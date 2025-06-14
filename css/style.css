@@ -1,0 +1,491 @@
+/* Light Theme (Default) */
+:root {
+  --primary-bg: #007bff; /* Bootstrap primary blue */
+  --secondary-bg: #f8f9fa; /* Light grey for main content area */
+  --text-color: #212529; /* Dark text for general content */
+  --header-text-color: #ffffff; /* Text color for elements on the primary background */
+  --card-bg: #ffffff; /* Background for day cards */
+  --card-border: #dee2e6; /* Border for day cards */
+  --footer-bg: #343a40; /* Footer background */
+  --footer-text-color: #ffffff; /* Footer text */
+  --modal-bg: #ffffff; /* Modal background */
+  --modal-text-color: #212529; /* Modal text */
+  --link-color: #007bff; /* Default link color */
+  --link-hover-color: #0056b3; /* Default link hover color */
+  --button-outline-color: #007bff; /* Outline button color */
+  --button-outline-text: #007bff; /* Outline button text */
+  --button-outline-hover-bg: #007bff; /* Outline button hover background */
+  --button-outline-hover-text: #ffffff; /* Outline button hover text */
+  --switch-track-off: #6c757d; /* Grey for unchecked switch track */
+  --switch-thumb-off: #adb5bd; /* Lighter grey for unchecked switch thumb */
+  --switch-track-on: #007bff; /* Primary blue for checked switch track */
+  --switch-thumb-on: #ffffff; /* White for checked switch thumb */
+  --border-radius: 8px; /* Consistent border radius */
+}
+
+/* Dark Theme */
+body.dark-theme {
+  --primary-bg: #212529; /* Darker primary for contrast */
+  --secondary-bg: #343a40; /* Dark grey for main content area */
+  --text-color: #e2e6ea; /* Light text */
+  --header-text-color: #ffffff;
+  --card-bg: #454d55;
+  --card-border: #6c757d;
+  --footer-bg: #212529;
+  --footer-text-color: #e2e6ea;
+  --modal-bg: #343a40;
+  --modal-text-color: #e2e6ea;
+  --link-color: #87cefa; /* Lighter link color for dark theme */
+  --link-hover-color: #6a9acb; /* Link hover for dark theme */
+  --button-outline-color: #e2e6ea; /* Outline button color in dark mode */
+  --button-outline-text: #e2e6ea; /* Outline button text in dark mode */
+  --button-outline-hover-bg: #e2e6ea; /* Outline button hover bg in dark mode */
+  --button-outline-hover-text: #343a40; /* Outline button hover text in dark mode */
+  --switch-track-off: #495057; /* Darker grey for unchecked switch track */
+  --switch-thumb-off: #6c757d; /* Dark grey for unchecked switch thumb */
+  --switch-track-on: #00c7e5; /* A bright color for dark mode checked switch track */
+  --switch-thumb-on: #ffffff; /* White for checked switch thumb */
+}
+
+/* General Body Styling */
+body {
+  background-color: var(--secondary-bg);
+  color: var(--text-color);
+}
+
+/* Navbar */
+.navbar {
+  background-color: var(--primary-bg) !important;
+}
+.navbar-brand,
+.navbar-nav .nav-link,
+.navbar-nav .form-check-label {
+  /* Added form-check-label for desktop switch */
+  color: var(--header-text-color) !important;
+  font-weight: bolder;
+}
+.navbar-toggler-icon {
+  filter: invert(0);
+}
+body.dark-theme .navbar-toggler-icon {
+  filter: invert(1);
+}
+
+.navbar .container-fluid {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Custom styles for the mobile theme switch label/icon */
+.form-switch .form-check-label i {
+  font-size: 1.25rem; /* Adjust icon size as needed */
+  vertical-align: middle;
+}
+
+/* Ensure the label itself has some dimension for the icon on mobile */
+.form-switch.d-lg-none .form-check-label {
+  min-width: 30px; /* Adjust to ensure clickable area */
+  text-align: center;
+  padding-left: 0;
+  padding-right: 0;
+  margin-right: 0;
+  display: inline-block;
+  color: var(--header-text-color); /* Icon color */
+}
+
+/* Style for the Bootstrap switch track and thumb */
+.form-check-input.form-switch {
+  /* Target the input specifically */
+  background-color: var(--switch-track-off); /* Unchecked track color */
+  border-color: var(--switch-track-off); /* Unchecked border color */
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23000'/%3e%3c/svg%3e"); /* Default thumb (black for visibility) */
+}
+
+.form-check-input.form-switch:focus {
+  box-shadow: 0 0 0 0.25rem rgba(0, 123, 255, 0.25); /* Bootstrap focus blue */
+}
+
+.form-check-input.form-switch:checked {
+  background-color: var(--switch-track-on); /* Checked track color */
+  border-color: var(--switch-track-on); /* Checked border color */
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e"); /* White thumb */
+}
+
+/* Ensure dark theme adjusts switch colors */
+body.dark-theme .form-check-input.form-switch {
+  background-color: var(--switch-track-off);
+  border-color: var(--switch-track-off);
+}
+body.dark-theme .form-check-input.form-switch:checked {
+  background-color: var(--switch-track-on);
+  border-color: var(--switch-track-on);
+}
+/* Ensure thumb color is visible against both track colors */
+.form-check-input.form-switch:not(:checked) {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='var(--switch-thumb-off)'/%3e%3c/svg%3e");
+}
+.form-check-input.form-switch:checked {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='var(--switch-thumb-on)'/%3e%3c/svg%3e");
+}
+
+/* Rest of your existing CSS (carousel, main, calendar, footer, modal) */
+
+/* Carousel Header */
+.carousel-header {
+  margin-bottom: 20px;
+}
+
+.carousel-item img {
+  height: 350px; /* Fixed height for carousel images */
+  object-fit: cover; /* Ensures images cover the area without distortion */
+}
+
+.carousel-caption h5 {
+  font-size: 1.5rem;
+  margin-bottom: 10px;
+  color: var(--header-text-color);
+}
+
+.carousel-caption .btn {
+  background-color: var(--primary-bg);
+  border-color: var(--primary-bg);
+  color: #343a40;
+  border-radius: 1px solid #343a40; /* Adjusted for better visibility */
+}
+.carousel-caption .btn:hover {
+  background-color: var(--link-hover-color);
+  border-color: var(--link-hover-color);
+}
+body.dark-theme .carousel-caption .btn {
+  background-color: var(--link-color);
+  border-color: var(--link-color);
+}
+body.dark-theme .carousel-caption .btn:hover {
+  background-color: var(--link-hover-color);
+  border-color: var(--link-hover-color);
+}
+
+/* Main Content and Calendar */
+main {
+  padding-bottom: 60px; /* Space for the fixed footer */
+}
+
+.month-navigation {
+  margin-bottom: 30px;
+  padding: 10px 0;
+}
+
+.month-navigation h2 {
+  color: var(--text-color);
+}
+
+.btn-outline-primary {
+  color: var(--button-outline-text);
+  border-color: var(--button-outline-color);
+}
+.btn-outline-primary:hover {
+  background-color: var(--button-outline-hover-bg);
+  color: var(--button-outline-hover-text);
+  border-color: var(--button-outline-hover-bg);
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 15px;
+  padding: 20px 0;
+}
+
+.day-card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 15px;
+  text-align: center;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+  cursor: pointer;
+  color: var(--text-color);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 120px; /* Ensure cards have a minimum height */
+}
+
+.day-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.day-number {
+  font-size: 2em;
+  font-weight: bold;
+  color: var(--primary-bg);
+  margin-bottom: 10px;
+}
+body.dark-theme .day-number {
+  color: var(--link-color); /* Lighter color for day number in dark theme */
+}
+
+.event-summary {
+  font-size: 0.9em;
+  color: var(--text-color);
+}
+
+#loadingIndicator {
+  grid-column: 1 / -1; /* Center across all columns */
+}
+
+/* Footer */
+.footer {
+  background-color: var(--footer-bg);
+  color: var(--footer-text-color);
+  padding: 20px 0;
+  text-align: center;
+  font-size: 0.9em;
+  width: 100%;
+  box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
+  margin-top: 40px;
+}
+
+.footer a {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.footer a:hover {
+  text-decoration: underline;
+  color: var(--link-hover-color);
+}
+
+/* Modal Styling */
+.modal-content {
+  background-color: var(--modal-bg);
+  color: var(--modal-text-color);
+  border-radius: 8px;
+}
+
+.modal-header {
+  border-bottom-color: var(--card-border);
+}
+
+.modal-title {
+  color: var(--text-color);
+}
+
+.modal-body ul {
+  list-style-type: disc;
+  padding-left: 20px;
+}
+
+.modal-body li {
+  margin-bottom: 10px;
+}
+
+.modal-body a {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.modal-body a:hover {
+  text-decoration: underline;
+  color: var(--link-hover-color);
+}
+
+.btn-close {
+  filter: invert(0); /* Default for light theme */
+}
+
+body.dark-theme .btn-close {
+  filter: invert(1); /* Invert for dark theme */
+}
+
+/* Google Translate Specific Styling */
+#google_translate_element .goog-te-gadget-simple {
+  background-color: var(--primary-bg) !important;
+  border: 1px solid var(--primary-bg) !important;
+  border-radius: 4px;
+  font-size: 0.8em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#google_translate_element .goog-te-gadget-simple a {
+  color: var(
+    --header-text-color
+  ) !important; /* Text color for the "Translate" link */
+  font-size: 1rem;
+  padding: 5px 8px;
+  line-height: 1; /* Adjust line height to prevent clipping */
+}
+
+#google_translate_element .goog-te-gadget-simple .goog-te-menu-value span {
+  color: var(
+    --header-text-color
+  ) !important; /* Text color for selected language */
+}
+
+/* Hide the Google Translate banner */
+.skiptranslate.goog-te-banner-frame {
+  display: none !important;
+}
+body {
+  top: 0px !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 991.98px) {
+  .navbar-nav {
+    align-items: flex-start; /* Align nav items to start in collapsed view */
+    padding-top: 10px; /* Add some padding */
+  }
+  .navbar-nav .nav-item {
+    margin-bottom: 5px;
+  }
+  .navbar-nav .form-check-switch {
+    margin-left: 10px; /* Indent the switch a bit */
+  }
+  .navbar-collapse {
+    margin-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 10px;
+  }
+  .navbar-nav .nav-item.d-flex {
+    flex-direction: column; /* Stack translate and theme switch vertically */
+    align-items: flex-start !important;
+  }
+  #google_translate_element {
+    margin-top: 10px;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 576px) {
+  .carousel-item img {
+    height: 200px; /* Smaller height for small screens */
+  }
+  .carousel-caption {
+    bottom: 5px;
+    padding: 5px 10px;
+    width: 90%;
+  }
+  .carousel-caption h5 {
+    font-size: 1rem;
+  }
+  .carousel-caption .btn {
+    font-size: 0.75rem;
+    padding: 2px 5px;
+  }
+  .calendar-grid {
+    grid-template-columns: repeat(
+      auto-fill,
+      minmax(100px, 1fr)
+    ); /* Adjust grid for smaller screens */
+    gap: 10px;
+  }
+  .day-card {
+    min-height: 100px;
+    padding: 10px;
+  }
+  .day-number {
+    font-size: 1.5em;
+  }
+  .event-summary {
+    font-size: 0.8em;
+  }
+  #historicalCarousel {
+    max-width: 100%; /* Full width on small screens */
+    padding: 0; /* Remove padding for full-width look */
+    margin-top: 0px !important; /* Less space above the carousel */
+  }
+}
+
+/* Styling for the whole carousel container */
+#historicalCarousel {
+  background-color: var(
+    --secondary-bg
+  ); /* Light gray background, adjust as needed */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Optional: Add a subtle shadow */
+  border-radius: 8px; /* Optional: Rounded corners */
+  margin-left: auto; /* Center the block element */
+  margin-right: auto; /* Center the block element */
+  margin-top: 30px; /* Space above the carousel */
+  max-width: 1200px; /* Limit the maximum width of the carousel */
+}
+
+/* Center the caption content */
+.carousel-caption {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  bottom: 0; /* Align to the bottom of the image */
+  left: 0;
+  right: 0;
+  top: 0; /* Stretch to cover the entire image area for full centering */
+  background-color: rgba(
+    0,
+    0,
+    0,
+    0.5
+  ); /* Semi-transparent black background for readability */
+  padding: 1rem; /* Add some padding */
+  width: 100%; /* Full width of the carousel item */
+  height: 100%; /* Full height of the carousel item */
+  z-index: 1; /* Ensure caption is above the image */
+  border-radius: var(
+    --border-radius
+  ); /* Match the carousel container's rounded corners */
+  box-sizing: border-box; /* Ensure padding does not affect width */
+  transition: background-color 0.3s ease; /* Smooth transition for background color */
+  /* Optional: Add a transition effect for hover */
+}
+
+.carousel-caption h5 {
+  color: var(
+    --header-text-color
+  ); /* Consistent text color with other white elements */
+  color: #fff; /* White text for better contrast on the dark background */
+  z-index: 1; /* Ensure text is above the semi-transparent background */
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+/* Responsive adjustments for smaller screens (mobile) */
+@media (max-width: 767.98px) {
+  #historicalCarousel {
+    padding: 10px; /* Less padding on mobile */
+    border-radius: var(
+      --border-radius,
+      0
+    ); /* Use consistent border-radius or remove for full-width look on small screens */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Lighter shadow for consistency on mobile */
+    /* Alternatively, if intentional, document the reasoning: 
+               box-shadow: none; /* No shadow on mobile for a cleaner, simpler design */
+    box-shadow: none; /* No shadow on mobile */
+  }
+
+  .carousel-caption {
+    padding: 0.5rem; /* Less padding for captions on mobile */
+  }
+
+  .carousel-caption h5 {
+    font-size: 1rem; /* Smaller font size for headings on mobile */
+  }
+
+  .carousel-caption .btn {
+    font-size: 0.8rem; /* Smaller button text on mobile */
+    padding: 0.3rem 0.6rem; /* Smaller button padding on mobile */
+  }
+}
+
+.form-check.form-switch.d-lg-none.me-2 {
+  margin: auto;
+}
+
+input#themeSwitchMobile {
+  margin-top: 8px;
+}

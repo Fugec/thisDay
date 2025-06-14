@@ -1,0 +1,40 @@
+{
+  "workbench.colorCustomizations": {
+    "activityBar.activeBackground": "#33f5ff",
+    "activityBar.activeBorder": "#972958",
+    "activityBar.background": "#33f5ff",
+    "activityBar.foreground": "#15202b",
+    "activityBar.inactiveForeground": "#15202b99",
+    "activityBarBadge.background": "#ff40f6",
+    "activityBarBadge.foreground": "#15202b",
+    "statusBar.background": "#00f2ff",
+    "statusBar.foreground": "#15202b",
+    "statusBarItem.hoverBackground": "#00c2cc",
+    "titleBar.activeBackground": "#00f2ff",
+    "titleBar.activeForeground": "#15202b",
+    "titleBar.inactiveBackground": "#00f2ff99",
+    "titleBar.inactiveForeground": "#15202b99",
+    "commandCenter.border": "#15202b99",
+    "sash.hoverBorder": "#33f5ff",
+    "statusBarItem.remoteBackground": "#00ff95",
+    "statusBarItem.remoteForeground": "#15202b"
+  },
+
+  "peacock.color": "#00f2ff",
+  "editor.wordWrap": "on",
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "diffEditor.wordWrap": "off",
+  "editor.formatOnPaste": true,
+  "editor.formatOnSave": true,
+  "[php]": {
+    "editor.defaultFormatter": "bmewburn.vscode-intelephense-client"
+  },
+  // Use to format all files in the folder specified by "includeFolders
+  // In the command palette, search for "Command On All Files" and select "Format All Files"
+  "commandOnAllFiles.commands": {
+    "Format All Files": {
+      "command": "editor.action.formatDocument",
+      "includeFileExtensions": [".php", ".css", ".js", ".json"]
+    }
+  }
+}

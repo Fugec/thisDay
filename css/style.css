@@ -6,7 +6,7 @@
   --header-text-color: #ffffff; /* Text color for elements on the primary background */
   --card-bg: #ffffff; /* Background for day cards */
   --card-border: #dee2e6; /* Border for day cards */
-  --footer-bg: #343a40; /* Footer background */
+  --footer-bg: #007bff; /* Footer background */
   --footer-text-color: #ffffff; /* Footer text */
   --modal-bg: #ffffff; /* Modal background */
   --modal-text-color: #212529; /* Modal text */
@@ -136,6 +136,12 @@ body.dark-theme .form-check-input.form-switch:checked {
   margin-bottom: 20px;
 }
 
+.carousel-inner {
+  border-radius: var(
+    --border-radius
+  ); /* Consistent border radius for carousel items */
+}
+
 .carousel-item img {
   height: 350px; /* Fixed height for carousel images */
   object-fit: cover; /* Ensures images cover the area without distortion */
@@ -143,8 +149,8 @@ body.dark-theme .form-check-input.form-switch:checked {
 
 .carousel-caption h5 {
   font-size: 1.5rem;
-  margin-bottom: 10px;
   color: var(--header-text-color);
+  margin-bottom: revert;
 }
 
 .carousel-caption .btn {
@@ -407,7 +413,6 @@ body {
   background-color: var(
     --secondary-bg
   ); /* Light gray background, adjust as needed */
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Optional: Add a subtle shadow */
   border-radius: 8px; /* Optional: Rounded corners */
   margin-left: auto; /* Center the block element */
   margin-right: auto; /* Center the block element */
@@ -462,10 +467,6 @@ body {
       --border-radius,
       0
     ); /* Use consistent border-radius or remove for full-width look on small screens */
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Lighter shadow for consistency on mobile */
-    /* Alternatively, if intentional, document the reasoning: 
-               box-shadow: none; /* No shadow on mobile for a cleaner, simpler design */
-    box-shadow: none; /* No shadow on mobile */
   }
 
   .carousel-caption {

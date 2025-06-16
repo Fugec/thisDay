@@ -18,18 +18,18 @@ const body = document.body;
 
 let currentDate = new Date(); // Start with current date
 const monthNamesBs = [
-  "Januar",
-  "Februar",
-  "Mart",
+  "January",
+  "February",
+  "March",
   "April",
-  "Maj",
-  "Juni",
-  "Juli",
+  "May",
+  "June",
+  "July",
   "August",
-  "Septembar",
-  "Oktobar",
-  "Novembar",
-  "Decembar",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 // Cache for storing fetched events to avoid redundant API calls
@@ -59,9 +59,9 @@ async function fetchWikipediaEvents(month, day, lang = "en") {
         `Error fetching data from Wikipedia (${lang}): ${response.status} ${response.statusText}`
       );
       if (lang === "en" && response.status === 404) {
-        // If English fails, try Bosnian
-        console.log("No data for English Wikipedia, trying Bosnian.");
-        const fallbackEvents = await fetchWikipediaEvents(month, day, "bs");
+        // If English fails, try German
+        console.log("No data for English Wikipedia, trying German.");
+        const fallbackEvents = await fetchWikipediaEvents(month, day, "de");
         eventCache[cacheKey] = fallbackEvents;
         return fallbackEvents;
       }
@@ -128,10 +128,10 @@ async function populateCarousel(month, year) {
     const defaultItem = document.createElement("div");
     defaultItem.className = "carousel-item active";
     defaultItem.innerHTML = `
-            <img src="https://placehold.co/1200x350/0056b3/ffffff?text=Nema+dostupnih+slika" class="d-block w-100" alt="No images available">
+            <img src="https://placehold.co/1200x350/0056b3/ffffff?text=No+images+available" class="d-block w-100" alt="No images available">
             <div class="carousel-caption">
-                <h5>Nema istaknutih događaja</h5>
-                <a href="#" class="btn btn-primary btn-sm disabled">Više detalja</a>
+                <h5>No events</h5>
+                <a href="#" class="btn btn-primary btn-sm disabled">More Details</a>
             </div>
         `;
     carouselInner.appendChild(defaultItem);
@@ -145,17 +145,19 @@ async function populateCarousel(month, year) {
 
     // Set image with onerror fallback
     const imageUrl = event.thumbnailUrl;
-    const fallbackImageUrl = `https://placehold.co/1200x350/0056b3/ffffff?text=Slika`; // Simplified fallback text
+    const fallbackImageUrl = `https://placehold.co/1200x350/0056b3/ffffff?text=Image`; // Simplified fallback text
 
     // Limit title to 20 words
-    const titleWords = (event.title || "Historijski Događaj").split(" ");
+    const titleWords = (
+      event.title || "Historical Events | Happened on this day"
+    ).split(" ");
     const truncatedTitle = titleWords.slice(0, 20).join(" ");
 
     carouselItem.innerHTML = `
             <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}" onerror="this.onerror=null;this.src='${fallbackImageUrl}';">
             <div class="carousel-caption">
                 <h5>${truncatedTitle}</h5>
-                <a href="${event.sourceUrl}" class="btn btn-primary btn-sm" target="_blank" rel="noopener noreferrer">Više detalja</a>
+                <a href="${event.sourceUrl}" class="btn btn-primary btn-sm" target="_blank" rel="noopener noreferrer">More Details</a>
             </div>
         `;
     carouselInner.appendChild(carouselItem);
@@ -194,7 +196,7 @@ async function renderCalendar() {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  currentMonthYearDisplay.textContent = `${monthNamesBs[month]} ${year}`;
+  currentMonthYearDisplay.textContent = `${monthNamesBs[month]}`;
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
@@ -223,9 +225,9 @@ async function renderCalendar() {
     const eventsForDay = allEventsForMonth[i - 1];
     if (eventsForDay && eventsForDay.length > 0) {
       // Display the count of events
-      eventSummary.textContent = `${eventsForDay.length} događaja`;
+      eventSummary.textContent = `${eventsForDay.length} Events`;
     } else {
-      eventSummary.textContent = "Nema događaja";
+      eventSummary.textContent = "No Events";
     }
     dayCard.appendChild(eventSummary);
 
@@ -242,7 +244,7 @@ async function renderCalendar() {
 
 async function showEventDetails(day, month, year, preFetchedEvents = null) {
   modalDate.textContent = `${day}. ${monthNamesBs[month - 1]} ${year}.`;
-  modalBodyContent.innerHTML = "<p>Učitavanje događaja...</p>";
+  modalBodyContent.innerHTML = "<p>Loading...</p>";
 
   let events =
     preFetchedEvents || (await fetchWikipediaEvents(month, day, "en")); // Fetch for English first
@@ -254,15 +256,15 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
     events.forEach((event) => {
       const li = document.createElement("li");
       let eventText = event.description;
-      if (event.lang === "bs") {
-        // Indicate if it came from Bosnian Wikipedia
-        eventText += " (Prevedeno sa bosanskog)";
+      if (event.sourceUrl) {
+        const lang = event.sourceUrl.match(/wikipedia\.org\/(\w+)\//)[1];
+        eventText += ` (${lang}.wikipedia.org)`;
       }
       li.innerHTML = `<strong>${event.year}.</strong> ${eventText}`;
       if (event.sourceUrl) {
         const sourceLink = document.createElement("a");
         sourceLink.href = event.sourceUrl;
-        sourceLink.textContent = " (Izvor: Wikipedia)";
+        sourceLink.textContent = " (Source: Wikipedia)";
         sourceLink.target = "_blank";
         sourceLink.rel = "noopener noreferrer";
         li.appendChild(sourceLink);
@@ -271,8 +273,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
     });
     modalBodyContent.appendChild(ul);
   } else {
-    modalBodyContent.innerHTML =
-      "<p>Za ovaj datum nisu pronađeni događaji na engleskoj niti bosanskoj Wikipediji.</p>";
+    modalBodyContent.innerHTML = "<p>No events found for this day.</p>";
   }
 
   eventDetailModal.show();
@@ -357,3 +358,13 @@ document.getElementById("currentYear").textContent = new Date().getFullYear();
 
 // Initial render of the calendar and carousel
 renderCalendar();
+
+function googleTranslateElementInit() {
+  new google.translate.TranslateElement(
+    {
+      pageLanguage: "en", // Set the original language of your page
+      layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+    },
+    "google_translate_element"
+  );
+}

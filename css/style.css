@@ -47,6 +47,37 @@ body.dark-theme {
   --switch-thumb-on: #ffffff; /* White for checked switch thumb */
 }
 
+/* Button primary small text color for theme */
+a.btn.btn-primary.btn-sm {
+  color: #fff;
+}
+body.dark-theme a.btn.btn-primary.btn-sm {
+  color: #000;
+}
+
+/* Month Navigation Buttons - Dark Theme */
+body.dark-theme button#prevMonthBtn {
+  border: 1px solid #87cefa;
+  background: #464d55;
+  color: #87cefa;
+}
+
+/* Month Navigation Buttons - Dark Theme */
+body.dark-theme button#nextMonthBtn {
+  border: 1px solid #87cefa;
+  background: #464d55;
+  color: #87cefa;
+}
+
+/* Month Navigation Buttons - light Theme */
+button#prevMonthBtn {
+  background: #fff;
+}
+
+/* Month Navigation Buttons - light Theme */
+button#nextMonthBtn {
+  background: #fff;
+}
 /* General Body Styling */
 body {
   background-color: var(--secondary-bg);
@@ -183,12 +214,17 @@ main {
 }
 
 .month-navigation h2 {
-  color: var(--text-color);
+  color: #027bff;
+  font-size: 1.5rem;
+  font-weight: bolder;
+}
+body.dark-theme .month-navigation h2 {
+  color: #87cefa;
 }
 
 .btn-outline-primary {
-  color: var(--button-outline-text);
-  border-color: var(--button-outline-color);
+  color: #027bff;
+  border-color: #027bff;
 }
 .btn-outline-primary:hover {
   background-color: var(--button-outline-hover-bg);
@@ -416,8 +452,11 @@ body {
   border-radius: 8px; /* Optional: Rounded corners */
   margin-left: auto; /* Center the block element */
   margin-right: auto; /* Center the block element */
-  margin-top: 30px; /* Space above the carousel */
-  max-width: 1200px; /* Limit the maximum width of the carousel */
+  padding: 20px; /* Padding around the carousel */
+  max-width: 100%; /* Full width of the container */
+  box-sizing: border-box; /* Ensure padding does not affect width */
+  position: relative; /* Position relative for absolute positioning of caption */
+  overflow: hidden; /* Hide overflow to maintain rounded corners */
 }
 
 /* Center the caption content */
@@ -449,14 +488,18 @@ body {
   /* Optional: Add a transition effect for hover */
 }
 
+div#carouselIndicators {
+  display: none;
+}
+
 .carousel-caption h5 {
   color: var(
     --header-text-color
   ); /* Consistent text color with other white elements */
   color: #fff; /* White text for better contrast on the dark background */
   z-index: 1; /* Ensure text is above the semi-transparent background */
-  padding-left: 20px;
-  padding-right: 20px;
+  padding-left: 10%;
+  padding-right: 10%;
 }
 
 /* Responsive adjustments for smaller screens (mobile) */
@@ -489,4 +532,9 @@ body {
 
 input#themeSwitchMobile {
   margin-top: 8px;
+}
+
+.month-navigation.mb-2.d-flex.justify-content-between.align-items-center {
+  max-width: 65%;
+  margin: auto;
 }

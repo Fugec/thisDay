@@ -3,23 +3,23 @@
   --primary-bg: #007bff; /* Bootstrap primary blue */
   --secondary-bg: #f8f9fa; /* Light grey for main content area */
   --text-color: #212529; /* Dark text for general content */
-  --header-text-color: #ffffff; /* Text color for elements on the primary background */
-  --card-bg: #ffffff; /* Background for day cards */
+  --header-text-color: #e3e6ea; /* Text color for elements on the primary background */
+  --card-bg: #e3e6ea; /* Background for day cards */
   --card-border: #dee2e6; /* Border for day cards */
   --footer-bg: #007bff; /* Footer background */
-  --footer-text-color: #ffffff; /* Footer text */
-  --modal-bg: #ffffff; /* Modal background */
+  --footer-text-color: #e3e6ea; /* Footer text */
+  --modal-bg: #e3e6ea; /* Modal background */
   --modal-text-color: #212529; /* Modal text */
   --link-color: #007bff; /* Default link color */
   --link-hover-color: #0056b3; /* Default link hover color */
   --button-outline-color: #007bff; /* Outline button color */
   --button-outline-text: #007bff; /* Outline button text */
   --button-outline-hover-bg: #007bff; /* Outline button hover background */
-  --button-outline-hover-text: #ffffff; /* Outline button hover text */
+  --button-outline-hover-text: #e3e6ea; /* Outline button hover text */
   --switch-track-off: #6c757d; /* Grey for unchecked switch track */
   --switch-thumb-off: #adb5bd; /* Lighter grey for unchecked switch thumb */
   --switch-track-on: #007bff; /* Primary blue for checked switch track */
-  --switch-thumb-on: #ffffff; /* White for checked switch thumb */
+  --switch-thumb-on: #e3e6ea; /* White for checked switch thumb */
   --border-radius: 8px; /* Consistent border radius */
 }
 
@@ -28,7 +28,7 @@ body.dark-theme {
   --primary-bg: #212529; /* Darker primary for contrast */
   --secondary-bg: #343a40; /* Dark grey for main content area */
   --text-color: #e2e6ea; /* Light text */
-  --header-text-color: #ffffff;
+  --header-text-color: #e3e6ea;
   --card-bg: #454d55;
   --card-border: #6c757d;
   --footer-bg: #212529;
@@ -44,12 +44,20 @@ body.dark-theme {
   --switch-track-off: #495057; /* Darker grey for unchecked switch track */
   --switch-thumb-off: #6c757d; /* Dark grey for unchecked switch thumb */
   --switch-track-on: #00c7e5; /* A bright color for dark mode checked switch track */
-  --switch-thumb-on: #ffffff; /* White for checked switch thumb */
+  --switch-thumb-on: #e3e6ea; /* White for checked switch thumb */
 }
-
+p.text-muted {
+  padding-left: 20px;
+  padding-right: 20px;
+  padding-top: 20px;
+  padding-bottom: 10px;
+}
+body.dark-theme p.text-muted {
+  color: #e3e6ea !important; /* Muted text color */
+}
 /* Button primary small text color for theme */
 a.btn.btn-primary.btn-sm {
-  color: #fff;
+  color: #e3e6ea;
 }
 body.dark-theme a.btn.btn-primary.btn-sm {
   color: #000;
@@ -71,12 +79,12 @@ body.dark-theme button#nextMonthBtn {
 
 /* Month Navigation Buttons - light Theme */
 button#prevMonthBtn {
-  background: #fff;
+  background: #e3e6ea;
 }
 
 /* Month Navigation Buttons - light Theme */
 button#nextMonthBtn {
-  background: #fff;
+  background: #e3e6ea;
 }
 /* General Body Styling */
 body {
@@ -215,7 +223,7 @@ main {
 
 .month-navigation h2 {
   color: #027bff;
-  font-size: 1.5rem;
+  font-size: 37.075px;
   font-weight: bolder;
 }
 body.dark-theme .month-navigation h2 {
@@ -237,6 +245,8 @@ body.dark-theme .month-navigation h2 {
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 15px;
   padding: 20px 0;
+  margin-left: 10px;
+  margin-right: 10px;
 }
 
 .day-card {
@@ -261,7 +271,7 @@ body.dark-theme .month-navigation h2 {
 }
 
 .day-number {
-  font-size: 2em;
+  font-size: 37.075px;
   font-weight: bold;
   color: var(--primary-bg);
   margin-bottom: 10px;
@@ -292,7 +302,7 @@ body.dark-theme .day-number {
 }
 
 .footer a {
-  color: var(--link-color);
+  color: #e3e6ea;
   text-decoration: none;
 }
 
@@ -432,7 +442,7 @@ body {
     padding: 10px;
   }
   .day-number {
-    font-size: 1.5em;
+    font-size: 37.075px;
   }
   .event-summary {
     font-size: 0.8em;
@@ -496,7 +506,7 @@ div#carouselIndicators {
   color: var(
     --header-text-color
   ); /* Consistent text color with other white elements */
-  color: #fff; /* White text for better contrast on the dark background */
+  color: #e3e6ea; /* White text for better contrast on the dark background */
   z-index: 1; /* Ensure text is above the semi-transparent background */
   padding-left: 10%;
   padding-right: 10%;
@@ -535,6 +545,9 @@ input#themeSwitchMobile {
 }
 
 .month-navigation.mb-2.d-flex.justify-content-between.align-items-center {
-  max-width: 65%;
   margin: auto;
+}
+
+h1.display-4 {
+  font-weight: bolder;
 }

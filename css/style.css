@@ -1,515 +1,147 @@
 /* Light Theme (Default) */
 :root {
-  --primary-bg: #007bff; /* Bootstrap primary blue */
-  --secondary-bg: #f8f9fa; /* Light grey for main content area */
-  --text-color: #212529; /* Dark text for general content */
-  --header-text-color: #e3e6ea; /* Text color for elements on the primary background */
-  --card-bg: #e3e6ea; /* Background for day cards */
-  --card-border: #dee2e6; /* Border for day cards */
-  --footer-bg: #007bff; /* Footer background */
-  --footer-text-color: #e3e6ea; /* Footer text */
-  --modal-bg: #e3e6ea; /* Modal background */
-  --modal-text-color: #212529; /* Modal text */
-  --link-color: #007bff; /* Default link color */
-  --link-hover-color: #0056b3; /* Default link hover color */
-  --button-outline-color: #007bff; /* Outline button color */
-  --button-outline-text: #007bff; /* Outline button text */
-  --button-outline-hover-bg: #007bff; /* Outline button hover background */
-  --button-outline-hover-text: #e3e6ea; /* Outline button hover text */
-  --switch-track-off: #6c757d; /* Grey for unchecked switch track */
-  --switch-thumb-off: #adb5bd; /* Lighter grey for unchecked switch thumb */
-  --switch-track-on: #007bff; /* Primary blue for checked switch track */
-  --switch-thumb-on: #e3e6ea; /* White for checked switch thumb */
-  --border-radius: 8px; /* Consistent border radius */
+  --primary-bg: #3b82f6; /* blue-500 */
+  --secondary-bg: #f9fafb; /* gray-50 */
+  --text-color: #6c757d; /* slate-900 */
+  --header-text-color: #ffffff; /* white */
+  --card-bg: #ffffff; /* white */
+  --card-border: #e2e8f0; /* gray-200 */
+  --footer-bg: #1e293b; /* slate-800 */
+  --footer-text-color: #f1f5f9; /* slate-100 */
+  --modal-bg: #ffffff; /* white */
+  --modal-text-color: #6c757d; /* slate-900 */
+  --link-color: #2563eb; /* blue-600 */
+  --link-hover-color: #1d4ed8; /* blue-700 */
+  --button-outline-color: #e2e8f0;
+  --button-outline-text: #6c757d;
+  --button-outline-hover-bg: #2563eb;
+  --button-outline-hover-text: #ffffff;
+  --switch-track-off: #e2e8f0; /* gray-200 */
+  --switch-thumb-off: #cbd5e1; /* gray-300 */
+  --switch-track-on: #2563eb; /* blue-600 */
+  --switch-thumb-on: #ffffff; /* white */
+
+  /* No Events Cards */
+  --card-bg-no-events: #f1f5f9; /* slate-100 */
+  --card-border-no-events: #e2e8f0; /* gray-200 */
+  --text-color-light: #64748b; /* slate-400 */
+
+  --border-radius: 0.5rem;
 }
 
 /* Dark Theme */
 body.dark-theme {
-  --primary-bg: #212529; /* Darker primary for contrast */
-  --secondary-bg: #343a40; /* Dark grey for main content area */
-  --text-color: #e2e6ea; /* Light text */
-  --header-text-color: #e3e6ea;
-  --card-bg: #454d55;
-  --card-border: #6c757d;
-  --footer-bg: #212529;
-  --footer-text-color: #e2e6ea;
-  --modal-bg: #343a40;
-  --modal-text-color: #e2e6ea;
-  --link-color: #87cefa; /* Lighter link color for dark theme */
-  --link-hover-color: #6a9acb; /* Link hover for dark theme */
-  --button-outline-color: #e2e6ea; /* Outline button color in dark mode */
-  --button-outline-text: #e2e6ea; /* Outline button text in dark mode */
-  --button-outline-hover-bg: #e2e6ea; /* Outline button hover bg in dark mode */
-  --button-outline-hover-text: #343a40; /* Outline button hover text in dark mode */
-  --switch-track-off: #495057; /* Darker grey for unchecked switch track */
-  --switch-thumb-off: #6c757d; /* Dark grey for unchecked switch thumb */
-  --switch-track-on: #00c7e5; /* A bright color for dark mode checked switch track */
-  --switch-thumb-on: #e3e6ea; /* White for checked switch thumb */
+  --primary-bg: #020617; /* slate-950 */
+  --secondary-bg: #1e293b; /* slate-800 */
+  --text-color: #f8fafc; /* slate-50 */
+  --header-text-color: #ffffff; /* white */
+  --card-bg: #1e293b; /* slate-800 */
+  --card-border: #334155; /* slate-700 */
+  --footer-bg: #020617; /* slate-950 */
+  --footer-text-color: #f1f5f9; /* slate-100 */
+  --modal-bg: #1e293b; /* slate-800 */
+  --modal-text-color: #f8fafc; /* slate-50 */
+  --link-color: #60a5fa; /* blue-400 */
+  --link-hover-color: #3b82f6; /* blue-500 */
+  --button-outline-color: #60a5fa;
+  --button-outline-text: #60a5fa;
+  --button-outline-hover-bg: #2563eb;
+  --button-outline-hover-text: #ffffff;
+  --switch-track-off: #334155; /* slate-700 */
+  --switch-thumb-off: #64748b; /* slate-400 */
+  --switch-track-on: #2563eb; /* blue-600 */
+  --switch-thumb-on: #f8fafc; /* slate-50 */
+
+  /* No Events Cards (Dark) */
+  --dark-card-bg-no-events: #0f172a; /* slate-900 */
+  --dark-card-border-no-events: #334155; /* slate-700 */
+  --dark-text-color-light: #64748b; /* slate-400 */
 }
-p.text-muted {
+
+body {
+  font-family: Arial, sans-serif;
+  background-color: var(--secondary-bg);
+  color: var(--text-color);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.btn-primary {
+  margin-bottom: 10px;
+}
+
+.navbar {
+  background-color: var(--primary-bg) !important;
+  transition: background-color 0.3s ease;
+}
+
+.navbar-brand,
+.navbar-nav .nav-link {
+  color: var(--header-text-color) !important;
+}
+
+/* Header/Hero Section */
+.carousel-header {
+  background-color: var(--primary-bg); /* Consistent with navbar */
+  color: var(--header-text-color);
+  text-align: center;
+  transition: background-color 0.3s ease;
+}
+
+.carousel-header h1 {
+  color: var(--header-text-color);
+}
+
+.carousel-header .text-muted {
+  color: #fff !important; /* Muted text color for better contrast */
   padding-left: 20px;
   padding-right: 20px;
   padding-top: 20px;
-  padding-bottom: 10px;
-}
-body.dark-theme p.text-muted {
-  color: #e3e6ea !important; /* Muted text color */
-}
-/* Button primary small text color for theme */
-a.btn.btn-primary.btn-sm {
-  color: #e3e6ea;
-}
-body.dark-theme a.btn.btn-primary.btn-sm {
-  color: #000;
 }
 
-/* Month Navigation Buttons - Dark Theme */
-body.dark-theme button#prevMonthBtn {
-  border: 1px solid #87cefa;
-  background: #464d55;
-  color: #87cefa;
-}
-
-/* Month Navigation Buttons - Dark Theme */
-body.dark-theme button#nextMonthBtn {
-  border: 1px solid #87cefa;
-  background: #464d55;
-  color: #87cefa;
-}
-
-/* Month Navigation Buttons - light Theme */
-button#prevMonthBtn {
-  background: #e3e6ea;
-}
-
-/* Month Navigation Buttons - light Theme */
-button#nextMonthBtn {
-  background: #e3e6ea;
-}
-/* General Body Styling */
-body {
-  background-color: var(--secondary-bg);
-  color: var(--text-color);
-}
-
-/* Navbar */
-.navbar {
-  background-color: var(--primary-bg) !important;
-}
-.navbar-brand,
-.navbar-nav .nav-link,
-.navbar-nav .form-check-label {
-  /* Added form-check-label for desktop switch */
-  color: var(--header-text-color) !important;
-  font-weight: bolder;
-}
-.navbar-toggler-icon {
-  filter: invert(0);
-}
-body.dark-theme .navbar-toggler-icon {
-  filter: invert(1);
-}
-
-.navbar .container-fluid {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-/* Custom styles for the mobile theme switch label/icon */
-.form-switch .form-check-label i {
-  font-size: 1.25rem; /* Adjust icon size as needed */
-  vertical-align: middle;
-}
-
-/* Ensure the label itself has some dimension for the icon on mobile */
-.form-switch.d-lg-none .form-check-label {
-  min-width: 30px; /* Adjust to ensure clickable area */
-  text-align: center;
-  padding-left: 0;
-  padding-right: 0;
-  margin-right: 0;
-  display: inline-block;
-  color: var(--header-text-color); /* Icon color */
-}
-
-/* Style for the Bootstrap switch track and thumb */
-.form-check-input.form-switch {
-  /* Target the input specifically */
-  background-color: var(--switch-track-off); /* Unchecked track color */
-  border-color: var(--switch-track-off); /* Unchecked border color */
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23000'/%3e%3c/svg%3e"); /* Default thumb (black for visibility) */
-}
-
-.form-check-input.form-switch:focus {
-  box-shadow: 0 0 0 0.25rem rgba(0, 123, 255, 0.25); /* Bootstrap focus blue */
-}
-
-.form-check-input.form-switch:checked {
-  background-color: var(--switch-track-on); /* Checked track color */
-  border-color: var(--switch-track-on); /* Checked border color */
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e"); /* White thumb */
-}
-
-/* Ensure dark theme adjusts switch colors */
-body.dark-theme .form-check-input.form-switch {
-  background-color: var(--switch-track-off);
-  border-color: var(--switch-track-off);
-}
-body.dark-theme .form-check-input.form-switch:checked {
-  background-color: var(--switch-track-on);
-  border-color: var(--switch-track-on);
-}
-/* Ensure thumb color is visible against both track colors */
-.form-check-input.form-switch:not(:checked) {
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='var(--switch-thumb-off)'/%3e%3c/svg%3e");
-}
-.form-check-input.form-switch:checked {
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='var(--switch-thumb-on)'/%3e%3c/svg%3e");
-}
-
-/* Rest of your existing CSS (carousel, main, calendar, footer, modal) */
-
-/* Carousel Header */
-.carousel-header {
-  margin-bottom: 20px;
-}
-
-.carousel-inner {
-  border-radius: var(
-    --border-radius
-  ); /* Consistent border radius for carousel items */
-}
-
-.carousel-item img {
-  height: 350px; /* Fixed height for carousel images */
-  object-fit: cover; /* Ensures images cover the area without distortion */
-}
-
-.carousel-caption h5 {
-  font-size: 1.5rem;
-  color: var(--header-text-color);
-  margin-bottom: revert;
-}
-
-.carousel-caption .btn {
-  background-color: var(--primary-bg);
-  border-color: var(--primary-bg);
-  color: #343a40;
-  border-radius: 1px solid #343a40; /* Adjusted for better visibility */
-}
-.carousel-caption .btn:hover {
-  background-color: var(--link-hover-color);
-  border-color: var(--link-hover-color);
-}
-body.dark-theme .carousel-caption .btn {
-  background-color: var(--link-color);
-  border-color: var(--link-color);
-}
-body.dark-theme .carousel-caption .btn:hover {
-  background-color: var(--link-hover-color);
-  border-color: var(--link-hover-color);
-}
-
-/* Main Content and Calendar */
-main {
-  padding-bottom: 60px; /* Space for the fixed footer */
-}
-
-.month-navigation {
-  margin-bottom: 30px;
-  padding: 10px 0;
-}
-
-.month-navigation h2 {
-  color: #027bff;
-  font-size: 37.075px;
-  font-weight: bolder;
-}
-body.dark-theme .month-navigation h2 {
-  color: #87cefa;
-}
-
-.btn-outline-primary {
-  color: #027bff;
-  border-color: #027bff;
-}
-.btn-outline-primary:hover {
-  background-color: var(--button-outline-hover-bg);
-  color: var(--button-outline-hover-text);
-  border-color: var(--button-outline-hover-bg);
-}
-
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 15px;
-  padding: 20px 0;
-  margin-left: 10px;
-  margin-right: 10px;
-}
-
-.day-card {
-  background-color: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 8px;
-  padding: 15px;
-  text-align: center;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-  cursor: pointer;
-  color: var(--text-color);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-height: 120px; /* Ensure cards have a minimum height */
-}
-
-.day-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-}
-
-.day-number {
-  font-size: 37.075px;
-  font-weight: bold;
-  color: var(--primary-bg);
-  margin-bottom: 10px;
-}
-body.dark-theme .day-number {
-  color: var(--link-color); /* Lighter color for day number in dark theme */
-}
-
-.event-summary {
-  font-size: 0.9em;
-  color: var(--text-color);
-}
-
-#loadingIndicator {
-  grid-column: 1 / -1; /* Center across all columns */
-}
-
-/* Footer */
-.footer {
-  background-color: var(--footer-bg);
-  color: var(--footer-text-color);
-  padding: 20px 0;
-  text-align: center;
-  font-size: 0.9em;
-  width: 100%;
-  box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
-  margin-top: 40px;
-}
-
-.footer a {
-  color: #e3e6ea;
-  text-decoration: none;
-}
-
-.footer a:hover {
-  text-decoration: underline;
-  color: var(--link-hover-color);
-}
-
-/* Modal Styling */
-.modal-content {
-  background-color: var(--modal-bg);
-  color: var(--modal-text-color);
-  border-radius: 8px;
-}
-
-.modal-header {
-  border-bottom-color: var(--card-border);
-}
-
-.modal-title {
-  color: var(--text-color);
-}
-
-.modal-body ul {
-  list-style-type: disc;
-  padding-left: 20px;
-}
-
-.modal-body li {
-  margin-bottom: 10px;
-}
-
-.modal-body a {
-  color: var(--link-color);
-  text-decoration: none;
-}
-
-.modal-body a:hover {
-  text-decoration: underline;
-  color: var(--link-hover-color);
-}
-
-.btn-close {
-  filter: invert(0); /* Default for light theme */
-}
-
-body.dark-theme .btn-close {
-  filter: invert(1); /* Invert for dark theme */
-}
-
-/* Google Translate Specific Styling */
-#google_translate_element .goog-te-gadget-simple {
-  background-color: var(--primary-bg) !important;
-  border: 1px solid var(--primary-bg) !important;
-  border-radius: 4px;
-  font-size: 0.8em;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-#google_translate_element .goog-te-gadget-simple a {
-  color: var(
-    --header-text-color
-  ) !important; /* Text color for the "Translate" link */
-  font-size: 1rem;
-  padding: 5px 8px;
-  line-height: 1; /* Adjust line height to prevent clipping */
-}
-
-#google_translate_element .goog-te-gadget-simple .goog-te-menu-value span {
-  color: var(
-    --header-text-color
-  ) !important; /* Text color for selected language */
-}
-
-/* Hide the Google Translate banner */
-.skiptranslate.goog-te-banner-frame {
-  display: none !important;
-}
-body {
-  top: 0px !important;
-}
-
-/* Responsive adjustments */
-@media (max-width: 991.98px) {
-  .navbar-nav {
-    align-items: flex-start; /* Align nav items to start in collapsed view */
-    padding-top: 10px; /* Add some padding */
-  }
-  .navbar-nav .nav-item {
-    margin-bottom: 5px;
-  }
-  .navbar-nav .form-check-switch {
-    margin-left: 10px; /* Indent the switch a bit */
-  }
-  .navbar-collapse {
-    margin-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 10px;
-  }
-  .navbar-nav .nav-item.d-flex {
-    flex-direction: column; /* Stack translate and theme switch vertically */
-    align-items: flex-start !important;
-  }
-  #google_translate_element {
-    margin-top: 10px;
-    margin-left: 0;
-  }
-}
-
-@media (max-width: 576px) {
-  .carousel-item img {
-    height: 200px; /* Smaller height for small screens */
-  }
-  .carousel-caption {
-    bottom: 5px;
-    padding: 5px 10px;
-    width: 90%;
-  }
-  .carousel-caption h5 {
-    font-size: 1rem;
-  }
-  .carousel-caption .btn {
-    font-size: 0.75rem;
-    padding: 2px 5px;
-  }
-  .calendar-grid {
-    grid-template-columns: repeat(
-      auto-fill,
-      minmax(100px, 1fr)
-    ); /* Adjust grid for smaller screens */
-    gap: 10px;
-  }
-  .day-card {
-    min-height: 100px;
-    padding: 10px;
-  }
-  .day-number {
-    font-size: 37.075px;
-  }
-  .event-summary {
-    font-size: 0.8em;
-  }
-  #historicalCarousel {
-    max-width: 100%; /* Full width on small screens */
-    padding: 0; /* Remove padding for full-width look */
-    margin-top: 0px !important; /* Less space above the carousel */
-  }
-}
-
-/* Styling for the whole carousel container */
+/* Carousel Styles */
 #historicalCarousel {
-  background-color: var(
-    --secondary-bg
-  ); /* Light gray background, adjust as needed */
-  border-radius: 8px; /* Optional: Rounded corners */
-  margin-left: auto; /* Center the block element */
-  margin-right: auto; /* Center the block element */
-  padding: 20px; /* Padding around the carousel */
-  max-width: 100%; /* Full width of the container */
-  box-sizing: border-box; /* Ensure padding does not affect width */
-  position: relative; /* Position relative for absolute positioning of caption */
-  overflow: hidden; /* Hide overflow to maintain rounded corners */
+  max-width: 1200px;
+  margin: 0 auto;
+  overflow: hidden;
+  transition: background-color 0.3s ease;
 }
 
-/* Center the caption content */
+#historicalCarousel .carousel-item img {
+  height: 350px;
+  object-fit: cover;
+  filter: brightness(70%); /* Darken image to make caption more readable */
+  transition: filter 0.3s ease;
+}
+
 .carousel-caption {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  bottom: 0; /* Align to the bottom of the image */
-  left: 0;
-  right: 0;
-  top: 0; /* Stretch to cover the entire image area for full centering */
-  background-color: rgba(
-    0,
-    0,
-    0,
-    0.5
-  ); /* Semi-transparent black background for readability */
-  padding: 1rem; /* Add some padding */
-  width: 100%; /* Full width of the carousel item */
-  height: 100%; /* Full height of the carousel item */
-  z-index: 1; /* Ensure caption is above the image */
-  border-radius: var(
-    --border-radius
-  ); /* Match the carousel container's rounded corners */
+  padding: 1rem 2rem;
   box-sizing: border-box; /* Ensure padding does not affect width */
   transition: background-color 0.3s ease; /* Smooth transition for background color */
-  /* Optional: Add a transition effect for hover */
+  position: static;
 }
 
 div#carouselIndicators {
-  display: none;
+  position: relative;
+  margin-top: -20px;
 }
 
+button.carousel-control-next {
+  display: none;
+}
+button.carousel-control-prev {
+  display: none;
+}
 .carousel-caption h5 {
   color: var(
     --header-text-color
   ); /* Consistent text color with other white elements */
   color: #e3e6ea; /* White text for better contrast on the dark background */
   z-index: 1; /* Ensure text is above the semi-transparent background */
-  padding-left: 10%;
-  padding-right: 10%;
+  padding-top: 20px; /* Add padding to the top for better spacing */
+  padding-bottom: 20px; /* Add padding to the bottom for better spacing */
 }
 
 /* Responsive adjustments for smaller screens (mobile) */
@@ -529,25 +161,223 @@ div#carouselIndicators {
   .carousel-caption h5 {
     font-size: 1rem; /* Smaller font size for headings on mobile */
   }
-
-  .carousel-caption .btn {
-    font-size: 0.8rem; /* Smaller button text on mobile */
-    padding: 0.3rem 0.6rem; /* Smaller button padding on mobile */
-  }
 }
 
-.form-check.form-switch.d-lg-none.me-2 {
-  margin: auto;
+.form-check-input:checked {
+  background-color: var(--switch-track-on) !important;
+  border-color: var(--switch-track-on) !important;
 }
 
-input#themeSwitchMobile {
-  margin-top: 8px;
+.form-check-input {
+  background-color: var(--switch-track-off);
+  border-color: var(--switch-track-off);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
-.month-navigation.mb-2.d-flex.justify-content-between.align-items-center {
-  margin: auto;
+.form-check-input:focus {
+  box-shadow: 0 0 0 0.25rem rgba(var(--switch-track-on-rgb, 0, 123, 255), 0.25) !important; /* Use rgba for focus outline */
 }
 
-h1.display-4 {
-  font-weight: bolder;
+/* Update default Bootstrap variables for switch if needed */
+/* :root {
+    --bs-form-switch-bg: var(--switch-track-off);
+    --bs-form-switch-checked-bg: var(--switch-track-on);
+} */
+
+.form-switch .form-check-input {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+  background-color: var(--switch-thumb-off); /* Unchecked thumb color */
+  transition: background-color 0.3s ease, transform 0.3s ease;
+}
+
+.form-switch .form-check-input:checked {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+  background-color: var(--switch-thumb-on); /* Checked thumb color */
+}
+
+.theme-switch-mobile label i {
+  color: var(--header-text-color); /* Icon color */
+  font-size: 1.2rem;
+  margin-left: 0.5rem;
+}
+
+.theme-switch-desktop label {
+  color: var(--header-text-color);
+}
+
+main {
+  flex: 1; /* Allow main content to grow and push footer down */
+  margin-top: 20px;
+}
+
+.month-navigation {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  margin-top: 20px;
+}
+
+.month-navigation h2 {
+  color: var(--text-color);
+  transition: color 0.3s ease;
+}
+
+.btn-outline-primary {
+  color: var(--button-outline-text);
+  border-color: var(--button-outline-color);
+  transition: color 0.3s ease, background-color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.btn-outline-primary:hover {
+  background-color: var(--button-outline-hover-bg);
+  color: var(--button-outline-hover-text);
+  border-color: var(--button-outline-hover-bg);
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 15px;
+  padding: 20px 0;
+}
+
+.day-card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--border-radius);
+  padding: 15px;
+  text-align: center;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease,
+    background-color 0.3s ease, border-color 0.3s ease;
+  min-height: 120px; /* Ensure consistent height for cards */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.day-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* New style for days with no events */
+.day-card.no-events {
+  background-color: var(--card-bg-no-events);
+  border-color: var(--card-border-no-events);
+  color: var(--text-color-light);
+  cursor: default; /* Change cursor if not clickable or less interactive */
+}
+
+.dark-theme .day-card.no-events {
+  background-color: var(--dark-card-bg-no-events);
+  border-color: var(--dark-card-border-no-events);
+  color: var(--dark-text-color-light);
+}
+
+.day-number {
+  font-size: 1.8em;
+  font-weight: bold;
+  color: var(--text-color);
+  transition: color 0.3s ease;
+}
+
+.event-summary {
+  font-size: 0.9em;
+  color: var(--text-color);
+  margin-top: 10px;
+  transition: color 0.3s ease;
+}
+
+/* Loading Indicator */
+.loading-indicator {
+  grid-column: 1 / -1; /* Span across all columns */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-color);
+  transition: color 0.3s ease;
+}
+
+.loading-indicator p {
+  color: var(--text-color);
+}
+
+/* Footer Styles */
+.footer {
+  background-color: var(--footer-bg);
+  color: var(--footer-text-color);
+  text-align: center;
+  padding: 20px 0;
+  margin-top: 30px;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.footer a {
+  color: var(--footer-text-color);
+  text-decoration: underline;
+  transition: color 0.3s ease;
+}
+
+.footer p {
+  font-size: 14px;
+}
+
+.footer a:hover {
+  color: #cceeff; /* Lighter shade on hover */
+}
+
+/* Modal Styles */
+.modal-content {
+  background-color: var(--modal-bg);
+  color: var(--modal-text-color);
+  border: 1px solid var(--card-border); /* Use card border for consistency */
+  transition: background-color 0.3s ease, color 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.modal-header {
+  border-bottom-color: var(--card-border);
+}
+
+.modal-footer {
+  border-top-color: var(--card-border);
+}
+
+.modal-title {
+  color: var(--modal-text-color);
+}
+
+.modal-body a {
+  color: var(--link-color);
+  transition: color 0.3s ease;
+}
+
+.modal-body a:hover {
+  color: var(--link-hover-color);
+}
+
+.btn-close {
+  filter: var(--bs-btn-close-white, invert(0)) grayscale(100%)
+    brightness(var(--close-btn-brightness, 1));
+  opacity: 0.7;
+  transition: filter 0.3s ease, opacity 0.3s ease;
+}
+
+.dark-theme .btn-close {
+  filter: var(--bs-btn-close-white, invert(1)) grayscale(100%)
+    brightness(var(--close-btn-brightness, 0.8));
+}
+
+#google_translate_element {
+  margin-left: 1rem;
+}
+
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 1030; /* Bootstrap's default z-index plus 1 */
 }

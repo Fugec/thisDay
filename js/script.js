@@ -50,22 +50,17 @@ async function fetchWikipediaEvents(month, day, lang = "en") {
   try {
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "HistorijskiKalendarBiH/1.0 (your-email@example.com)", // IMPORTANT: Replace with YOUR contact email
+        "User-Agent": "HappenedCalendar/1.0 (info@happened.io)", // IMPORTANT: Replace with YOUR contact email
       },
     });
 
     if (!response.ok) {
-      console.error(
-        `Error fetching data from Wikipedia (${lang}): ${response.status} ${response.statusText}`
+      console.warn(
+        `No data for ${lang.toUpperCase()} Wikipedia for ${month}/${day} (Status: ${
+          response.status
+        } ${response.statusText}).`
       );
-      if (lang === "en" && response.status === 404) {
-        // If English fails, try German
-        console.log("No data for English Wikipedia, trying German.");
-        const fallbackEvents = await fetchWikipediaEvents(month, day, "de");
-        eventCache[cacheKey] = fallbackEvents;
-        return fallbackEvents;
-      }
-      return [];
+      return []; // Return empty array if no data or error for this language
     }
 
     const data = await response.json();
@@ -91,14 +86,17 @@ async function fetchWikipediaEvents(month, day, lang = "en") {
           year: year,
           sourceUrl: wikipediaLink,
           thumbnailUrl: thumbnailUrl,
-          lang: lang,
+          lang: lang, // Store the language this event was fetched from
         });
       });
     }
     eventCache[cacheKey] = events;
     return events;
   } catch (error) {
-    console.error("Network or parsing error:", error);
+    console.error(
+      `Network or parsing error for ${lang} (${month}/${day}):`,
+      error
+    );
     return [];
   }
 }
@@ -110,10 +108,11 @@ async function populateCarousel(month, year) {
   carouselIndicators.innerHTML = "";
 
   // Fetch events for the first day of the month for the carousel from English Wikipedia
-  const eventsForDayOne = await fetchWikipediaEvents(month + 1, 1, "en");
+  // Using a specific day like 15th to potentially get more varied content if 1st is often empty
+  const eventsForCarouselDay = await fetchWikipediaEvents(month + 1, 15, "en");
 
-  // Filter for events with images and limit to max 5
-  const featuredEvents = eventsForDayOne
+  // Filter for events with images and limit to max 10
+  const featuredEvents = eventsForCarouselDay
     .filter(
       (event) =>
         event.sourceUrl &&
@@ -121,17 +120,19 @@ async function populateCarousel(month, year) {
         event.thumbnailUrl &&
         event.thumbnailUrl !== ""
     )
-    .slice(0, 10); // Limit to 5 articles
+    .slice(0, 10); // Limit to 10 articles for more variety
 
   if (featuredEvents.length === 0) {
     // If no featured events, show a default placeholder with no text
     const defaultItem = document.createElement("div");
     defaultItem.className = "carousel-item active";
+    // Improved placeholder for no image available
     defaultItem.innerHTML = `
-            <img src="https://placehold.co/1200x350/0056b3/ffffff?text=No+images+available" class="d-block w-100" alt="No images available">
+            <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available" class="d-block w-100" alt="No images available">
             <div class="carousel-caption">
-                <h5>No events</h5>
-                <a href="#" class="btn btn-primary btn-sm disabled">More Details</a>
+                <h5>Discover History Daily</h5>
+                <p>No specific featured image for this day, but explore the calendar for more events!</p>
+                <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
             </div>
         `;
     carouselInner.appendChild(defaultItem);
@@ -145,12 +146,13 @@ async function populateCarousel(month, year) {
 
     // Set image with onerror fallback
     const imageUrl = event.thumbnailUrl;
-    const fallbackImageUrl = `https://placehold.co/1200x350/0056b3/ffffff?text=Image`; // Simplified fallback text
+    // Fallback image using a more neutral color
+    const fallbackImageUrl = `https://placehold.co/1200x350/6c757d/ffffff?text=Image+Not+Available`;
 
-    // Limit title to 20 words
-    const titleWords = (
-      event.title || "Historical Events | Happened on this day"
-    ).split(" ");
+    // Limit title to 20 words for display, and use it as alt text
+    const titleWords = (event.title || "Historical Event on This Day").split(
+      " "
+    );
     const truncatedTitle = titleWords.slice(0, 20).join(" ");
 
     carouselItem.innerHTML = `
@@ -190,19 +192,25 @@ async function populateCarousel(month, year) {
 }
 
 async function renderCalendar() {
+  // --- IMPORTANT FIX: Clear existing day cards before rendering new ones ---
   calendarGrid.innerHTML = "";
+  // --- END FIX ---
+
   loadingIndicator.style.display = "block";
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  currentMonthYearDisplay.textContent = `${monthNamesBs[month]}`;
+  currentMonthYearDisplay.textContent = `${monthNamesBs[month]} ${year}`; // Display month and year
+  document.title = `Happened. | ${monthNamesBs[month]} ${year} Historical Events`; // SEO: Dynamic page title
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
   const fetchPromises = [];
   for (let i = 1; i <= daysInMonth; i++) {
-    fetchPromises.push(fetchWikipediaEvents(month + 1, i, "en")); // Fetch for English first
+    // We only fetch for English for the calendar grid initial display
+    // The modal will handle fallbacks if needed.
+    fetchPromises.push(fetchWikipediaEvents(month + 1, i, "en"));
   }
 
   const allEventsForMonth = await Promise.all(fetchPromises);
@@ -222,17 +230,22 @@ async function renderCalendar() {
     const eventSummary = document.createElement("div");
     eventSummary.className = "event-summary";
 
-    const eventsForDay = allEventsForMonth[i - 1];
+    const eventsForDay = allEventsForMonth[i - 1]; // Use the pre-fetched events
     if (eventsForDay && eventsForDay.length > 0) {
       // Display the count of events
       eventSummary.textContent = `${eventsForDay.length} Events`;
     } else {
       eventSummary.textContent = "No Events";
+      dayCard.classList.add("no-events"); // Add class for styling days with no events
     }
     dayCard.appendChild(eventSummary);
 
+    // Store events directly on the element for quick access in modal
+    dayCard.eventsData = eventsForDay;
+
     dayCard.addEventListener("click", () => {
-      showEventDetails(i, month + 1, year, eventsForDay);
+      // Pass stored events, if any, to avoid re-fetching immediately
+      showEventDetails(i, month + 1, year, dayCard.eventsData);
     });
 
     calendarGrid.appendChild(dayCard);
@@ -242,38 +255,75 @@ async function renderCalendar() {
   await populateCarousel(month, year);
 }
 
+// Added language fallback logic to showEventDetails
 async function showEventDetails(day, month, year, preFetchedEvents = null) {
   modalDate.textContent = `${day}. ${monthNamesBs[month - 1]} ${year}.`;
   modalBodyContent.innerHTML = "<p>Loading...</p>";
 
-  let events =
-    preFetchedEvents || (await fetchWikipediaEvents(month, day, "en")); // Fetch for English first
+  let events = preFetchedEvents;
+  let fetchedLang = "en"; // Assume English initially
 
-  modalBodyContent.innerHTML = "";
+  // If no pre-fetched events or pre-fetched events are empty, try fetching with fallbacks
+  if (!events || events.length === 0) {
+    events = await fetchWikipediaEvents(month, day, "en"); // Try English first
+    if (!events || events.length === 0) {
+      console.log(`No English events for ${month}/${day}, trying German.`);
+      events = await fetchWikipediaEvents(month, day, "de"); // Fallback to German
+      if (events && events.length > 0) fetchedLang = "de";
+    }
+    if (!events || events.length === 0) {
+      console.log(`No German events for ${month}/${day}, trying French.`);
+      events = await fetchWikipediaEvents(month, day, "fr"); // Fallback to French
+      if (events && events.length > 0) fetchedLang = "fr";
+    }
+  } else {
+    // If events were pre-fetched, use the language from the first event (if available)
+    if (events.length > 0 && events[0].lang) {
+      fetchedLang = events[0].lang;
+    }
+  }
+
+  modalBodyContent.innerHTML = ""; // Clear loading message
 
   if (events && events.length > 0) {
     const ul = document.createElement("ul");
     events.forEach((event) => {
       const li = document.createElement("li");
       let eventText = event.description;
+      let langCode = "en"; // Default for display
       if (event.sourceUrl) {
-        const lang = event.sourceUrl.match(/wikipedia\.org\/(\w+)\//)[1];
-        eventText += ` (${lang}.wikipedia.org)`;
+        const match = event.sourceUrl.match(/wikipedia\.org\/(\w+)\//);
+        if (match && match[1]) {
+          langCode = match[1];
+        }
       }
+      // Add year and description. Source link is added separately below for clarity.
       li.innerHTML = `<strong>${event.year}.</strong> ${eventText}`;
       if (event.sourceUrl) {
         const sourceLink = document.createElement("a");
         sourceLink.href = event.sourceUrl;
-        sourceLink.textContent = " (Source: Wikipedia)";
+        // Indicate the language of the Wikipedia source
+        sourceLink.textContent = ` (Source: ${langCode.toUpperCase()}.Wikipedia)`;
         sourceLink.target = "_blank";
-        sourceLink.rel = "noopener noreferrer";
+        sourceLink.rel = "noopener noreferrer"; // Good practice for external links
         li.appendChild(sourceLink);
       }
       ul.appendChild(li);
     });
     modalBodyContent.appendChild(ul);
+
+    // Add a note if events were fetched from a fallback language
+    if (fetchedLang !== "en") {
+      const langNote = document.createElement("p");
+      langNote.className = "text-muted mt-3";
+      langNote.textContent = `(Events for this day were found in ${fetchedLang.toUpperCase()} Wikipedia. English events might not be available.)`;
+      modalBodyContent.appendChild(langNote);
+    }
   } else {
-    modalBodyContent.innerHTML = "<p>No events found for this day.</p>";
+    modalBodyContent.innerHTML = `
+        <p>No events found for this day in English, German, or French Wikipedia.</p>
+        <p class="text-muted">Historical data is subject to available records on Wikipedia. Try checking Wikipedia directly for more languages or broader historical context.</p>
+    `;
   }
 
   eventDetailModal.show();
@@ -359,6 +409,7 @@ document.getElementById("currentYear").textContent = new Date().getFullYear();
 // Initial render of the calendar and carousel
 renderCalendar();
 
+// Google Translate Initialization (Existing - keep if you plan to use it)
 function googleTranslateElementInit() {
   new google.translate.TranslateElement(
     {

@@ -7,7 +7,7 @@
   --card-bg: #ffffff; /* white */
   --card-border: #e2e8f0; /* gray-200 */
   --footer-bg: #1e293b; /* slate-800 */
-  --footer-text-color: #f1f5f9; /* slate-100 */
+  --footer-text-color: #ffffff; /* slate-100 */
   --modal-bg: #ffffff; /* white */
   --modal-text-color: #6c757d; /* slate-900 */
   --link-color: #2563eb; /* blue-600 */
@@ -22,7 +22,7 @@
   --switch-thumb-on: #ffffff; /* white */
 
   /* No Events Cards */
-  --card-bg-no-events: #f1f5f9; /* slate-100 */
+  --card-bg-no-events: #ffffff; /* slate-100 */
   --card-border-no-events: #e2e8f0; /* gray-200 */
   --text-color-light: #64748b; /* slate-400 */
 
@@ -38,7 +38,7 @@ body.dark-theme {
   --card-bg: #1e293b; /* slate-800 */
   --card-border: #334155; /* slate-700 */
   --footer-bg: #020617; /* slate-950 */
-  --footer-text-color: #f1f5f9; /* slate-100 */
+  --footer-text-color: #ffffff; /* slate-100 */
   --modal-bg: #1e293b; /* slate-800 */
   --modal-text-color: #f8fafc; /* slate-50 */
   --link-color: #60a5fa; /* blue-400 */
@@ -80,6 +80,7 @@ body {
 .navbar-brand,
 .navbar-nav .nav-link {
   color: var(--header-text-color) !important;
+  font-weight: bolder;
 }
 
 /* Header/Hero Section */
@@ -92,13 +93,20 @@ body {
 
 .carousel-header h1 {
   color: var(--header-text-color);
+  font-weight: bolder;
 }
 
 .carousel-header .text-muted {
-  color: #fff !important; /* Muted text color for better contrast */
   padding-left: 20px;
   padding-right: 20px;
   padding-top: 20px;
+}
+
+.display-4 {
+  font-size: 40px;
+}
+.text-muted {
+  color: #fff !important; /* Muted text color for better contrast */
 }
 
 /* Carousel Styles */
@@ -380,4 +388,23 @@ main {
   position: sticky;
   top: 0;
   z-index: 1030; /* Bootstrap's default z-index plus 1 */
+}
+
+.word {
+  animation: loop 5s infinite;
+}
+@keyframes loop {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0;
+  }
+  75% {
+    opacity: 0;
+  }
 }

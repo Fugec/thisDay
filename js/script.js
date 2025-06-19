@@ -16,317 +16,27 @@ const themeSwitchMobile = document.getElementById("themeSwitchMobile");
 const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
 const body = document.body;
 
-// Language dropdown elements
-const languageDropdownButton = document.getElementById("languageDropdown");
-const languageMenuItems = document.querySelectorAll(
-  "#languageDropdown + .dropdown-menu .dropdown-item"
-);
-
 let currentDate = new Date(); // Start with current date
-
-// Month names object for localization
-const monthNames = {
-  en: [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ],
-  es: [
-    "Enero",
-    "Febrero",
-    "Marzo",
-    "Abril",
-    "Mayo",
-    "Junio",
-    "Julio",
-    "Agosto",
-    "Septiembre",
-    "Octubre",
-    "Noviembre",
-    "Diciembre",
-  ],
-  zh: [
-    "一月",
-    "二月",
-    "三月",
-    "四月",
-    "五月",
-    "六月",
-    "七月",
-    "八月",
-    "九月",
-    "十月",
-    "十一月",
-    "十二月",
-  ],
-  hi: [
-    "जनवरी",
-    "फ़रवरी",
-    "मार्च",
-    "अप्रैल",
-    "मई",
-    "जून",
-    "जुलाई",
-    "अगस्त",
-    "सितंबर",
-    "अक्टूबर",
-    "नवंबर",
-    "दिसंबर",
-  ],
-  ar: [
-    "يناير",
-    "فبراير",
-    "مارس",
-    "أبريل",
-    "مايو",
-    "يونيو",
-    "يوليو",
-    "أغسطس",
-    "سبتمبر",
-    "أكتوبر",
-    "نوفمبر",
-    "ديسمبر",
-  ],
-  pt: [
-    "Janeiro",
-    "Fevereiro",
-    "Março",
-    "Abril",
-    "Maio",
-    "Junho",
-    "Julho",
-    "Agosto",
-    "Setembro",
-    "Outubro",
-    "Novembro",
-    "Dezembro",
-  ],
-  bn: [
-    "জানুয়ারী",
-    "ফেব্রুয়ারী",
-    "মার্চ",
-    "এপ্রিল",
-    "মে",
-    "জুন",
-    "জুলাই",
-    "আগস্ট",
-    "সেপ্টেম্বর",
-    "অক্টোবর",
-    "নভেম্বর",
-    "ডিসেম্বর",
-  ],
-  ru: [
-    "Январь",
-    "Февраль",
-    "Март",
-    "Апрель",
-    "Май",
-    "Июнь",
-    "Июль",
-    "Август",
-    "Сентябрь",
-    "Октябрь",
-    "Ноябрь",
-    "Декабрь",
-  ],
-  fr: [
-    "Janvier",
-    "Février",
-    "Mars",
-    "Avril",
-    "Mai",
-    "Juin",
-    "Juillet",
-    "Août",
-    "Septembre",
-    "Octobre",
-    "Novembre",
-    "Décembre",
-  ],
-  de: [
-    "Januar",
-    "Februar",
-    "März",
-    "April",
-    "Mai",
-    "Juni",
-    "Juli",
-    "August",
-    "September",
-    "Oktober",
-    "November",
-    "Dezember",
-  ],
-  ja: [
-    "1月",
-    "2月",
-    "3月",
-    "4月",
-    "5月",
-    "6月",
-    "7月",
-    "8月",
-    "9月",
-    "10月",
-    "11月",
-    "12月",
-  ],
-  pa: [
-    "ਜਨਵਰੀ",
-    "ਫ਼ਰਵਰੀ",
-    "ਮਾਰਚ",
-    "ਅਪ੍ਰੈਲ",
-    "ਮਈ",
-    "ਜੂਨ",
-    "ਜੁਲਾਈ",
-    "ਅਗਸਤ",
-    "ਸਤੰਬਰ",
-    "ਅਕਤੂਬਰ",
-    "ਨਵੰਬਰ",
-    "ਦਸੰਬਰ",
-  ],
-  id: [
-    "Januari",
-    "Februari",
-    "Maret",
-    "April",
-    "Mei",
-    "Juni",
-    "Juli",
-    "Agustus",
-    "September",
-    "Oktober",
-    "November",
-    "Desember",
-  ],
-  ko: [
-    "1월",
-    "2월",
-    "3월",
-    "4월",
-    "5월",
-    "6월",
-    "7월",
-    "8월",
-    "9월",
-    "10월",
-    "11월",
-    "12월",
-  ],
-  tr: [
-    "Ocak",
-    "Şubat",
-    "Mart",
-    "Nisan",
-    "Mayıs",
-    "Haziran",
-    "Temmuz",
-    "Ağustos",
-    "Eylül",
-    "Ekim",
-    "Kasım",
-    "Aralık",
-  ],
-  it: [
-    "Gennaio",
-    "Febbraio",
-    "Marzo",
-    "Aprile",
-    "Maggio",
-    "Giugno",
-    "Luglio",
-    "Agosto",
-    "Settembre",
-    "Ottobre",
-    "Novembre",
-    "Dicembre",
-  ],
-  th: [
-    "มกราคม",
-    "กุมภาพันธ์",
-    "มีนาคม",
-    "เมษายน",
-    "พฤษภาคม",
-    "มิถุนายน",
-    "กรกฎาคม",
-    "สิงหาคม",
-    "กันยายน",
-    "ตุลาคม",
-    "พฤศจิกายน",
-    "ธันวาคม",
-  ],
-  vi: [
-    "Tháng 1",
-    "Tháng 2",
-    "Tháng 3",
-    "Tháng 4",
-    "Tháng 5",
-    "Tháng 6",
-    "Tháng 7",
-    "Tháng 8",
-    "Tháng 9",
-    "Tháng 10",
-    "Tháng 11",
-    "Tháng 12",
-  ],
-  bs: [
-    "Januar",
-    "Februar",
-    "Mart",
-    "April",
-    "Maj",
-    "Juni",
-    "Juli",
-    "August",
-    "Septembar",
-    "Oktobar",
-    "Novembar",
-    "Decembar",
-  ],
-  hr: [
-    "Siječanj",
-    "Veljača",
-    "Ožujak",
-    "Travanj",
-    "Svibanj",
-    "Lipanj",
-    "Srpanj",
-    "Kolovoz",
-    "Rujan",
-    "Listopad",
-    "Studeni",
-    "Prosinac",
-  ],
-  sr: [
-    "Јануар",
-    "Фебруар",
-    "Март",
-    "Април",
-    "Мај",
-    "Јун",
-    "Јул",
-    "Август",
-    "Септембар",
-    "Октобар",
-    "Новембар",
-    "Децембар",
-  ],
-};
 
 // Enhanced cache for storing fetched events with expiration
 const eventCache = new Map();
 const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
-let currentLanguage = localStorage.getItem("selectedLanguage") || "en";
+// English month names
+const monthNames = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 // Rate limiting variables
 let requestCount = 0;
@@ -354,7 +64,7 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
         ...options,
         headers: {
           "User-Agent":
-            "What Happened on This Day?Calendar/1.0 (kapetanovic.armin@gmail.com)",
+            "What Happened on This Day Calendar/1.0 (kapetanovic.armin@gmail.com)",
           ...options.headers,
         },
       });
@@ -395,8 +105,8 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
 }
 
 // Enhanced Wikipedia API function with better error handling and caching
-async function fetchWikipediaEvents(month, day, lang = currentLanguage) {
-  const cacheKey = `${month}-${day}-${lang}`;
+async function fetchWikipediaEvents(month, day) {
+  const cacheKey = `${month}-${day}-en`;
 
   // Check cache with expiration
   if (eventCache.has(cacheKey)) {
@@ -410,16 +120,14 @@ async function fetchWikipediaEvents(month, day, lang = currentLanguage) {
 
   const monthPadded = String(month).padStart(2, "0");
   const dayPadded = String(day).padStart(2, "0");
-  const url = `https://api.wikimedia.org/feed/v1/wikipedia/${lang}/What Happened on This Day?/events/${monthPadded}/${dayPadded}`;
+  const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${monthPadded}/${dayPadded}`;
 
   try {
     const response = await rateLimitedFetch(url);
 
     if (!response.ok) {
       console.warn(
-        `No data for ${lang.toUpperCase()} Wikipedia for ${month}/${day} (Status: ${
-          response.status
-        })`
+        `No data for English Wikipedia for ${month}/${day} (Status: ${response.status})`
       );
       // Cache empty result to avoid repeated failed requests
       eventCache.set(cacheKey, { data: [], timestamp: Date.now() });
@@ -430,7 +138,7 @@ async function fetchWikipediaEvents(month, day, lang = currentLanguage) {
     const events = [];
 
     if (data && data.events && Array.isArray(data.events)) {
-      // Process all events, not just a subset
+      // Process all events
       data.events.forEach((event) => {
         if (!event || !event.text) return; // Skip invalid events
 
@@ -459,7 +167,6 @@ async function fetchWikipediaEvents(month, day, lang = currentLanguage) {
           year: year,
           sourceUrl: wikipediaLink,
           thumbnailUrl: thumbnailUrl,
-          lang: lang,
         });
       });
     }
@@ -468,10 +175,7 @@ async function fetchWikipediaEvents(month, day, lang = currentLanguage) {
     eventCache.set(cacheKey, { data: events, timestamp: Date.now() });
     return events;
   } catch (error) {
-    console.error(
-      `Error fetching events for ${lang} (${month}/${day}):`,
-      error
-    );
+    console.error(`Error fetching events for ${month}/${day}:`, error);
     // Return empty array but don't cache errors to allow retries
     return [];
   }
@@ -490,7 +194,7 @@ async function populateCarousel(month, year) {
     for (const day of daysToTry) {
       if (featuredEvents.length >= 10) break;
 
-      const eventsForDay = await fetchWikipediaEvents(month + 1, day, "en");
+      const eventsForDay = await fetchWikipediaEvents(month + 1, day);
       const eventsWithImages = eventsForDay.filter(
         (event) =>
           event.sourceUrl &&
@@ -599,8 +303,8 @@ async function renderCalendar() {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  currentMonthYearDisplay.textContent = `${monthNames[currentLanguage][month]} ${year}`;
-  document.title = `What Happened on This Day?. | ${monthNames[currentLanguage][month]} ${year} Historical Events`;
+  currentMonthYearDisplay.textContent = `${monthNames[month]} ${year}`;
+  document.title = `What Happened on This Day | ${monthNames[month]} ${year} Historical Events`;
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
@@ -640,11 +344,7 @@ async function renderCalendar() {
       const batchPromises = batch.map(async (dayCard) => {
         const day = parseInt(dayCard.getAttribute("data-day"));
         try {
-          const events = await fetchWikipediaEvents(
-            month + 1,
-            day,
-            currentLanguage
-          );
+          const events = await fetchWikipediaEvents(month + 1, day);
 
           // Update UI
           const eventSummary = dayCard.querySelector(".event-summary");
@@ -689,55 +389,18 @@ async function renderCalendar() {
   await populateCarousel(month, year);
 }
 
-// Enhanced event details with better fallback logic
+// Enhanced event details
 async function showEventDetails(day, month, year, preFetchedEvents = null) {
-  modalDate.textContent = `${day}. ${
-    monthNames[currentLanguage][month - 1]
-  } ${year}.`;
+  modalDate.textContent = `${day}. ${monthNames[month - 1]} ${year}`;
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
 
   let events = preFetchedEvents;
-  let fetchedLang = currentLanguage;
 
   try {
-    // If no pre-fetched events or they're from a different language, fetch new ones
-    if (
-      !events ||
-      events.length === 0 ||
-      (events[0] && events[0].lang !== currentLanguage)
-    ) {
-      events = await fetchWikipediaEvents(month, day, currentLanguage);
-      if (events && events.length > 0) {
-        fetchedLang = currentLanguage;
-      }
-    }
-
-    // Enhanced fallback logic with more languages
-    const fallbackLanguages = [
-      "en",
-      "de",
-      "fr",
-      "es",
-      "it",
-      "pt",
-      "ru",
-      "bs",
-      "hr",
-      "sr",
-    ].filter((lang) => lang !== currentLanguage);
-
-    for (const lang of fallbackLanguages) {
-      if (!events || events.length === 0) {
-        console.log(`Trying ${lang.toUpperCase()} for ${month}/${day}`);
-        events = await fetchWikipediaEvents(month, day, lang);
-        if (events && events.length > 0) {
-          fetchedLang = lang;
-          break;
-        }
-      } else {
-        break;
-      }
+    // If no pre-fetched events, fetch new ones
+    if (!events || events.length === 0) {
+      events = await fetchWikipediaEvents(month, day);
     }
 
     modalBodyContent.innerHTML = "";
@@ -759,14 +422,6 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
 
         let eventText =
           event.description || event.title || "No description available";
-        let langCode = "en";
-
-        if (event.sourceUrl) {
-          const match = event.sourceUrl.match(/\/\/(\w+)\.wikipedia\.org/);
-          if (match && match[1]) {
-            langCode = match[1];
-          }
-        }
 
         li.innerHTML = `
           <div class="d-flex justify-content-between align-items-start">
@@ -776,11 +431,9 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
               ${
                 event.sourceUrl
                   ? `
-                <a href="${
-                  event.sourceUrl
-                }" class="btn btn-sm btn-outline-primary" 
+                <a href="${event.sourceUrl}" class="btn btn-sm btn-outline-primary" 
                    target="_blank" rel="noopener noreferrer">
-                  Read more on ${langCode.toUpperCase()}.Wikipedia
+                  Read more on Wikipedia
                 </a>
               `
                   : ""
@@ -801,23 +454,11 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
       });
 
       modalBodyContent.appendChild(ul);
-
-      if (fetchedLang !== currentLanguage) {
-        const langNote = document.createElement("div");
-        langNote.className = "alert alert-info mt-3";
-        langNote.innerHTML = `
-          <i class="bi bi-info-circle"></i>
-          Events for this day were found in <strong>${fetchedLang.toUpperCase()}</strong> Wikipedia. 
-          Your preferred language (<strong>${currentLanguage.toUpperCase()}</strong>) events might not be available.
-        `;
-        modalBodyContent.appendChild(langNote);
-      }
     } else {
       modalBodyContent.innerHTML = `
         <div class="alert alert-warning">
           <h5><i class="bi bi-exclamation-triangle"></i> No Events Found</h5>
-          <p>No events found for this day in your preferred language (${currentLanguage.toUpperCase()}) 
-             or any fallback languages on Wikipedia.</p>
+          <p>No events found for this day on Wikipedia.</p>
           <p class="mb-0 text-muted">Historical data depends on available records. 
              Try checking Wikipedia directly for more comprehensive information.</p>
         </div>
@@ -877,26 +518,12 @@ function setTheme(theme) {
   }
 }
 
-// Language management with cache clearing
-async function setLanguage(lang) {
-  if (lang === currentLanguage) return; // No change needed
-
-  currentLanguage = lang;
-  localStorage.setItem("selectedLanguage", lang);
-
-  // Clear cache for better language switching experience
-  eventCache.clear();
-
-  await renderCalendar();
-}
-
 // Initialize application
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     const savedTheme = localStorage.getItem("theme") || "light";
     setTheme(savedTheme);
 
-    currentLanguage = localStorage.getItem("selectedLanguage") || "en";
     await renderCalendar();
   } catch (error) {
     console.error("Error initializing application:", error);
@@ -963,34 +590,6 @@ if (nextMonthBtn) {
 const currentYearElement = document.getElementById("currentYear");
 if (currentYearElement) {
   currentYearElement.textContent = new Date().getFullYear();
-}
-
-// Language menu event listeners
-if (languageMenuItems) {
-  languageMenuItems.forEach((item) => {
-    item.addEventListener("click", async (event) => {
-      event.preventDefault();
-      const lang = event.target.dataset.lang;
-      if (lang) {
-        // Show loading state
-        const loadingText = event.target.textContent;
-        event.target.innerHTML =
-          '<span class="spinner-border spinner-border-sm me-2"></span>Loading...';
-
-        try {
-          await setLanguage(lang);
-          // Update dropdown button text
-          if (languageDropdownButton) {
-            languageDropdownButton.textContent = loadingText;
-          }
-        } catch (error) {
-          console.error("Error changing language:", error);
-          // Restore original text on error
-          event.target.textContent = loadingText;
-        }
-      }
-    });
-  });
 }
 
 // Cleanup function for cache management

@@ -188,7 +188,10 @@ async function populateCarousel(month, year) {
 
   try {
     // Try multiple days to find events with images
-    const daysToTry = [15, 1, 10, 20, 25, 30, 5, 7, 12, 18, 22, 28];
+    const daysToTry = [];
+    for (let i = 1; i <= 31; i++) {
+      daysToTry.push(i);
+    }
     // Shuffle days to randomize the selection
     daysToTry.sort(() => Math.random() - 0.5);
     let featuredEvents = [];
@@ -251,7 +254,7 @@ async function populateCarousel(month, year) {
         <div class="carousel-caption">
           <h5>${truncatedTitle}</h5>
           <a href="${event.sourceUrl}" class="btn btn-primary btn-sm" 
-             target="_blank" rel="noopener noreferrer">More Details</a>
+             target="_blank" rel="noopener noreferrer">Read More</a>
         </div>
       `;
       carouselInner.appendChild(carouselItem);

@@ -1,7 +1,7 @@
 /* Light Theme (Default) */
 :root {
   --primary-bg: #3b82f6; /* blue-500 */
-  --secondary-bg: #fff; /* white */
+  --secondary-bg: #fff !important; /* white */
   --text-color: #6c757d; /* slate-900 */
   --header-text-color: #ffffff; /* white */
   --card-bg: #ffffff; /* white */

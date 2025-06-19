@@ -188,11 +188,13 @@ async function populateCarousel(month, year) {
 
   try {
     // Try multiple days to find events with images
-    const daysToTry = [15, 1, 10, 20, 25];
+    const daysToTry = [15, 1, 10, 20, 25, 30, 5, 7, 12, 18, 22, 28];
+    // Shuffle days to randomize the selection
+    daysToTry.sort(() => Math.random() - 0.5);
     let featuredEvents = [];
 
     for (const day of daysToTry) {
-      if (featuredEvents.length >= 10) break;
+      if (featuredEvents.length >= 12) break;
 
       const eventsForDay = await fetchWikipediaEvents(month + 1, day);
       const eventsWithImages = eventsForDay.filter(
@@ -212,7 +214,7 @@ async function populateCarousel(month, year) {
         (event, index, self) =>
           index === self.findIndex((e) => e.sourceUrl === event.sourceUrl)
       )
-      .slice(0, 10);
+      .slice(0, 12);
 
     if (uniqueEvents.length === 0) {
       // Default placeholder
@@ -303,8 +305,8 @@ async function renderCalendar() {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  currentMonthYearDisplay.textContent = `${monthNames[month]} ${year}`;
-  document.title = `What Happened on This Day | ${monthNames[month]} ${year} Historical Events`;
+  currentMonthYearDisplay.textContent = `${monthNames[month]}`;
+  document.title = `What Happened on This Day | ${monthNames[month]} Historical Events`;
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
@@ -391,7 +393,7 @@ async function renderCalendar() {
 
 // Enhanced event details
 async function showEventDetails(day, month, year, preFetchedEvents = null) {
-  modalDate.textContent = `${day}. ${monthNames[month - 1]} ${year}`;
+  modalDate.textContent = `${day}. ${monthNames[month - 1]}`;
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
 

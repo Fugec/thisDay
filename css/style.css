@@ -91,8 +91,12 @@ body {
   transition: background-color 0.3s ease;
 }
 
-.carousel-header h1 {
-  color: var(--header-text-color);
+body.dark-theme .carousel-header h1 {
+  background: linear-gradient(90deg, #f8fafc 0%, #60a5fa 50%, #1e293b 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: transparent;
   font-weight: bolder;
 }
 
@@ -104,7 +108,9 @@ body {
 
 .display-4 {
   font-size: 40px;
+  font-weight: bolder;
 }
+
 .text-muted {
   color: #fff !important; /* Muted text color for better contrast */
 }
@@ -233,9 +239,13 @@ main {
 
 .btn-outline-primary {
   color: var(--button-outline-text);
-  border-color: var(--button-outline-color);
+  border-color: #0e6efd;
   transition: color 0.3s ease, background-color 0.3s ease,
     border-color 0.3s ease;
+}
+
+body.dark-theme .btn-outline-primary {
+  border-color: #60a5fa;
 }
 
 .btn-outline-primary:hover {
@@ -422,6 +432,29 @@ main {
 }
 
 .carousel-caption h5 {
-  font-size: 1.5rem;
-  font-weight: bold;
+  font-size: 16px;
+  font-weight: bolder;
+}
+
+h2#currentMonthYear {
+  font-size: 28.8px;
+  font-weight: bolder;
+}
+
+.text-primary {
+  --bs-text-opacity: 1;
+  font-size: 20px;
+}
+
+body.dark-theme .text-primary {
+  color: #60a5fa !important  ;
+}
+
+h5#eventDetailModalLabel {
+  font-size: 20px;
+  font-weight: bolder;
+}
+
+body.dark-theme h5#eventDetailModalLabel {
+  color: #60a5fa;
 }

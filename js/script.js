@@ -289,6 +289,76 @@ async function populateCarousel(month, year) {
       carouselIndicators.appendChild(indicator);
     });
 
+    // Only show events from today in the carousel
+    const today = new Date();
+    const todayMonth = today.getMonth() + 1;
+    const todayDay = today.getDate();
+
+    // Fetch today's events with images
+    const todaysEvents = (
+      await fetchWikipediaEvents(todayMonth, todayDay)
+    ).filter(
+      (event) =>
+        event.sourceUrl &&
+        event.sourceUrl.includes("wikipedia.org") &&
+        event.thumbnailUrl &&
+        event.thumbnailUrl !== ""
+    );
+
+    carouselInner.innerHTML = "";
+    carouselIndicators.innerHTML = "";
+
+    if (todaysEvents.length === 0) {
+      // Default placeholder
+      const defaultItem = document.createElement("div");
+      defaultItem.className = "carousel-item active";
+      defaultItem.innerHTML = `
+      <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available" 
+         class="d-block w-100" alt="No images available">
+      <div class="carousel-caption">
+        <h5>Discover History Today</h5>
+        <p>No featured images for today, but explore the calendar for more events!</p>
+        <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
+      </div>
+      `;
+      carouselInner.appendChild(defaultItem);
+    } else {
+      todaysEvents.slice(0, 12).forEach((event, index) => {
+        const carouselItem = document.createElement("div");
+        carouselItem.className = `carousel-item${index === 0 ? " active" : ""}`;
+
+        const imageUrl = event.thumbnailUrl;
+        const fallbackImageUrl = `https://placehold.co/1200x350/6c757d/ffffff?text=Image+Not+Available`;
+
+        const titleWords = (
+          event.title || "Historical Event on This Day"
+        ).split(" ");
+        const truncatedTitle = titleWords.slice(0, 20).join(" ");
+
+        carouselItem.innerHTML = `
+        <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
+        onerror="this.onerror=null;this.src='${fallbackImageUrl}';" loading="lazy">
+        <div class="carousel-caption">
+        <h5>${truncatedTitle}</h5>
+        <a href="${event.sourceUrl}" class="btn btn-primary btn-sm" 
+           target="_blank" rel="noopener noreferrer">More Details</a>
+        </div>
+      `;
+        carouselInner.appendChild(carouselItem);
+
+        const indicator = document.createElement("button");
+        indicator.setAttribute("type", "button");
+        indicator.setAttribute("data-bs-target", "#historicalCarousel");
+        indicator.setAttribute("data-bs-slide-to", index);
+        indicator.setAttribute("aria-label", `Slide ${index + 1}`);
+        if (index === 0) {
+          indicator.className = "active";
+          indicator.setAttribute("aria-current", "true");
+        }
+        carouselIndicators.appendChild(indicator);
+      });
+    }
+
     // Initialize carousel
     const carouselElement = document.getElementById("historicalCarousel");
     const bsCarousel = bootstrap.Carousel.getInstance(carouselElement);
@@ -308,10 +378,10 @@ async function populateCarousel(month, year) {
     errorItem.className = "carousel-item active";
     errorItem.innerHTML = `
       <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images" 
-           class="d-block w-100" alt="Error loading">
+         class="d-block w-100" alt="Error loading">
       <div class="carousel-caption">
-        <h5>Unable to Load Featured Content</h5>
-        <p>Please check your internet connection and try again.</p>
+      <h5>Unable to Load Featured Content</h5>
+      <p>Please check your internet connection and try again.</p>
       </div>
     `;
     carouselInner.appendChild(errorItem);

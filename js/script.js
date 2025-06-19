@@ -38,6 +38,25 @@ const monthNames = [
   "December",
 ];
 
+// Schema.org metadata for search engine optimization
+const script = document.createElement("script");
+script.type = "application/ld+json";
+script.innerHTML = `
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "thisDay.",
+  "description": "Explore significant historical events that occurred on any given day throughout history with On This Day's interactive calendar and daily highlights.",
+  "url": "https://thisday.info/",
+  "author": {
+    "@type": "Person",
+    "name": "Armin Kapetanović",
+  },
+  "image": "https://thisday.info/images/logo.png"
+}
+`;
+
+document.head.appendChild(script);
 // Rate limiting variables
 let requestCount = 0;
 const MAX_REQUESTS_PER_SECOND = 10;
@@ -191,8 +210,7 @@ async function populateCarousel(month, year) {
     const daysToTry = [];
     for (let i = 1; i <= 31; i++) {
       daysToTry.push(i);
-    }
-    // Shuffle days to randomize the selection
+    } // Shuffle days to randomize the selection
     daysToTry.sort(() => Math.random() - 0.5);
     let featuredEvents = [];
 
@@ -249,12 +267,12 @@ async function populateCarousel(month, year) {
       const truncatedTitle = titleWords.slice(0, 20).join(" ");
 
       carouselItem.innerHTML = `
-        <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}" 
-             onerror="this.onerror=null;this.src='${fallbackImageUrl}';">
+        <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
+          onerror="this.onerror=null;this.src='${fallbackImageUrl}';" loading="lazy">
         <div class="carousel-caption">
           <h5>${truncatedTitle}</h5>
           <a href="${event.sourceUrl}" class="btn btn-primary btn-sm" 
-             target="_blank" rel="noopener noreferrer">Read More</a>
+             target="_blank" rel="noopener noreferrer">More Details</a>
         </div>
       `;
       carouselInner.appendChild(carouselItem);

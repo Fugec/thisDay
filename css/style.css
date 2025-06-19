@@ -239,14 +239,17 @@ main {
 
 .btn-outline-primary {
   color: var(--button-outline-text);
-  border-color: #6c757d;
+  border-color: #e2e8f0;
   transition: color 0.3s ease, background-color 0.3s ease,
     border-color 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background: #fff;
 }
 
 body.dark-theme .btn-outline-primary {
-  border-color: #60a5fa;
-  color: #60a5fa;
+  border-color: #334255;
+  color: #f8fafc;
+  background-color: #1d293b;
 }
 
 .btn-outline-primary:hover {
@@ -448,7 +451,7 @@ h2#currentMonthYear {
 }
 
 body.dark-theme h2#currentMonthYear {
-  color: #60a5fa;
+  color: #f8fafc;
 }
 
 .text-primary {

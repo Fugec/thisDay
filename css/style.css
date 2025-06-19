@@ -360,7 +360,11 @@ body.dark-theme .btn-outline-primary {
 }
 
 .modal-header {
+  background-color: var(--modal-bg);
   border-bottom-color: var(--card-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 .modal-footer {

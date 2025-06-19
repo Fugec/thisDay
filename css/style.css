@@ -503,3 +503,8 @@ body.dark-theme h5#eventDetailModalLabel {
   margin: 0 !important;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
+
+.container.d-flex.justify-content-center.my-2 {
+  margin-bottom: 20px !important;
+  gap: 20px;
+}

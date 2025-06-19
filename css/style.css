@@ -239,13 +239,14 @@ main {
 
 .btn-outline-primary {
   color: var(--button-outline-text);
-  border-color: #0e6efd;
+  border-color: #6c757d;
   transition: color 0.3s ease, background-color 0.3s ease,
     border-color 0.3s ease;
 }
 
 body.dark-theme .btn-outline-primary {
   border-color: #60a5fa;
+  color: #60a5fa;
 }
 
 .btn-outline-primary:hover {
@@ -274,6 +275,7 @@ body.dark-theme .btn-outline-primary {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .day-card:hover {
@@ -439,6 +441,10 @@ body.dark-theme .btn-outline-primary {
 h2#currentMonthYear {
   font-size: 28.8px;
   font-weight: bolder;
+}
+
+body.dark-theme h2#currentMonthYear {
+  color: #60a5fa;
 }
 
 .text-primary {

@@ -38,23 +38,6 @@ const monthNames = [
   "December",
 ];
 
-// Schema.org metadata for search engine optimization
-const script = document.createElement("script");
-script.type = "application/ld+json";
-script.innerHTML = `
-{
-  "@context": "https://schema.org",
-  "@type": "WebApplication",
-  "name": "thisDay.",
-  "description": "Explore significant historical events that occurred on any given day throughout history with On This Day's interactive calendar and daily highlights.",
-  "url": "https://thisday.info/",
-  "author": {
-    "@type": "Person",
-    "name": "Armin Kapetanović",
-  },
-  "image": "https://thisday.info/images/logo.png"
-}
-`;
 // Rate limiting variables
 let requestCount = 0;
 const MAX_REQUESTS_PER_SECOND = 10;
@@ -65,7 +48,7 @@ setInterval(() => {
   requestCount = 0;
 }, RATE_LIMIT_WINDOW);
 
-// Enhanced rate-limited fetch with retry logic
+// Enhanced rate-limited fetch with retry logic - CORS FIX
 async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     // Check rate limit
@@ -80,8 +63,7 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
       const response = await fetch(url, {
         ...options,
         headers: {
-          "User-Agent":
-            "What Happened on This Day Calendar/1.0 (kapetanovic.armin@gmail.com)",
+          Accept: "application/json",
           ...options.headers,
         },
       });
@@ -121,7 +103,7 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
   throw new Error(`Failed after ${maxRetries} attempts`);
 }
 
-// Enhanced Wikipedia API function with better error handling and caching
+// Enhanced Wikipedia API function with better error handling and caching - CORS FIX
 async function fetchWikipediaEvents(month, day) {
   const cacheKey = `${month}-${day}-en`;
 
@@ -228,7 +210,7 @@ async function populateCarousel(month, year) {
       featuredEvents = [...featuredEvents, ...eventsWithImages];
     }
 
-    // Remove duplicates and limit to 10
+    // Remove duplicates and limit to 12
     const uniqueEvents = featuredEvents
       .filter(
         (event, index, self) =>

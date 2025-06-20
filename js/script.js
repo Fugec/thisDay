@@ -186,10 +186,13 @@ async function populateCarousel(month, year) {
   carouselIndicators.innerHTML = "";
 
   try {
-    // Try multiple days to find events with images
-    const daysToTry = [];
-    for (let i = 1; i <= 31; i++) {
-      daysToTry.push(i);
+    // For February, avoid days that don't exist (e.g., 30th)
+    let daysToTry;
+    if (month === 1) {
+      // month is 0-based, so 1 = February
+      daysToTry = [1, 5, 10, 14, 18, 20, 22, 25, 28];
+    } else {
+      daysToTry = [1, 5, 10, 15, 18, 20, 22, 25, 28, 30];
     }
     // Shuffle days to randomize the selection
     daysToTry.sort(() => Math.random() - 0.5);
@@ -225,7 +228,7 @@ async function populateCarousel(month, year) {
       defaultItem.innerHTML = `
         <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available" 
              class="d-block w-100" alt="No images available">
-        <div class="carousel-caption">
+             <div class="carousel-caption">
           <h5>Discover History Daily</h5>
           <p>No specific featured image for this day, but explore the calendar for more events!</p>
           <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
@@ -245,11 +248,37 @@ async function populateCarousel(month, year) {
       const titleWords = (event.title || "Historical Event on This Day").split(
         " "
       );
-      const truncatedTitle = titleWords.slice(0, 20).join(" ");
+      let truncatedTitle = titleWords.slice(0, 15).join(" ");
+      if (titleWords.length > 15) {
+        truncatedTitle += "...";
+      }
+
+      // Add year label in top right corner
+      const yearLabel = `
+        <span style="
+          position: absolute;
+          top: 12px;
+          right: 18px;
+          z-index: 10;
+          background: #0d6efd;
+          color: #fff;
+          padding: 4px 12px;
+          border-radius: 4px;
+          font-size: 16px;
+          font-weight: 600;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+          pointer-events: none;
+        ">
+          ${event.year}
+        </span>
+      `;
 
       carouselItem.innerHTML = `
-        <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}" 
-             onerror="this.onerror=null;this.src='${fallbackImageUrl}';">
+        <div style="position:relative;">
+          ${yearLabel}
+          <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}" 
+               onerror="this.onerror=null;this.src='${fallbackImageUrl}';">
+        </div>
         <div class="carousel-caption">
           <h5>${truncatedTitle}</h5>
           <a href="${event.sourceUrl}" class="btn btn-primary btn-sm" 
@@ -525,7 +554,7 @@ function setTheme(theme) {
 // Initialize application
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    const savedTheme = localStorage.getItem("theme") || "light";
+    const savedTheme = localStorage.getItem("theme") || "dark";
     setTheme(savedTheme);
 
     await renderCalendar();

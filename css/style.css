@@ -92,7 +92,7 @@ body {
 }
 
 .btn-primary {
-  margin-bottom: 10px;
+  font-weight: bold;
 }
 
 .navbar {
@@ -103,7 +103,7 @@ body {
 .navbar-brand,
 .navbar-nav .nav-link {
   color: var(--header-text-color) !important;
-  font-weight: bolder !important;
+  font-weight: bold !important;
 }
 
 /* Header/Hero Section */
@@ -120,7 +120,7 @@ body.dark-theme .carousel-header h1 {
   -webkit-text-fill-color: transparent;
   background-clip: text;
   color: transparent;
-  font-weight: bolder !important;
+  font-weight: bold !important;
 }
 
 .carousel-header .text-muted {
@@ -131,7 +131,7 @@ body.dark-theme .carousel-header h1 {
 
 .display-4 {
   font-size: 40px;
-  font-weight: bolder !important;
+  font-weight: bold !important;
 }
 
 .text-muted {
@@ -151,6 +151,8 @@ body.dark-theme .carousel-header h1 {
   object-fit: cover;
   filter: brightness(70%); /* Darken image to make caption more readable */
   transition: filter 0.3s ease;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .carousel-caption {
@@ -197,6 +199,8 @@ button.carousel-control-prev {
 
   .carousel-caption h5 {
     font-size: 1rem; /* Smaller font size for headings on mobile */
+    padding-top: 10px; /* Adjust padding for better spacing */
+    padding-bottom: 10px; /* Adjust padding for better spacing */
   }
 }
 
@@ -464,12 +468,12 @@ body.dark-theme .btn-outline-primary {
 
 .carousel-caption h5 {
   font-size: 16px;
-  font-weight: bolder;
+  font-weight: bold;
 }
 
 h2#currentMonthYear {
   font-size: 28.8px;
-  font-weight: bolder;
+  font-weight: bold;
 }
 
 body.dark-theme h2#currentMonthYear {
@@ -487,7 +491,7 @@ body.dark-theme .text-primary {
 
 h5#eventDetailModalLabel {
   font-size: 20px;
-  font-weight: bolder;
+  font-weight: bold;
 }
 
 body.dark-theme h5#eventDetailModalLabel {

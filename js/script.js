@@ -375,10 +375,12 @@ async function loadDayEvents(dayCard, month) {
   }
 }
 
-// Optimized calendar rendering - TODAY FIRST APPROACH
 async function renderCalendar() {
-  calendarGrid.innerHTML = "";
-  loadingIndicator.style.display = "block";
+  const fragment = document.createDocumentFragment();
+  // Remove only day cards from the calendar grid
+  const existingDayCards = calendarGrid.querySelectorAll(".day-card");
+  existingDayCards.forEach((card) => card.remove());
+  loadingIndicator.style.display = "block"; // Show initial loading for the whole calendar
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -392,100 +394,134 @@ async function renderCalendar() {
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // Create all calendar grid structure first
+  // 1. Create all calendar grid structure first with loading states
   const dayCards = [];
   for (let i = 1; i <= daysInMonth; i++) {
     const dayCard = createDayCard(i, month);
 
-    // Highlight today's date if viewing current month
     if (isCurrentMonth && i === todayDate) {
-      dayCard.classList.add("today-highlight"); // Use a new class for styling
+      dayCard.classList.add("today-highlight");
     }
 
     calendarGrid.appendChild(dayCard);
     dayCards.push(dayCard);
   }
 
+  // Hide the global loading indicator once the grid structure is present
+  loadingIndicator.style.display = "none";
+
   try {
-    // PRIORITY 1: Load today's date first if viewing current month
+    // Determine which days to prioritize for loading
+    let daysToPrioritize = [];
+    if (isCurrentMonth) {
+      // Prioritize today's date and nearby days for current month
+      const todayCard = dayCards.find(
+        (card) => parseInt(card.getAttribute("data-day")) === todayDate
+      );
+      if (todayCard) {
+        daysToPrioritize.push(todayCard);
+        // Also add a few days around today for a better initial view
+        for (let i = 1; i <= 3; i++) {
+          const prevDayCard = dayCards.find(
+            (card) => parseInt(card.getAttribute("data-day")) === todayDate - i
+          );
+          const nextDayCard = dayCards.find(
+            (card) => parseInt(card.getAttribute("data-day")) === todayDate + i
+          );
+          if (prevDayCard) daysToPrioritize.push(prevDayCard);
+          if (nextDayCard) daysToPrioritize.push(nextDayCard);
+        }
+      }
+    } else {
+      // For other months, prioritize the first few days visible
+      daysToPrioritize = dayCards.slice(0, Math.min(daysInMonth, 7)); // Load first 7 days initially
+    }
+
+    // Filter out duplicates and ensure all are actual elements
+    daysToPrioritize = [...new Set(daysToPrioritize)].filter(Boolean);
+
+    // 2. Load Carousel content in parallel (high priority visual)
+    const carouselPromise = populateCarousel(month, year);
+
+    // 3. Load prioritized days with limited concurrency
+    const CONCURRENCY_LIMIT =
+      navigator.connection && navigator.connection.effectiveType === "4g"
+        ? 10
+        : 5; // Dynamically adjust based on network speed
+    let activePromises = [];
+    let allPromises = [];
+
+    const loadDayPromises = async (cardsToLoad) => {
+      for (const dayCard of cardsToLoad) {
+        const promise = loadDayEvents(dayCard, month);
+        allPromises.push(promise);
+        activePromises.push(promise);
+
+        if (activePromises.length >= CONCURRENCY_LIMIT) {
+          await Promise.race(activePromises).finally(() => {
+            activePromises = activePromises.filter((p) => p !== promise);
+          });
+        }
+      }
+      await Promise.all(activePromises); // Wait for any remaining
+    };
+
+    // Load prioritized days
+    await loadDayPromises(daysToPrioritize);
+
+    // Scroll to today's card if current month, after its events are loaded
     if (isCurrentMonth) {
       const todayCard = dayCards.find(
         (card) => parseInt(card.getAttribute("data-day")) === todayDate
       );
-
       if (todayCard) {
-        console.log(
-          `Loading events for today's date: ${todayDate}/${
-            month + 1
-          }/${currentDate.getFullYear()}`
-        );
-        await loadDayEvents(todayCard, month);
-
-        // Scroll today's card into view with a 1-second delay
         setTimeout(() => {
           todayCard.scrollIntoView({
             behavior: "smooth",
             block: "center",
           });
-
-          // Add scroll-to-top button if not already present
-          let scrollBtn = document.getElementById("scrollToTopBtn");
-          if (!scrollBtn) {
-            scrollBtn = document.createElement("button");
-            scrollBtn.id = "scrollToTopBtn";
-            scrollBtn.type = "button";
-            scrollBtn.title = "Scroll to top";
-            scrollBtn.innerHTML = `
-          <span style="font-size: 1.2rem; font-weight: bold; display: flex; align-items: center; gap: 0.5rem;">
-            <i class="bi bi-arrow-up"></i>
-          </span>
-        `;
-
-            scrollBtn.addEventListener("mouseenter", () => {
-              scrollBtn.style.opacity = "1";
-            });
-            scrollBtn.addEventListener("mouseleave", () => {
-              scrollBtn.style.opacity = "0.92";
-            });
-            scrollBtn.addEventListener("click", () => {
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            });
-            document.body.appendChild(scrollBtn);
-          }
-        }, 1000); // 1-second delay
+        }, 300); // Small delay to allow rendering
       }
     }
 
-    // PRIORITY 2: Load carousel while other days are loading
-    const carouselPromise = populateCarousel(month, year);
+    // 4. Load remaining days in the background
+    const remainingCards = dayCards.filter(
+      (card) => !daysToPrioritize.includes(card)
+    );
 
-    // PRIORITY 3: Load remaining days
-    const remainingCards = isCurrentMonth
-      ? dayCards.filter(
-          (card) => parseInt(card.getAttribute("data-day")) !== todayDate
-        )
-      : dayCards;
-
-    // Prioritize days near today
-    let sortedCards = remainingCards;
-    if (isCurrentMonth) {
-      sortedCards = remainingCards.sort((a, b) => {
-        const dayA = parseInt(a.getAttribute("data-day"));
-        const dayB = parseInt(b.getAttribute("data-day"));
-        return Math.abs(dayA - todayDate) - Math.abs(dayB - todayDate);
-      });
-    }
-
-    // Load all remaining days
-    for (const dayCard of sortedCards) {
-      await loadDayEvents(dayCard, month);
-    }
-
+    // Use a short delay before starting background loads to ensure initial view is stable
+    const connectionType = navigator.connection
+      ? navigator.connection.effectiveType
+      : null;
+    const delay =
+      connectionType === "4g" || connectionType === "wifi" ? 300 : 1000; // Default to 1000ms for unreliable detection
+    setTimeout(async () => {
+      await loadDayPromises(remainingCards);
+    }, delay); // Dynamically adjust background loading delay
+    // Ensure carousel is also finished
     await carouselPromise;
+    // Start background loading after carousel is fully loaded
+    // The individual day cards remove their own loading indicators when their data loads
+    // The individual day cards remove their own loading indicators when their data loads
   } catch (error) {
     console.error("Error during calendar rendering:", error);
-  } finally {
-    loadingIndicator.style.display = "none";
+    console.error(
+      "This error could be due to network issues, API rate limits, or unexpected data format. Please check your internet connection, ensure the API is accessible, and verify the data structure."
+    );
+    // Use a short delay before starting background loads to ensure initial view is stable
+    setTimeout(async () => {
+      await loadDayPromises(remainingCards);
+    }, 500); // Start background loading after 0.5 seconds
+    console.error("Error during calendar rendering:", error);
+    // Display a general error message if something critical fails
+    calendarGrid.innerHTML = `
+      <div class="col-12 text-center py-5">
+        <div class="alert alert-danger" role="alert">
+          <h5><i class="bi bi-exclamation-triangle"></i> Failed to Load Calendar</h5>
+          <p>An error occurred while loading events. Please check your internet connection, ensure the Wikipedia API is accessible, and refresh the page. If the issue persists, try clearing your browser cache or using a different browser.</p>
+        </div>
+      </div>
+    `;
   }
 }
 

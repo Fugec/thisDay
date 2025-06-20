@@ -19,8 +19,8 @@ const body = document.body;
 let currentDate = new Date(); // Start with current date
 
 // Enhanced cache for storing fetched events with expiration
-const eventCache = new Map();
 const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+const LOCAL_STORAGE_CACHE_KEY = "wikipediaEventCache";
 
 // Months
 const monthNames = [
@@ -47,6 +47,42 @@ const RATE_LIMIT_WINDOW = 1000; // 1 second
 setInterval(() => {
   requestCount = 0;
 }, RATE_LIMIT_WINDOW);
+
+// --- Local Storage Cache Management ---
+
+// Function to load cache from localStorage
+function loadCacheFromLocalStorage() {
+  try {
+    const cachedData = localStorage.getItem(LOCAL_STORAGE_CACHE_KEY);
+    if (cachedData) {
+      const parsedData = JSON.parse(cachedData);
+      // Convert plain object back to Map for easier use
+      return new Map(Object.entries(parsedData));
+    }
+  } catch (e) {
+    console.error("Error loading cache from localStorage:", e);
+  }
+  return new Map(); // Return empty Map if no data or error
+}
+
+// Function to save cache to localStorage
+function saveCacheToLocalStorage(cacheMap) {
+  try {
+    // Convert Map to a plain object for JSON stringification
+    const objToStore = {};
+    cacheMap.forEach((value, key) => {
+      objToStore[key] = value;
+    });
+    localStorage.setItem(LOCAL_STORAGE_CACHE_KEY, JSON.stringify(objToStore));
+  } catch (e) {
+    console.error("Error saving cache to localStorage:", e);
+  }
+}
+
+// Initialize eventCache from localStorage on startup
+let eventCache = loadCacheFromLocalStorage();
+
+// --- End Local Storage Cache Management ---
 
 // Enhanced rate-limited fetch with retry logic - CORS FIX
 async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
@@ -114,6 +150,7 @@ async function fetchWikipediaEvents(month, day) {
       return cached.data;
     } else {
       eventCache.delete(cacheKey); // Remove expired cache
+      saveCacheToLocalStorage(eventCache); // Update localStorage
     }
   }
 
@@ -124,12 +161,19 @@ async function fetchWikipediaEvents(month, day) {
   try {
     const response = await rateLimitedFetch(url);
 
+    // Check if offline
+    if (!navigator.onLine && !response.ok) {
+      console.warn("Offline: Cannot fetch new data from Wikipedia.");
+      return []; // Return empty if offline and no cache
+    }
+
     if (!response.ok) {
       console.warn(
         `No data for English Wikipedia for ${month}/${day} (Status: ${response.status})`
       );
       // Cache empty result to avoid repeated failed requests
       eventCache.set(cacheKey, { data: [], timestamp: Date.now() });
+      saveCacheToLocalStorage(eventCache); // Update localStorage
       return [];
     }
 
@@ -172,6 +216,7 @@ async function fetchWikipediaEvents(month, day) {
 
     // Cache the result with timestamp
     eventCache.set(cacheKey, { data: events, timestamp: Date.now() });
+    saveCacheToLocalStorage(eventCache); // Update localStorage
     return events;
   } catch (error) {
     console.error(`Error fetching events for ${month}/${day}:`, error);
@@ -226,7 +271,7 @@ async function populateCarousel(month, year) {
       const defaultItem = document.createElement("div");
       defaultItem.className = "carousel-item active";
       defaultItem.innerHTML = `
-        <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available" 
+        <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available"
              class="d-block w-100" alt="No images available">
              <div class="carousel-caption">
           <h5>Discover History Daily</h5>
@@ -263,12 +308,12 @@ async function populateCarousel(month, year) {
       carouselItem.innerHTML = `
         <div style="position:relative;">
           ${yearLabel}
-          <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}" 
+          <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
                onerror="this.onerror=null;this.src='${fallbackImageUrl}';">
         </div>
         <div class="carousel-caption">
           <h5>${truncatedTitle}</h5>
-          <a href="${event.sourceUrl}" class="btn btn-primary btn-sm" 
+          <a href="${event.sourceUrl}" class="btn btn-primary btn-sm"
              target="_blank" rel="noopener noreferrer">Read More</a>
         </div>
       `;
@@ -304,7 +349,7 @@ async function populateCarousel(month, year) {
     const errorItem = document.createElement("div");
     errorItem.className = "carousel-item active";
     errorItem.innerHTML = `
-      <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images" 
+      <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images"
            class="d-block w-100" alt="Error loading">
       <div class="carousel-caption">
         <h5>Unable to Load Featured Content</h5>
@@ -360,7 +405,7 @@ async function loadDayEvents(dayCard, month) {
         day,
         month + 1,
         currentDate.getFullYear(),
-        dayCard.eventsData
+        dayCard.eventsData // Pass pre-fetched data
       );
     });
 
@@ -376,14 +421,13 @@ async function loadDayEvents(dayCard, month) {
 }
 
 async function renderCalendar() {
-  const fragment = document.createDocumentFragment();
-  // Remove only day cards from the calendar grid
+  // Clear only day cards from the calendar grid
   const existingDayCards = calendarGrid.querySelectorAll(".day-card");
   existingDayCards.forEach((card) => card.remove());
   loadingIndicator.style.display = "block"; // Show initial loading for the whole calendar
 
   const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
+  const month = currentDate.getMonth(); // 0-indexed month
   const today = new Date();
   const isCurrentMonth =
     year === today.getFullYear() && month === today.getMonth();
@@ -497,22 +541,15 @@ async function renderCalendar() {
       connectionType === "4g" || connectionType === "wifi" ? 300 : 1000; // Default to 1000ms for unreliable detection
     setTimeout(async () => {
       await loadDayPromises(remainingCards);
-    }, delay); // Dynamically adjust background loading delay
+    }, delay);
+
     // Ensure carousel is also finished
     await carouselPromise;
-    // Start background loading after carousel is fully loaded
-    // The individual day cards remove their own loading indicators when their data loads
-    // The individual day cards remove their own loading indicators when their data loads
   } catch (error) {
     console.error("Error during calendar rendering:", error);
     console.error(
       "This error could be due to network issues, API rate limits, or unexpected data format. Please check your internet connection, ensure the API is accessible, and verify the data structure."
     );
-    // Use a short delay before starting background loads to ensure initial view is stable
-    setTimeout(async () => {
-      await loadDayPromises(remainingCards);
-    }, 500); // Start background loading after 0.5 seconds
-    console.error("Error during calendar rendering:", error);
     // Display a general error message if something critical fails
     calendarGrid.innerHTML = `
       <div class="col-12 text-center py-5">
@@ -534,7 +571,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
   let events = preFetchedEvents;
 
   try {
-    // If no pre-fetched events, fetch new ones
+    // If no pre-fetched events, fetch new ones (this will check cache first)
     if (!events || events.length === 0) {
       events = await fetchWikipediaEvents(month, day);
     }
@@ -567,7 +604,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
               ${
                 event.sourceUrl
                   ? `
-                <a href="${event.sourceUrl}" class="btn btn-sm btn-outline-primary" 
+                <a href="${event.sourceUrl}" class="btn btn-sm btn-outline-primary"
                    target="_blank" rel="noopener noreferrer">
                   Read more on Wikipedia
                 </a>
@@ -578,8 +615,8 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
             ${
               event.thumbnailUrl
                 ? `
-              <img src="${event.thumbnailUrl}" class="ms-3 rounded" 
-                   style="width: 60px; height: 60px; object-fit: cover;" 
+              <img src="${event.thumbnailUrl}" class="ms-3 rounded"
+                   style="width: 60px; height: 60px; object-fit: cover;"
                    alt="Event thumbnail" onerror="this.style.display='none'">
             `
                 : ""
@@ -595,7 +632,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
         <div class="alert alert-warning">
           <h5><i class="bi bi-exclamation-triangle"></i> No Events Found</h5>
           <p>No events found for this day on Wikipedia.</p>
-          <p class="mb-0 text-muted">Historical data depends on available records. 
+          <p class="mb-0 text-muted">Historical data depends on available records.
              Try checking Wikipedia directly for more comprehensive information.</p>
         </div>
       `;
@@ -751,7 +788,10 @@ function cleanupCache() {
     }
   }
 
-  keysToDelete.forEach((key) => eventCache.delete(key));
+  if (keysToDelete.length > 0) {
+    keysToDelete.forEach((key) => eventCache.delete(key));
+    saveCacheToLocalStorage(eventCache); // Update localStorage after cleanup
+  }
 }
 
 // Run cache cleanup every hour

@@ -22,7 +22,7 @@ let currentDate = new Date(); // Start with current date
 const eventCache = new Map();
 const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
-// English month names
+// Months
 const monthNames = [
   "January",
   "February",
@@ -213,13 +213,13 @@ async function populateCarousel(month, year) {
       featuredEvents = [...featuredEvents, ...eventsWithImages];
     }
 
-    // Remove duplicates and limit to 12
+    // Remove duplicates and limit to 10
     const uniqueEvents = featuredEvents
       .filter(
         (event, index, self) =>
           index === self.findIndex((e) => e.sourceUrl === event.sourceUrl)
       )
-      .slice(0, 12);
+      .slice(0, 10);
 
     if (uniqueEvents.length === 0) {
       // Default placeholder
@@ -255,20 +255,7 @@ async function populateCarousel(month, year) {
 
       // Add year label in top right corner
       const yearLabel = `
-        <span style="
-          position: absolute;
-          top: 12px;
-          right: 18px;
-          z-index: 10;
-          background: #0d6efd;
-          color: #fff;
-          padding: 4px 12px;
-          border-radius: 4px;
-          font-size: 16px;
-          font-weight: 600;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-          pointer-events: none;
-        ">
+        <span class="year-label">
           ${event.year}
         </span>
       `;
@@ -328,98 +315,178 @@ async function populateCarousel(month, year) {
   }
 }
 
-// Optimized calendar rendering with concurrent requests and progressive loading
+// Function to create day card element
+function createDayCard(day, month) {
+  const dayCard = document.createElement("div");
+  dayCard.className = "day-card loading";
+  dayCard.setAttribute("data-day", day);
+  dayCard.setAttribute("data-month", month + 1);
+
+  const dayNumber = document.createElement("div");
+  dayNumber.className = "day-number";
+  dayNumber.textContent = day;
+  dayCard.appendChild(dayNumber);
+
+  const eventSummary = document.createElement("div");
+  eventSummary.className = "event-summary";
+  eventSummary.innerHTML =
+    '<div class="spinner-border spinner-border-sm" role="status"></div>';
+  dayCard.appendChild(eventSummary);
+
+  return dayCard;
+}
+
+// Function to load events for a specific day card
+async function loadDayEvents(dayCard, month) {
+  const day = parseInt(dayCard.getAttribute("data-day"));
+  try {
+    const events = await fetchWikipediaEvents(month + 1, day);
+
+    // Update UI
+    const eventSummary = dayCard.querySelector(".event-summary");
+    dayCard.classList.remove("loading");
+
+    if (events && events.length > 0) {
+      eventSummary.textContent = `${events.length} Events`;
+      dayCard.eventsData = events;
+    } else {
+      eventSummary.textContent = "No Events";
+      dayCard.classList.add("no-events");
+      dayCard.eventsData = [];
+    }
+
+    dayCard.addEventListener("click", () => {
+      showEventDetails(
+        day,
+        month + 1,
+        currentDate.getFullYear(),
+        dayCard.eventsData
+      );
+    });
+
+    return true;
+  } catch (error) {
+    console.error(`Error loading events for day ${day}:`, error);
+    const eventSummary = dayCard.querySelector(".event-summary");
+    eventSummary.textContent = "Error";
+    dayCard.classList.remove("loading");
+    dayCard.classList.add("error");
+    return false;
+  }
+}
+
+// Optimized calendar rendering - TODAY FIRST APPROACH
 async function renderCalendar() {
   calendarGrid.innerHTML = "";
   loadingIndicator.style.display = "block";
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
+  const today = new Date();
+  const isCurrentMonth =
+    year === today.getFullYear() && month === today.getMonth();
+  const todayDate = today.getDate();
 
   currentMonthYearDisplay.textContent = `${monthNames[month]}`;
   document.title = `What Happened on This Day | ${monthNames[month]} Historical Events`;
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // Create calendar grid structure first (progressive loading)
+  // Create all calendar grid structure first
   const dayCards = [];
   for (let i = 1; i <= daysInMonth; i++) {
-    const dayCard = document.createElement("div");
-    dayCard.className = "day-card loading";
-    dayCard.setAttribute("data-day", i);
-    dayCard.setAttribute("data-month", month + 1);
+    const dayCard = createDayCard(i, month);
 
-    const dayNumber = document.createElement("div");
-    dayNumber.className = "day-number";
-    dayNumber.textContent = i;
-    dayCard.appendChild(dayNumber);
-
-    const eventSummary = document.createElement("div");
-    eventSummary.className = "event-summary";
-    eventSummary.innerHTML =
-      '<div class="spinner-border spinner-border-sm" role="status"></div>';
-    dayCard.appendChild(eventSummary);
+    // Highlight today's date if viewing current month
+    if (isCurrentMonth && i === todayDate) {
+      dayCard.classList.add("today-highlight"); // Use a new class for styling
+    }
 
     calendarGrid.appendChild(dayCard);
     dayCards.push(dayCard);
   }
 
-  // Load events with controlled concurrency
-  const BATCH_SIZE = 5; // Process 5 days at a time
-  const batches = [];
-  for (let i = 0; i < daysInMonth; i += BATCH_SIZE) {
-    batches.push(dayCards.slice(i, i + BATCH_SIZE));
-  }
-
   try {
-    for (const batch of batches) {
-      // Process batch concurrently
-      const batchPromises = batch.map(async (dayCard) => {
-        const day = parseInt(dayCard.getAttribute("data-day"));
-        try {
-          const events = await fetchWikipediaEvents(month + 1, day);
+    // PRIORITY 1: Load today's date first if viewing current month
+    if (isCurrentMonth) {
+      const todayCard = dayCards.find(
+        (card) => parseInt(card.getAttribute("data-day")) === todayDate
+      );
 
-          // Update UI
-          const eventSummary = dayCard.querySelector(".event-summary");
-          dayCard.classList.remove("loading");
+      if (todayCard) {
+        console.log(
+          `Loading events for today's date: ${todayDate}/${
+            month + 1
+          }/${currentDate.getFullYear()}`
+        );
+        await loadDayEvents(todayCard, month);
 
-          if (events && events.length > 0) {
-            eventSummary.textContent = `${events.length} Events`;
-            dayCard.eventsData = events;
-          } else {
-            eventSummary.textContent = "No Events";
-            dayCard.classList.add("no-events");
-            dayCard.eventsData = [];
-          }
-
-          dayCard.addEventListener("click", () => {
-            showEventDetails(day, month + 1, year, dayCard.eventsData);
+        // Scroll today's card into view with a 1-second delay
+        setTimeout(() => {
+          todayCard.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
           });
-        } catch (error) {
-          console.error(`Error loading events for day ${day}:`, error);
-          const eventSummary = dayCard.querySelector(".event-summary");
-          eventSummary.textContent = "Error";
-          dayCard.classList.remove("loading");
-          dayCard.classList.add("error");
-        }
-      });
 
-      // Wait for current batch to complete before processing next
-      await Promise.allSettled(batchPromises);
+          // Add scroll-to-top button if not already present
+          let scrollBtn = document.getElementById("scrollToTopBtn");
+          if (!scrollBtn) {
+            scrollBtn = document.createElement("button");
+            scrollBtn.id = "scrollToTopBtn";
+            scrollBtn.type = "button";
+            scrollBtn.title = "Scroll to top";
+            scrollBtn.innerHTML = `
+          <span style="font-size: 1.2rem; font-weight: bold; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="bi bi-arrow-up"></i>
+          </span>
+        `;
 
-      // Small delay between batches to avoid overwhelming the API
-      if (batches.indexOf(batch) < batches.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 200));
+            scrollBtn.addEventListener("mouseenter", () => {
+              scrollBtn.style.opacity = "1";
+            });
+            scrollBtn.addEventListener("mouseleave", () => {
+              scrollBtn.style.opacity = "0.92";
+            });
+            scrollBtn.addEventListener("click", () => {
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            });
+            document.body.appendChild(scrollBtn);
+          }
+        }, 1000); // 1-second delay
       }
     }
+
+    // PRIORITY 2: Load carousel while other days are loading
+    const carouselPromise = populateCarousel(month, year);
+
+    // PRIORITY 3: Load remaining days
+    const remainingCards = isCurrentMonth
+      ? dayCards.filter(
+          (card) => parseInt(card.getAttribute("data-day")) !== todayDate
+        )
+      : dayCards;
+
+    // Prioritize days near today
+    let sortedCards = remainingCards;
+    if (isCurrentMonth) {
+      sortedCards = remainingCards.sort((a, b) => {
+        const dayA = parseInt(a.getAttribute("data-day"));
+        const dayB = parseInt(b.getAttribute("data-day"));
+        return Math.abs(dayA - todayDate) - Math.abs(dayB - todayDate);
+      });
+    }
+
+    // Load all remaining days
+    for (const dayCard of sortedCards) {
+      await loadDayEvents(dayCard, month);
+    }
+
+    await carouselPromise;
   } catch (error) {
     console.error("Error during calendar rendering:", error);
   } finally {
     loadingIndicator.style.display = "none";
   }
-
-  // Load carousel after calendar is populated
-  await populateCarousel(month, year);
 }
 
 // Enhanced event details
@@ -551,11 +618,23 @@ function setTheme(theme) {
   }
 }
 
-// Initialize application
+// Initialize application with TODAY-FIRST approach
 document.addEventListener("DOMContentLoaded", async () => {
   try {
+    console.log("Initializing calendar with today-first loading strategy...");
+
     const savedTheme = localStorage.getItem("theme") || "dark";
     setTheme(savedTheme);
+
+    // Show immediate feedback
+    if (loadingIndicator) {
+      loadingIndicator.innerHTML = `
+        <div class="text-center">
+          <div class="spinner-border text-primary mb-2" role="status"></div>
+          <p class="mb-0">Loading today's events first...</p>
+        </div>
+      `;
+    }
 
     await renderCalendar();
   } catch (error) {

@@ -290,14 +290,14 @@ async function populateCarousel(month, year) {
       const imageUrl = event.thumbnailUrl;
       const fallbackImageUrl = `https://placehold.co/1200x350/6c757d/ffffff?text=Image+Not+Available`;
 
-      const titleWords = (event.title || "Historical Event on This Day").split(
-        " "
-      );
-      let truncatedTitle = titleWords.slice(0, 15).join(" ");
-      if (titleWords.length > 15) {
+      const MAX_WORDS = 15;
+      let titleContent = event.title || "Historical Event on This Day";
+      const titleWords = titleContent.split(" ");
+      let truncatedTitle = titleWords.slice(0, MAX_WORDS).join(" ");
+
+      if (titleWords.length > MAX_WORDS) {
         truncatedTitle += "...";
       }
-
       // Add year label in top right corner
       const yearLabel = `
         <span class="year-label">

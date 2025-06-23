@@ -148,6 +148,10 @@ body.dark-theme .carousel-header h1 {
   transition: background-color 0.3s ease;
 }
 
+div#historicalCarousel .carousel-inner {
+  padding-bottom: 20px; /* Add padding to the bottom for spacing */
+}
+
 #historicalCarousel .carousel-item img {
   height: 350px;
   object-fit: cover;
@@ -203,7 +207,7 @@ button.carousel-control-prev {
   .carousel-caption h5 {
     font-size: 1rem; /* Smaller font size for headings on mobile */
     padding-top: 10px; /* Adjust padding for better spacing */
-    padding-bottom: 10px; /* Adjust padding for better spacing */
+    padding-bottom: 20px; /* Adjust padding for better spacing */
   }
 }
 

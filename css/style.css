@@ -149,7 +149,7 @@ body.dark-theme .carousel-header h1 {
 }
 
 div#historicalCarousel .carousel-inner {
-  padding-bottom: 20px; /* Add padding to the bottom for spacing */
+  padding-bottom: 15px; /* Add padding to the bottom for spacing */
 }
 
 #historicalCarousel .carousel-item img {

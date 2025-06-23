@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap");
+
 /* Light Theme (Default) */
 :root {
   --primary-bg: #3b82f6; /* blue-500 */
@@ -82,7 +84,7 @@ body.dark-theme a.btn.btn-sm.btn-outline-primary {
 }
 
 body {
-  font-family: Arial, sans-serif;
+  font-family: Inter, sans-serif;
   background-color: var(--secondary-bg);
   color: var(--text-color);
   min-height: 100vh;
@@ -126,12 +128,12 @@ body.dark-theme .carousel-header h1 {
 .carousel-header .text-muted {
   padding-left: 20px;
   padding-right: 20px;
-  padding-top: 20px;
 }
 
 .display-4 {
-  font-size: 40px;
-  font-weight: bold !important;
+  font-size: 50px;
+  font-weight: bolder !important;
+  padding: 20px;
 }
 
 .text-muted {
@@ -144,6 +146,10 @@ body.dark-theme .carousel-header h1 {
   margin: 0 auto;
   overflow: hidden;
   transition: background-color 0.3s ease;
+}
+
+div#historicalCarousel .carousel-inner {
+  padding-bottom: 15px; /* Add padding to the bottom for spacing */
 }
 
 #historicalCarousel .carousel-item img {
@@ -165,6 +171,7 @@ body.dark-theme .carousel-header h1 {
 div#carouselIndicators {
   position: relative;
   margin-top: -20px;
+  display: none; /* Hide indicators */
 }
 
 button.carousel-control-next {
@@ -179,8 +186,7 @@ button.carousel-control-prev {
   ); /* Consistent text color with other white elements */
   color: #e3e6ea; /* White text for better contrast on the dark background */
   z-index: 1; /* Ensure text is above the semi-transparent background */
-  padding-top: 20px; /* Add padding to the top for better spacing */
-  padding-bottom: 20px; /* Add padding to the bottom for better spacing */
+  padding: 20px;
 }
 
 /* Responsive adjustments for smaller screens (mobile) */
@@ -199,8 +205,8 @@ button.carousel-control-prev {
 
   .carousel-caption h5 {
     font-size: 1rem; /* Smaller font size for headings on mobile */
-    padding-top: 10px; /* Adjust padding for better spacing */
-    padding-bottom: 10px; /* Adjust padding for better spacing */
+    padding-top: 15px; /* Adjust padding for better spacing */
+    padding-bottom: 20px; /* Adjust padding for better spacing */
   }
 }
 
@@ -363,6 +369,7 @@ body.dark-theme .btn-outline-primary {
   padding: 20px 0;
   margin-top: 30px;
   transition: background-color 0.3s ease, color 0.3s ease;
+  padding: 20px;
 }
 
 .footer a {

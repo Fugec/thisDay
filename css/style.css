@@ -186,8 +186,7 @@ button.carousel-control-prev {
   ); /* Consistent text color with other white elements */
   color: #e3e6ea; /* White text for better contrast on the dark background */
   z-index: 1; /* Ensure text is above the semi-transparent background */
-  padding-top: 20px; /* Add padding to the top for better spacing */
-  padding-bottom: 20px; /* Add padding to the bottom for better spacing */
+  padding: 20px;
 }
 
 /* Responsive adjustments for smaller screens (mobile) */
@@ -206,7 +205,7 @@ button.carousel-control-prev {
 
   .carousel-caption h5 {
     font-size: 1rem; /* Smaller font size for headings on mobile */
-    padding-top: 10px; /* Adjust padding for better spacing */
+    padding-top: 15px; /* Adjust padding for better spacing */
     padding-bottom: 20px; /* Adjust padding for better spacing */
   }
 }

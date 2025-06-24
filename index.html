@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <!-- Designed and Developed by: https://github.com/Fugec  -->
+    <!-- Designed and Developed by: Armin Kapetanović  -->
     <!-- Contact: kapetanovic.armin@gmail.com -->
     <!-- Project: thisDay. | Historical Events Calendar -->
     <!-- License: CC BY-SA 4.0 -->
@@ -11,7 +11,6 @@
 
     <!-- thisDay. is an interactive web application that allows users to explore significant historical events for any day of the year. It features a calendar view, daily highlights carousel, dark mode, and responsive design. Data is sourced from Wikipedia and presented for educational and entertainment purposes.-->
     <!-- For feedback, suggestions, or contributions, please visit the GitHub repository https://github.com/Fugec/thisDay. or contact the developer @kapetanovic.armin@gmail.com. -->
-    <script id="Cookiebot" src="https://consent.cookiebot.com/uc.js" data-cbid="be06740c-de8e-41d6-9185-e5f47c0dc18e" type="text/javascript" async></script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>thisDay. | What Happened on This Day? | Historical Events</title>
@@ -73,28 +72,8 @@
       sizes="16x16"
       href="images/favicon-16x16.png"
     />
-
-    <script>
-      // Schema.org metadata for search engine optimization
-      const script = document.createElement("script");
-      script.type = "application/ld+json";
-      script.innerHTML = `
-      {
-        "@context": "https://schema.org",
-        "@type": "WebApplication",
-        "name": "thisDay.",
-        "description": "Discover what happened on this day in history. Explore fascinating events, important milestones, and notable people from any date. Dive into the past and see how history comes alive, one day at a time.",
-        "url": "https://thisday.info/",
-        "author": {
-          "@type": "Person",
-          "name": "Armin Kapetanović",
-        },
-        "image": "https://thisday.info/images/logo.png"
-    }
-    `;
-      document.head.appendChild(script);
-    </script>
-
+    <!-- Cookiebot -->
+    <script id="Cookiebot" src="https://consent.cookiebot.com/uc.js" data-cbid="be06740c-de8e-41d6-9185-e5f47c0dc18e" type="text/javascript" async></script>
     <!-- Google tag (gtag.js) -->
       <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
       <script>
@@ -104,6 +83,27 @@
 
         gtag('config', 'G-WXEZ3868VN');
       </script>
+    <!-- Schema.org metadata for search engine optimization -->
+      <script>
+        const script = document.createElement("script");
+        script.type = "application/ld+json";
+        script.innerHTML = `
+        {
+          "@context": "https://schema.org",
+          "@type": "WebApplication",
+          "name": "thisDay.",
+          "description": "Discover what happened on this day in history. Explore fascinating events, important milestones, and notable people from any date. Dive into the past and see how history comes alive, one day at a time.",
+          "url": "https://thisday.info/",
+          "author": {
+            "@type": "Person",
+            "name": "Armin Kapetanović",
+          },
+          "image": "https://thisday.info/images/logo.png"
+      }
+      `;
+        document.head.appendChild(script);
+      </script>
+  
   </head>
   <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">

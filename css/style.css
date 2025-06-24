@@ -513,6 +513,7 @@ body.dark-theme h5#eventDetailModalLabel {
   width: auto !important;
   margin: 0 !important;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  z-index: 1050; /* Ensure it stays above other content */
 }
 
 .container.d-flex.justify-content-center.my-2 {

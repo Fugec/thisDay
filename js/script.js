@@ -272,7 +272,7 @@ async function populateCarousel(month, year) {
       defaultItem.className = "carousel-item active";
       defaultItem.innerHTML = `
         <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available"
-             class="d-block w-100" alt="No images available">
+             class="d-block w-100" alt="No images available" width="1200" height="350">
              <div class="carousel-caption">
           <h5>Discover History Daily</h5>
           <p>No specific featured image for this day, but explore the calendar for more events!</p>
@@ -309,6 +309,8 @@ async function populateCarousel(month, year) {
         <div style="position:relative;">
           ${yearLabel}
           <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
+               loading="${index === 0 ? "eager" : "lazy"}"
+               width="1200" height="350"
                onerror="this.onerror=null;this.src='${fallbackImageUrl}';">
         </div>
         <div class="carousel-caption">
@@ -350,7 +352,7 @@ async function populateCarousel(month, year) {
     errorItem.className = "carousel-item active";
     errorItem.innerHTML = `
       <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images"
-           class="d-block w-100" alt="Error loading">
+           class="d-block w-100" alt="Error loading" width="1200" height="350">
       <div class="carousel-caption">
         <h5>Unable to Load Featured Content</h5>
         <p>Please check your internet connection and try again.</p>
@@ -562,6 +564,64 @@ async function renderCalendar() {
   }
 }
 
+// Function to preload data for adjacent months in the background
+async function preloadAdjacentMonths(baseDate) {
+  const currentMonth = baseDate.getMonth(); // 0-indexed
+  const currentYear = baseDate.getFullYear();
+
+  console.log(
+    `Starting background preloading for months adjacent to ${monthNames[currentMonth]} ${currentYear}`
+  );
+
+  const daysToPreload = [];
+
+  // Previous Month
+  const prevMonthDate = new Date(currentYear, currentMonth - 1, 1);
+  const prevMonth = prevMonthDate.getMonth(); // 0-indexed
+  const prevYear = prevMonthDate.getFullYear();
+  const daysInPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
+  for (let day = 1; day <= daysInPrevMonth; day++) {
+    daysToPreload.push({ month: prevMonth + 1, day: day }); // Wikipedia API uses 1-indexed month
+  }
+
+  // Next Month
+  const nextMonthDate = new Date(currentYear, currentMonth + 1, 1);
+  const nextMonth = nextMonthDate.getMonth(); // 0-indexed
+  const nextYear = nextMonthDate.getFullYear();
+  const daysInNextMonth = new Date(nextYear, nextMonth + 1, 0).getDate();
+  for (let day = 1; day <= daysInNextMonth; day++) {
+    daysToPreload.push({ month: nextMonth + 1, day: day }); // Wikipedia API uses 1-indexed month
+  }
+
+  // Shuffle to distribute requests and avoid hitting specific days repeatedly
+  daysToPreload.sort(() => Math.random() - 0.5);
+
+  const CONCURRENCY_LIMIT_PRELOAD = 3; // Keep background preloading less aggressive
+  let activePreloadPromises = [];
+
+  for (const { month, day } of daysToPreload) {
+    // Call fetchWikipediaEvents. It already handles caching and rate limiting internally.
+    const preloadPromise = fetchWikipediaEvents(month, day).catch((error) => {
+      // Log error but don't rethrow, as it's background preloading
+      console.warn(`Failed to preload ${month}/${day}:`, error);
+    });
+
+    activePreloadPromises.push(preloadPromise);
+
+    if (activePreloadPromises.length >= CONCURRENCY_LIMIT_PRELOAD) {
+      // Wait for at least one to complete before adding more, to respect concurrency
+      await Promise.race(activePreloadPromises);
+      // Remove completed promises from the active list
+      activePreloadPromises = activePreloadPromises.filter(
+        (p) => p !== preloadPromise
+      );
+    }
+  }
+  // Wait for any remaining background preloads to finish
+  await Promise.allSettled(activePreloadPromises);
+  console.log("Background preloading for adjacent months complete.");
+}
+
 // Enhanced event details
 async function showEventDetails(day, month, year, preFetchedEvents = null) {
   modalDate.textContent = `${day}. ${monthNames[month - 1]}`;
@@ -617,7 +677,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
                 ? `
               <img src="${event.thumbnailUrl}" class="ms-3 rounded"
                    style="width: 60px; height: 60px; object-fit: cover;"
-                   alt="Event thumbnail" onerror="this.style.display='none'">
+                   alt="Event thumbnail" onerror="this.style.display='none'" width="60" height="60">
             `
                 : ""
             }
@@ -710,6 +770,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     await renderCalendar();
+    // After initial render, start preloading adjacent months
+    preloadAdjacentMonths(currentDate);
   } catch (error) {
     console.error("Error initializing application:", error);
     // Show error message to user
@@ -749,6 +811,8 @@ if (prevMonthBtn) {
     try {
       currentDate.setMonth(currentDate.getMonth() - 1);
       await renderCalendar();
+      // After navigating and rendering, preload new adjacent months
+      preloadAdjacentMonths(currentDate);
     } catch (error) {
       console.error("Error navigating to previous month:", error);
     } finally {
@@ -763,6 +827,8 @@ if (nextMonthBtn) {
     try {
       currentDate.setMonth(currentDate.getMonth() + 1);
       await renderCalendar();
+      // After navigating and rendering, preload new adjacent months
+      preloadAdjacentMonths(currentDate);
     } catch (error) {
       console.error("Error navigating to next month:", error);
     } finally {
@@ -802,6 +868,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     // Optionally refresh data when tab becomes visible again
     cleanupCache();
+    // Re-trigger preloading for current context when tab becomes visible
+    preloadAdjacentMonths(currentDate);
   }
 });
 

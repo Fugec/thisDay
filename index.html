@@ -10,7 +10,7 @@
     <!-- Version: 1.0.0 -->
 
     <!-- thisDay. is an interactive web application that allows users to explore significant historical events for any day of the year. It features a calendar view, daily highlights carousel, dark mode, and responsive design. Data is sourced from Wikipedia and presented for educational and entertainment purposes.-->
-    <!-- For feedback, suggestions, or contributions, please visit the GitHub repository or contact the developer. -->
+    <!-- For feedback, suggestions, or contributions, please visit the GitHub repository https://github.com/Fugec/thisDay. or contact the developer @kapetanovic.armin@gmail.com. -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>thisDay. | What Happened on This Day? | Historical Events</title>
@@ -42,39 +42,16 @@
       content="Discover what happened on this day in history. Explore fascinating events, important milestones, and notable people from any date. Dive into the past and see how history comes alive, one day at a time."
     />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
-
-    <!-- Preconnect & preload for fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-
     <link
-      rel="preload"
-      as="style"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap"
-    />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
       rel="stylesheet"
     />
-
-    <!-- Bootstrap & icons -->
-    <link
-      rel="preload"
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-      as="style"
-      onload="this.onload=null;this.rel='stylesheet'"
-    />
-    <noscript
-      ><link
-        rel="stylesheet"
-        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    /></noscript>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
     />
-    <!-- Favicons -->
-    <link rel="icon" href="images/favicon.ico" type="image/x-icon" />
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="icon" href="images/favicon.ico" type="images/x-icon" />
     <link
       rel="apple-touch-icon"
       sizes="180x180"
@@ -92,450 +69,6 @@
       sizes="16x16"
       href="images/favicon-16x16.png"
     />
-
-    <!-- Preload Critical CSS -->
-    <style>
-      /* Light Theme (Default) - Critical Variables */
-      :root {
-        --link-hover-color: #1d4ed8; /* blue-700 */
-        --button-outline-color: #e2e8f0;
-        --button-outline-text: #6c757d;
-        --button-outline-hover-bg: #2563eb;
-        --button-outline-hover-text: #ffffff;
-
-        /* Original base colors and their application */
-        --primary-bg: #3b82f6; /* blue-500 */
-        --secondary-bg: #fff !important; /* white */
-        --text-color: #6c757d; /* slate-900 */
-        --header-text-color: #ffffff; /* white */
-        --card-bg: #ffffff; /* white */
-        --card-border: #e2e8f0; /* gray-200 */
-        --footer-bg: #1e293b; /* slate-800 */
-        --footer-text-color: #ffffff; /* slate-100 */
-        --modal-bg: #ffffff; /* white */
-        --modal-text-color: #6c757d; /* slate-900 */
-        --link-color: #2563eb; /* blue-600 */
-        --switch-track-off: #e2e8f0; /* gray-200 */
-        --switch-thumb-off: #cbd5e1; /* gray-300 */
-        --switch-track-on: #2563eb; /* blue-600 */
-        --switch-thumb-on: #ffffff; /* white */
-        --card-bg-no-events: #ffffff; /* slate-100 */
-        --card-border-no-events: #e2e8f0; /* gray-200 */
-        --text-color-light: #64748b; /* slate-400 */
-        --border-radius: 0.5rem;
-
-        /* Apply default body colors */
-        background-color: var(--secondary-bg);
-        color: var(--text-color);
-      }
-
-      /* Dark Theme - Critical Variables and Applications */
-      body.dark-theme {
-        --link-hover-color: #3b82f6; /* blue-500 */
-        --button-outline-color: #60a5fa;
-        --button-outline-text: #60a5fa;
-        --button-outline-hover-bg: #2563eb;
-        --button-outline-hover-text: #ffffff;
-
-        /* Original dark theme colors and their application */
-        --primary-bg: #020617; /* slate-950 */
-        --secondary-bg: #1e293b; /* slate-800 */
-        --text-color: #f8fafc; /* slate-50 */
-        --header-text-color: #ffffff; /* white */
-        --card-bg: #1e293b; /* slate-800 */
-        --card-border: #334155; /* slate-700 */
-        --footer-bg: #020617; /* slate-950 */
-        --footer-text-color: #ffffff; /* slate-100 */
-        --modal-bg: #1e293b; /* slate-800 */
-        --modal-text-color: #f8fafc; /* slate-50 */
-        --link-color: #60a5fa; /* blue-400 */
-        --switch-track-off: #334155; /* slate-700 */
-        --switch-thumb-off: #64748b; /* slate-400 */
-        --switch-track-on: #2563eb; /* blue-600 */
-        --switch-thumb-on: #f8fafc; /* slate-50 */
-        --dark-card-bg-no-events: #0f172a; /* slate-900 */
-        --dark-card-border-no-events: #334155; /* slate-700 */
-        --dark-text-color-light: #64748b; /* slate-400 */
-
-        /* Apply dark theme colors directly to body and navbar when dark-theme is active */
-        background-color: var(--secondary-bg) !important;
-        color: var(--text-color) !important;
-      }
-
-      body.dark-theme .border {
-        border: 1px solid #334255 !important;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-
-      a.btn.btn-sm.btn-outline-primary {
-        border: 1px solid #0e6efd;
-      }
-
-      body.dark-theme a.btn.btn-sm.btn-outline-primary {
-        border: 1px solid #334255;
-      }
-
-      .border {
-        border: 1px solid var(--card-border);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-
-      /* Base styles for body and navbar - these will be overridden by dark-theme if present */
-      body {
-        font-family: Inter, sans-serif;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        transition: background-color 0.3s ease, color 0.3s ease;
-      }
-
-      .navbar {
-        background-color: var(--primary-bg) !important;
-        transition: background-color 0.3s ease;
-        position: sticky;
-        top: 0;
-        z-index: 1030;
-      }
-
-      .navbar-brand,
-      .navbar-nav .nav-link {
-        color: var(--header-text-color) !important;
-        font-weight: bold !important;
-      }
-
-      .carousel-header {
-        background-color: var(--primary-bg);
-        color: var(--header-text-color);
-        text-align: center;
-        transition: background-color 0.3s ease;
-      }
-
-      body.dark-theme .carousel-header h1 {
-        background: linear-gradient(
-          90deg,
-          #f8fafc 0%,
-          #60a5fa 50%,
-          #1e293b 100%
-        );
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        color: transparent;
-        font-weight: bold !important;
-      }
-
-      .display-4 {
-        font-size: 50px;
-        font-weight: bolder !important;
-        padding: 20px;
-      }
-
-      .text-muted {
-        color: #fff !important;
-      }
-
-      #historicalCarousel {
-        max-width: 1200px;
-        margin: 0 auto;
-        overflow: hidden;
-        transition: background-color 0.3s ease;
-      }
-
-      #historicalCarousel .carousel-item img {
-        height: 350px;
-        object-fit: cover;
-        filter: brightness(70%);
-        transition: filter 0.3s ease;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-
-      .carousel-caption {
-        padding: 1rem 2rem;
-        box-sizing: border-box;
-        transition: background-color 0.3s ease;
-        position: static;
-        background: none; /* Default for loading */
-        border: none; /* Default for loading */
-        margin-top: 10px;
-      }
-
-      .carousel-caption.no-events {
-        background: #ff000054;
-        border: 1px solid red;
-      }
-
-      .carousel-caption h5 {
-        color: #e3e6ea;
-        z-index: 1;
-        padding: 20px;
-        font-size: 16px;
-        font-weight: bold;
-      }
-
-      .form-check-input:checked {
-        background-color: var(--switch-track-on) !important;
-        border-color: var(--switch-track-on) !important;
-      }
-
-      .form-check-input {
-        background-color: var(--switch-track-off);
-        border-color: var(--switch-track-off);
-        transition: background-color 0.3s ease, border-color 0.3s ease;
-      }
-
-      .form-switch .form-check-input {
-        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
-        background-color: var(--switch-thumb-off); /* Unchecked thumb color */
-        transition: background-color 0.3s ease, transform 0.3s ease;
-      }
-
-      .form-switch .form-check-input:checked {
-        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
-        background-color: var(--switch-thumb-on); /* Checked thumb color */
-      }
-
-      .theme-switch-mobile label i {
-        color: var(--header-text-color); /* Icon color */
-        font-size: 1.2rem;
-        margin-left: 0.5rem;
-      }
-
-      .theme-switch-desktop label {
-        color: var(--header-text-color);
-      }
-
-      main {
-        flex: 1;
-        margin-top: 20px;
-      }
-
-      .month-navigation {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 20px;
-        margin-top: 20px;
-      }
-
-      .month-navigation h2 {
-        color: var(--text-color);
-        transition: color 0.3s ease;
-        font-size: 28.8px;
-        font-weight: bold;
-      }
-
-      body.dark-theme h2#currentMonthYear {
-        color: #f8fafc;
-      }
-
-      .btn-outline-primary {
-        color: #6f787f;
-        border-color: #e2e8f0;
-        transition: color 0.3s ease, background-color 0.3s ease,
-          border-color 0.3s ease;
-        background: #fff;
-      }
-
-      body.dark-theme .btn-outline-primary {
-        border-color: #334255;
-        color: #f8fafc;
-        background-color: #1d293b;
-      }
-
-      .calendar-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-        gap: 15px;
-        padding: 20px 0;
-      }
-
-      .day-card {
-        background-color: var(--card-bg);
-        border: 1px solid var(--card-border);
-        border-radius: var(--border-radius);
-        padding: 15px;
-        text-align: center;
-        min-height: 120px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        transition: background-color 0.3s ease, border-color 0.3s ease;
-      }
-
-      .day-card.no-events {
-        background-color: var(--card-bg-no-events);
-        border-color: var(--card-border-no-events);
-        color: var(--text-color-light);
-        cursor: default;
-      }
-
-      .dark-theme .day-card.no-events {
-        background-color: var(--dark-card-bg-no-events);
-        border-color: var(--dark-card-border-no-events);
-        color: var(--dark-text-color-light);
-      }
-
-      .day-number {
-        font-size: 1.8em;
-        font-weight: bold;
-        color: var(--text-color);
-        transition: color 0.3s ease;
-      }
-
-      .event-summary {
-        font-size: 0.9em;
-        color: var(--text-color);
-        margin-top: 10px;
-        transition: color 0.3s ease;
-      }
-
-      .loading-indicator {
-        grid-column: 1 / -1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        color: var(--text-color);
-        transition: color 0.3s ease;
-      }
-
-      .loading-indicator p {
-        color: var(--text-color);
-      }
-
-      .footer {
-        background-color: var(--footer-bg);
-        color: var(--footer-text-color);
-        text-align: center;
-        padding: 20px 0;
-        margin-top: 30px;
-        transition: background-color 0.3s ease, color 0.3s ease;
-        padding: 20px;
-      }
-
-      .footer a {
-        color: var(--footer-text-color);
-        text-decoration: underline;
-        transition: color 0.3s ease;
-      }
-
-      .modal-content {
-        background-color: var(--modal-bg);
-        color: var(--modal-text-color);
-        border: 1px solid var(--card-border);
-        transition: background-color 0.3s ease, color 0.3s ease,
-          border-color 0.3s ease;
-      }
-
-      .modal-header {
-        background-color: var(--modal-bg);
-        border-bottom-color: var(--card-border);
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-
-      .modal-title {
-        color: var(--modal-text-color);
-        font-size: 20px;
-        font-weight: bold;
-      }
-
-      body.dark-theme h5#eventDetailModalLabel {
-        color: #60a5fa;
-      }
-
-      .btn-close {
-        filter: var(--bs-btn-close-white, invert(0)) grayscale(100%)
-          brightness(var(--close-btn-brightness, 1));
-        opacity: 0.7;
-        transition: filter 0.3s ease, opacity 0.3s ease;
-      }
-
-      .dark-theme .btn-close {
-        filter: var(--bs-btn-close-white, invert(1)) grayscale(100%)
-          brightness(var(--close-btn-brightness, 0.8));
-      }
-
-      .text-primary {
-        --bs-text-opacity: 1;
-        font-size: 20px;
-      }
-
-      body.dark-theme .text-primary {
-        color: #60a5fa !important;
-      }
-
-      .day-card.today-highlight {
-        position: relative;
-        overflow: hidden;
-        transition: all 0.3s ease-in-out;
-        border-radius: 0px !important;
-      }
-
-      .day-card.today-highlight::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 123, 255, 0.2);
-        z-index: 1;
-        pointer-events: none;
-        border: 2px solid #007bff;
-        box-sizing: border-box;
-      }
-
-      #scrollToTopBtn {
-        position: fixed;
-        bottom: 10px;
-        left: 10px;
-        z-index: 1050;
-        min-width: 40px;
-        height: 40px;
-        border-radius: 6px;
-        background: #0d6efd;
-        color: #fff;
-        border: none;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        opacity: 0.92;
-        font-weight: bold;
-        font-size: 16px;
-        padding: 0 18px;
-      }
-
-      .year-label {
-        position: absolute;
-        top: 12px;
-        right: 18px;
-        z-index: 10;
-        background: #0d6efd;
-        color: #fff;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-size: 16px;
-        font-weight: 600;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        pointer-events: none;
-      }
-    </style>
-
-    <!-- Preload Non-Critical CSS styles -->
-    <link
-      rel="preload"
-      href="css/style.css"
-      as="style"
-      onload="this.onload=null;this.rel='stylesheet'"
-    />
-    <noscript><link rel="stylesheet" href="css/style.css" /></noscript>
-
     <!-- Cookiebot -->
     <script
       id="Cookiebot"
@@ -543,10 +76,8 @@
       data-cbid="be06740c-de8e-41d6-9185-e5f47c0dc18e"
       data-blockingmode="auto"
       type="text/javascript"
-      async
     ></script>
-
-    <!-- Google Analytics -->
+    <!-- Google tag (gtag.js) -->
     <script
       async
       src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"
@@ -557,9 +88,9 @@
         dataLayer.push(arguments);
       }
       gtag("js", new Date());
+
       gtag("config", "G-WXEZ3868VN");
     </script>
-
     <!-- Schema.org metadata for search engine optimization -->
     <script>
       const script = document.createElement("script");
@@ -581,7 +112,6 @@
       document.head.appendChild(script);
     </script>
   </head>
-
   <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
       <div class="container-fluid">

@@ -611,12 +611,7 @@ async function preloadAdjacentMonths(baseDate) {
     if (activePreloadPromises.length >= CONCURRENCY_LIMIT_PRELOAD) {
       // Wait for at least one to complete before adding more, to respect concurrency
       await Promise.race(activePreloadPromises);
-      // Filter out completed promises. Note: In `Promise.race`, only one resolves/rejects,
-      // so this filter is simpler than trying to find the exact one that finished.
-      // A more robust way to manage `activePreloadPromises` would be to use `Promise.allSettled`
-      // on batches or after each promise resolves, but for background preloading,
-      // this loose management is generally acceptable as long as `fetchWikipediaEvents`
-      // handles its own rate limiting/retries.
+      // Remove completed promises from the active list
       activePreloadPromises = activePreloadPromises.filter(
         (p) => p !== preloadPromise
       );

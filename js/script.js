@@ -156,7 +156,8 @@ async function fetchWikipediaEvents(month, day) {
 
   const monthPadded = String(month).padStart(2, "0");
   const dayPadded = String(day).padStart(2, "0");
-  const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${monthPadded}/${dayPadded}`;
+  // *** API ***
+  const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${monthPadded}/${dayPadded}?origin=*`;
 
   try {
     const response = await rateLimitedFetch(url);
@@ -225,57 +226,45 @@ async function fetchWikipediaEvents(month, day) {
   }
 }
 
-// Optimized carousel population with better error handling
+// Optimized carousel population to focus on the current date
 async function populateCarousel(month, year) {
   carouselInner.innerHTML = "";
   carouselIndicators.innerHTML = "";
 
   try {
-    // For February, avoid days that don't exist (e.g., 30th)
-    let daysToTry;
-    if (month === 1) {
-      // month is 0-based, so 1 = February
-      daysToTry = [1, 5, 10, 14, 18, 20, 22, 25, 28];
-    } else {
-      daysToTry = [1, 5, 10, 15, 18, 20, 22, 25, 28, 30];
-    }
-    // Shuffle days to randomize the selection
-    daysToTry.sort(() => Math.random() - 0.5);
-    let featuredEvents = [];
+    const today = new Date();
+    const currentMonth = today.getMonth(); // 0-indexed
+    const currentDay = today.getDate();
 
-    for (const day of daysToTry) {
-      if (featuredEvents.length >= 12) break;
+    // Fetch events only for the current day
+    const eventsForToday = await fetchWikipediaEvents(
+      currentMonth + 1,
+      currentDay
+    );
 
-      const eventsForDay = await fetchWikipediaEvents(month + 1, day);
-      const eventsWithImages = eventsForDay.filter(
-        (event) =>
-          event.sourceUrl &&
-          event.sourceUrl.includes("wikipedia.org") &&
-          event.thumbnailUrl &&
-          event.thumbnailUrl !== ""
-      );
+    const eventsWithImages = eventsForToday.filter(
+      (event) =>
+        event.sourceUrl &&
+        event.sourceUrl.includes("wikipedia.org") &&
+        event.thumbnailUrl &&
+        event.thumbnailUrl !== ""
+    );
 
-      featuredEvents = [...featuredEvents, ...eventsWithImages];
-    }
-
-    // Remove duplicates and limit to 10
-    const uniqueEvents = featuredEvents
-      .filter(
-        (event, index, self) =>
-          index === self.findIndex((e) => e.sourceUrl === event.sourceUrl)
-      )
-      .slice(0, 10);
+    // Shuffle and pick up to 10 random events with images
+    const uniqueEvents = eventsWithImages
+      .sort(() => Math.random() - 0.5) // Shuffle the array
+      .slice(0, 10); // Take the first 10
 
     if (uniqueEvents.length === 0) {
-      // Default placeholder
+      // Default placeholder if no events with images are found for today
       const defaultItem = document.createElement("div");
       defaultItem.className = "carousel-item active";
       defaultItem.innerHTML = `
-        <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available"
+        <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available+for+Today"
              class="d-block w-100" alt="No images available">
              <div class="carousel-caption">
-          <h5>Discover History Daily</h5>
-          <p>No specific featured image for this day, but explore the calendar for more events!</p>
+          <h5>Discover History on ${currentDay} ${monthNames[currentMonth]}</h5>
+          <p>No specific featured images available for today, but explore the calendar for more events!</p>
           <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
         </div>
       `;
@@ -298,10 +287,17 @@ async function populateCarousel(month, year) {
       if (titleWords.length > MAX_WORDS) {
         truncatedTitle += "...";
       }
-      // Add year label in top right corner
+      // Get the current day and month for the label
+      const today = new Date();
+      const currentMonth = today.getMonth(); // 0-indexed
+      const currentDay = today.getDate();
+
+      // Formatted as "Day Month Year" (e.g., "26 June 1980")
+      const formattedDate = `${currentDay} ${monthNames[currentMonth]} ${event.year}`;
+
       const yearLabel = `
         <span class="year-label">
-          ${event.year}
+          ${formattedDate}
         </span>
       `;
 

@@ -1,5 +1,5 @@
 {
-  "name": "seo-worker",
+  "name": "thisday-seo-worker",
   "compatibility_date": "2025-06-27",
   "main": "js/seo-worker.js"
 }

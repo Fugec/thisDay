@@ -1,5 +1,5 @@
 {
   "name": "seo-worker",
   "compatibility_date": "2025-06-27",
-  "main": "./seo-worker.js"
+  "main": "js/seo-worker.js"
 }

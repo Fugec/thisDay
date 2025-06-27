@@ -23,10 +23,6 @@ body.dark-theme {
   padding-right: 20px;
 }
 
-div#historicalCarousel .carousel-inner {
-  padding-bottom: 15px; /* Add padding to the bottom for spacing */
-}
-
 div#carouselIndicators {
   position: relative;
   margin-top: -20px;

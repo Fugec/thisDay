@@ -17,6 +17,10 @@ body.dark-theme {
   font-weight: bold;
 }
 
+div#historicalCarousel .carousel-inner {
+  padding-bottom: 30px; /* Add padding to the bottom for spacing */
+}
+
 /* Header/Hero Section */
 .carousel-header .text-muted {
   padding-left: 20px;
@@ -54,6 +58,12 @@ button.carousel-control-prev {
     font-size: 1rem; /* Smaller font size for headings on mobile */
     padding-top: 15px; /* Adjust padding for better spacing */
     padding-bottom: 20px; /* Adjust padding for better spacing */
+  }
+
+  @media screen and (max-width: 450px) {
+    div#historicalCarousel .carousel-inner {
+      padding-bottom: 0px;
+    }
   }
 }
 

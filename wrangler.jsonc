@@ -1,7 +1,5 @@
 {
-  "name": "seo-worker-thisday-info",
+  "name": "seo-worker",
   "compatibility_date": "2025-06-27",
-  "assets": {
-    "directory": "./dist"
-  }
+  "main": "./seo-worker.js"
 }

@@ -35,107 +35,122 @@ async function fetchDailyEvents(date) {
 
     if (!fetchResponse.ok) {
       console.error(
-        `Wikipedia API error: ${fetchResponse.status} - ${fetchResponse.statusText}`
+        `Wikipedia API responded with status ${fetchResponse.status} for ${apiUrl}`
       );
-      // Important: Clone the response before putting it in cache or consuming it
-      // because a Response body can only be read once.
-      const errorResponse = fetchResponse.clone();
-      const errorBody = await errorResponse.text();
-      console.error("Wikipedia API Error Body:", errorBody);
-      return null; // Return null on API error
+      // If the response is not OK, we still need to consume the body to not block
+      // subsequent requests in some environments.
+      await fetchResponse.text(); // Consume body
+      throw new Error(
+        `Failed to fetch Wikipedia events: ${fetchResponse.statusText}`
+      );
     }
 
-    // Cache the successful response before returning.
-    // It's crucial to clone the response as its body can only be read once.
+    // Cache the successful response for future requests
+    // We clone the response because a response can only be read once.
     const responseToCache = fetchResponse.clone();
+    // Use an aggressive cache policy for the worker, matching the client-side
+    const cacheOptions = {
+      // Set the Cache-Control header for the cached response
+      headers: {
+        "Cache-Control": `public, max-age=${CACHE_TTL_SECONDS}, s-maxage=${CACHE_TTL_SECONDS}`,
+      },
+    };
     await cache.put(apiUrl, responseToCache);
     console.log("Worker Cache PUT for Wikipedia API:", apiUrl);
 
-    return fetchResponse.json(); // Return parsed JSON
+    return fetchResponse.json();
   } catch (error) {
-    console.error("Error fetching Wikipedia events in Worker:", error);
-    return null; // Return null on network/fetch error
+    console.error(`Error fetching daily events from Wikipedia API: ${error}`);
+    // Return a default structure in case of an error to prevent crashing the page
+    return { events: [], births: [], deaths: [], holidays: [], selected: [] };
   }
 }
 
-// --- Main Worker Request Handler ---
+// --- Main Request Handler ---
 async function handleRequest(request) {
   const url = new URL(request.url);
 
-  // Only process requests for the root path (index.html)
+  // Only handle requests for the root path or /index.html
+  // Pass through all other requests (e.g., for JS, CSS, images) directly to the origin
   if (url.pathname !== "/" && url.pathname !== "/index.html") {
-    return fetch(request); // For other assets (CSS, JS, images), just pass them through
+    return fetch(request);
   }
 
-  // --- Determine the Date for Content ---
-  // For this implementation, we're fetching events for the current day.
+  // Determine the current date in UTC to ensure consistent daily events across timezones
+  // For 'onthisday' API, it typically uses the UTC date.
+  const today = new Date(); // This will be the server's current date (Cloudflare's edge location)
+  // For global "on this day" content, UTC or the server's local time is usually fine.
 
-  const today = new Date();
-  const eventsData = await fetchDailyEvents(today); // This now returns the full data object
+  // Fetch daily events
+  const eventsData = await fetchDailyEvents(today);
 
-  // --- Prepare Dynamic Meta Content ---
+  // Prepare dynamic meta tags and content based on fetched data
   let dynamicDescription =
-    "Explore historical events, milestones, and notable figures from any date. Discover what happened on this day in history, featuring daily highlights.";
+    "Explore historical events, milestones, and notable figures from any date. Dive into history with this interactive calendar.";
   let dynamicKeywords =
     "thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history, educational, timeline, trivia, historical figures";
   let dynamicTitle =
     "thisDay. | What Happened on This Day? | Historical Events";
-  let ogImageUrl = "https://thisday.info/images/default-social-share.jpg"; // Default social share image
-  let ogUrl = url.href; // Canonical URL for social sharing
+  const ogImageUrl = "https://thisday.info/assets/default-social-share.jpg"; // Default image
+  const ogUrl = "https://thisday.info/"; // Canonical URL
 
-  const formattedDate = today.toLocaleString("en-US", {
-    month: "long",
-    day: "numeric",
-  });
+  // Format the date for the title and description
+  const options = { month: "long", day: "numeric" };
+  const formattedDate = today.toLocaleDateString("en-US", options); // e.g., "June 28"
 
-  // Check if eventsData and its 'events' array exist and is not empty
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
-    const events = eventsData.events;
-    // Take the first few significant events for a concise description
-    const topEvents = events
-      .slice(0, 3)
-      .map((e) => e.text)
+    // Pick the top 3-5 events for a concise description
+    const topEvents = eventsData.events
+      .slice(0, 5)
+      .map((event) => `In ${event.year}, ${event.text}`)
       .join("; ");
-    dynamicDescription = `On ${formattedDate}, discover events like: ${topEvents}. Explore more historical milestones on thisDay.info.`;
-    dynamicTitle = `On This Day, ${formattedDate} | Historical Events & Facts | thisDay.`;
+
+    dynamicTitle = `On This Day, ${formattedDate}: ${
+      eventsData.events[0].year
+    }, ${eventsData.events[0].text.substring(0, 70)}... | thisDay.info`;
+    dynamicDescription = `Discover what happened on ${formattedDate}: ${topEvents}. Explore historical events, births, and deaths.`;
+
+    // Add relevant keywords from event texts (simple approach)
+    const eventKeywords = eventsData.events
+      .slice(0, 10)
+      .flatMap((event) => event.text.split(" "))
+      .filter((word) => word.length > 3 && /^[a-zA-Z]+$/.test(word)) // Basic filter
+      .map((word) => word.toLowerCase())
+      .filter((value, index, self) => self.indexOf(value) === index) // Unique words
+      .slice(0, 20) // Limit to top 20
+      .join(", ");
+    dynamicKeywords = `${dynamicKeywords}, ${eventKeywords}`;
   }
 
-  // --- Fetch Original index.html from Origin ---
-  // It's crucial to fetch the base HTML from the origin server.
-  const originalResponse = await fetch(request);
+  // Fetch the original index.html from the origin server
+  const originalResponse = await fetch(url.origin, request);
+  const contentType = originalResponse.headers.get("content-type") || "";
 
-  // Ensure the response is HTML and successful before attempting to modify.
-  const contentType = originalResponse.headers.get("Content-Type");
-  if (
-    !originalResponse.ok ||
-    !contentType ||
-    !contentType.includes("text/html")
-  ) {
-    return originalResponse; // Pass through non-HTML or error responses without modification
+  // Only apply transformations to HTML responses
+  if (!contentType.includes("text/html")) {
+    return originalResponse;
   }
 
-  // --- Modify HTML using HTMLRewriter ---
-  // HTMLRewriter allows to stream and transform HTML responses efficiently.
+  // Use HTMLRewriter to modify the HTML
   const rewriter = new HTMLRewriter()
-    // Update the <title> tag
+    // --- Title Tag ---
     .on("title", {
       element(element) {
         element.setInnerContent(dynamicTitle);
       },
     })
-    // Update standard meta description
+    // --- Standard Meta Tags ---
     .on("meta[name='description']", {
       element(element) {
         element.setAttribute("content", dynamicDescription);
       },
     })
-    // Update standard meta keywords
     .on("meta[name='keywords']", {
       element(element) {
         element.setAttribute("content", dynamicKeywords);
       },
     })
-    // --- Open Graph (og:) Tags for Social Media ---
+    // --- Open Graph Tags (for social media sharing) ---
     .on("meta[property='og:title']", {
       element(element) {
         element.setAttribute("content", dynamicTitle);
@@ -182,6 +197,35 @@ async function handleRequest(request) {
         element.setAttribute("content", ogImageUrl);
       },
     });
+
+  // Inject preloaded data for the current day into the HTML
+  if (eventsData && eventsData.events && eventsData.events.length > 0) {
+    const initialEventsForClient = eventsData.events.slice(0, 20); // Limit data to avoid large payloads
+    const initialBirthsForClient = eventsData.births
+      ? eventsData.births.slice(0, 10)
+      : [];
+    const initialDeathsForClient = eventsData.deaths
+      ? eventsData.deaths.slice(0, 10)
+      : [];
+
+    const preloadedData = {
+      events: initialEventsForClient,
+      births: initialBirthsForClient,
+      deaths: initialDeathsForClient,
+    };
+    const jsonData = JSON.stringify(preloadedData);
+
+    rewriter.on("head", {
+      // Inject into head or body
+      element(element) {
+        // Create a script tag with the preloaded data
+        element.append(
+          `<script id="preloaded-today-events" type="application/json">${jsonData}</script>`,
+          { html: true }
+        );
+      },
+    });
+  }
 
   // Return the modified response. HTMLRewriter automatically handles streaming the transformation.
   return rewriter.transform(originalResponse);

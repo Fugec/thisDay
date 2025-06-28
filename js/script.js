@@ -250,10 +250,11 @@ async function populateCarousel(month, year) {
         event.thumbnailUrl !== ""
     );
 
-    // Shuffle and pick up to 10 random events with images
+    // Shuffle and pick a *smaller number* of random events with images for initial load
+    // Changed from .slice(0, 10) to .slice(0, 3) for initial display
     const uniqueEvents = eventsWithImages
       .sort(() => Math.random() - 0.5) // Shuffle the array
-      .slice(0, 10); // Take the first 10
+      .slice(0, 3); // Take the first 3 for immediate display
 
     if (uniqueEvents.length === 0) {
       // Default placeholder if no events with images are found for today
@@ -305,8 +306,8 @@ async function populateCarousel(month, year) {
         <div style="position:relative;">
           ${yearLabel}
           <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
-               onerror="this.onerror=null;this.src='${fallbackImageUrl}';">
-        </div>
+               onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
+               ${index === 0 ? "" : 'loading="lazy"'} > </div>
         <div class="carousel-caption">
           <h5>${truncatedTitle}</h5>
           <a href="${event.sourceUrl}" class="btn btn-primary btn-sm"

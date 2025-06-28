@@ -231,8 +231,12 @@ async function handleRequest(request) {
   return rewriter.transform(originalResponse);
 }
 
-// --- Worker Entry Point ---
-// This is the standard entry point for all Cloudflare Workers.
-addEventListener("fetch", (event) => {
-  event.respondWith(handleRequest(event.request));
-});
+// --- Worker Entry Point (ES Module Format) ---
+export default {
+  async fetch(request, env, ctx) {
+    // The handleRequest function now becomes the core logic of the fetch handler
+    // In a full module worker, 'env' would contain bindings (KV, Durable Objects etc.)
+    // and 'ctx' would contain the ExecutionContext (for ctx.waitUntil etc.).
+    return handleRequest(request);
+  },
+};

@@ -1,6 +1,7 @@
 // This Cloudflare Worker dynamically injects SEO-friendly meta tags
 // and preloads daily event data to improve the user experience on site.
-// It also adds various security headers to enhance protection.
+// Adds various security headers to enhance protection.
+// Injects Schema.org JSON-LD for better SEO.
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -107,6 +108,7 @@ async function handleFetchRequest(request, env) {
   // Format the date for the title and description
   const options = { month: "long", day: "numeric" };
   const formattedDate = today.toLocaleDateString("en-US", options); // e.g., "June 28"
+  const isoDate = today.toISOString().split("T")[0]; // e.g., "2025-06-30"
 
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
     // Pick the top 3-5 events for a concise description
@@ -227,6 +229,36 @@ async function handleFetchRequest(request, env) {
           `<script id="preloaded-today-events" type="application/json">${jsonData}</script>`,
           { html: true }
         );
+
+        // --- Inject Schema.org JSON-LD for WebPage ---
+        const schemaData = {
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          name: dynamicTitle,
+          description: dynamicDescription,
+          url: ogUrl, // Use the canonical URL
+          datePublished: isoDate,
+          dateModified: isoDate,
+          isPartOf: {
+            "@type": "WebSite",
+            name: "thisDay.info",
+            url: "https://thisday.info/",
+          },
+          potentialAction: {
+            "@type": "SearchAction",
+            target: {
+              "@type": "EntryPoint",
+              urlTemplate: "https://thisday.info/?q={search_term_string}",
+            },
+            "query-input": "required name=search_term_string",
+          },
+        };
+        element.append(
+          `<script type="application/ld+json">${JSON.stringify(
+            schemaData
+          )}</script>`,
+          { html: true }
+        );
       },
     });
   }
@@ -253,7 +285,9 @@ async function handleFetchRequest(request, env) {
     "max-age=31536000; includeSubDomains; preload"
   );
 
-  // Content-Security-Policy (CSP)
+  // Content-Security-Policy (CSP) - Most comprehensive.
+  // This needs to be carefully crafted based on ALL resources your site uses (scripts, styles, images, fonts, etc.).
+  // Incorrect CSP can break your site. Review and refine this based on your actual site's needs.
   // - default-src 'none': Blocks everything by default, forcing explicit allowance.
   // - connect-src: Allows connections to your domain ('self') and the Wikipedia API.
   // - script-src: Allows scripts from your domain ('self') and jsDelivr CDN (for Bootstrap/jQuery).
@@ -261,7 +295,7 @@ async function handleFetchRequest(request, env) {
   // - img-src: Allows images from your domain ('self'), data URIs (for inline images), and Wikipedia (for event images).
   // - font-src: Allows fonts from your domain ('self') and jsDelivr CDN.
   // - base-uri 'self': Restricts the URLs that can be used in <base> elements.
-  // - frame-ancestors 'none': Specifically for ClickJacking protection (prevents embedding your site in iframes).
+  // - frame-ancestors 'none': Specifically for ClickJacking prevention (prevents embedding your site in iframes).
   // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
   const csp =
     `default-src 'none'; ` +

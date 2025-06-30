@@ -39,7 +39,8 @@
     />
     <meta
       name="twitter:description"
-      content="Discover what happened on this day in history. Explore fascinating events, important milestones, and notable people from any date. Dive into the past and see how history comes alive, one day at a time."
+      content="Discover What Happened Today in History – Explore Famous Events, Birthdays & Milestones
+      Uncover significant historical events, famous birthdays, and key moments that happened on this day throughout history. Browse by date and learn about wars, inventions, discoveries, and the lives of notable people. Make history come alive - one day at a time."
     />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
 
@@ -110,7 +111,7 @@
         --header-text-color: #ffffff; /* white */
         --card-bg: #ffffff; /* white */
         --card-border: #e2e8f0; /* gray-200 */
-        --footer-bg: #1e293b; /* slate-800 */
+        --footer-bg: #3b82f6;
         --footer-text-color: #ffffff; /* slate-100 */
         --modal-bg: #ffffff; /* white */
         --modal-text-color: #6c757d; /* slate-900 */
@@ -127,6 +128,17 @@
         /* Apply default body colors */
         background-color: var(--secondary-bg);
         color: var(--text-color);
+
+        .display-4 {
+          background: linear-gradient(
+            to right,
+            #60a5fa 0%,
+            #fff 50%,
+            #60a5fa 100%
+          );
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
       }
 
       /* Dark Theme - Critical Variables and Applications */
@@ -583,7 +595,8 @@
           "@context": "https://schema.org",
           "@type": "WebApplication",
           "name": "thisDay.",
-          "description": "Discover what happened on this day in history. Explore fascinating events, important milestones, and notable people from any date. Dive into the past and see how history comes alive, one day at a time.",
+          "description": "Discover What Happened Today in History – Explore Famous Events, Birthdays & Milestones
+            Uncover significant historical events, famous birthdays, and key moments that happened on this day throughout history. Browse by date and learn about wars, inventions, discoveries, and the lives of notable people. Make history come alive - one day at a time.",
           "url": "https://thisday.info/",
           "author": {
             "@type": "Person",
@@ -637,9 +650,12 @@
       <div class="container text-center my-4">
         <h1 class="display-4">What happened on this day?</h1>
         <p class="text-muted">
-          Discover what happened on this day in history. Explore fascinating
-          events, important milestones, and notable people from any date. Dive
-          into the past and see how history comes alive, one day at a time.
+          Discover What Happened Today in History – Explore Famous Events,
+          Birthdays & Milestones Uncover significant historical events, famous
+          birthdays, and key moments that happened on this day throughout
+          history. Browse by date and learn about wars, inventions, discoveries,
+          and the lives of notable people. Make history come alive - one day at
+          a time.
         </p>
       </div>
       <div
@@ -783,16 +799,6 @@
             aria-label="YouTube"
           >
             <i class="bi bi-youtube h3 text-white"></i>
-          </a>
-        </div>
-        <div class="me-2">
-          <a
-            href="https://x.com/thisDay_info"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Twitter"
-          >
-            <i class="bi bi-twitter h3 text-white"></i>
           </a>
         </div>
       </div>

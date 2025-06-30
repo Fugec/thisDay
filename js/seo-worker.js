@@ -300,10 +300,10 @@ async function handleFetchRequest(request, env) {
   const csp =
     `default-src 'none'; ` +
     `connect-src 'self' https://api.wikimedia.org; ` +
-    `script-src 'self' https://cdn.jsdelivr.net; ` +
-    `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; ` +
-    `img-src 'self' data: https://upload.wikimedia.org; ` +
-    `font-src 'self' https://cdn.jsdelivr.net; ` +
+    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com 'unsafe-inline'; ` +
+    `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
+    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com; ` +
+    `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
     `base-uri 'self'; ` +
     `frame-ancestors 'none'; ` +
     `object-src 'none';`;

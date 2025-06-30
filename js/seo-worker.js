@@ -1,5 +1,7 @@
 // This Cloudflare Worker dynamically injects SEO-friendly meta tags
 // and preloads daily event data to improve the user experience on site.
+// Adds various security headers to enhance protection.
+// Injects Schema.org JSON-LD for better SEO.
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -15,8 +17,6 @@ async function fetchDailyEvents(date) {
   const day = date.getDate();
   const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${month}/${day}`;
 
-  // This internal cache is now less critical as KV will be the primary cache,
-  // but it can still serve as a fallback if KV is not yet populated or accessible.
   const workerCache = caches.default;
   let response = await workerCache.match(apiUrl);
   if (response) {
@@ -108,6 +108,7 @@ async function handleFetchRequest(request, env) {
   // Format the date for the title and description
   const options = { month: "long", day: "numeric" };
   const formattedDate = today.toLocaleDateString("en-US", options); // e.g., "June 28"
+  const isoDate = today.toISOString().split("T")[0]; // e.g., "2025-06-30"
 
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
     // Pick the top 3-5 events for a concise description
@@ -135,7 +136,7 @@ async function handleFetchRequest(request, env) {
 
   // Fetch the original index.html from the origin server
   const originalResponse = await fetch(url.origin, request);
-  const contentType = originalResponse.headers.get("content-type") || "";
+  let contentType = originalResponse.headers.get("content-type") || "";
 
   // Only apply transformations to HTML responses
   if (!contentType.includes("text/html")) {
@@ -228,11 +229,90 @@ async function handleFetchRequest(request, env) {
           `<script id="preloaded-today-events" type="application/json">${jsonData}</script>`,
           { html: true }
         );
+
+        // --- Inject Schema.org JSON-LD for WebPage ---
+        const schemaData = {
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          name: dynamicTitle,
+          description: dynamicDescription,
+          url: ogUrl, // Use the canonical URL
+          datePublished: isoDate,
+          dateModified: isoDate,
+          isPartOf: {
+            "@type": "WebSite",
+            name: "thisDay.info",
+            url: "https://thisday.info/",
+          },
+          potentialAction: {
+            "@type": "SearchAction",
+            target: {
+              "@type": "EntryPoint",
+              urlTemplate: "https://thisday.info/?q={search_term_string}",
+            },
+            "query-input": "required name=search_term_string",
+          },
+        };
+        element.append(
+          `<script type="application/ld+json">${JSON.stringify(
+            schemaData
+          )}</script>`,
+          { html: true }
+        );
       },
     });
   }
 
-  return rewriter.transform(originalResponse);
+  // Transform the response
+  const transformedResponse = rewriter.transform(originalResponse);
+
+  // Clone the response to modify headers
+  const newResponse = new Response(
+    transformedResponse.body,
+    transformedResponse
+  );
+
+  // --- Add Security Headers ---
+
+  // X-Content-Type-Options: nosniff - Prevents browsers from MIME-sniffing a response away from the declared Content-Type.
+  newResponse.headers.set("X-Content-Type-Options", "nosniff");
+
+  // Strict-Transport-Security (HSTS) - ONLY if your site is always HTTPS.
+  // This tells browsers to only connect via HTTPS for a given duration, preventing downgrade attacks.
+  // Be very careful with this; if you ever revert to HTTP, users might be locked out for max-age duration.
+  newResponse.headers.set(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains; preload"
+  );
+
+  // Content-Security-Policy (CSP) - Most comprehensive.
+  // This needs to be carefully crafted based on ALL resources your site uses (scripts, styles, images, fonts, etc.).
+  // Incorrect CSP can break your site. Review and refine this based on your actual site's needs.
+  // - default-src 'none': Blocks everything by default, forcing explicit allowance.
+  // - connect-src: Allows connections to your domain ('self') and the Wikipedia API.
+  // - script-src: Allows scripts from your domain ('self') and jsDelivr CDN (for Bootstrap/jQuery).
+  // - style-src: Allows styles from your domain ('self'), jsDelivr CDN, and 'unsafe-inline' for any inline <style> tags or style attributes.
+  // - img-src: Allows images from your domain ('self'), data URIs (for inline images), and Wikipedia (for event images).
+  // - font-src: Allows fonts from your domain ('self') and jsDelivr CDN.
+  // - base-uri 'self': Restricts the URLs that can be used in <base> elements.
+  // - frame-ancestors 'none': Specifically for ClickJacking prevention (prevents embedding your site in iframes).
+  // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
+  const csp =
+    `default-src 'none'; ` +
+    `connect-src 'self' https://api.wikimedia.org; ` +
+    `script-src 'self' https://cdn.jsdelivr.net; ` +
+    `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; ` +
+    `img-src 'self' data: https://upload.wikimedia.org; ` +
+    `font-src 'self' https://cdn.jsdelivr.net; ` +
+    `base-uri 'self'; ` +
+    `frame-ancestors 'none'; ` +
+    `object-src 'none';`;
+  newResponse.headers.set("Content-Security-Policy", csp);
+
+  // X-Frame-Options: DENY - Also for ClickJacking protection. Redundant if CSP frame-ancestors 'none' is used, but good for older browsers.
+  newResponse.headers.set("X-Frame-Options", "DENY");
+
+  return newResponse;
 }
 
 // --- Scheduled Event Handler (Cron Trigger) ---
@@ -261,7 +341,6 @@ export default {
     return handleFetchRequest(request, env);
   },
   async scheduled(event, env, ctx) {
-    // You can use ctx.waitUntil to ensure the scheduled task completes
     ctx.waitUntil(handleScheduledEvent(env));
   },
 };

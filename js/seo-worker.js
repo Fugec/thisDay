@@ -299,13 +299,14 @@ async function handleFetchRequest(request, env) {
   // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
   const csp =
     `default-src 'none'; ` +
-    `connect-src 'self' https://api.wikimedia.org; ` +
+    `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com; ` +
     `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com 'unsafe-inline'; ` +
     `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
     `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com; ` +
     `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
+    `frame-src https://consentcdn.cookiebot.com; ` + // Cookiebot iframe
     `base-uri 'self'; ` +
-    `frame-ancestors 'none'; ` +
+    `frame-ancestors 'none'; ` + // This prevents site from being framed.
     `object-src 'none';`;
   newResponse.headers.set("Content-Security-Policy", csp);
 

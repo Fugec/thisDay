@@ -15,6 +15,7 @@ body.dark-theme {
 
 .btn-primary {
   font-weight: bold;
+  font-size: 16px;
 }
 
 div#historicalCarousel .carousel-inner {

@@ -250,11 +250,10 @@ async function populateCarousel(month, year) {
         event.thumbnailUrl !== ""
     );
 
-    // Shuffle and pick a *smaller number* of random events with images for initial load
-    // Changed from .slice(0, 10) to .slice(0, 3) for initial display
+    // Shuffle and pick random events with images for initial load
     const uniqueEvents = eventsWithImages
       .sort(() => Math.random() - 0.5) // Shuffle the array
-      .slice(0, 3); // Take the first 3 for immediate display
+      .slice(0, 5); // Take the first 5 for immediate display
 
     if (uniqueEvents.length === 0) {
       // Default placeholder if no events with images are found for today
@@ -398,11 +397,15 @@ async function loadDayEvents(dayCard, month) {
     }
 
     dayCard.addEventListener("click", () => {
+      // Track a general conversion when any day is clicked
+      gtag_report_conversion(null); // Pass null as the URL
+
+      // Show the modal with event details
       showEventDetails(
         day,
         month + 1,
         currentDate.getFullYear(),
-        dayCard.eventsData // Pass pre-fetched data
+        dayCard.eventsData
       );
     });
 

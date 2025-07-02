@@ -397,15 +397,11 @@ async function loadDayEvents(dayCard, month) {
     }
 
     dayCard.addEventListener("click", () => {
-      // Track a general conversion when any day is clicked
-      gtag_report_conversion(null); // Pass null as the URL
-
-      // Show the modal with event details
       showEventDetails(
         day,
         month + 1,
         currentDate.getFullYear(),
-        dayCard.eventsData
+        dayCard.eventsData // Pass pre-fetched data
       );
     });
 

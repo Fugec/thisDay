@@ -253,16 +253,19 @@ async function populateCarousel(month, year) {
     // Shuffle and pick random events with images for initial load
     const uniqueEvents = eventsWithImages
       .sort(() => Math.random() - 0.5) // Shuffle the array
-      .slice(0, 5); // Take the first 5 for immediate display
+      .slice(0, 3); // Take the first 3 for immediate display
 
     if (uniqueEvents.length === 0) {
       // Default placeholder if no events with images are found for today
       const defaultItem = document.createElement("div");
       defaultItem.className = "carousel-item active";
+      // Carousel-image-container for consistent sizing
       defaultItem.innerHTML = `
-        <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Featured+Images+Available+for+Today"
-             class="d-block w-100" alt="No images available">
-             <div class="carousel-caption">
+        <div class="carousel-image-container">
+          <img src="https://placehold.co/1200x350/6c75 D/ffffff?text=No+Featured+Images+Available+for+Today"
+               class="d-block w-100" alt="No images available">
+        </div>
+        <div class="carousel-caption">
           <h5>Discover History on ${currentDay} ${monthNames[currentMonth]}</h5>
           <p>No specific featured images available for today, but explore the calendar for more events!</p>
           <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
@@ -304,9 +307,12 @@ async function populateCarousel(month, year) {
       carouselItem.innerHTML = `
         <div style="position:relative;">
           ${yearLabel}
-          <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
-               onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
-               ${index === 0 ? "" : 'loading="lazy"'} > </div>
+          <div class="carousel-image-container">
+            <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
+                 onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
+                 ${index === 0 ? "" : 'loading="lazy"'} >
+          </div>
+        </div>
         <div class="carousel-caption">
           <h5>${truncatedTitle}</h5>
           <a href="${event.sourceUrl}" class="btn btn-primary btn-sm"
@@ -344,9 +350,12 @@ async function populateCarousel(month, year) {
     // Show error state in carousel
     const errorItem = document.createElement("div");
     errorItem.className = "carousel-item active";
+    // Carousel-image-container for consistent sizing
     errorItem.innerHTML = `
-      <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images"
-           class="d-block w-100" alt="Error loading">
+      <div class="carousel-image-container">
+        <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images"
+             class="d-block w-100" alt="Error loading">
+      </div>
       <div class="carousel-caption">
         <h5>Unable to Load Featured Content</h5>
         <p>Please check your internet connection and try again.</p>
@@ -371,39 +380,57 @@ function createDayCard(day, month) {
   const eventSummary = document.createElement("div");
   eventSummary.className = "event-summary";
   eventSummary.innerHTML =
-    '<div class="spinner-border spinner-border-sm" role="status"></div>';
+    '<div class="spinner-border spinner-border-sm" role="status"></div>'; // Default loading spinner
   dayCard.appendChild(eventSummary);
 
   return dayCard;
 }
 
 // Function to load events for a specific day card
-async function loadDayEvents(dayCard, month) {
+async function loadDayEvents(dayCard, month, forceLoad = false) {
   const day = parseInt(dayCard.getAttribute("data-day"));
+  // Only load if not already loaded or if forceLoad is true
+  if (dayCard.classList.contains("loaded") && !forceLoad) {
+    console.log(`Events for day ${day} already loaded.`);
+    return true;
+  }
+
+  // Set loading state
+  const eventSummary = dayCard.querySelector(".event-summary");
+  dayCard.classList.add("loading");
+  eventSummary.innerHTML =
+    '<div class="spinner-border spinner-border-sm" role="status"></div>';
+
   try {
     const events = await fetchWikipediaEvents(month + 1, day);
 
     // Update UI
-    const eventSummary = dayCard.querySelector(".event-summary");
     dayCard.classList.remove("loading");
+    dayCard.classList.add("loaded"); // Mark as loaded
 
     if (events && events.length > 0) {
       eventSummary.textContent = `${events.length} Events`;
-      dayCard.eventsData = events;
+      dayCard.eventsData = events; // Store events directly on the card
+      dayCard.classList.remove("no-events");
     } else {
       eventSummary.textContent = "No Events";
       dayCard.classList.add("no-events");
       dayCard.eventsData = [];
     }
 
-    dayCard.addEventListener("click", () => {
-      showEventDetails(
-        day,
-        month + 1,
-        currentDate.getFullYear(),
-        dayCard.eventsData // Pass pre-fetched data
-      );
-    });
+    // Attach click listener if not already attached for this card's data state
+    // Ensure click listener is only attached once or updates its bound data
+    if (!dayCard._hasClickListener) {
+      dayCard.addEventListener("click", () => {
+        showEventDetails(
+          day,
+          month + 1,
+          currentDate.getFullYear(),
+          dayCard.eventsData // Pass pre-fetched data
+        );
+      });
+      dayCard._hasClickListener = true; // Mark that listener is attached
+    }
 
     return true;
   } catch (error) {
@@ -412,6 +439,7 @@ async function loadDayEvents(dayCard, month) {
     eventSummary.textContent = "Error";
     dayCard.classList.remove("loading");
     dayCard.classList.add("error");
+    dayCard.classList.remove("loaded"); // If error, not fully loaded
     return false;
   }
 }
@@ -454,27 +482,21 @@ async function renderCalendar() {
     // Determine which days to prioritize for loading
     let daysToPrioritize = [];
     if (isCurrentMonth) {
-      // Prioritize today's date and nearby days for current month
-      const todayCard = dayCards.find(
-        (card) => parseInt(card.getAttribute("data-day")) === todayDate
-      );
-      if (todayCard) {
-        daysToPrioritize.push(todayCard);
-        // Also add a few days around today for a better initial view
-        for (let i = 1; i <= 3; i++) {
-          const prevDayCard = dayCards.find(
-            (card) => parseInt(card.getAttribute("data-day")) === todayDate - i
-          );
-          const nextDayCard = dayCards.find(
-            (card) => parseInt(card.getAttribute("data-day")) === todayDate + i
-          );
-          if (prevDayCard) daysToPrioritize.push(prevDayCard);
-          if (nextDayCard) daysToPrioritize.push(nextDayCard);
+      // Prioritize today's date and a total of 7 days around it if possible
+      const startDay = Math.max(1, todayDate - 3); // 3 days before today
+      const endDay = Math.min(daysInMonth, todayDate + 3); // 3 days after today
+
+      for (let i = startDay; i <= endDay; i++) {
+        const card = dayCards.find(
+          (dCard) => parseInt(dCard.getAttribute("data-day")) === i
+        );
+        if (card) {
+          daysToPrioritize.push(card);
         }
       }
     } else {
-      // For other months, prioritize the first few days visible
-      daysToPrioritize = dayCards.slice(0, Math.min(daysInMonth, 7)); // Load first 7 days initially
+      // For other months, prioritize the first 7 days explicitly
+      daysToPrioritize = dayCards.slice(0, Math.min(daysInMonth, 7));
     }
 
     // Filter out duplicates and ensure all are actual elements
@@ -489,25 +511,26 @@ async function renderCalendar() {
         ? 10
         : 5; // Dynamically adjust based on network speed
     let activePromises = [];
-    let allPromises = [];
 
-    const loadDayPromises = async (cardsToLoad) => {
+    const loadDayPromisesWithConcurrency = async (cardsToLoad) => {
       for (const dayCard of cardsToLoad) {
-        const promise = loadDayEvents(dayCard, month);
-        allPromises.push(promise);
-        activePromises.push(promise);
+        // Only load if the card is not already marked as loaded (e.g., from cache)
+        if (!dayCard.classList.contains("loaded")) {
+          const promise = loadDayEvents(dayCard, month);
+          activePromises.push(promise);
 
-        if (activePromises.length >= CONCURRENCY_LIMIT) {
-          await Promise.race(activePromises).finally(() => {
-            activePromises = activePromises.filter((p) => p !== promise);
-          });
+          if (activePromises.length >= CONCURRENCY_LIMIT) {
+            await Promise.race(activePromises).finally(() => {
+              activePromises = activePromises.filter((p) => p !== promise);
+            });
+          }
         }
       }
       await Promise.all(activePromises); // Wait for any remaining
     };
 
     // Load prioritized days
-    await loadDayPromises(daysToPrioritize);
+    await loadDayPromisesWithConcurrency(daysToPrioritize);
 
     // Scroll to today's card if current month, after its events are loaded
     if (isCurrentMonth) {
@@ -524,20 +547,36 @@ async function renderCalendar() {
       }
     }
 
-    // 4. Load remaining days in the background
+    // 4. For remaining cards, set up click-to-load behavior
     const remainingCards = dayCards.filter(
       (card) => !daysToPrioritize.includes(card)
     );
 
-    // Use a short delay before starting background loads to ensure initial view is stable
-    const connectionType = navigator.connection
-      ? navigator.connection.effectiveType
-      : null;
-    const delay =
-      connectionType === "4g" || connectionType === "wifi" ? 300 : 1000; // Default to 1000ms for unreliable detection
-    setTimeout(async () => {
-      await loadDayPromises(remainingCards);
-    }, delay);
+    remainingCards.forEach((dayCard) => {
+      // Ensure existing loading spinner is removed and replaced with "Click to Load"
+      const eventSummary = dayCard.querySelector(".event-summary");
+      dayCard.classList.remove("loading"); // Remove initial loading state
+      eventSummary.textContent = "Click to load";
+      dayCard.classList.add("needs-load"); // Add a class for styling/identification
+
+      // Add a single event listener for lazy loading
+      if (!dayCard._hasClickListener) {
+        dayCard.addEventListener("click", async () => {
+          if (dayCard.classList.contains("needs-load")) {
+            await loadDayEvents(dayCard, month, true); // Force load
+            dayCard.classList.remove("needs-load");
+          }
+          // After loading, show event details
+          showEventDetails(
+            parseInt(dayCard.getAttribute("data-day")),
+            month + 1,
+            currentDate.getFullYear(),
+            dayCard.eventsData
+          );
+        });
+        dayCard._hasClickListener = true;
+      }
+    });
 
     // Ensure carousel is also finished
     await carouselPromise;
@@ -568,6 +607,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
 
   try {
     // If no pre-fetched events, fetch new ones (this will check cache first)
+    // This path is primarily for "Click to load" days or if preFetchedEvents was null/empty
     if (!events || events.length === 0) {
       events = await fetchWikipediaEvents(month, day);
     }
@@ -602,7 +642,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
                   ? `
                 <a href="${event.sourceUrl}" class="btn btn-sm btn-outline-primary"
                    target="_blank" rel="noopener noreferrer">
-                  Read more on Wikipedia
+                  Read More
                 </a>
               `
                   : ""
@@ -611,9 +651,11 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
             ${
               event.thumbnailUrl
                 ? `
-              <img src="${event.thumbnailUrl}" class="ms-3 rounded"
-                   style="width: 60px; height: 60px; object-fit: cover;"
-                   alt="Event thumbnail" onerror="this.style.display='none'">
+              <div class="modal-thumbnail-container ms-3">
+                <img src="${event.thumbnailUrl}" class="rounded"
+                     style="width: 40px; height: 40px; object-fit: cover;"
+                     alt="Event thumbnail" onerror="this.style.display='none'">
+              </div>
             `
                 : ""
             }
@@ -767,7 +809,7 @@ if (nextMonthBtn) {
   });
 }
 
-// Set current year in footer
+// Set current year in footer (Moved from inline script in index.html)
 const currentYearElement = document.getElementById("currentYear");
 if (currentYearElement) {
   currentYearElement.textContent = new Date().getFullYear();

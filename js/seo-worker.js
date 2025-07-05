@@ -299,14 +299,14 @@ async function handleFetchRequest(request, env) {
   // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
   const csp =
     `default-src 'none'; ` +
-    `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com; ` +
-    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com 'unsafe-inline'; ` +
+    `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com https://www.google.com https://www.gstatic.com https://www.googleadservices.com; ` +
+    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net 'unsafe-inline'; ` +
     `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
     `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com; ` +
     `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
-    `frame-src https://consentcdn.cookiebot.com; ` + // Cookiebot iframe
+    `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com; ` +
     `base-uri 'self'; ` +
-    `frame-ancestors 'none'; ` + // This prevents site from being framed.
+    `frame-ancestors 'none'; ` +
     `object-src 'none';`;
   newResponse.headers.set("Content-Security-Policy", csp);
 

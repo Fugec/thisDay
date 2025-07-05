@@ -38,13 +38,12 @@
     <meta
       name="twitter:description"
       content="Discover what happened today in history. Explore famous events,
-      birthdays, milestones, and key moments that happened on this day throughout the
-      history. Browse by date and learn about wars, inventions, discoveries,
-      and the lives of notable people. Make history come alive - one day at
-      a time."
+        birthdays, milestones, and key moments that happened on this day throughout the
+        history. Browse by date and learn about wars, inventions, discoveries,
+        and the lives of notable people. Make history come alive - one day at
+        a time."
     />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
-
     <!-- Preconnect & preload for fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -52,13 +51,12 @@
     <link
       rel="preload"
       as="style"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@wght@400;500;600;700&display=swap"
     />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-
     <!-- Bootstrap & icons -->
     <link
       rel="preload"
@@ -94,7 +92,6 @@
       sizes="16x16"
       href="images/favicon-16x16.png"
     />
-
     <!-- Preload Critical CSS -->
     <style>
       /* Light Theme (Default) - Critical Variables */
@@ -554,7 +551,6 @@
       }
     </style>
 
-    <!-- Preload Non-Critical CSS styles -->
     <link
       rel="preload"
       href="css/style.css"
@@ -563,7 +559,6 @@
     />
     <noscript><link rel="stylesheet" href="css/style.css" /></noscript>
 
-    <!-- Cookiebot -->
     <script
       id="Cookiebot"
       src="https://consent.cookiebot.com/uc.js"
@@ -573,7 +568,6 @@
       async
     ></script>
 
-    <!-- Google Analytics -->
     <script
       async
       src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"
@@ -584,7 +578,25 @@
         dataLayer.push(arguments);
       }
       gtag("js", new Date());
+      // Google Analytics configuration
       gtag("config", "G-WXEZ3868VN");
+      // Google Ads configuration
+      gtag("config", "AW-17262488503");
+    </script>
+
+    <script>
+      function gtag_report_conversion(url) {
+        var callback = function () {
+          if (typeof url != "undefined") {
+            window.location = url;
+          }
+        };
+        gtag("event", "conversion", {
+          send_to: "AW-17262488503/WsLuCMLVweEaELfXsqdA",
+          event_callback: callback,
+        });
+        return false;
+      }
     </script>
   </head>
 

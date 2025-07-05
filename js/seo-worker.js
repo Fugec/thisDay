@@ -302,7 +302,7 @@ async function handleFetchRequest(request, env) {
     `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com; ` +
     `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com 'unsafe-inline'; ` +
     `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
-    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com; ` +
+    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com; ` +
     `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
     `frame-src https://consentcdn.cookiebot.com; ` + // Cookiebot iframe
     `base-uri 'self'; ` +

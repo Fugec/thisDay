@@ -386,6 +386,15 @@
         justify-content: space-between;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         transition: background-color 0.3s ease, border-color 0.3s ease;
+        min-height: 100px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+      }
+
+      .day-card .spinner-border {
+        margin: auto; /* Center the spinner */
       }
 
       .day-card.no-events {
@@ -548,6 +557,10 @@
         font-weight: 600;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         pointer-events: none;
+      }
+
+      #calendarGrid {
+        min-height: 600px;
       }
     </style>
 

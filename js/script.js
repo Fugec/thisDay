@@ -250,10 +250,21 @@ async function populateCarousel(month, year) {
         event.thumbnailUrl !== ""
     );
 
-    // Shuffle and pick random events with images for initial load
-    const uniqueEvents = eventsWithImages
-      .sort(() => Math.random() - 0.5) // Shuffle the array
-      .slice(0, 3); // Take the first 3 for immediate display
+    let uniqueEvents = [];
+    if (eventsWithImages.length <= 3) {
+      uniqueEvents = eventsWithImages; // If 3 or less, use all of them
+    } else {
+      // More efficient random selection without full array shuffle
+      const selectedIndices = new Set();
+      while (selectedIndices.size < 3) {
+        selectedIndices.add(
+          Math.floor(Math.random() * eventsWithImages.length)
+        );
+      }
+      uniqueEvents = Array.from(selectedIndices).map(
+        (index) => eventsWithImages[index]
+      );
+    }
 
     if (uniqueEvents.length === 0) {
       // Default placeholder if no events with images are found for today
@@ -262,8 +273,8 @@ async function populateCarousel(month, year) {
       // Carousel-image-container for consistent sizing
       defaultItem.innerHTML = `
         <div class="carousel-image-container">
-          <img src="https://placehold.co/1200x350/6c75 D/ffffff?text=No+Featured+Images+Available+for+Today"
-               class="d-block w-100" alt="No images available">
+          <img src="https://placehold.co/1200x350/6c75D/ffffff?text=No+Featured+Images+Available+for+Today"
+               class="d-block w-100" alt="No images available" width="1200" height="350">
         </div>
         <div class="carousel-caption">
           <h5>Discover History on ${currentDay} ${monthNames[currentMonth]}</h5>
@@ -310,7 +321,9 @@ async function populateCarousel(month, year) {
           <div class="carousel-image-container">
             <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
                  onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
-                 ${index === 0 ? "" : 'loading="lazy"'} >
+                 ${
+                   index === 0 ? "" : 'loading="lazy"'
+                 } width="1200" height="350">
           </div>
         </div>
         <div class="carousel-caption">
@@ -354,7 +367,7 @@ async function populateCarousel(month, year) {
     errorItem.innerHTML = `
       <div class="carousel-image-container">
         <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images"
-             class="d-block w-100" alt="Error loading">
+             class="d-block w-100" alt="Error loading" width="1200" height="350">
       </div>
       <div class="carousel-caption">
         <h5>Unable to Load Featured Content</h5>

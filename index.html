@@ -20,7 +20,7 @@
     />
     <meta
       name="description"
-      content="Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history. Browse by date and learn about wars, inventions, discoveries, and the lives of notable people. Make history come alive - one day at a time."
+      content="Explore historical events, milestones, and notable figures from any date. Dive into the past and bring history to life."
     />
     <meta property="og:title" content="thisDay. | Historical Events" />
     <meta
@@ -44,10 +44,7 @@
         a time."
     />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
-
-    <link rel="dns-prefetch" href="//api.wikimedia.org" />
-    <link rel="preconnect" href="https://api.wikimedia.org" crossorigin />
-
+    <!-- Preconnect & preload for fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 
@@ -60,29 +57,12 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-
+    <!-- Bootstrap & icons -->
     <link
       rel="preload"
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
       as="style"
-    />
-    <link
-      rel="preload"
-      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
-      as="style"
-    />
-    <link
-      rel="preload"
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
-      as="script"
-    />
-    <link rel="preload" href="js/script.js" as="script" />
-
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-      media="print"
-      onload="this.media='all'"
+      onload="this.onload=null;this.rel='stylesheet'"
     />
     <noscript
       ><link
@@ -93,7 +73,7 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
     />
-
+    <!-- Favicons -->
     <link rel="icon" href="images/favicon.ico" type="image/x-icon" />
     <link
       rel="apple-touch-icon"
@@ -112,7 +92,7 @@
       sizes="16x16"
       href="images/favicon-16x16.png"
     />
-
+    <!-- Preload Critical CSS -->
     <style>
       /* Light Theme (Default) - Critical Variables */
       :root {
@@ -579,65 +559,8 @@
         pointer-events: none;
       }
 
-      /* Skeleton Styles */
-      .skeleton {
-        background: linear-gradient(
-          90deg,
-          #f0f0f0 25%,
-          #e0e0e0 50%,
-          #f0f0f0 75%
-        );
-        background-size: 200% 100%;
-        animation: loading 1.5s infinite;
-        border-radius: 0.5rem; /* Use var for consistency */
-      }
-      body.dark-theme .skeleton {
-        background: linear-gradient(
-          90deg,
-          #1e293b 25%,
-          #334155 50%,
-          #1e293b 75%
-        );
-        background-size: 200% 100%;
-      }
-
-      @keyframes loading {
-        0% {
-          background-position: 200% 0;
-        }
-        100% {
-          background-position: -200% 0;
-        }
-      }
-
-      .skeleton-day {
-        height: 100px;
-        margin-bottom: 10px;
-      }
-      .skeleton-carousel {
-        height: 350px;
-        margin: 20px auto;
-        max-width: 1200px;
-      }
-      .skeleton-text {
-        height: 1em;
-        width: 80%;
-        margin: 0.5em auto;
-      }
-      .skeleton-button {
-        height: 30px;
-        width: 100px;
-        margin-top: 10px;
-      }
-      .skeleton-header-text {
-        height: 2em;
-        width: 70%;
-        margin: 10px auto;
-      }
-      .skeleton-paragraph {
-        height: 1em;
-        width: 90%;
-        margin: 0.5em auto;
+      #calendarGrid {
+        min-height: 600px;
       }
     </style>
 
@@ -700,7 +623,6 @@
             class="form-check-input"
             type="checkbox"
             id="themeSwitchMobile"
-            aria-label="Toggle dark mode"
           />
           <label class="form-check-label" for="themeSwitchMobile">
             <i class="bi bi-moon-fill"></i>
@@ -717,7 +639,6 @@
                   class="form-check-input"
                   type="checkbox"
                   id="themeSwitchDesktop"
-                  aria-label="Toggle dark mode"
                 />
                 <label class="form-check-label" for="themeSwitchDesktop"
                   >Dark Mode</label
@@ -744,14 +665,19 @@
         id="historicalCarousel"
         class="carousel slide"
         data-bs-ride="carousel"
-        aria-label="Historical Carousel"
       >
         <div class="carousel-indicators" id="carouselIndicators"></div>
         <div class="carousel-inner" id="carouselInner">
           <div class="carousel-item active">
             <div class="carousel-caption">
-              <div class="skeleton-text skeleton-header-text"></div>
-              <div class="skeleton-button"></div>
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <div class="mt-3">
+                <span class="word">Loading</span>
+                <span class="word">historical</span>
+                <span class="word">events...</span>
+              </div>
             </div>
           </div>
         </div>
@@ -782,17 +708,21 @@
           class="month-navigation mb-2 d-flex justify-content-between align-items-center"
         >
           <button class="btn btn-outline-primary px-3" id="prevMonthBtn">
-            <
+            &lt;
           </button>
           <h2 id="currentMonthYear" class="mb-0"></h2>
           <button class="btn btn-outline-primary px-3" id="nextMonthBtn">
-            >
+            &gt;
           </button>
         </div>
       </div>
 
       <div class="calendar-grid" id="calendarGrid">
-        <div id="loadingIndicator" class="col-12 text-center py-5">
+        <div
+          class="text-center p-5"
+          id="loadingIndicator"
+          class="loading-indicator"
+        >
           <div class="spinner-border text-primary" role="status">
             <span class="visually-hidden">Loading...</span>
           </div>
@@ -836,6 +766,16 @@
         </div>
         <div class="me-2">
           <a
+            href="https://www.tiktok.com/@this__day"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="TikTok"
+          >
+            <i class="bi bi-tiktok h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a
             href="https://www.facebook.com/profile.php?id=61578009082537"
             target="_blank"
             rel="noopener noreferrer"
@@ -854,28 +794,7 @@
             <i class="bi bi-instagram h3 text-white"></i>
           </a>
         </div>
-        <div class="me-2">
-          <a
-            href="https://www.tiktok.com/@this__day"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="TikTok"
-          >
-            <i class="bi bi-tiktok h3 text-white"></i>
-          </a>
-        </div>
-        <div class="me-2">
-          <a
-            href="https://www.pinterest.com/thisday_info/"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Pinterest"
-          >
-            <i class="bi bi-pinterest h3 text-white"></i>
-          </a>
-        </div>
-
-        <div class="me-2">
+        <div>
           <a
             href="https://www.youtube.com/@thisDay_info/shorts"
             target="_blank"
@@ -887,7 +806,7 @@
         </div>
       </div>
       <div class="container"></div>
-      <p>© <span id="currentYear"></span> thisDay. All rights reserved.</p>
+      <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
       <p>
         Historical data sourced from Wikipedia.org under
         <a
@@ -911,9 +830,8 @@
       class="modal fade"
       id="eventDetailModal"
       tabindex="-1"
-      role="dialog"
-      aria-model="true"
-      aria-labelledby="modalDate"
+      aria-labelledby="eventDetailModalLabel"
+      aria-hidden="true"
     >
       <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
@@ -943,6 +861,11 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      // Dynamically set the current year
+      document.getElementById("currentYear").textContent =
+        new Date().getFullYear();
+    </script>
     <script src="js/script.js"></script>
   </body>
 </html>

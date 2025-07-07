@@ -1,3 +1,47 @@
+// Prevent FOUC and show skeleton immediately
+document.documentElement.style.display = "block";
+
+// Optimize the initial render by showing skeleton immediately
+function showInitialSkeleton() {
+  const carouselInner = document.getElementById("carouselInner");
+  const calendarGrid = document.getElementById("calendarGrid");
+  const loadingIndicator = document.getElementById("loadingIndicator");
+
+  if (carouselInner) {
+    carouselInner.innerHTML = `
+            <div class="carousel-item active">
+                <div class="carousel-caption">
+                    <div class="skeleton-text skeleton-header-text"></div>
+                    <div class="skeleton-paragraph skeleton-text"></div>
+                    <div class="skeleton-button"></div>
+                </div>
+            </div>
+        `;
+  }
+
+  if (calendarGrid) {
+    let skeletonDaysHtml = "";
+    for (let i = 0; i < 31; i++) {
+      // Generate 31 skeleton day cards
+      skeletonDaysHtml += `
+                <div class="day-card skeleton">
+                    <div class="day-number skeleton-text" style="width: 30%;"></div>
+                    <div class="event-summary skeleton-text" style="width: 70%;"></div>
+                </div>
+            `;
+    }
+    calendarGrid.innerHTML = skeletonDaysHtml;
+  }
+
+  // Hide the general loading indicator because of skeletons
+  if (loadingIndicator) {
+    loadingIndicator.style.display = "none";
+  }
+}
+
+// Call showInitialSkeleton immediately, before waiting for DOMContentLoaded
+showInitialSkeleton();
+
 const calendarGrid = document.getElementById("calendarGrid");
 const currentMonthYearDisplay = document.getElementById("currentMonthYear");
 const modalDate = document.getElementById("modalDate");
@@ -5,7 +49,7 @@ const modalBodyContent = document.getElementById("modalBodyContent");
 const eventDetailModal = new bootstrap.Modal(
   document.getElementById("eventDetailModal")
 );
-const loadingIndicator = document.getElementById("loadingIndicator");
+const loadingIndicator = document.getElementById("loadingIndicator"); // This will be hidden by showInitialSkeleton now
 
 // Elements for carousel
 const carouselInner = document.getElementById("carouselInner");
@@ -274,7 +318,7 @@ async function populateCarousel(month, year) {
       defaultItem.innerHTML = `
         <div class="carousel-image-container">
           <img src="https://placehold.co/1200x350/6c75D/ffffff?text=No+Featured+Images+Available+for+Today"
-               class="d-block w-100" alt="No images available" width="1200" height="350">
+               class="d-block w-100" alt="No images available" width="1200" height="350" fetchpriority="high" decoding="async">
         </div>
         <div class="carousel-caption">
           <h5>Discover History on ${currentDay} ${monthNames[currentMonth]}</h5>
@@ -322,14 +366,18 @@ async function populateCarousel(month, year) {
             <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
                  onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
                  ${
-                   index === 0 ? "" : 'loading="lazy"'
-                 } width="1200" height="350">
+                   index === 0 ? 'fetchpriority="high"' : 'loading="lazy"'
+                 } decoding="async" width="1200" height="350">
           </div>
         </div>
         <div class="carousel-caption">
           <h5>${truncatedTitle}</h5>
           <a href="${event.sourceUrl}" class="btn btn-primary btn-sm"
-             target="_blank" rel="noopener noreferrer">Read More</a>
+             target="_blank" rel="noopener noreferrer">Read More About ${
+               event.title.length > 50
+                 ? `${event.title.substring(0, 20)}...`
+                 : event.title
+             }</a>
         </div>
       `;
       carouselInner.appendChild(carouselItem);
@@ -367,7 +415,7 @@ async function populateCarousel(month, year) {
     errorItem.innerHTML = `
       <div class="carousel-image-container">
         <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images"
-             class="d-block w-100" alt="Error loading" width="1200" height="350">
+             class="d-block w-100" alt="Error loading" width="1200" height="350" fetchpriority="high" decoding="async">
       </div>
       <div class="carousel-caption">
         <h5>Unable to Load Featured Content</h5>
@@ -381,7 +429,7 @@ async function populateCarousel(month, year) {
 // Function to create day card element
 function createDayCard(day, month) {
   const dayCard = document.createElement("div");
-  dayCard.className = "day-card loading";
+  dayCard.className = "day-card loading"; // Start with loading class
   dayCard.setAttribute("data-day", day);
   dayCard.setAttribute("data-month", month + 1);
 
@@ -425,10 +473,12 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
       eventSummary.textContent = `${events.length} Events`;
       dayCard.eventsData = events; // Store events directly on the card
       dayCard.classList.remove("no-events");
+      dayCard.classList.remove("skeleton"); // Remove skeleton class
     } else {
       eventSummary.textContent = "No Events";
       dayCard.classList.add("no-events");
       dayCard.eventsData = [];
+      dayCard.classList.remove("skeleton"); // Remove skeleton class
     }
 
     // Attach click listener if not already attached for this card's data state
@@ -453,15 +503,17 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
     dayCard.classList.remove("loading");
     dayCard.classList.add("error");
     dayCard.classList.remove("loaded"); // If error, not fully loaded
+    dayCard.classList.remove("skeleton"); // Remove skeleton class
     return false;
   }
 }
 
 async function renderCalendar() {
   // Clear only day cards from the calendar grid
-  const existingDayCards = calendarGrid.querySelectorAll(".day-card");
-  existingDayCards.forEach((card) => card.remove());
-  loadingIndicator.style.display = "block"; // Show initial loading for the whole calendar
+  calendarGrid.innerHTML = ""; // Clear previous content, including skeletons
+
+  calendarGrid.setAttribute("role", "grid");
+  calendarGrid.setAttribute("aria-label", "Historical events calendar");
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth(); // 0-indexed month
@@ -475,21 +527,26 @@ async function renderCalendar() {
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // 1. Create all calendar grid structure first with loading states
+  // 1. Create all calendar grid structure first with skeleton states
   const dayCards = [];
   for (let i = 1; i <= daysInMonth; i++) {
     const dayCard = createDayCard(i, month);
+    dayCard.classList.add("skeleton"); // Add skeleton class initially
+
+    // Add ARIA roles and labels
+    dayCard.setAttribute("role", "button");
+    dayCard.setAttribute("tabindex", "0");
+    dayCard.setAttribute("aria-label", `Events for ${i} ${monthNames[month]}`);
+    dayCard.setAttribute("aria-pressed", "false");
 
     if (isCurrentMonth && i === todayDate) {
       dayCard.classList.add("today-highlight");
+      dayCard.setAttribute("aria-current", "date");
     }
 
     calendarGrid.appendChild(dayCard);
     dayCards.push(dayCard);
   }
-
-  // Hide the global loading indicator once the grid structure is present
-  loadingIndicator.style.display = "none";
 
   try {
     // Determine which days to prioritize for loading
@@ -569,6 +626,7 @@ async function renderCalendar() {
       // Ensure existing loading spinner is removed and replaced with "Click to Load"
       const eventSummary = dayCard.querySelector(".event-summary");
       dayCard.classList.remove("loading"); // Remove initial loading state
+      dayCard.classList.remove("skeleton"); // Remove skeleton class as it's now interactive
       eventSummary.textContent = "Click to load";
       dayCard.classList.add("needs-load"); // Add a class for styling/identification
 
@@ -653,9 +711,15 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
               ${
                 event.sourceUrl
                   ? `
-                <a href="${event.sourceUrl}" class="btn btn-sm btn-outline-primary"
+                <a href="${
+                  event.sourceUrl
+                }" class="btn btn-sm btn-outline-primary"
                    target="_blank" rel="noopener noreferrer">
-                  Read More
+                  Read More About ${
+                    event.title.length > 50
+                      ? `${event.title.substring(0, 15)}...`
+                      : event.title
+                  }
                 </a>
               `
                   : ""
@@ -680,7 +744,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
       modalBodyContent.appendChild(ul);
     } else {
       modalBodyContent.innerHTML = `
-        <div class="alert alert-warning">
+        <div class="alert alert-warning" role="alert">
           <h5><i class="bi bi-exclamation-triangle"></i> No Events Found</h5>
           <p>No events found for this day on Wikipedia.</p>
           <p class="mb-0 text-muted">Historical data depends on available records.
@@ -691,7 +755,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
   } catch (error) {
     console.error("Error loading event details:", error);
     modalBodyContent.innerHTML = `
-      <div class="alert alert-danger">
+      <div class="alert alert-danger" role="alert">
         <h5><i class="bi bi-exclamation-circle"></i> Loading Error</h5>
         <p>Unable to load events for this day. Please check your internet connection and try again.</p>
       </div>
@@ -750,16 +814,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const savedTheme = localStorage.getItem("theme") || "dark";
     setTheme(savedTheme);
 
-    // Show immediate feedback
-    if (loadingIndicator) {
-      loadingIndicator.innerHTML = `
-        <div class="text-center">
-          <div class="spinner-border text-primary mb-2" role="status"></div>
-          <p class="mb-0">Loading today's events first...</p>
-        </div>
-      `;
-    }
-
+    // Initial skeleton shown
+    // Render the calendar
     await renderCalendar();
   } catch (error) {
     console.error("Error initializing application:", error);

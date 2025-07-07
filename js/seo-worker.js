@@ -137,7 +137,7 @@ async function handleFetchRequest(request, env) {
     }
   }
   // Fetch original response from origin server
-  const originalResponse = await fetch(url.origin, request);
+  const originalResponse = await env.ASSETS.fetch(request);
   const contentType = originalResponse.headers.get("content-type") || "";
   if (!contentType.includes("text/html")) return originalResponse;
 
@@ -300,30 +300,49 @@ async function handleFetchRequest(request, env) {
     transformedResponse.body,
     transformedResponse
   );
-  // Security headers, without 'unsafe-inline' for script-src
+  // --- Add Security Headers ---
+
+  // X-Content-Type-Options: nosniff - Prevents browsers from MIME-sniffing a response away from the declared Content-Type.
   newResponse.headers.set("X-Content-Type-Options", "nosniff");
-  newResponse.headers.set("X-Frame-Options", "DENY");
+
+  // Strict-Transport-Security (HSTS) - ONLY if your site is always HTTPS.
+  // This tells browsers to only connect via HTTPS for a given duration, preventing downgrade attacks.
+  // Be very careful with this; if you ever revert to HTTP, users might be locked out for max-age duration.
   newResponse.headers.set(
     "Strict-Transport-Security",
     "max-age=31536000; includeSubDomains; preload"
   );
-  newResponse.headers.set("Cache-Control", "public, max-age=600");
 
-  newResponse.headers.set(
-    "Content-Security-Policy",
-    [
-      `default-src 'none'`,
-      `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com https://www.google.com https://www.gstatic.com https://www.googleadservices.com`,
-      `script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net`,
-      `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com`,
-      `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://placehold.co`,
-      `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com`,
-      `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com`,
-      `base-uri 'self'`,
-      `frame-ancestors 'none'`,
-      `object-src 'none'`,
-    ].join("; ")
-  );
+  // Content-Security-Policy (CSP) - Most comprehensive.
+  // This needs to be carefully crafted based on ALL resources your site uses (scripts, styles, images, fonts, etc.).
+  // Incorrect CSP can break your site. Review and refine this based on your actual site's needs.
+  // - default-src 'none': Blocks everything by default, forcing explicit allowance.
+  // - connect-src: Allows connections to your domain ('self') and the Wikipedia API.
+  // - script-src: Allows scripts from your domain ('self') and jsDelivr CDN (for Bootstrap/jQuery).
+  // - style-src: Allows styles from your domain ('self'), jsDelivr CDN, and 'unsafe-inline' for any inline <style> tags or style attributes.
+  // - img-src: Allows images from your domain ('self'), data URIs (for inline images), and Wikipedia (for event images).
+  // - font-src: Allows fonts from your domain ('self') and jsDelivr CDN.
+  // - base-uri 'self': Restricts the URLs that can be used in <base> elements.
+  // - frame-ancestors 'none': Specifically for ClickJacking prevention (prevents embedding your site in iframes).
+  // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
+  const csp =
+    `default-src 'none'; ` +
+    `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com https://www.google.com https://www.gstatic.com https://www.googleadservices.com; ` +
+    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net 'unsafe-inline'; ` +
+    `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
+    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com; ` + // ADDED THESE DOMAINS
+    `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
+    `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com; ` +
+    `base-uri 'self'; ` +
+    `frame-ancestors 'none'; ` +
+    `object-src 'none';`;
+  newResponse.headers.set("Content-Security-Policy", csp);
+
+  // X-Frame-Options: DENY - Also for ClickJacking protection. Redundant if CSP frame-ancestors 'none' is used, but good for older browsers.
+  newResponse.headers.set("X-Frame-Options", "DENY");
+
+  return newResponse;
+}
 
 async function handleScheduledEvent(env) {
   console.log("Scheduled KV pre-population...");

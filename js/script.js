@@ -375,7 +375,7 @@ async function populateCarousel(month, year) {
           <a href="${event.sourceUrl}" class="btn btn-primary btn-sm"
              target="_blank" rel="noopener noreferrer">Read More About ${
                event.title.length > 50
-                 ? `${event.title.substring(0, 20)}...`
+                 ? `${event.title.substring(0, 10)}...`
                  : event.title
              }</a>
         </div>
@@ -717,7 +717,7 @@ async function showEventDetails(day, month, year, preFetchedEvents = null) {
                    target="_blank" rel="noopener noreferrer">
                   Read More About ${
                     event.title.length > 50
-                      ? `${event.title.substring(0, 15)}...`
+                      ? `${event.title.substring(0, 10)}...`
                       : event.title
                   }
                 </a>

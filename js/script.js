@@ -184,24 +184,8 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
 }
 
 // Enhanced Wikipedia API function with better error handling and caching - CORS FIX
-// preloadedData parameter to prioritize data from the HTML
-async function fetchWikipediaEvents(month, day, preloadedData = null) {
+async function fetchWikipediaEvents(month, day) {
   const cacheKey = `${month}-${day}-en`;
-  const today = new Date();
-  const currentMonth = today.getMonth() + 1;
-  const currentDay = today.getDate();
-
-  // If preloadedData is provided and matches current day, use it directly
-  if (preloadedData && month === currentMonth && day === currentDay) {
-    console.log("Using preloaded data for today's events.");
-    // Cache the preloaded data immediately for future use without re-parsing
-    eventCache.set(cacheKey, {
-      data: preloadedData.events,
-      timestamp: Date.now(),
-    });
-    saveCacheToLocalStorage(eventCache);
-    return preloadedData.events;
-  }
 
   // Check cache with expiration
   if (eventCache.has(cacheKey)) {
@@ -287,8 +271,7 @@ async function fetchWikipediaEvents(month, day, preloadedData = null) {
 }
 
 // Optimized carousel population to focus on the current date
-async function populateCarousel(month, year, preloadedData = null) {
-  // preloadedData parameter
+async function populateCarousel(month, year) {
   carouselInner.innerHTML = "";
   carouselIndicators.innerHTML = "";
 
@@ -297,11 +280,10 @@ async function populateCarousel(month, year, preloadedData = null) {
     const currentMonth = today.getMonth(); // 0-indexed
     const currentDay = today.getDate();
 
-    // Fetch events only for the current day, passing preloaded data
+    // Fetch events only for the current day
     const eventsForToday = await fetchWikipediaEvents(
       currentMonth + 1,
-      currentDay,
-      preloadedData
+      currentDay
     );
 
     const eventsWithImages = eventsForToday.filter(
@@ -466,12 +448,7 @@ function createDayCard(day, month) {
 }
 
 // Function to load events for a specific day card
-async function loadDayEvents(
-  dayCard,
-  month,
-  forceLoad = false,
-  preloadedData = null
-) {
+async function loadDayEvents(dayCard, month, forceLoad = false) {
   const day = parseInt(dayCard.getAttribute("data-day"));
   // Only load if not already loaded or if forceLoad is true
   if (dayCard.classList.contains("loaded") && !forceLoad) {
@@ -486,7 +463,7 @@ async function loadDayEvents(
     '<div class="spinner-border spinner-border-sm" role="status"></div>';
 
   try {
-    const events = await fetchWikipediaEvents(month + 1, day, preloadedData);
+    const events = await fetchWikipediaEvents(month + 1, day);
 
     // Update UI
     dayCard.classList.remove("loading");
@@ -531,7 +508,7 @@ async function loadDayEvents(
   }
 }
 
-async function renderCalendar(preloadedData = null) {
+async function renderCalendar() {
   // Clear only day cards from the calendar grid
   calendarGrid.innerHTML = ""; // Clear previous content, including skeletons
 
@@ -596,7 +573,7 @@ async function renderCalendar(preloadedData = null) {
     daysToPrioritize = [...new Set(daysToPrioritize)].filter(Boolean);
 
     // 2. Load Carousel content in parallel (high priority visual)
-    const carouselPromise = populateCarousel(month, year, preloadedData);
+    const carouselPromise = populateCarousel(month, year);
 
     // 3. Load prioritized days with limited concurrency
     const CONCURRENCY_LIMIT =
@@ -609,7 +586,7 @@ async function renderCalendar(preloadedData = null) {
       for (const dayCard of cardsToLoad) {
         // Only load if the card is not already marked as loaded (e.g., from cache)
         if (!dayCard.classList.contains("loaded")) {
-          const promise = loadDayEvents(dayCard, month, false, preloadedData);
+          const promise = loadDayEvents(dayCard, month);
           activePromises.push(promise);
 
           if (activePromises.length >= CONCURRENCY_LIMIT) {
@@ -657,7 +634,7 @@ async function renderCalendar(preloadedData = null) {
       if (!dayCard._hasClickListener) {
         dayCard.addEventListener("click", async () => {
           if (dayCard.classList.contains("needs-load")) {
-            await loadDayEvents(dayCard, month, true, preloadedData); // Force load, pass preloaded data
+            await loadDayEvents(dayCard, month, true); // Force load
             dayCard.classList.remove("needs-load");
           }
           // After loading, show event details
@@ -837,20 +814,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     const savedTheme = localStorage.getItem("theme") || "dark";
     setTheme(savedTheme);
 
-    // Attempt to read preloaded data from the HTML
-    let preloadedData = null;
-    const preloadedScript = document.getElementById("preloaded-today-events");
-    if (preloadedScript) {
-      try {
-        preloadedData = JSON.parse(preloadedScript.textContent);
-        console.log("Found preloaded data in HTML:", preloadedData);
-      } catch (e) {
-        console.error("Error parsing preloaded data from HTML:", e);
-      }
-    }
-
-    // Render the calendar, passing the preloaded data
-    await renderCalendar(preloadedData);
+    // Initial skeleton shown
+    // Render the calendar
+    await renderCalendar();
   } catch (error) {
     console.error("Error initializing application:", error);
     // Show error message to user
@@ -972,24 +938,3 @@ if (typeof PerformanceObserver !== "undefined") {
     // Performance Observer not supported, ignore
   }
 }
-
-// Prefetch images for today when online and on homepage
-// This optimizes loading of images when user navigates to today's events
-// Keeps a key in localStorage to avoid prefetching on every page load
-document.addEventListener("DOMContentLoaded", () => {
-  if (navigator.onLine && location.pathname === "/") {
-    const PREFETCH_KEY = "imagePrefetchDone";
-    const today = new Date().toISOString().slice(0, 10);
-
-    if (localStorage.getItem(PREFETCH_KEY) !== today) {
-      // Fetch image URLs from API and log them to console
-      fetch("https://thisday.info/api/today-images")
-        .then((res) => res.json())
-        .then((data) => {
-          console.log("Prefetched Wikimedia images:", data);
-          localStorage.setItem(PREFETCH_KEY, today);
-        })
-        .catch((err) => console.warn("Prefetching error:", err));
-    }
-  }
-});

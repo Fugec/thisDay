@@ -938,3 +938,44 @@ if (typeof PerformanceObserver !== "undefined") {
     // Performance Observer not supported, ignore
   }
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+  if (navigator.onLine && location.pathname === "/") {
+    const PREFETCH_KEY = "imagePrefetchDone";
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (localStorage.getItem(PREFETCH_KEY) !== today) {
+      fetch("https://thisday.info/api/today-images")
+        .then((res) => res.json())
+        .then((data) => {
+          console.log("Image prefetch data from worker:", data);
+
+          // Client-side prefetching based on worker's response
+          if (data && data.prefetched) {
+            // Preload eager image (if any)
+            if (data.prefetched.eager) {
+              const link = document.createElement("link");
+              link.rel = "preload";
+              link.as = "image";
+              link.href = data.prefetched.eager;
+              document.head.appendChild(link);
+              console.log(
+                "Client-side preloaded eager image:",
+                data.prefetched.eager
+              );
+            }
+
+            // Prefetch lazy images (e.g., by creating Image objects)
+            data.prefetched.lazy.forEach((url) => {
+              const img = new Image();
+              img.src = url;
+              console.log("Client-side prefetched lazy image:", url);
+            });
+          }
+
+          localStorage.setItem(PREFETCH_KEY, today);
+        })
+        .catch((err) => console.warn("Prefetching error:", err));
+    }
+  }
+});

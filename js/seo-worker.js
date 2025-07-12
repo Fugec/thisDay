@@ -53,6 +53,24 @@ async function fetchDailyEvents(date) {
   }
 }
 
+// --- Helper function to extract a plausible location from event text ---
+function extractLocationFromName(text) {
+  // Try to find patterns like "in City, Country" or "in City"
+  let match = text.match(
+    /(?:in|near)\s+([A-Za-z\s,\-]+(?:,\s*[A-Za-z\s\-]+)?)\b/i
+  );
+  if (match && match[1]) {
+    // Basic cleaning: remove trailing punctuation if any
+    let location = match[1].trim();
+    if (location.endsWith(".")) {
+      location = location.slice(0, -1);
+    }
+    return location;
+  }
+  // Fallback if no specific location can be extracted
+  return "Historical Location";
+}
+
 // --- Main Request Handler (for user requests) ---
 async function handleFetchRequest(request, env) {
   const url = new URL(request.url);
@@ -107,8 +125,8 @@ async function handleFetchRequest(request, env) {
 
   // Format the date for the title and description
   const options = { month: "long", day: "numeric" };
-  const formattedDate = today.toLocaleDateString("en-US", options); // e.g., "June 28"
-  const isoDate = today.toISOString().split("T")[0]; // e.g., "2025-06-30"
+  const formattedDate = today.toLocaleDateString("en-US", options); // e.g., "July 12"
+  const isoDate = today.toISOString().split("T")[0]; // e.g., "2025-07-12"
 
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
     // Pick the top 3-5 events for a concise description
@@ -290,27 +308,44 @@ async function handleFetchRequest(request, env) {
             description: `Major historical events that occurred on ${formattedDate} throughout history`,
             url: ogUrl,
             numberOfItems: topEvents.length,
-            itemListElement: topEvents.map((eventItem, index) => ({
-              "@type": "ListItem",
-              position: index + 1,
-              item: {
-                "@type": "Event",
-                name:
-                  eventItem.text.length > 100
-                    ? eventItem.text.substring(0, 100) + "..."
-                    : eventItem.text,
-                startDate: `${eventItem.year}-${String(
-                  today.getMonth() + 1
-                ).padStart(2, "0")}-${String(today.getDate()).padStart(
-                  2,
-                  "0"
-                )}`,
-                description: eventItem.text,
-                url: ogUrl,
-                // Add temporal context
-                temporalCoverage: eventItem.year.toString(),
-              },
-            })),
+            itemListElement: topEvents.map((eventItem, index) => {
+              const locationName = extractLocationFromName(eventItem.text);
+              const eventImage =
+                eventItem.pages &&
+                eventItem.pages.length > 0 &&
+                eventItem.pages[0].thumbnail &&
+                eventItem.pages[0].thumbnail.source
+                  ? eventItem.pages[0].thumbnail.source
+                  : undefined;
+
+              return {
+                "@type": "ListItem",
+                position: index + 1,
+                item: {
+                  "@type": "Event",
+                  name:
+                    eventItem.text.length > 100
+                      ? eventItem.text.substring(0, 100) + "..."
+                      : eventItem.text,
+                  startDate: `${eventItem.year}-${String(
+                    today.getMonth() + 1
+                  ).padStart(2, "0")}-${String(today.getDate()).padStart(
+                    2,
+                    "0"
+                  )}`,
+                  description: eventItem.text,
+                  // Temporal Coverage
+                  temporalCoverage: eventItem.year.toString(),
+                  // Location
+                  location: {
+                    "@type": "Place",
+                    name: locationName,
+                  },
+                  // Image
+                  ...(eventImage && { image: eventImage }),
+                },
+              };
+            }),
           };
 
           element.append(
@@ -337,6 +372,13 @@ async function handleFetchRequest(request, env) {
               const personName = nameMatch
                 ? nameMatch[1].trim()
                 : birthItem.text.split(",")[0].trim();
+              const personImage =
+                birthItem.pages &&
+                birthItem.pages.length > 0 &&
+                birthItem.pages[0].thumbnail &&
+                birthItem.pages[0].thumbnail.source
+                  ? birthItem.pages[0].thumbnail.source
+                  : undefined;
 
               return {
                 "@type": "ListItem",
@@ -351,7 +393,7 @@ async function handleFetchRequest(request, env) {
                     "0"
                   )}`,
                   description: birthItem.text,
-                  url: ogUrl,
+                  url: ogUrl, // This 'url' is acceptable for Person if no specific profile page exists
                   // Add additional context if available
                   ...(birthItem.pages &&
                     birthItem.pages.length > 0 && {
@@ -361,6 +403,8 @@ async function handleFetchRequest(request, env) {
                         )}`,
                       ],
                     }),
+                  // Image for Person if available
+                  ...(personImage && { image: personImage }),
                 },
               };
             }),
@@ -389,6 +433,13 @@ async function handleFetchRequest(request, env) {
               const personName = nameMatch
                 ? nameMatch[1].trim()
                 : deathItem.text.split(",")[0].trim();
+              const personImage =
+                deathItem.pages &&
+                deathItem.pages.length > 0 &&
+                deathItem.pages[0].thumbnail &&
+                deathItem.pages[0].thumbnail.source
+                  ? deathItem.pages[0].thumbnail.source
+                  : undefined;
 
               return {
                 "@type": "ListItem",
@@ -403,7 +454,7 @@ async function handleFetchRequest(request, env) {
                     "0"
                   )}`,
                   description: deathItem.text,
-                  url: ogUrl,
+                  url: ogUrl, // This 'url' is acceptable for Person if no specific profile page exists
                   // Add Wikipedia link if available
                   ...(deathItem.pages &&
                     deathItem.pages.length > 0 && {
@@ -413,6 +464,8 @@ async function handleFetchRequest(request, env) {
                         )}`,
                       ],
                     }),
+                  // Image for Person if available
+                  ...(personImage && { image: personImage }),
                 },
               };
             }),

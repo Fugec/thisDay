@@ -182,3 +182,53 @@ button.carousel-control-prev {
 button.btn.btn-sm.btn-outline-primary.filter-btn {
   font-size: 16px;
 }
+
+/* --- Highlighting for Active Filter Button --- */
+
+.btn-outline-primary.active {
+  background-color: var(--bs-primary);
+  color: var(--bs-btn-active-color, #fff);
+  border-color: var(--bs-primary);
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.5);
+}
+
+body.dark-theme .btn-outline-primary.active {
+  background-color: var(--bs-light-blue, #6daffb);
+  color: #212529; /* Dark text for contrast */
+  border-color: var(--bs-light-blue, #6daffb);
+}
+
+.btn-outline-primary.active:hover,
+.btn-outline-primary.active:focus {
+  background-color: var(--bs-primary);
+  color: #fff;
+  border-color: var(--bs-primary);
+  opacity: 0.9;
+}
+
+body.dark-theme .btn-outline-primary.active:hover,
+body.dark-theme .btn-outline-primary.active:focus {
+  background-color: var(--bs-light-blue, #6daffb);
+  color: #212529;
+  border-color: var(--bs-light-blue, #6daffb);
+  opacity: 0.9;
+}
+
+.form-check-label {
+  color: var(--bs-body-color);
+}
+
+body.dark-theme .form-check-label {
+  color: #f8f9fa;
+}
+
+#eventFilterContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+#eventFilterContainer .filter-btn {
+  width: calc(50% - 0.25rem);
+}

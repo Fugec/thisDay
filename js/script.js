@@ -183,7 +183,8 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
   throw new Error(`Failed after ${maxRetries} attempts`);
 }
 
-// Enhanced Wikipedia API function with better error handling and caching - CORS FIX
+// Enhanced Wikipedia API function with better error handling and caching
+// Now returns a structured object { events: [], births: [], deaths: [] }
 async function fetchWikipediaEvents(month, day) {
   const cacheKey = `${month}-${day}-en`;
 
@@ -191,7 +192,7 @@ async function fetchWikipediaEvents(month, day) {
   if (eventCache.has(cacheKey)) {
     const cached = eventCache.get(cacheKey);
     if (Date.now() - cached.timestamp < CACHE_EXPIRY_TIME) {
-      return cached.data;
+      return cached.data; // Return cached structured data
     } else {
       eventCache.delete(cacheKey); // Remove expired cache
       saveCacheToLocalStorage(eventCache); // Update localStorage
@@ -209,64 +210,79 @@ async function fetchWikipediaEvents(month, day) {
     // Check if offline
     if (!navigator.onLine && !response.ok) {
       console.warn("Offline: Cannot fetch new data from Wikipedia.");
-      return []; // Return empty if offline and no cache
+      // Return empty structured data if offline and no cache
+      return { events: [], births: [], deaths: [] };
     }
 
     if (!response.ok) {
       console.warn(
         `No data for English Wikipedia for ${month}/${day} (Status: ${response.status})`
       );
+      const emptyData = { events: [], births: [], deaths: [] };
       // Cache empty result to avoid repeated failed requests
-      eventCache.set(cacheKey, { data: [], timestamp: Date.now() });
+      eventCache.set(cacheKey, { data: emptyData, timestamp: Date.now() });
       saveCacheToLocalStorage(eventCache); // Update localStorage
-      return [];
+      return emptyData;
     }
 
     const data = await response.json();
-    const events = [];
+    const processedEvents = [];
+    const processedBirths = [];
+    const processedDeaths = [];
 
-    if (data && data.events && Array.isArray(data.events)) {
-      // Process all events
-      data.events.forEach((event) => {
-        if (!event || !event.text) return; // Skip invalid events
+    // Helper to process an array of items (events, births, deaths)
+    const processItems = (items, targetArray, type) => {
+      if (items && Array.isArray(items)) {
+        items.forEach((item) => {
+          if (!item || !item.text) return;
 
-        let description = event.text;
-        let year = event.year || "Unknown";
-        let wikipediaLink = "";
-        let thumbnailUrl = "";
+          let wikipediaLink = "";
+          let thumbnailUrl = "";
 
-        if (
-          event.pages &&
-          Array.isArray(event.pages) &&
-          event.pages.length > 0
-        ) {
-          const page = event.pages[0];
-          if (page.content_urls && page.content_urls.desktop) {
-            wikipediaLink = page.content_urls.desktop.page;
+          if (
+            item.pages &&
+            Array.isArray(item.pages) &&
+            item.pages.length > 0
+          ) {
+            const page = item.pages[0];
+            if (page.content_urls && page.content_urls.desktop) {
+              wikipediaLink = page.content_urls.desktop.page;
+            }
+            if (page.thumbnail && page.thumbnail.source) {
+              thumbnailUrl = page.thumbnail.source;
+            }
           }
-          if (page.thumbnail && page.thumbnail.source) {
-            thumbnailUrl = page.thumbnail.source;
-          }
-        }
 
-        events.push({
-          title: description.split(".")[0] + ".",
-          description: description,
-          year: year,
-          sourceUrl: wikipediaLink,
-          thumbnailUrl: thumbnailUrl,
+          targetArray.push({
+            title: item.text.split(".")[0] + ".", // Basic title extraction
+            description: item.text,
+            year: item.year || "Unknown",
+            sourceUrl: wikipediaLink,
+            thumbnailUrl: thumbnailUrl,
+            type: type, // Explicitly add type for categorization
+          });
         });
-      });
-    }
+      }
+    };
+
+    processItems(data.events, processedEvents, "event");
+    processItems(data.births, processedBirths, "birth");
+    processItems(data.deaths, processedDeaths, "death");
+
+    const resultData = {
+      events: processedEvents,
+      births: processedBirths,
+      deaths: processedDeaths,
+    };
 
     // Cache the result with timestamp
-    eventCache.set(cacheKey, { data: events, timestamp: Date.now() });
+    eventCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
     saveCacheToLocalStorage(eventCache); // Update localStorage
-    return events;
+    return resultData;
   } catch (error) {
     console.error(`Error fetching events for ${month}/${day}:`, error);
-    // Return empty array but don't cache errors to allow retries
-    return [];
+    // Return empty structured data but don't cache errors to allow retries
+    return { events: [], births: [], deaths: [] };
   }
 }
 
@@ -281,12 +297,17 @@ async function populateCarousel(month, year) {
     const currentDay = today.getDate();
 
     // Fetch events only for the current day
-    const eventsForToday = await fetchWikipediaEvents(
-      currentMonth + 1,
-      currentDay
-    );
+    // Expect structured data from fetchWikipediaEvents
+    const eventsData = await fetchWikipediaEvents(currentMonth + 1, currentDay);
 
-    const eventsWithImages = eventsForToday.filter(
+    // Combine all event types for the carousel for image selection
+    const allEventsForToday = [
+      ...(eventsData.events || []),
+      ...(eventsData.births || []),
+      ...(eventsData.deaths || []),
+    ];
+
+    const eventsWithImages = allEventsForToday.filter(
       (event) =>
         event.sourceUrl &&
         event.sourceUrl.includes("wikipedia.org") &&
@@ -463,21 +484,27 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
     '<div class="spinner-border spinner-border-sm" role="status"></div>';
 
   try {
-    const events = await fetchWikipediaEvents(month + 1, day);
+    // Expect structured data from fetchWikipediaEvents
+    const eventsData = await fetchWikipediaEvents(month + 1, day);
+    // Store the structured events data directly on the card
+    dayCard.eventsData = eventsData;
 
-    // Update UI
+    // Update UI based on combined event count
+    const totalEvents =
+      (eventsData.events?.length || 0) +
+      (eventsData.births?.length || 0) +
+      (eventsData.deaths?.length || 0);
+
     dayCard.classList.remove("loading");
     dayCard.classList.add("loaded"); // Mark as loaded
 
-    if (events && events.length > 0) {
-      eventSummary.textContent = `${events.length} Events`;
-      dayCard.eventsData = events; // Store events directly on the card
+    if (totalEvents > 0) {
+      eventSummary.textContent = `${totalEvents} Events`;
       dayCard.classList.remove("no-events");
       dayCard.classList.remove("skeleton"); // Remove skeleton class
     } else {
       eventSummary.textContent = "No Events";
       dayCard.classList.add("no-events");
-      dayCard.eventsData = [];
       dayCard.classList.remove("skeleton"); // Remove skeleton class
     }
 
@@ -489,7 +516,7 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
           day,
           month + 1,
           currentDate.getFullYear(),
-          dayCard.eventsData // Pass pre-fetched data
+          dayCard.eventsData // Pass pre-fetched structured data
         );
       });
       dayCard._hasClickListener = true; // Mark that listener is attached
@@ -668,90 +695,732 @@ async function renderCalendar() {
   }
 }
 
-// Enhanced event details
-async function showEventDetails(day, month, year, preFetchedEvents = null) {
+// --- GLOBAL VARIABLES FOR FILTERING ---
+let currentDayAllItems = []; // Stores all events for the currently opened day, with assigned categories
+let currentActiveFilter = "all"; // Tracks the currently active filter category
+
+// --- CATEGORY DEFINITIONS FOR KEYWORD MATCHING ---
+const eventCategories = {
+  "War & Conflict": [
+    "war",
+    "battle",
+    "conflict",
+    "siege",
+    "attack",
+    "invasion",
+    "armistice",
+    "treaty",
+    "military",
+    "forces",
+    "army",
+    "navy",
+    "air force",
+    "troops",
+    "soldiers",
+    "fighting",
+    "bombing",
+    "genocide",
+    "uprising",
+    "rebellion",
+    "revolution",
+    "peace treaty",
+    "declaration of war",
+    "skirmish",
+    "campaign",
+    "guerilla",
+    "front",
+    "combat",
+    "offensive",
+    "surrender",
+    "ceasefire",
+    "annexation",
+    "occupation",
+    "insurrection",
+    "bloodshed",
+    "massacre",
+    "coup d'état",
+    "mutiny",
+    "crusade",
+    "jihad",
+    "liberation",
+    "resistance",
+    "revolt",
+    "civil war",
+    "world war",
+    "cold war",
+    "terrorism",
+    "extremism",
+    "riot",
+  ],
+  "Politics & Government": [
+    "president",
+    "king",
+    "queen",
+    "emperor",
+    "parliament",
+    "election",
+    "government",
+    "constitution",
+    "assassination",
+    "coup",
+    "republic",
+    "monarchy",
+    "vote",
+    "congress",
+    "senate",
+    "law",
+    "act",
+    "decree",
+    "political",
+    "prime minister",
+    "chancellor",
+    "diplomatic",
+    "treaty",
+    "ambassador",
+    "summit",
+    "federation",
+    "union",
+    "state",
+    "nation",
+    "party",
+    "cabinet",
+    "ministry",
+    "parliamentary",
+    "legislature",
+    "policy",
+    "proclamation",
+    "edict",
+    "administration",
+    "jurisdiction",
+    "sovereignty",
+    "referendum",
+    "bill",
+    "veto",
+    "democracy",
+    "autocracy",
+    "dictatorship",
+    "coup plot",
+  ],
+  "Science & Technology": [
+    "discovery",
+    "invention",
+    "scientific",
+    "technology",
+    "space",
+    "astronomy",
+    "physics",
+    "chemistry",
+    "biology",
+    "computer",
+    "internet",
+    "machine",
+    "device",
+    "research",
+    "experiment",
+    "patent",
+    "launch",
+    "satellite",
+    "telecom",
+    "innovation",
+    "breakthrough",
+    "engineering",
+    "robotics",
+    "artificial intelligence",
+    "AI",
+    "software",
+    "hardware",
+    "algorithm",
+    "biotechnology",
+    "genetics",
+    "medicine",
+    "vaccine",
+    "cure",
+    "theory",
+    "quantum",
+    "relativity",
+    "cosmology",
+    "explorer",
+    "telescope",
+    "microscope",
+    "nuclear",
+    "reactor",
+    "power plant",
+    "digital",
+    "network",
+    "cybernetics",
+    "data",
+    "chip",
+  ],
+  "Arts & Culture": [
+    "art",
+    "music",
+    "film",
+    "literature",
+    "theater",
+    "opera",
+    "painting",
+    "sculpture",
+    "artist",
+    "writer",
+    "poet",
+    "composer",
+    "play",
+    "novel",
+    "exhibition",
+    "festival",
+    "award",
+    "cultural",
+    "museum",
+    "gallery",
+    "symphony",
+    "ballet",
+    "premiere",
+    "architect",
+    "architecture",
+    "dance",
+    "photography",
+    "fashion",
+    "design",
+    "library",
+    "masterpiece",
+    "genre",
+    "album",
+    "song",
+    "director",
+    "actor",
+    "actress",
+    "exhibit",
+    "performance",
+    "academy",
+    "pulitzer",
+    "grammy",
+    "oscar",
+    "tony",
+    "emmy",
+    "cannes",
+    "venice",
+    "berlin",
+    "folklore",
+    "tradition",
+    "heritage",
+    "craft",
+    "poetry",
+    "prose",
+  ],
+  "Disasters & Accidents": [
+    "earthquake",
+    "flood",
+    "hurricane",
+    "tornado",
+    "volcano",
+    "tsunami",
+    "epidemic",
+    "famine",
+    "disaster",
+    "collapse",
+    "accident",
+    "crash",
+    "fire",
+    "explosion",
+    "sinking",
+    "blizzard",
+    "drought",
+    "calamity",
+    "tragedy",
+    "catastrophe",
+    "derailment",
+    "wreck",
+    "shipwreck",
+    "landslide",
+    "mudslide",
+    "avalanche",
+    "heatwave",
+    "cold wave",
+    "cyclone",
+    "typhoon",
+    "wildfire",
+    "oil spill",
+    "nuclear accident",
+    "meltdown",
+    "toxic leak",
+    "pollution",
+    "contagion",
+    "plague",
+    "pandemic",
+    "illness",
+    "disease",
+    "natural disaster",
+  ],
+  Sports: [
+    "olympic",
+    "games",
+    "championship",
+    "sport",
+    "tournament",
+    "team",
+    "medal",
+    "cup",
+    "athlete",
+    "competition",
+    "match",
+    "record",
+    "goal",
+    "world cup",
+    "football",
+    "soccer",
+    "basketball",
+    "baseball",
+    "tennis",
+    "golf",
+    "cricket",
+    "rugby",
+    "boxing",
+    "swimming",
+    "athletics",
+    "track and field",
+    "marathon",
+    "cycling",
+    "skiing",
+    "hockey",
+    "volleyball",
+    "formula 1",
+    "super bowl",
+    "grand slam",
+    "trophy",
+    "league",
+    "season",
+    "final",
+    "playoffs",
+    "stadium",
+    "arena",
+    "player",
+    "coach",
+    "umpire",
+    "referee",
+    "race",
+    "motor racing",
+    "equestrian",
+    "gymnastics",
+    "wrestling",
+    "judo",
+    "karate",
+    "fencing",
+    "sailing",
+    "rowing",
+    "diving",
+    "surfing",
+    "skateboarding",
+    "snowboarding",
+    "badminton",
+    "table tennis",
+    "handball",
+    "polo",
+    "pentathlon",
+    "decathlon",
+    "triathlon",
+    "winter olympics",
+    "summer olympics",
+    "commonwealth games",
+    "asian games",
+    "african games",
+    "pan american games",
+  ],
+  "Social & Human Rights": [
+    "slavery",
+    "rights",
+    "protest",
+    "movement",
+    "discrimination",
+    "equality",
+    "justice",
+    "reform",
+    "activist",
+    "civil",
+    "emancipation",
+    "suffrage",
+    "demonstration",
+    "strike",
+    "boycott",
+    "freedom",
+    "liberty",
+    "charter",
+    "declaration",
+    "humanitarian",
+    "charity",
+    "social",
+    "welfare",
+    "education reform",
+    "prison reform",
+    "labor rights",
+    "womens rights",
+    "civil rights",
+    "LGBTQ+",
+    "minority rights",
+    "indigenous rights",
+    "refugee",
+    "migration",
+    "community",
+    "poverty",
+    "housing",
+    "healthcare",
+    "public health",
+    "education",
+    "literacy",
+    "gender",
+    "race relations",
+    "class struggle",
+    "social change",
+    "activism",
+    "advocacy",
+  ],
+  "Economy & Business": [
+    "bank",
+    "stock market",
+    "company",
+    "trade",
+    "economy",
+    "financial",
+    "industry",
+    "currency",
+    "crisis",
+    "market",
+    "business",
+    "corporation",
+    "commerce",
+    "recession",
+    "inflation",
+    "depression",
+    "merger",
+    "acquisition",
+    "bankruptcy",
+    "debt",
+    "investment",
+    "capital",
+    "shares",
+    "bonds",
+    "tariff",
+    "tax",
+    "monopoly",
+    "trust",
+    "union",
+    "labor",
+    "manufacturing",
+    "agriculture",
+    "mining",
+    "transport",
+    "shipping",
+    "railway",
+    "airline",
+    "dot-com",
+    "boom",
+    "bust",
+    "entrepreneur",
+    "startup",
+    "venture",
+    "globalization",
+    "free trade",
+    "protectionism",
+    "commodity",
+    "export",
+    "import",
+    "retail",
+    "wholesale",
+    "consumer",
+    "production",
+    "distribution",
+    "logistics",
+  ],
+  // Categories derived from 'type' property or keywords
+  "Famous Persons": [
+    "author",
+    "artist",
+    "scientist",
+    "composer",
+    "king",
+    "queen",
+    "president",
+    "emperor",
+    "pope",
+    "philosopher",
+    "physicist",
+    "mathematician",
+    "writer",
+    "poet",
+    "singer",
+    "musician",
+    "painter",
+    "sculptor",
+    "architect",
+    "inventor",
+    "explorer",
+    "general",
+    "statesman",
+    "revolutionary",
+    "activist",
+    "athlete",
+    "actor",
+    "director",
+    "producer",
+    "comedian",
+    "humanitarian",
+    "scholar",
+    "economist",
+    "historian",
+    "monarch",
+    "ruler",
+    "politician",
+    "diplomat",
+    "astronaut",
+    "engineer",
+    "biologist",
+    "chemist",
+    "astronomer",
+    "novelist",
+    "playwright",
+    "lyricist",
+    "choreographer",
+    "dancer",
+    "photographer",
+    "fashion designer",
+    "chef",
+    "broadcaster",
+    "journalist",
+    "explorer",
+    "pioneer",
+    "visionary",
+  ],
+};
+
+// Helper Function to Categorize an Item (based on type AND text)
+function assignCategories(item) {
+  const categoriesFound = new Set();
+
+  // 1. Categorize based on explicit 'type' property from worker/API
+  if (item.type === "birth") {
+    categoriesFound.add("Births");
+    categoriesFound.add("Famous Persons"); // Births are often famous persons
+  } else if (item.type === "death") {
+    categoriesFound.add("Deaths");
+    categoriesFound.add("Famous Persons"); // Deaths are often famous persons
+  }
+
+  // 2. Categorize based on keywords in description (for general events and more specific famous persons)
+  const itemText = item.description || item.title || "";
+  const lowerText = itemText.toLowerCase();
+
+  for (const category in eventCategories) {
+    for (const keyword of eventCategories[category]) {
+      if (lowerText.includes(keyword)) {
+        categoriesFound.add(category);
+        break; // Move to next category once a keyword is found for a given category
+      }
+    }
+  }
+
+  // Add a 'Miscellaneous' category if no other specific category was found
+  if (categoriesFound.size === 0) {
+    categoriesFound.add("Miscellaneous");
+  }
+
+  return Array.from(categoriesFound);
+}
+
+// Function to Render Items in the Modal
+function renderFilteredItems(itemsToRender) {
+  const eventsListDiv = document.getElementById("modal-events-list");
+  if (!eventsListDiv) return;
+
+  if (itemsToRender.length === 0) {
+    eventsListDiv.innerHTML =
+      "<p class='text-muted text-center'>No items found for this category.</p>";
+    return;
+  }
+
+  let htmlContent = `<ul class="list-unstyled">`;
+  itemsToRender.forEach((event) => {
+    // Determine special emphasis based on explicit 'type'
+    let specialEmphasis = "";
+    if (event.type === "birth") {
+      specialEmphasis = "<strong>Birth:</strong> ";
+    } else if (event.type === "death") {
+      specialEmphasis = "<strong>Death:</strong> ";
+    }
+
+    htmlContent += `
+            <li class="mb-3 p-3 border rounded">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <strong class="text-primary">${event.year}</strong>
+                        <p class="mb-1">${specialEmphasis}${
+      event.description
+    }</p>
+                        ${
+                          event.sourceUrl
+                            ? `
+                            <a href="${
+                              event.sourceUrl
+                            }" class="btn btn-sm btn-outline-primary"
+                               target="_blank" rel="noopener noreferrer">
+                                Read More About ${
+                                  event.title.length > 50
+                                    ? `${event.title.substring(0, 12)}...`
+                                    : event.title
+                                }
+                            </a>
+                            `
+                            : ""
+                        }
+                    </div>
+                    ${
+                      event.thumbnailUrl
+                        ? `
+                        <div class="modal-thumbnail-container ms-3">
+                            <img src="${event.thumbnailUrl}" class="rounded"
+                                style="width: 40px; height: 40px; object-fit: cover;"
+                                alt="Event thumbnail" onerror="this.style.display='none'">
+                        </div>
+                        `
+                        : ""
+                    }
+                </div>
+            </li>`;
+  });
+  htmlContent += `</ul>`;
+
+  eventsListDiv.innerHTML = htmlContent;
+}
+
+// Function to Apply the Filter
+function applyFilter() {
+  const filteredItems = currentDayAllItems.filter((item) => {
+    if (currentActiveFilter === "all") {
+      return true;
+    }
+    return item.categories
+      .map((cat) => cat.toLowerCase())
+      .includes(currentActiveFilter);
+  });
+
+  renderFilteredItems(filteredItems);
+}
+
+// showEventDetails function to include filtering and process structured data
+async function showEventDetails(
+  day,
+  month,
+  year,
+  preFetchedStructuredEvents = null
+) {
   modalDate.textContent = `${day}. ${monthNames[month - 1]}`;
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
 
-  let events = preFetchedEvents;
+  let structuredEvents = preFetchedStructuredEvents;
 
   try {
-    // If no pre-fetched events, fetch new ones (this will check cache first)
-    // This path is primarily for "Click to load" days or if preFetchedEvents was null/empty
-    if (!events || events.length === 0) {
-      events = await fetchWikipediaEvents(month, day);
+    // If no pre-fetched structured events, fetch new ones (this will check cache first)
+    if (
+      !structuredEvents ||
+      (structuredEvents.events?.length === 0 &&
+        structuredEvents.births?.length === 0 &&
+        structuredEvents.deaths?.length === 0)
+    ) {
+      structuredEvents = await fetchWikipediaEvents(month, day);
     }
 
-    modalBodyContent.innerHTML = "";
+    // --- Combine all event types into a single array for processing ---
+    currentDayAllItems = [
+      ...(structuredEvents.events || []),
+      ...(structuredEvents.births || []),
+      ...(structuredEvents.deaths || []),
+    ].map((item) => ({
+      ...item,
+      // Pass the entire item to assignCategories to leverage 'type' and 'description'
+      categories: assignCategories(item),
+    }));
 
-    if (events && events.length > 0) {
-      // Sort events by year
-      events.sort((a, b) => {
-        const yearA = parseInt(a.year) || 0;
-        const yearB = parseInt(b.year) || 0;
-        return yearA - yearB;
-      });
+    // Sort events by year
+    currentDayAllItems.sort((a, b) => {
+      const yearA = parseInt(a.year) || 0;
+      const yearB = parseInt(b.year) || 0;
+      return yearA - yearB;
+    });
 
-      const ul = document.createElement("ul");
-      ul.className = "list-unstyled";
+    // --- Generate Filter Buttons ---
+    const allAvailableCategories = new Set(["All"]);
+    currentDayAllItems.forEach((item) => {
+      item.categories.forEach((cat) => allAvailableCategories.add(cat));
+    });
 
-      events.forEach((event) => {
-        const li = document.createElement("li");
-        li.className = "mb-3 p-3 border rounded";
+    const sortedCategories = Array.from(allAvailableCategories).sort((a, b) => {
+      // Prioritize "All", then "Births", "Deaths", "Famous Persons", then alphabetical
+      if (a === "All") return -1;
+      if (b === "All") return 1;
+      if (a === "Births") return -1;
+      if (b === "Births") return 1;
+      if (a === "Deaths") return -1;
+      if (b === "Deaths") return 1;
+      if (a === "Famous Persons" && b !== "Births" && b !== "Deaths") return -1;
+      if (b === "Famous Persons" && a !== "Births" && a !== "Deaths") return 1;
+      return a.localeCompare(b);
+    });
 
-        let eventText =
-          event.description || event.title || "No description available";
+    let filterButtonsHtml = `<div id="eventFilterContainer" class="d-flex flex-wrap gap-2 mb-3">`;
+    sortedCategories.forEach((category) => {
+      const isActive =
+        category.toLowerCase() === currentActiveFilter ? "active" : "";
+      filterButtonsHtml += `<button class="btn btn-sm btn-outline-primary filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
+    });
+    filterButtonsHtml += `</div>`;
+    // --- END Filter Buttons ---
 
-        li.innerHTML = `
-          <div class="d-flex justify-content-between align-items-start">
-            <div class="flex-grow-1">
-              <strong class="text-primary">${event.year}</strong>
-              <p class="mb-1">${eventText}</p>
-              ${
-                event.sourceUrl
-                  ? `
-                <a href="${
-                  event.sourceUrl
-                }" class="btn btn-sm btn-outline-primary"
-                   target="_blank" rel="noopener noreferrer">
-                  Read More About ${
-                    event.title.length > 50
-                      ? `${event.title.substring(0, 12)}...`
-                      : event.title
-                  }
-                </a>
-              `
-                  : ""
-              }
+    // --- Build Modal Content HTML with Filter Container ---
+    modalBodyContent.innerHTML = `
+            <div class="modal-header-content">
+                <h5 class="modal-title" id="eventModalLabel">${day}. ${
+      monthNames[month - 1]
+    }</h5>
+                <hr>
+                ${filterButtonsHtml}
             </div>
-            ${
-              event.thumbnailUrl
-                ? `
-              <div class="modal-thumbnail-container ms-3">
-                <img src="${event.thumbnailUrl}" class="rounded"
-                     style="width: 40px; height: 40px; object-fit: cover;"
-                     alt="Event thumbnail" onerror="this.style.display='none'">
-              </div>
-            `
-                : ""
-            }
-          </div>
+            <div id="modal-events-list">
+                </div>
         `;
-        ul.appendChild(li);
-      });
+    // --- END Modal Content ---
 
-      modalBodyContent.appendChild(ul);
-    } else {
-      modalBodyContent.innerHTML = `
-        <div class="alert alert-warning" role="alert">
-          <h5><i class="bi bi-exclamation-triangle"></i> No Events Found</h5>
-          <p>No events found for this day on Wikipedia.</p>
-          <p class="mb-0 text-muted">Historical data depends on available records.
-             Try checking Wikipedia directly for more comprehensive information.</p>
-        </div>
-      `;
-    }
+    // Attach event listeners to filter buttons
+    modalBodyContent.querySelectorAll(".filter-btn").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        const clickedCategory = event.target.dataset.category;
+
+        if (clickedCategory === currentActiveFilter) {
+          // If the active filter button is clicked again, reset to "All"
+          currentActiveFilter = "all";
+          // Remove active class from current button
+          event.target.classList.remove("active");
+          // Find and activate the "All" button
+          const allButton = modalBodyContent.querySelector(
+            '.filter-btn[data-category="all"]'
+          );
+          if (allButton) {
+            allButton.classList.add("active");
+          }
+        } else {
+          // Normal behavior: set new active filter
+          currentActiveFilter = clickedCategory;
+          // Update active state in UI
+          modalBodyContent
+            .querySelectorAll(".filter-btn")
+            .forEach((btn) => btn.classList.remove("active"));
+          event.target.classList.add("active");
+        }
+
+        applyFilter();
+      });
+    });
+
+    // Initial render based on the current active filter (which is "all" by default or from previous modal open)
+    applyFilter();
   } catch (error) {
     console.error("Error loading event details:", error);
     modalBodyContent.innerHTML = `
@@ -979,3 +1648,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 });
+
+// Modal close listener to reset filter
+// Add event listener for the modal close button
+const eventDetailModalElement = document.getElementById("eventDetailModal");
+if (eventDetailModalElement) {
+  eventDetailModalElement
+    .querySelector(".btn-close")
+    .addEventListener("click", () => {
+      eventDetailModal.hide(); // Use Bootstrap's hide method
+      currentActiveFilter = "all"; // Reset filter on close
+    });
+  // Also handle when dismissed via backdrop click or ESC key
+  eventDetailModalElement.addEventListener("hidden.bs.modal", function () {
+    currentActiveFilter = "all"; // Reset filter when modal is completely hidden
+  });
+}

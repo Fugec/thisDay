@@ -166,13 +166,19 @@ button.carousel-control-prev {
   align-items: center;
   gap: 15px;
 }
+
 .cookie-banner p {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 14px;
 }
+
 .cookie-banner .btn {
   flex-shrink: 0;
   padding: 8px 16px;
   border-radius: 5px;
   border: 1px solid #fff;
+}
+
+button.btn.btn-sm.btn-outline-primary.filter-btn {
+  font-size: 16px;
 }

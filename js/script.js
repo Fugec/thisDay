@@ -1376,16 +1376,12 @@ async function showEventDetails(
 
     // --- Build Modal Content HTML with Filter Container ---
     modalBodyContent.innerHTML = `
-            <div class="modal-header-content">
-                <h5 class="modal-title" id="eventModalLabel">${day}. ${
-      monthNames[month - 1]
-    }</h5>
-                <hr>
-                ${filterButtonsHtml}
-            </div>
-            <div id="modal-events-list">
-                </div>
-        `;
+    <div class="modal-header-content">
+        ${filterButtonsHtml}
+    </div>
+    <div id="modal-events-list">
+        </div>
+`;
     // --- END Modal Content ---
 
     // Attach event listeners to filter buttons

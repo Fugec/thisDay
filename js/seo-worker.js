@@ -225,24 +225,32 @@ async function handleFetchRequest(request, env) {
 
     rewriter.on("head", {
       element(element) {
+        // --- Inject Preloaded Data for Client-Side JS ---
         element.append(
           `<script id="preloaded-today-events" type="application/json">${jsonData}</script>`,
           { html: true }
         );
 
-        // --- Inject Schema.org JSON-LD for WebPage ---
-        const schemaData = {
+        // --- Main WebPage Schema with Events Collection ---
+        const webPageSchema = {
           "@context": "https://schema.org",
           "@type": "WebPage",
           name: dynamicTitle,
           description: dynamicDescription,
-          url: ogUrl, // Use the canonical URL
+          url: ogUrl,
           datePublished: isoDate,
           dateModified: isoDate,
           isPartOf: {
             "@type": "WebSite",
             name: "thisDay.info",
             url: "https://thisday.info/",
+            description:
+              "Explore historical events, milestones, and notable figures from any date",
+            publisher: {
+              "@type": "Organization",
+              name: "thisDay.info",
+              url: "https://thisday.info/",
+            },
           },
           potentialAction: {
             "@type": "SearchAction",
@@ -252,10 +260,226 @@ async function handleFetchRequest(request, env) {
             },
             "query-input": "required name=search_term_string",
           },
+          // Add mainEntity for primary content
+          mainEntity: {
+            "@type": "ItemList",
+            name: `Historical Events on ${formattedDate}`,
+            description: `Collection of historical events, births, and deaths that occurred on ${formattedDate}`,
+            numberOfItems:
+              (eventsData?.events?.length || 0) +
+              (eventsData?.births?.length || 0) +
+              (eventsData?.deaths?.length || 0),
+          },
         };
+
         element.append(
           `<script type="application/ld+json">${JSON.stringify(
-            schemaData
+            webPageSchema
+          )}</script>`,
+          { html: true }
+        );
+
+        // --- Consolidated Events Schema (limit to top events to avoid bloat) ---
+        if (eventsData && eventsData.events && eventsData.events.length > 0) {
+          // Create a consolidated events schema instead of individual ones
+          const topEvents = eventsData.events.slice(0, 5); // Limit to top 5 events
+          const eventsListSchema = {
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            name: `Historical Events on ${formattedDate}`,
+            description: `Major historical events that occurred on ${formattedDate} throughout history`,
+            url: ogUrl,
+            numberOfItems: topEvents.length,
+            itemListElement: topEvents.map((eventItem, index) => ({
+              "@type": "ListItem",
+              position: index + 1,
+              item: {
+                "@type": "Event",
+                name:
+                  eventItem.text.length > 100
+                    ? eventItem.text.substring(0, 100) + "..."
+                    : eventItem.text,
+                startDate: `${eventItem.year}-${String(
+                  today.getMonth() + 1
+                ).padStart(2, "0")}-${String(today.getDate()).padStart(
+                  2,
+                  "0"
+                )}`,
+                description: eventItem.text,
+                url: ogUrl,
+                // Add temporal context
+                temporalCoverage: eventItem.year.toString(),
+              },
+            })),
+          };
+
+          element.append(
+            `<script type="application/ld+json">${JSON.stringify(
+              eventsListSchema
+            )}</script>`,
+            { html: true }
+          );
+        }
+
+        // --- Notable People Schema (Births - limit to top 3) ---
+        if (eventsData?.births && eventsData.births.length > 0) {
+          const topBirths = eventsData.births.slice(0, 3);
+          const birthsListSchema = {
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            name: `Notable People Born on ${formattedDate}`,
+            description: `Famous individuals born on ${formattedDate} throughout history`,
+            url: ogUrl,
+            numberOfItems: topBirths.length,
+            itemListElement: topBirths.map((birthItem, index) => {
+              // Better name parsing - handle cases like "Name, title" or "Name (profession)"
+              const nameMatch = birthItem.text.match(/^([^,\(]+)/);
+              const personName = nameMatch
+                ? nameMatch[1].trim()
+                : birthItem.text.split(",")[0].trim();
+
+              return {
+                "@type": "ListItem",
+                position: index + 1,
+                item: {
+                  "@type": "Person",
+                  name: personName,
+                  birthDate: `${birthItem.year}-${String(
+                    today.getMonth() + 1
+                  ).padStart(2, "0")}-${String(today.getDate()).padStart(
+                    2,
+                    "0"
+                  )}`,
+                  description: birthItem.text,
+                  url: ogUrl,
+                  // Add additional context if available
+                  ...(birthItem.pages &&
+                    birthItem.pages.length > 0 && {
+                      sameAs: [
+                        `https://en.wikipedia.org/wiki/${encodeURIComponent(
+                          birthItem.pages[0].title.replace(/ /g, "_")
+                        )}`,
+                      ],
+                    }),
+                },
+              };
+            }),
+          };
+
+          element.append(
+            `<script type="application/ld+json">${JSON.stringify(
+              birthsListSchema
+            )}</script>`,
+            { html: true }
+          );
+        }
+
+        // --- Deaths Schema (limit to top 3) ---
+        if (eventsData?.deaths && eventsData.deaths.length > 0) {
+          const topDeaths = eventsData.deaths.slice(0, 3);
+          const deathsListSchema = {
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            name: `Notable People Who Died on ${formattedDate}`,
+            description: `Famous individuals who died on ${formattedDate} throughout history`,
+            url: ogUrl,
+            numberOfItems: topDeaths.length,
+            itemListElement: topDeaths.map((deathItem, index) => {
+              const nameMatch = deathItem.text.match(/^([^,\(]+)/);
+              const personName = nameMatch
+                ? nameMatch[1].trim()
+                : deathItem.text.split(",")[0].trim();
+
+              return {
+                "@type": "ListItem",
+                position: index + 1,
+                item: {
+                  "@type": "Person",
+                  name: personName,
+                  deathDate: `${deathItem.year}-${String(
+                    today.getMonth() + 1
+                  ).padStart(2, "0")}-${String(today.getDate()).padStart(
+                    2,
+                    "0"
+                  )}`,
+                  description: deathItem.text,
+                  url: ogUrl,
+                  // Add Wikipedia link if available
+                  ...(deathItem.pages &&
+                    deathItem.pages.length > 0 && {
+                      sameAs: [
+                        `https://en.wikipedia.org/wiki/${encodeURIComponent(
+                          deathItem.pages[0].title.replace(/ /g, "_")
+                        )}`,
+                      ],
+                    }),
+                },
+              };
+            }),
+          };
+
+          element.append(
+            `<script type="application/ld+json">${JSON.stringify(
+              deathsListSchema
+            )}</script>`,
+            { html: true }
+          );
+        }
+
+        // --- Add Breadcrumb Schema ---
+        const breadcrumbSchema = {
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          itemListElement: [
+            {
+              "@type": "ListItem",
+              position: 1,
+              name: "Home",
+              item: "https://thisday.info/",
+            },
+            {
+              "@type": "ListItem",
+              position: 2,
+              name: `${formattedDate} in History`,
+              item: ogUrl,
+            },
+          ],
+        };
+
+        element.append(
+          `<script type="application/ld+json">${JSON.stringify(
+            breadcrumbSchema
+          )}</script>`,
+          { html: true }
+        );
+
+        // --- Add FAQ Schema if you have common questions ---
+        const faqSchema = {
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          mainEntity: [
+            {
+              "@type": "Question",
+              name: `What happened on ${formattedDate}?`,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: dynamicDescription,
+              },
+            },
+            {
+              "@type": "Question",
+              name: "How do I find historical events for other dates?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "Use the date picker or search functionality to explore historical events, births, and deaths for any date in history.",
+              },
+            },
+          ],
+        };
+
+        element.append(
+          `<script type="application/ld+json">${JSON.stringify(
+            faqSchema
           )}</script>`,
           { html: true }
         );

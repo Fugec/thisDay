@@ -94,7 +94,7 @@ setInterval(() => {
 
 // --- Local Storage Cache Management ---
 
-// Function to load cache from localStorage
+// load cache from localStorage
 function loadCacheFromLocalStorage() {
   try {
     const cachedData = localStorage.getItem(LOCAL_STORAGE_CACHE_KEY);
@@ -109,7 +109,7 @@ function loadCacheFromLocalStorage() {
   return new Map(); // Return empty Map if no data or error
 }
 
-// Function to save cache to localStorage
+// save cache to localStorage
 function saveCacheToLocalStorage(cacheMap) {
   try {
     // Convert Map to a plain object for JSON stringification
@@ -286,7 +286,7 @@ async function fetchWikipediaEvents(month, day) {
   }
 }
 
-// Optimized carousel population to focus on the current date
+// Enhanced carousel population to load blog posts from /blog/ folder structure
 async function populateCarousel(month, year) {
   carouselInner.innerHTML = "";
   carouselIndicators.innerHTML = "";
@@ -296,54 +296,28 @@ async function populateCarousel(month, year) {
     const currentMonth = today.getMonth(); // 0-indexed
     const currentDay = today.getDate();
 
-    // Fetch events only for the current day
-    // Expect structured data from fetchWikipediaEvents
-    const eventsData = await fetchWikipediaEvents(currentMonth + 1, currentDay);
+    // Get month name for folder structure
+    const monthName = monthNames[currentMonth].toLowerCase();
 
-    // Combine all event types for the carousel for image selection
-    const allEventsForToday = [
-      ...(eventsData.events || []),
-      ...(eventsData.births || []),
-      ...(eventsData.deaths || []),
-    ];
+    console.log(`Fetching ALL blog posts for entire month: ${monthName}`);
 
-    const eventsWithImages = allEventsForToday.filter(
-      (event) =>
-        event.sourceUrl &&
-        event.sourceUrl.includes("wikipedia.org") &&
-        event.thumbnailUrl &&
-        event.thumbnailUrl !== ""
-    );
+    // Fetch ALL blog posts for the current month (not just current day)
+    const blogPosts = await fetchBlogPosts(monthName, currentMonth);
 
-    let uniqueEvents = [];
-    if (eventsWithImages.length <= 3) {
-      uniqueEvents = eventsWithImages; // If 3 or less, use all of them
-    } else {
-      // More efficient random selection without full array shuffle
-      const selectedIndices = new Set();
-      while (selectedIndices.size < 3) {
-        selectedIndices.add(
-          Math.floor(Math.random() * eventsWithImages.length)
-        );
-      }
-      uniqueEvents = Array.from(selectedIndices).map(
-        (index) => eventsWithImages[index]
-      );
-    }
+    console.log(`Found ${blogPosts.length} blog posts`);
 
-    if (uniqueEvents.length === 0) {
-      // Default placeholder if no events with images are found for today
+    if (blogPosts.length === 0) {
+      // Default placeholder if no blog posts are found
       const defaultItem = document.createElement("div");
       defaultItem.className = "carousel-item active";
-      // Carousel-image-container for consistent sizing
       defaultItem.innerHTML = `
         <div class="carousel-image-container">
-          <img src="https://placehold.co/1200x350/6c75D/ffffff?text=No+Featured+Images+Available+for+Today"
-               class="d-block w-100" alt="No images available" width="1200" height="350" fetchpriority="high" decoding="async">
+          <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Blog+Posts+Available+for+${monthName}"
+               class="d-block w-100" alt="No blog posts available" width="1200" height="350" fetchpriority="high" decoding="async">
         </div>
         <div class="carousel-caption">
-          <h5>Discover History on ${currentDay} ${monthNames[currentMonth]}</h5>
-          <p>No specific featured images available for today, but explore the calendar for more events!</p>
+          <h5>Blog Posts for ${monthNames[currentMonth]}</h5>
+          <p>No blog posts available for this month. Check back later for new content!</p>
           <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
         </div>
       `;
@@ -351,38 +325,38 @@ async function populateCarousel(month, year) {
       return;
     }
 
-    uniqueEvents.forEach((event, index) => {
+    // Create carousel items for each blog post
+    blogPosts.forEach((post, index) => {
       const carouselItem = document.createElement("div");
       carouselItem.className = `carousel-item${index === 0 ? " active" : ""}`;
 
-      const imageUrl = event.thumbnailUrl;
-      const fallbackImageUrl = `https://placehold.co/1200x350/6c757d/ffffff?text=Image+Not+Available`;
+      const imageUrl =
+        post.imageUrl ||
+        `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
+      const fallbackImageUrl = `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
 
+      // Truncate title if too long
       const MAX_WORDS = 15;
-      let titleContent = event.title || "Historical Event on This Day";
+      let titleContent =
+        post.title ||
+        `Blog Post - ${post.day} ${monthNames[currentMonth]} ${post.year}`;
       const titleWords = titleContent.split(" ");
       let truncatedTitle = titleWords.slice(0, MAX_WORDS).join(" ");
 
       if (titleWords.length > MAX_WORDS) {
         truncatedTitle += "...";
       }
-      // Get the current day and month for the label
-      const today = new Date();
-      const currentMonth = today.getMonth(); // 0-indexed
-      const currentDay = today.getDate();
 
-      // Formatted as "Day Month Year" (e.g., "26 June 1980")
-      const formattedDate = `${currentDay} ${monthNames[currentMonth]} ${event.year}`;
-
-      const yearLabel = `
+      // Date label for the blog post
+      const dateLabel = `
         <span class="year-label">
-          ${formattedDate}
+          ${post.day} ${monthNames[currentMonth]} ${post.year}
         </span>
       `;
 
       carouselItem.innerHTML = `
         <div style="position:relative;">
-          ${yearLabel}
+          ${dateLabel}
           <div class="carousel-image-container">
             <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
                  onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
@@ -393,16 +367,22 @@ async function populateCarousel(month, year) {
         </div>
         <div class="carousel-caption">
           <h5>${truncatedTitle}</h5>
-          <a href="${event.sourceUrl}" class="btn btn-primary btn-sm"
-             target="_blank" rel="noopener noreferrer">Read More About ${
-               event.title.length > 50
-                 ? `${event.title.substring(0, 12)}...`
-                 : event.title
-             }</a>
+          <p>${
+            post.excerpt || "Read this blog post about historical events."
+          }</p>
+          <a href="${post.url}" class="btn btn-primary btn-sm"
+             ${
+               post.isExternal
+                 ? 'target="_blank" rel="noopener noreferrer"'
+                 : ""
+             }>
+             Read Full Post
+          </a>
         </div>
       `;
       carouselInner.appendChild(carouselItem);
 
+      // Create carousel indicators
       const indicator = document.createElement("button");
       indicator.setAttribute("type", "button");
       indicator.setAttribute("data-bs-target", "#historicalCarousel");
@@ -423,7 +403,7 @@ async function populateCarousel(month, year) {
       bsCarousel.cycle();
     } else {
       new bootstrap.Carousel(carouselElement, {
-        interval: 4000,
+        interval: 3000, // 3 seconds per slide
         ride: "carousel",
       });
     }
@@ -432,14 +412,13 @@ async function populateCarousel(month, year) {
     // Show error state in carousel
     const errorItem = document.createElement("div");
     errorItem.className = "carousel-item active";
-    // Carousel-image-container for consistent sizing
     errorItem.innerHTML = `
       <div class="carousel-image-container">
-        <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Images"
+        <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Blog+Posts"
              class="d-block w-100" alt="Error loading" width="1200" height="350" fetchpriority="high" decoding="async">
       </div>
       <div class="carousel-caption">
-        <h5>Unable to Load Featured Content</h5>
+        <h5>Unable to Load Blog Posts</h5>
         <p>Please check your internet connection and try again.</p>
       </div>
     `;
@@ -447,7 +426,395 @@ async function populateCarousel(month, year) {
   }
 }
 
-// Function to create day card element
+// fetch blog posts from the /blog/ folder structure
+async function fetchBlogPosts(monthName, monthIndex) {
+  const blogPosts = [];
+  const BLOG_CACHE_KEY = `blogPosts_${monthName}`;
+
+  console.log(`Attempting to fetch ALL blog posts for ${monthName}`);
+
+  // Check cache first (using in-memory cache)
+  const cachedPosts = getCachedBlogPosts(BLOG_CACHE_KEY);
+  if (cachedPosts) {
+    console.log("Using cached blog posts");
+    return cachedPosts;
+  }
+
+  try {
+    // Method 1: Try to fetch from manifest file first (recommended approach)
+    const manifestPosts = await fetchBlogPostsFromManifest(monthName);
+    if (manifestPosts.length > 0) {
+      console.log(`Found ${manifestPosts.length} posts from manifest`);
+      setCachedBlogPosts(BLOG_CACHE_KEY, manifestPosts);
+      return manifestPosts;
+    }
+
+    // Method 2: Try to fetch all posts from the month folder
+    const allPosts = await fetchAllBlogPostsFromFolder(monthName, monthIndex);
+    if (allPosts.length > 0) {
+      console.log(`Found ${allPosts.length} posts from folder scanning`);
+      setCachedBlogPosts(BLOG_CACHE_KEY, allPosts);
+      return allPosts;
+    }
+
+    // Method 3: Generate posts for all days in the month
+    const generatedPosts = await generateMonthBlogPosts(monthName, monthIndex);
+    if (generatedPosts.length > 0) {
+      console.log(`Generated ${generatedPosts.length} posts for the month`);
+      setCachedBlogPosts(BLOG_CACHE_KEY, generatedPosts);
+      return generatedPosts;
+    }
+
+    console.log(`No blog posts found for ${monthName}`);
+    return [];
+  } catch (error) {
+    console.error("Error fetching blog posts:", error);
+
+    // Fallback: try to generate blog posts for the entire month
+    const fallbackPosts = await generateMonthBlogPosts(monthName, monthIndex);
+    console.log(`Using fallback posts: ${fallbackPosts.length}`);
+    return fallbackPosts;
+  }
+}
+
+// Fetch ALL blog posts from the month folder (starting from 2025, only before today)
+async function fetchAllBlogPostsFromFolder(monthName, monthIndex) {
+  const allPosts = [];
+  const currentYear = new Date().getFullYear();
+  const startYear = Math.max(2025, currentYear); // Start from 2025 or current year, whichever is higher
+
+  const today = new Date();
+  const currentMonth = today.getMonth();
+  const currentDay = today.getDate();
+
+  console.log(
+    `Scanning for all blog posts in ${monthName} folder starting from ${startYear} (only before today)...`
+  );
+
+  // Get number of days in the month
+  const daysInMonth = new Date(startYear, monthIndex + 1, 0).getDate();
+
+  // Try to find posts for all days of the month, but only for days before today
+  for (let day = 1; day <= daysInMonth; day++) {
+    // Skip days that are today or in the future
+    if (monthIndex === currentMonth && day >= currentDay) {
+      continue;
+    }
+
+    // Skip future months
+    if (monthIndex > currentMonth) {
+      continue;
+    }
+
+    const folderName = `${day}-${startYear}`;
+
+    try {
+      // Check if this post exists by trying to fetch it
+      const response = await fetch(`/blog/${monthName}/${folderName}/`, {
+        method: "HEAD",
+        cache: "no-cache",
+      });
+
+      if (response.ok) {
+        console.log(`Found blog post: ${folderName}`);
+        const postData = await fetchBlogPostData(
+          monthName,
+          folderName,
+          day,
+          startYear,
+          monthIndex
+        );
+        if (postData) {
+          allPosts.push(postData);
+        }
+      }
+    } catch (error) {
+      // Ignore errors for non-existent posts
+    }
+  }
+
+  // Sort posts by day (most recent first)
+  return allPosts.sort((a, b) => b.day - a.day);
+}
+
+// generate blog posts for all days in the month (only before today)
+async function generateMonthBlogPosts(monthName, monthIndex) {
+  const posts = [];
+  const currentYear = new Date().getFullYear();
+  const year = Math.max(2025, currentYear); // Use 2025 or current year, whichever is higher
+
+  const today = new Date();
+  const currentMonth = today.getMonth();
+  const currentDay = today.getDate();
+
+  console.log(
+    `Generating blog posts for all days in ${monthName} ${year} (only before today)...`
+  );
+
+  // Get number of days in the month
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+  // Generate posts for each day, but only for days before today
+  for (let day = 1; day <= daysInMonth; day++) {
+    // Skip days that are today or in the future
+    if (monthIndex === currentMonth && day >= currentDay) {
+      continue;
+    }
+
+    // Skip future months
+    if (monthIndex > currentMonth) {
+      continue;
+    }
+
+    const folderName = `${day}-${year}`;
+
+    // Create image URL using the format day.month.jpg (e.g., 18.7.jpg)
+    const imageUrl = `/images/blog/${day}.${monthIndex + 1}.jpg`;
+
+    const postData = {
+      day: day,
+      year: year,
+      title: `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`,
+      excerpt: `Discover what happened on ${day} ${monthNames[monthIndex]} ${year}. Explore historical events, birthdays, and significant moments from this day in history.`,
+      imageUrl: imageUrl,
+      url: `/blog/${monthName}/${folderName}/`,
+      isExternal: false,
+    };
+
+    posts.push(postData);
+  }
+
+  // Sort posts by day (most recent first)
+  return posts.sort((a, b) => b.day - a.day);
+}
+
+// fetch individual blog post data
+async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
+  try {
+    console.log(`Fetching data for blog post: ${monthName}/${folder}`);
+
+    // Create image URL using the format day.month.jpg (e.g., 18.7.jpg)
+    const imageUrl = `/images/blog/${day}.${monthIndex + 1}.jpg`;
+
+    // Try to fetch a metadata file (index.json, meta.json, etc.)
+    const metaResponse = await fetch(`/blog/${monthName}/${folder}/meta.json`);
+
+    if (metaResponse.ok) {
+      const metadata = await metaResponse.json();
+      console.log(`Found metadata for ${folder}:`, metadata);
+      return {
+        day: day,
+        year: year,
+        title: metadata.title,
+        excerpt: metadata.excerpt,
+        imageUrl: imageUrl, // Always use the standardized image format
+        url: `/blog/${monthName}/${folder}/`,
+        isExternal: false,
+        ...metadata,
+      };
+    }
+
+    // Fallback: try to fetch index.html and parse it
+    const htmlResponse = await fetch(`/blog/${monthName}/${folder}/index.html`);
+
+    if (htmlResponse.ok) {
+      const html = await htmlResponse.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+
+      // Extract title from various possible sources
+      const title =
+        doc
+          .querySelector('meta[property="og:title"]')
+          ?.getAttribute("content") ||
+        doc.querySelector("title")?.textContent ||
+        `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`;
+
+      // Extract excerpt/description
+      const excerpt =
+        doc
+          .querySelector('meta[property="og:description"]')
+          ?.getAttribute("content") ||
+        doc
+          .querySelector('meta[name="description"]')
+          ?.getAttribute("content") ||
+        `Discover what happened on ${day} ${monthNames[monthIndex]} ${year}`;
+
+      console.log(`Parsed HTML for ${folder}:`, { title, excerpt });
+
+      return {
+        day: day,
+        year: year,
+        title: title.trim(),
+        excerpt: excerpt.trim(),
+        imageUrl: imageUrl, // Always use the standardized image format
+        url: `/blog/${monthName}/${folder}/`,
+        isExternal: false,
+      };
+    }
+
+    // If no content found, return basic info with standardized image
+    return {
+      day: day,
+      year: year,
+      title: `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`,
+      excerpt: `Discover what happened on this day in ${year}`,
+      imageUrl: imageUrl, // Always use the standardized image format
+      url: `/blog/${monthName}/${folder}/`,
+      isExternal: false,
+    };
+  } catch (error) {
+    console.error(`Error fetching blog post data for ${folder}:`, error);
+
+    // Return basic data with standardized image even on error
+    return {
+      day: day,
+      year: year,
+      title: `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`,
+      excerpt: `Discover what happened on this day in ${year}`,
+      imageUrl: `/images/blog/${day}.${monthIndex + 1}.jpg`,
+      url: `/blog/${monthName}/${folder}/`,
+      isExternal: false,
+    };
+  }
+}
+
+// In-memory cache for blog posts (replacing localStorage)
+const blogPostCache = new Map();
+
+function getCachedBlogPosts(key) {
+  try {
+    const cached = blogPostCache.get(key);
+    if (cached) {
+      if (Date.now() - cached.timestamp < 60 * 60 * 1000) {
+        // 1 hour cache
+        return cached.posts;
+      } else {
+        blogPostCache.delete(key);
+      }
+    }
+  } catch (error) {
+    console.error("Error reading blog cache:", error);
+  }
+  return null;
+}
+
+function setCachedBlogPosts(key, posts) {
+  try {
+    blogPostCache.set(key, {
+      posts: posts,
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    console.error("Error setting blog cache:", error);
+  }
+}
+
+// Improved manifest-based approach (only before today)
+async function fetchBlogPostsFromManifest(monthName) {
+  try {
+    console.log(`Trying to fetch manifest for ${monthName}`);
+    const response = await fetch(`/blog/${monthName}/manifest.json`);
+    if (!response.ok) {
+      console.log(
+        `Manifest not found for ${monthName} (Status: ${response.status})`
+      );
+      return [];
+    }
+
+    const manifest = await response.json();
+    console.log(`Manifest loaded for ${monthName}:`, manifest);
+
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentDay = today.getDate();
+    const monthIndex = monthNames.findIndex(
+      (m) => m.toLowerCase() === monthName.toLowerCase()
+    );
+
+    const blogPosts = [];
+
+    for (const post of manifest.posts || []) {
+      // Skip posts that are today or in the future
+      if (monthIndex === currentMonth && post.day >= currentDay) {
+        continue;
+      }
+
+      // Skip future months
+      if (monthIndex > currentMonth) {
+        continue;
+      }
+
+      // Use standardized image format
+      const imageUrl = `/images/blog/${post.day}.${monthIndex + 1}.jpg`;
+
+      const postData = {
+        day: post.day,
+        year: post.year,
+        title: post.title,
+        excerpt: post.excerpt,
+        imageUrl: imageUrl,
+        url: `/blog/${monthName}/${post.folder}/`,
+        isExternal: false,
+      };
+      blogPosts.push(postData);
+    }
+
+    return blogPosts.sort((a, b) => b.day - a.day);
+  } catch (error) {
+    console.error("Error fetching from manifest:", error);
+    return [];
+  }
+}
+
+// Debug test blog post fetching
+async function debugBlogPosts() {
+  const today = new Date();
+  const monthName = monthNames[today.getMonth()].toLowerCase();
+
+  console.log("=== Blog Post Debug ===");
+  console.log(`Month: ${monthName}`);
+  console.log(`Looking for ALL posts in /blog/${monthName}/`);
+  console.log(`Starting from year: ${Math.min(2025, today.getFullYear())}`);
+  console.log(`Using image format: /images/blog/[day].[month].jpg`);
+
+  // Test manifest
+  console.log("Testing manifest...");
+  const manifestPosts = await fetchBlogPostsFromManifest(monthName);
+  console.log("Manifest posts:", manifestPosts);
+
+  // Test folder scanning
+  console.log("Testing folder scanning...");
+  const folderPosts = await fetchAllBlogPostsFromFolder(
+    monthName,
+    today.getMonth()
+  );
+  console.log("Folder posts:", folderPosts);
+
+  // Test month generation
+  console.log("Testing month generation...");
+  const generatedPosts = await generateMonthBlogPosts(
+    monthName,
+    today.getMonth()
+  );
+  console.log("Generated posts:", generatedPosts);
+
+  // Test specific posts
+  console.log("Testing specific posts...");
+  const testDays = [1, 15, 18, 25, 31];
+  for (const day of testDays) {
+    const testPost = await fetchBlogPostData(
+      monthName,
+      `${day}-${Math.max(2025, today.getFullYear())}`,
+      day,
+      Math.max(2025, today.getFullYear()),
+      today.getMonth()
+    );
+    console.log(`Test post ${day}:`, testPost);
+  }
+}
+
+// create day card element
 function createDayCard(day, month) {
   const dayCard = document.createElement("div");
   dayCard.className = "day-card loading"; // Start with loading class
@@ -468,7 +835,7 @@ function createDayCard(day, month) {
   return dayCard;
 }
 
-// Function to load events for a specific day card
+// load events for a specific day card
 async function loadDayEvents(dayCard, month, forceLoad = false) {
   const day = parseInt(dayCard.getAttribute("data-day"));
   // Only load if not already loaded or if forceLoad is true
@@ -1191,7 +1558,7 @@ const eventCategories = {
   ],
 };
 
-// Helper Function to Categorize an Item (based on type AND text)
+// Helper Categorize an Item (based on type AND text)
 function assignCategories(item) {
   const categoriesFound = new Set();
 
@@ -1225,7 +1592,7 @@ function assignCategories(item) {
   return Array.from(categoriesFound);
 }
 
-// Function to Render Items in the Modal
+// Render Items in the Modal
 function renderFilteredItems(itemsToRender) {
   const eventsListDiv = document.getElementById("modal-events-list");
   if (!eventsListDiv) return;
@@ -1290,7 +1657,7 @@ function renderFilteredItems(itemsToRender) {
   eventsListDiv.innerHTML = htmlContent;
 }
 
-// Function to Apply the Filter
+// Apply the Filter
 function applyFilter() {
   const filteredItems = currentDayAllItems.filter((item) => {
     if (currentActiveFilter === "all") {
@@ -1304,7 +1671,7 @@ function applyFilter() {
   renderFilteredItems(filteredItems);
 }
 
-// showEventDetails function to include filtering and process structured data
+// showEventDetails include filtering and process structured data
 async function showEventDetails(
   day,
   month,

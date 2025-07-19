@@ -802,10 +802,10 @@ async function debugBlogPosts() {
   }
 }
 
-// create day card element
+// create day card element// create day card element
 function createDayCard(day, month) {
   const dayCard = document.createElement("div");
-  dayCard.className = "day-card loading"; // Start with loading class
+  dayCard.className = "day-card"; // Remove initial loading class
   dayCard.setAttribute("data-day", day);
   dayCard.setAttribute("data-month", month + 1);
 
@@ -816,8 +816,7 @@ function createDayCard(day, month) {
 
   const eventSummary = document.createElement("div");
   eventSummary.className = "event-summary";
-  eventSummary.innerHTML =
-    '<div class="spinner-border spinner-border-sm" role="status"></div>'; // Default loading spinner
+  eventSummary.textContent = "Click to load"; // Default inactive state
   dayCard.appendChild(eventSummary);
 
   return dayCard;
@@ -835,6 +834,7 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
   // Set loading state
   const eventSummary = dayCard.querySelector(".event-summary");
   dayCard.classList.add("loading");
+  dayCard.classList.remove("needs-load");
   eventSummary.innerHTML =
     '<div class="spinner-border spinner-border-sm" role="status"></div>';
 
@@ -856,11 +856,9 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
     if (totalEvents > 0) {
       eventSummary.textContent = `${totalEvents} Events`;
       dayCard.classList.remove("no-events");
-      dayCard.classList.remove("skeleton"); // Remove skeleton class
     } else {
       eventSummary.textContent = "No Events";
       dayCard.classList.add("no-events");
-      dayCard.classList.remove("skeleton"); // Remove skeleton class
     }
 
     // Attach click listener if not already attached for this card's data state
@@ -885,14 +883,13 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
     dayCard.classList.remove("loading");
     dayCard.classList.add("error");
     dayCard.classList.remove("loaded"); // If error, not fully loaded
-    dayCard.classList.remove("skeleton"); // Remove skeleton class
     return false;
   }
 }
 
 async function renderCalendar() {
   // Clear only day cards from the calendar grid
-  calendarGrid.innerHTML = ""; // Clear previous content, including skeletons
+  calendarGrid.innerHTML = ""; // Clear previous content
 
   calendarGrid.setAttribute("role", "grid");
   calendarGrid.setAttribute("aria-label", "Historical events calendar");
@@ -909,17 +906,40 @@ async function renderCalendar() {
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-  // 1. Create all calendar grid structure first with skeleton states
+  // 1. Create all calendar grid structure first in inactive state
   const dayCards = [];
   for (let i = 1; i <= daysInMonth; i++) {
     const dayCard = createDayCard(i, month);
-    dayCard.classList.add("skeleton"); // Add skeleton class initially
 
     // Add ARIA roles and labels
     dayCard.setAttribute("role", "button");
     dayCard.setAttribute("tabindex", "0");
     dayCard.setAttribute("aria-label", `Events for ${i} ${monthNames[month]}`);
     dayCard.setAttribute("aria-pressed", "false");
+
+    // Mark all cards as needing to load initially
+    dayCard.classList.add("needs-load");
+
+    // Add click listener for lazy loading to all cards
+    dayCard.addEventListener("click", async () => {
+      if (
+        dayCard.classList.contains("needs-load") ||
+        dayCard.classList.contains("error")
+      ) {
+        await loadDayEvents(dayCard, month, true); // Force load
+        dayCard.classList.remove("needs-load");
+      }
+      // After loading (or if already loaded), show event details
+      if (dayCard.eventsData) {
+        showEventDetails(
+          parseInt(dayCard.getAttribute("data-day")),
+          month + 1,
+          currentDate.getFullYear(),
+          dayCard.eventsData
+        );
+      }
+    });
+    dayCard._hasClickListener = true;
 
     if (isCurrentMonth && i === todayDate) {
       dayCard.classList.add("today-highlight");
@@ -931,65 +951,20 @@ async function renderCalendar() {
   }
 
   try {
-    // Determine which days to prioritize for loading
-    let daysToPrioritize = [];
-    if (isCurrentMonth) {
-      // Prioritize today's date and a total of 7 days around it if possible
-      const startDay = Math.max(1, todayDate - 3); // 3 days before today
-      const endDay = Math.min(daysInMonth, todayDate + 3); // 3 days after today
-
-      for (let i = startDay; i <= endDay; i++) {
-        const card = dayCards.find(
-          (dCard) => parseInt(dCard.getAttribute("data-day")) === i
-        );
-        if (card) {
-          daysToPrioritize.push(card);
-        }
-      }
-    } else {
-      // For other months, prioritize the first 7 days explicitly
-      daysToPrioritize = dayCards.slice(0, Math.min(daysInMonth, 7));
-    }
-
-    // Filter out duplicates and ensure all are actual elements
-    daysToPrioritize = [...new Set(daysToPrioritize)].filter(Boolean);
-
-    // 2. Load Carousel content in parallel (high priority visual)
+    // 2. Load Carousel content in parallel
     const carouselPromise = populateCarousel(month, year);
 
-    // 3. Load prioritized days with limited concurrency
-    const CONCURRENCY_LIMIT =
-      navigator.connection && navigator.connection.effectiveType === "4g"
-        ? 10
-        : 5; // Dynamically adjust based on network speed
-    let activePromises = [];
-
-    const loadDayPromisesWithConcurrency = async (cardsToLoad) => {
-      for (const dayCard of cardsToLoad) {
-        // Only load if the card is not already marked as loaded (e.g., from cache)
-        if (!dayCard.classList.contains("loaded")) {
-          const promise = loadDayEvents(dayCard, month);
-          activePromises.push(promise);
-
-          if (activePromises.length >= CONCURRENCY_LIMIT) {
-            await Promise.race(activePromises).finally(() => {
-              activePromises = activePromises.filter((p) => p !== promise);
-            });
-          }
-        }
-      }
-      await Promise.all(activePromises); // Wait for any remaining
-    };
-
-    // Load prioritized days
-    await loadDayPromisesWithConcurrency(daysToPrioritize);
-
-    // Scroll to today's card if current month, after its events are loaded
+    // 3. Only load events for today's date if we're viewing the current month
     if (isCurrentMonth) {
       const todayCard = dayCards.find(
         (card) => parseInt(card.getAttribute("data-day")) === todayDate
       );
+
       if (todayCard) {
+        // Load today's events immediately
+        await loadDayEvents(todayCard, month, true);
+
+        // Scroll to today's card after its events are loaded
         setTimeout(() => {
           todayCard.scrollIntoView({
             behavior: "smooth",
@@ -998,38 +973,6 @@ async function renderCalendar() {
         }, 300); // Small delay to allow rendering
       }
     }
-
-    // 4. For remaining cards, set up click-to-load behavior
-    const remainingCards = dayCards.filter(
-      (card) => !daysToPrioritize.includes(card)
-    );
-
-    remainingCards.forEach((dayCard) => {
-      // Ensure existing loading spinner is removed and replaced with "Click to Load"
-      const eventSummary = dayCard.querySelector(".event-summary");
-      dayCard.classList.remove("loading"); // Remove initial loading state
-      dayCard.classList.remove("skeleton"); // Remove skeleton class as it's now interactive
-      eventSummary.textContent = "Click to load";
-      dayCard.classList.add("needs-load"); // Add a class for styling/identification
-
-      // Add a single event listener for lazy loading
-      if (!dayCard._hasClickListener) {
-        dayCard.addEventListener("click", async () => {
-          if (dayCard.classList.contains("needs-load")) {
-            await loadDayEvents(dayCard, month, true); // Force load
-            dayCard.classList.remove("needs-load");
-          }
-          // After loading, show event details
-          showEventDetails(
-            parseInt(dayCard.getAttribute("data-day")),
-            month + 1,
-            currentDate.getFullYear(),
-            dayCard.eventsData
-          );
-        });
-        dayCard._hasClickListener = true;
-      }
-    });
 
     // Ensure carousel is also finished
     await carouselPromise;
@@ -1054,526 +997,681 @@ async function renderCalendar() {
 let currentDayAllItems = []; // Stores all events for the currently opened day, with assigned categories
 let currentActiveFilter = "all"; // Tracks the currently active filter category
 
-// --- CATEGORY DEFINITIONS FOR KEYWORD MATCHING ---
+// --- CATEGORY DEFINITIONS WITH INCLUDE/EXCLUDE PRINCIPLE ---
 const eventCategories = {
-  "War & Conflict": [
-    "war",
-    "battle",
-    "conflict",
-    "siege",
-    "attack",
-    "invasion",
-    "armistice",
-    "treaty",
-    "military",
-    "forces",
-    "army",
-    "navy",
-    "air force",
-    "troops",
-    "soldiers",
-    "fighting",
-    "bombing",
-    "genocide",
-    "uprising",
-    "rebellion",
-    "revolution",
-    "peace treaty",
-    "declaration of war",
-    "skirmish",
-    "campaign",
-    "guerilla",
-    "front",
-    "combat",
-    "offensive",
-    "surrender",
-    "ceasefire",
-    "annexation",
-    "occupation",
-    "insurrection",
-    "bloodshed",
-    "massacre",
-    "coup d'état",
-    "mutiny",
-    "crusade",
-    "jihad",
-    "liberation",
-    "resistance",
-    "revolt",
-    "civil war",
-    "world war",
-    "cold war",
-    "terrorism",
-    "extremism",
-    "riot",
-  ],
-  "Politics & Government": [
-    "president",
-    "king",
-    "queen",
-    "emperor",
-    "parliament",
-    "election",
-    "government",
-    "constitution",
-    "assassination",
-    "coup",
-    "republic",
-    "monarchy",
-    "vote",
-    "congress",
-    "senate",
-    "law",
-    "act",
-    "decree",
-    "political",
-    "prime minister",
-    "chancellor",
-    "diplomatic",
-    "treaty",
-    "ambassador",
-    "summit",
-    "federation",
-    "union",
-    "state",
-    "nation",
-    "party",
-    "cabinet",
-    "ministry",
-    "parliamentary",
-    "legislature",
-    "policy",
-    "proclamation",
-    "edict",
-    "administration",
-    "jurisdiction",
-    "sovereignty",
-    "referendum",
-    "bill",
-    "veto",
-    "democracy",
-    "autocracy",
-    "dictatorship",
-    "coup plot",
-  ],
-  "Science & Technology": [
-    "discovery",
-    "invention",
-    "scientific",
-    "technology",
-    "space",
-    "astronomy",
-    "physics",
-    "chemistry",
-    "biology",
-    "computer",
-    "internet",
-    "machine",
-    "device",
-    "research",
-    "experiment",
-    "patent",
-    "launch",
-    "satellite",
-    "telecom",
-    "innovation",
-    "breakthrough",
-    "engineering",
-    "robotics",
-    "artificial intelligence",
-    "AI",
-    "software",
-    "hardware",
-    "algorithm",
-    "biotechnology",
-    "genetics",
-    "medicine",
-    "vaccine",
-    "cure",
-    "theory",
-    "quantum",
-    "relativity",
-    "cosmology",
-    "explorer",
-    "telescope",
-    "microscope",
-    "nuclear",
-    "reactor",
-    "power plant",
-    "digital",
-    "network",
-    "cybernetics",
-    "data",
-    "chip",
-  ],
-  "Arts & Culture": [
-    "art",
-    "music",
-    "film",
-    "literature",
-    "theater",
-    "opera",
-    "painting",
-    "sculpture",
-    "artist",
-    "writer",
-    "poet",
-    "composer",
-    "play",
-    "novel",
-    "exhibition",
-    "festival",
-    "award",
-    "cultural",
-    "museum",
-    "gallery",
-    "symphony",
-    "ballet",
-    "premiere",
-    "architect",
-    "architecture",
-    "dance",
-    "photography",
-    "fashion",
-    "design",
-    "library",
-    "masterpiece",
-    "genre",
-    "album",
-    "song",
-    "director",
-    "actor",
-    "actress",
-    "exhibit",
-    "performance",
-    "academy",
-    "pulitzer",
-    "grammy",
-    "oscar",
-    "tony",
-    "emmy",
-    "cannes",
-    "venice",
-    "berlin",
-    "folklore",
-    "tradition",
-    "heritage",
-    "craft",
-    "poetry",
-    "prose",
-  ],
-  "Disasters & Accidents": [
-    "earthquake",
-    "flood",
-    "hurricane",
-    "tornado",
-    "volcano",
-    "tsunami",
-    "epidemic",
-    "famine",
-    "disaster",
-    "collapse",
-    "accident",
-    "crash",
-    "fire",
-    "explosion",
-    "sinking",
-    "blizzard",
-    "drought",
-    "calamity",
-    "tragedy",
-    "catastrophe",
-    "derailment",
-    "wreck",
-    "shipwreck",
-    "landslide",
-    "mudslide",
-    "avalanche",
-    "heatwave",
-    "cold wave",
-    "cyclone",
-    "typhoon",
-    "wildfire",
-    "oil spill",
-    "nuclear accident",
-    "meltdown",
-    "toxic leak",
-    "pollution",
-    "contagion",
-    "plague",
-    "pandemic",
-    "illness",
-    "disease",
-    "natural disaster",
-  ],
-  Sports: [
-    "olympic",
-    "games",
-    "championship",
-    "sport",
-    "tournament",
-    "team",
-    "medal",
-    "cup",
-    "athlete",
-    "competition",
-    "match",
-    "record",
-    "goal",
-    "world cup",
-    "football",
-    "soccer",
-    "basketball",
-    "baseball",
-    "tennis",
-    "golf",
-    "cricket",
-    "rugby",
-    "boxing",
-    "swimming",
-    "athletics",
-    "track and field",
-    "marathon",
-    "cycling",
-    "skiing",
-    "hockey",
-    "volleyball",
-    "formula 1",
-    "super bowl",
-    "grand slam",
-    "trophy",
-    "league",
-    "season",
-    "final",
-    "playoffs",
-    "stadium",
-    "arena",
-    "player",
-    "coach",
-    "umpire",
-    "referee",
-    "race",
-    "motor racing",
-    "equestrian",
-    "gymnastics",
-    "wrestling",
-    "judo",
-    "karate",
-    "fencing",
-    "sailing",
-    "rowing",
-    "diving",
-    "surfing",
-    "skateboarding",
-    "snowboarding",
-    "badminton",
-    "table tennis",
-    "handball",
-    "polo",
-    "pentathlon",
-    "decathlon",
-    "triathlon",
-    "winter olympics",
-    "summer olympics",
-    "commonwealth games",
-    "asian games",
-    "african games",
-    "pan american games",
-  ],
-  "Social & Human Rights": [
-    "slavery",
-    "rights",
-    "protest",
-    "movement",
-    "discrimination",
-    "equality",
-    "justice",
-    "reform",
-    "activist",
-    "civil",
-    "emancipation",
-    "suffrage",
-    "demonstration",
-    "strike",
-    "boycott",
-    "freedom",
-    "liberty",
-    "charter",
-    "declaration",
-    "humanitarian",
-    "charity",
-    "social",
-    "welfare",
-    "education reform",
-    "prison reform",
-    "labor rights",
-    "womens rights",
-    "civil rights",
-    "LGBTQ+",
-    "minority rights",
-    "indigenous rights",
-    "refugee",
-    "migration",
-    "community",
-    "poverty",
-    "housing",
-    "healthcare",
-    "public health",
-    "education",
-    "literacy",
-    "gender",
-    "race relations",
-    "class struggle",
-    "social change",
-    "activism",
-    "advocacy",
-  ],
-  "Economy & Business": [
-    "bank",
-    "stock market",
-    "company",
-    "trade",
-    "economy",
-    "financial",
-    "industry",
-    "currency",
-    "crisis",
-    "market",
-    "business",
-    "corporation",
-    "commerce",
-    "recession",
-    "inflation",
-    "depression",
-    "merger",
-    "acquisition",
-    "bankruptcy",
-    "debt",
-    "investment",
-    "capital",
-    "shares",
-    "bonds",
-    "tariff",
-    "tax",
-    "monopoly",
-    "trust",
-    "union",
-    "labor",
-    "manufacturing",
-    "agriculture",
-    "mining",
-    "transport",
-    "shipping",
-    "railway",
-    "airline",
-    "dot-com",
-    "boom",
-    "bust",
-    "entrepreneur",
-    "startup",
-    "venture",
-    "globalization",
-    "free trade",
-    "protectionism",
-    "commodity",
-    "export",
-    "import",
-    "retail",
-    "wholesale",
-    "consumer",
-    "production",
-    "distribution",
-    "logistics",
-  ],
-  // Categories derived from 'type' property or keywords
-  "Famous Persons": [
-    "author",
-    "artist",
-    "scientist",
-    "composer",
-    "king",
-    "queen",
-    "president",
-    "emperor",
-    "pope",
-    "philosopher",
-    "physicist",
-    "mathematician",
-    "writer",
-    "poet",
-    "singer",
-    "musician",
-    "painter",
-    "sculptor",
-    "architect",
-    "inventor",
-    "explorer",
-    "general",
-    "statesman",
-    "revolutionary",
-    "activist",
-    "athlete",
-    "actor",
-    "director",
-    "producer",
-    "comedian",
-    "humanitarian",
-    "scholar",
-    "economist",
-    "historian",
-    "monarch",
-    "ruler",
-    "politician",
-    "diplomat",
-    "astronaut",
-    "engineer",
-    "biologist",
-    "chemist",
-    "astronomer",
-    "novelist",
-    "playwright",
-    "lyricist",
-    "choreographer",
-    "dancer",
-    "photographer",
-    "fashion designer",
-    "chef",
-    "broadcaster",
-    "journalist",
-    "explorer",
-    "pioneer",
-    "visionary",
-  ],
+  "War & Conflict": {
+    include: [
+      "war",
+      "battle",
+      "conflict",
+      "siege",
+      "attack",
+      "invasion",
+      "armistice",
+      "military",
+      "army",
+      "navy",
+      "air force",
+      "troops",
+      "soldiers",
+      "fighting",
+      "bombing",
+      "genocide",
+      "uprising",
+      "rebellion",
+      "revolution",
+      "combat",
+      "offensive",
+      "surrender",
+      "ceasefire",
+      "annexation",
+      "occupation",
+      "insurrection",
+      "bloodshed",
+      "massacre",
+      "mutiny",
+      "crusade",
+      "jihad",
+      "liberation",
+      "resistance",
+      "revolt",
+      "civil war",
+      "world war",
+      "cold war",
+      "terrorism",
+      "warfare",
+      "hostilities",
+      "blitzkrieg",
+      "partisan",
+      "militia",
+      "casualty",
+      "prisoner of war",
+      "pow",
+      "truce",
+      "alliance",
+      "blockade",
+      "skirmish",
+      "campaign",
+      "guerilla",
+      "guerrilla",
+      "front",
+      "regiment",
+      "battalion",
+      "division",
+      "corps",
+      "fleet",
+      "squadron",
+      "embargo",
+      "sanctions",
+    ],
+    exclude: [
+      "war on poverty",
+      "war on drugs",
+      "trade war",
+      "price war",
+      "culture war",
+      "cold war era",
+      "post-war",
+      "pre-war",
+      "war memorial",
+      "war museum",
+      "star wars",
+      "console wars",
+      "format war",
+      "browser war",
+    ],
+  },
+
+  "Politics & Government": {
+    include: [
+      "president",
+      "king",
+      "queen",
+      "emperor",
+      "parliament",
+      "election",
+      "government",
+      "constitution",
+      "assassination",
+      "coup",
+      "republic",
+      "monarchy",
+      "vote",
+      "congress",
+      "senate",
+      "law",
+      "act",
+      "decree",
+      "political",
+      "prime minister",
+      "chancellor",
+      "diplomatic",
+      "ambassador",
+      "summit",
+      "federation",
+      "state",
+      "nation",
+      "cabinet",
+      "ministry",
+      "legislature",
+      "policy",
+      "proclamation",
+      "administration",
+      "sovereignty",
+      "referendum",
+      "bill",
+      "veto",
+      "democracy",
+      "autocracy",
+      "dictatorship",
+      "regime",
+      "governance",
+      "embassy",
+      "treaty",
+      "accord",
+      "pact",
+      "impeachment",
+      "inauguration",
+      "coronation",
+      "abdication",
+      "succession",
+      "dynasty",
+      "duke",
+      "duchess",
+      "prince",
+      "princess",
+      "governor",
+      "senator",
+      "congressman",
+      "minister",
+      "mayor",
+    ],
+    exclude: [
+      "student government",
+      "corporate governance",
+      "self-government",
+      "government contract",
+      "government employee",
+      "government building",
+      "king size",
+      "queen bed",
+      "emperor penguin",
+      "minister of religion",
+      "political science",
+      "political theory",
+      "political philosophy",
+    ],
+  },
+
+  "Science & Technology": {
+    include: [
+      "discovery",
+      "invention",
+      "scientific",
+      "technology",
+      "space",
+      "astronomy",
+      "physics",
+      "chemistry",
+      "biology",
+      "computer",
+      "internet",
+      "research",
+      "experiment",
+      "patent",
+      "launch",
+      "satellite",
+      "innovation",
+      "breakthrough",
+      "engineering",
+      "robotics",
+      "artificial intelligence",
+      "AI",
+      "software",
+      "hardware",
+      "algorithm",
+      "biotechnology",
+      "genetics",
+      "medicine",
+      "vaccine",
+      "cure",
+      "theory",
+      "quantum",
+      "relativity",
+      "telescope",
+      "microscope",
+      "nuclear",
+      "reactor",
+      "digital",
+      "network",
+      "laboratory",
+      "mars",
+      "moon landing",
+      "shuttle",
+      "rocket",
+      "probe",
+      "rover",
+      "orbit",
+      "astronaut",
+      "cosmonaut",
+      "dna",
+      "genome",
+      "cloning",
+      "antibiotic",
+      "surgery",
+      "transplant",
+      "laser",
+      "nanotechnology",
+      "renewable energy",
+    ],
+    exclude: [
+      "rocket science",
+      "brain surgery",
+      "computer game",
+      "computer graphics",
+      "internet meme",
+      "space opera",
+      "space fantasy",
+      "digital art",
+      "digital music",
+      "network television",
+      "social network",
+      "patent leather",
+      "medicine man",
+      "folk medicine",
+      "alternative medicine",
+      "space race",
+    ],
+  },
+
+  "Arts & Culture": {
+    include: [
+      "art",
+      "music",
+      "film",
+      "literature",
+      "theater",
+      "theatre",
+      "opera",
+      "painting",
+      "sculpture",
+      "artist",
+      "writer",
+      "poet",
+      "composer",
+      "play",
+      "novel",
+      "exhibition",
+      "festival",
+      "museum",
+      "gallery",
+      "symphony",
+      "ballet",
+      "premiere",
+      "architect",
+      "architecture",
+      "dance",
+      "photography",
+      "fashion",
+      "design",
+      "masterpiece",
+      "album",
+      "song",
+      "director",
+      "actor",
+      "actress",
+      "performance",
+      "folklore",
+      "tradition",
+      "heritage",
+      "craft",
+      "poetry",
+      "prose",
+      "cinema",
+      "movie",
+      "documentary",
+      "concert",
+      "recital",
+      "manuscript",
+      "bestseller",
+      "anthology",
+      "autobiography",
+      "biography",
+    ],
+    exclude: [
+      "art dealer",
+      "art market",
+      "music industry",
+      "film industry",
+      "theater of war",
+      "performance indicator",
+      "performance review",
+      "architect of peace",
+      "fashion police",
+      "design pattern",
+      "song bird",
+      "actor model",
+      "play ground",
+      "novel idea",
+      "craft beer",
+      "craft fair",
+    ],
+  },
+
+  "Disasters & Accidents": {
+    include: [
+      "earthquake",
+      "flood",
+      "hurricane",
+      "tornado",
+      "volcano",
+      "tsunami",
+      "epidemic",
+      "pandemic",
+      "famine",
+      "disaster",
+      "collapse",
+      "accident",
+      "crash",
+      "fire",
+      "explosion",
+      "sinking",
+      "blizzard",
+      "drought",
+      "tragedy",
+      "catastrophe",
+      "derailment",
+      "wreck",
+      "shipwreck",
+      "landslide",
+      "avalanche",
+      "heatwave",
+      "cyclone",
+      "typhoon",
+      "wildfire",
+      "oil spill",
+      "nuclear accident",
+      "meltdown",
+      "toxic leak",
+      "pollution",
+      "plague",
+      "outbreak",
+      "mudslide",
+      "natural disaster",
+      "calamity",
+      "emergency",
+      "evacuation",
+      "rescue",
+    ],
+    exclude: [
+      "disaster movie",
+      "train wreck",
+      "car crash test",
+      "fire drill",
+      "fire department",
+      "fire station",
+      "disaster preparedness",
+      "emergency room",
+      "emergency exit",
+      "fire alarm",
+      "smoke detector",
+      "rescue dog",
+    ],
+  },
+
+  Sports: {
+    include: [
+      "olympic",
+      "olympics",
+      "championship",
+      "sport",
+      "tournament",
+      "medal",
+      "cup",
+      "athlete",
+      "competition",
+      "match",
+      "record",
+      "goal",
+      "world cup",
+      "football",
+      "soccer",
+      "basketball",
+      "baseball",
+      "tennis",
+      "golf",
+      "cricket",
+      "rugby",
+      "boxing",
+      "swimming",
+      "athletics",
+      "marathon",
+      "cycling",
+      "skiing",
+      "hockey",
+      "volleyball",
+      "formula 1",
+      "super bowl",
+      "grand slam",
+      "trophy",
+      "league",
+      "season",
+      "final",
+      "playoffs",
+      "stadium",
+      "arena",
+      "player",
+      "coach",
+      "race",
+      "gymnastics",
+      "wrestling",
+      "sailing",
+      "rowing",
+      "diving",
+    ],
+    exclude: [
+      "sport utility",
+      "good sport",
+      "sport coat",
+      "transport",
+      "passport",
+      "stadium seating",
+      "arena rock",
+      "player piano",
+      "coach class",
+      "record label",
+      "record store",
+      "goal post",
+      "cup holder",
+      "medal of honor",
+    ],
+  },
+
+  "Social & Human Rights": {
+    include: [
+      "slavery",
+      "rights",
+      "protest",
+      "movement",
+      "discrimination",
+      "equality",
+      "justice",
+      "reform",
+      "activist",
+      "civil rights",
+      "emancipation",
+      "suffrage",
+      "demonstration",
+      "strike",
+      "boycott",
+      "freedom",
+      "liberty",
+      "charter",
+      "humanitarian",
+      "welfare",
+      "labor rights",
+      "women's rights",
+      "minority rights",
+      "indigenous rights",
+      "refugee",
+      "migration",
+      "poverty",
+      "social justice",
+      "human rights",
+      "civil liberties",
+      "segregation",
+      "integration",
+      "march",
+    ],
+    exclude: [
+      "property rights",
+      "copyright",
+      "patent rights",
+      "mineral rights",
+      "labor day",
+      "labor cost",
+      "welfare state",
+      "freedom fighter",
+      "liberty bell",
+      "charter school",
+      "charter flight",
+      "reform school",
+    ],
+  },
+
+  "Economy & Business": {
+    include: [
+      "bank",
+      "stock market",
+      "company",
+      "trade",
+      "economy",
+      "financial",
+      "industry",
+      "currency",
+      "market",
+      "business",
+      "corporation",
+      "commerce",
+      "recession",
+      "inflation",
+      "depression",
+      "merger",
+      "acquisition",
+      "bankruptcy",
+      "debt",
+      "investment",
+      "capital",
+      "shares",
+      "bonds",
+      "tariff",
+      "tax",
+      "monopoly",
+      "union",
+      "manufacturing",
+      "agriculture",
+      "mining",
+      "transport",
+      "shipping",
+      "railway",
+      "airline",
+      "boom",
+      "bust",
+      "entrepreneur",
+      "startup",
+      "globalization",
+      "free trade",
+      "commodity",
+      "export",
+      "import",
+      "retail",
+    ],
+    exclude: [
+      "blood bank",
+      "river bank",
+      "bank holiday",
+      "investment bank",
+      "food bank",
+      "data bank",
+      "piggy bank",
+      "company picnic",
+      "trade winds",
+      "trade secret",
+      "market place",
+      "market research",
+      "labor union",
+      "student union",
+      "european union",
+      "tax break",
+      "tax shelter",
+    ],
+  },
+
+  "Famous Persons": {
+    include: [
+      "author",
+      "scientist",
+      "composer",
+      "philosopher",
+      "physicist",
+      "mathematician",
+      "writer",
+      "poet",
+      "singer",
+      "musician",
+      "painter",
+      "sculptor",
+      "inventor",
+      "explorer",
+      "general",
+      "statesman",
+      "revolutionary",
+      "humanitarian",
+      "scholar",
+      "economist",
+      "historian",
+      "novelist",
+      "playwright",
+      "choreographer",
+      "dancer",
+      "photographer",
+      "journalist",
+      "pioneer",
+      "visionary",
+      "genius",
+      "celebrity",
+      "icon",
+      "legend",
+      "laureate",
+      "recipient",
+      "winner",
+    ],
+    exclude: [
+      "ghost writer",
+      "song writer",
+      "copy writer",
+      "type writer",
+      "explorer browser",
+      "general store",
+      "general public",
+      "general knowledge",
+      "revolutionary war",
+      "pioneer species",
+      "dance music",
+      "singer sewing machine",
+    ],
+  },
 };
 
-// Helper Categorize an Item (based on type AND text)
-function assignCategories(item) {
-  const categoriesFound = new Set();
+// Helper function to check if text matches include/exclude criteria
+function matchesCategory(text, categoryRules) {
+  const lowerText = text.toLowerCase();
 
-  // 1. Categorize based on explicit 'type' property from worker/API
-  if (item.type === "birth") {
-    categoriesFound.add("Births");
-    categoriesFound.add("Famous Persons"); // Births are often famous persons
-  } else if (item.type === "death") {
-    categoriesFound.add("Deaths");
-    categoriesFound.add("Famous Persons"); // Deaths are often famous persons
-  }
-
-  // 2. Categorize based on keywords in description (for general events and more specific famous persons)
-  const itemText = item.description || item.title || "";
-  const lowerText = itemText.toLowerCase();
-
-  for (const category in eventCategories) {
-    for (const keyword of eventCategories[category]) {
-      if (lowerText.includes(keyword)) {
-        categoriesFound.add(category);
-        break; // Move to next category once a keyword is found for a given category
-      }
+  // Check if any exclude keywords are present
+  for (const excludeKeyword of categoryRules.exclude) {
+    if (lowerText.includes(excludeKeyword.toLowerCase())) {
+      return false;
     }
   }
 
-  // Add a 'Miscellaneous' category if no other specific category was found
-  if (categoriesFound.size === 0) {
+  // Check if any include keywords are present
+  for (const includeKeyword of categoryRules.include) {
+    if (lowerText.includes(includeKeyword.toLowerCase())) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Main categorization function
+function assignCategories(item) {
+  const categoriesFound = new Set();
+
+  // 1. Handle explicit type-based categories first
+  if (item.type === "birth") {
+    categoriesFound.add("Births");
+    categoriesFound.add("Famous Persons");
+  } else if (item.type === "death") {
+    categoriesFound.add("Deaths");
+    categoriesFound.add("Famous Persons");
+  }
+
+  // 2. Categorize based on include/exclude keyword matching
+  const itemText = (item.description || item.title || "").toLowerCase();
+
+  for (const categoryName in eventCategories) {
+    if (matchesCategory(itemText, eventCategories[categoryName])) {
+      categoriesFound.add(categoryName);
+    }
+  }
+
+  // 3. Add 'Miscellaneous' if no categories found (excluding type-based ones)
+  const nonTypeBased = Array.from(categoriesFound).filter(
+    (cat) => cat !== "Births" && cat !== "Deaths"
+  );
+
+  if (nonTypeBased.length === 0 && !categoriesFound.has("Famous Persons")) {
     categoriesFound.add("Miscellaneous");
   }
 

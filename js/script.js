@@ -591,30 +591,12 @@ async function generateMonthBlogPosts(monthName, monthIndex) {
 // fetch individual blog post data
 async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
   try {
-    console.log(`Fetching data for blog post: ${monthName}/${folder}`);
+    console.log(`Fetching HTML for blog post: ${monthName}/${folder}`); // Updated log message
 
     // Create image URL using the format day.month.jpg (e.g., 18.7.jpg)
     const imageUrl = `/images/blog/${day}.${monthIndex + 1}.jpg`;
 
-    // Try to fetch a metadata file (index.json, meta.json, etc.)
-    const metaResponse = await fetch(`/blog/${monthName}/${folder}/meta.json`);
-
-    if (metaResponse.ok) {
-      const metadata = await metaResponse.json();
-      console.log(`Found metadata for ${folder}:`, metadata);
-      return {
-        day: day,
-        year: year,
-        title: metadata.title,
-        excerpt: metadata.excerpt,
-        imageUrl: imageUrl, // Always use the standardized image format
-        url: `/blog/${monthName}/${folder}/`,
-        isExternal: false,
-        ...metadata,
-      };
-    }
-
-    // Fallback: try to fetch index.html and parse it
+    // --- Directly try to fetch index.html and parse it ---
     const htmlResponse = await fetch(`/blog/${monthName}/${folder}/index.html`);
 
     if (htmlResponse.ok) {
@@ -653,18 +635,24 @@ async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
       };
     }
 
-    // If no content found, return basic info with standardized image
+    // If no content found (index.html not found/OK), return basic info with standardized image
+    console.warn(
+      `No index.html found for ${monthName}/${folder}, returning basic info.`
+    );
     return {
       day: day,
       year: year,
       title: `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`,
       excerpt: `Discover what happened on this day in ${year}`,
-      imageUrl: imageUrl, // Always use the standardized image format
+      imageUrl: imageUrl,
       url: `/blog/${monthName}/${folder}/`,
       isExternal: false,
     };
   } catch (error) {
-    console.error(`Error fetching blog post data for ${folder}:`, error);
+    console.error(
+      `Error fetching or parsing blog post HTML for ${folder}:`,
+      error
+    );
 
     // Return basic data with standardized image even on error
     return {

@@ -75,10 +75,102 @@ function extractLocationFromName(text) {
 async function handleFetchRequest(request, env) {
   const url = new URL(request.url);
 
+  if (url.pathname === "/llms.txt") {
+    const llmsContent = `# Site Summary for Large Language Models...`; // your content
+    return new Response(llmsContent, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+
   // Only handle requests for the root path or /index.html
   // Pass through all other requests (e.g., for JS, CSS, images) directly to the origin
   if (url.pathname !== "/" && url.pathname !== "/index.html") {
     return fetch(request);
+  }
+
+  if (url.pathname === "/manifest.json") {
+    const manifestContent = {
+      name: "This Day in History",
+      short_name: "ThisDay",
+      description:
+        "Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history. Browse by date and learn about wars, inventions, discoveries, and the lives of notable people. Make history come alive - one day at a time.",
+      version: "1.0.0",
+      start_url: "/",
+      display: "standalone",
+      background_color: "#2c3e50",
+      theme_color: "#2c3e50",
+      orientation: "any",
+      scope: "/",
+      lang: "en",
+      icons: [
+        {
+          src: "icons/icon-72x72.png",
+          sizes: "72x72",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "icons/icon-96x96.png",
+          sizes: "96x96",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "icons/icon-128x128.png",
+          sizes: "128x128",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "icons/icon-144x144.png",
+          sizes: "144x144",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "icons/icon-152x152.png",
+          sizes: "152x152",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "icons/icon-192x192.png",
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "any maskable",
+        },
+        {
+          src: "icons/icon-384x384.png",
+          sizes: "384x384",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "icons/icon-512x512.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "any maskable",
+        },
+      ],
+      categories: ["education", "reference", "history"],
+      screenshots: [
+        {
+          src: "screenshots/desktop.png",
+          sizes: "1280x720",
+          type: "image/png",
+          form_factor: "wide",
+        },
+        {
+          src: "screenshots/mobile.png",
+          sizes: "540x720",
+          type: "image/png",
+          form_factor: "narrow",
+        },
+      ],
+    };
+    return new Response(JSON.stringify(manifestContent), {
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    });
   }
 
   const today = new Date(); // Current date (at Cloudflare edge)

@@ -452,8 +452,8 @@ async function fetchAllBlogPostsFromFolder(monthName, monthIndex) {
 
   // Try to find posts for all days of the month, but only for days before today
   for (let day = 1; day <= daysInMonth; day++) {
-    // Skip days that are today or in the future
-    if (monthIndex === currentMonth && day >= currentDay) {
+    // Skip future days (allow today)
+    if (monthIndex === currentMonth && day > currentDay) {
       continue;
     }
 
@@ -679,8 +679,8 @@ async function fetchBlogPostsFromManifest(monthName) {
     const blogPosts = [];
 
     for (const post of manifest.posts || []) {
-      // Skip posts that are today or in the future
-      if (monthIndex === currentMonth && post.day >= currentDay) {
+      // Skip future days (allow today)
+      if (monthIndex === currentMonth && post.day > currentDay) {
         continue;
       }
 

@@ -18,10 +18,6 @@ body.dark-theme {
   font-size: 16px;
 }
 
-div#historicalCarousel .carousel-inner {
-  padding-bottom: 30px; /* Add padding to the bottom for spacing */
-}
-
 /* Header/Hero Section */
 .carousel-header .text-muted {
   padding-left: 20px;
@@ -35,31 +31,19 @@ div#carouselIndicators {
   display: none; /* Hide indicators */
 }
 
-button.carousel-control-next {
+/* button.carousel-control-next {
   display: none;
 }
 button.carousel-control-prev {
   display: none;
-}
+} */
 
 /* Responsive adjustments for smaller screens (mobile) */
 @media (max-width: 767.98px) {
-  #historicalCarousel {
-    padding: 10px; /* Less padding on mobile */
-    border-radius: var(
-      --border-radius,
-      0
-    ); /* Use consistent border-radius or remove for full-width look on small screens */
-  }
-
-  .carousel-caption {
-    padding: 0.5rem; /* Less padding for captions on mobile */
-  }
-
   .carousel-caption h5 {
-    font-size: 1rem; /* Smaller font size for headings on mobile */
-    padding-top: 15px; /* Adjust padding for better spacing */
-    padding-bottom: 20px; /* Adjust padding for better spacing */
+    font-size: 1rem;
+    padding-top: 15px;
+    padding-bottom: 20px;
   }
 
   @media screen and (max-width: 450px) {

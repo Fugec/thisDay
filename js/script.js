@@ -5,7 +5,7 @@ const modalBodyContent = document.getElementById("modalBodyContent");
 const eventDetailModal = new bootstrap.Modal(
   document.getElementById("eventDetailModal")
 );
-const loadingIndicator = document.getElementById("loadingIndicator"); // This will be hidden by showInitialSkeleton now
+const loadingIndicator = document.getElementById("loadingIndicator");
 
 // Elements for carousel
 const carouselInner = document.getElementById("carouselInner");
@@ -16,10 +16,9 @@ const themeSwitchMobile = document.getElementById("themeSwitchMobile");
 const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
 const body = document.body;
 
-let currentDate = new Date(); // Start with current date
+let currentDate = new Date();
 
-// Enhanced cache for storing fetched events with expiration
-const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000;
 const LOCAL_STORAGE_CACHE_KEY = "wikipediaEventCache";
 
 // Months
@@ -41,34 +40,29 @@ const monthNames = [
 // Rate limiting variables
 let requestCount = 0;
 const MAX_REQUESTS_PER_SECOND = 10;
-const RATE_LIMIT_WINDOW = 1000; // 1 second
+const RATE_LIMIT_WINDOW = 1000;
 
-// Reset request counter every second
 setInterval(() => {
   requestCount = 0;
 }, RATE_LIMIT_WINDOW);
 
 // --- Local Storage Cache Management ---
 
-// load cache from localStorage
 function loadCacheFromLocalStorage() {
   try {
     const cachedData = localStorage.getItem(LOCAL_STORAGE_CACHE_KEY);
     if (cachedData) {
       const parsedData = JSON.parse(cachedData);
-      // Convert plain object back to Map for easier use
       return new Map(Object.entries(parsedData));
     }
   } catch (e) {
     console.error("Error loading cache from localStorage:", e);
   }
-  return new Map(); // Return empty Map if no data or error
+  return new Map();
 }
 
-// save cache to localStorage
 function saveCacheToLocalStorage(cacheMap) {
   try {
-    // Convert Map to a plain object for JSON stringification
     const objToStore = {};
     cacheMap.forEach((value, key) => {
       objToStore[key] = value;
@@ -79,15 +73,12 @@ function saveCacheToLocalStorage(cacheMap) {
   }
 }
 
-// Initialize eventCache from localStorage on startup
 let eventCache = loadCacheFromLocalStorage();
 
 // --- End Local Storage Cache Management ---
 
-// Enhanced rate-limited fetch with retry logic - CORS FIX
 async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    // Check rate limit
     if (requestCount >= MAX_REQUESTS_PER_SECOND) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       requestCount = 0;
@@ -107,15 +98,13 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
       if (response.ok) {
         return response;
       } else if (response.status === 429) {
-        // Rate limited, wait and retry
-        const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
+        const waitTime = Math.pow(2, attempt) * 1000;
         console.warn(
           `Rate limited. Waiting ${waitTime}ms before retry ${attempt + 1}`
         );
         await new Promise((resolve) => setTimeout(resolve, waitTime));
         continue;
       } else if (response.status >= 500) {
-        // Server error, retry
         const waitTime = Math.pow(2, attempt) * 500;
         console.warn(
           `Server error ${response.status}. Retrying in ${waitTime}ms`
@@ -123,7 +112,6 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
         await new Promise((resolve) => setTimeout(resolve, waitTime));
         continue;
       } else {
-        // Client error, don't retry
         return response;
       }
     } catch (error) {
@@ -135,38 +123,30 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
       await new Promise((resolve) => setTimeout(resolve, waitTime));
     }
   }
-
   throw new Error(`Failed after ${maxRetries} attempts`);
 }
 
-// Enhanced Wikipedia API function with better error handling and caching
-// Now returns a structured object { events: [], births: [], deaths: [] }
 async function fetchWikipediaEvents(month, day) {
   const cacheKey = `${month}-${day}-en`;
-
-  // Check cache with expiration
   if (eventCache.has(cacheKey)) {
     const cached = eventCache.get(cacheKey);
     if (Date.now() - cached.timestamp < CACHE_EXPIRY_TIME) {
-      return cached.data; // Return cached structured data
+      return cached.data;
     } else {
-      eventCache.delete(cacheKey); // Remove expired cache
-      saveCacheToLocalStorage(eventCache); // Update localStorage
+      eventCache.delete(cacheKey);
+      saveCacheToLocalStorage(eventCache);
     }
   }
 
   const monthPadded = String(month).padStart(2, "0");
   const dayPadded = String(day).padStart(2, "0");
-  // *** API ***
   const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${monthPadded}/${dayPadded}?origin=*`;
 
   try {
     const response = await rateLimitedFetch(url);
 
-    // Check if offline
     if (!navigator.onLine && !response.ok) {
       console.warn("Offline: Cannot fetch new data from Wikipedia.");
-      // Return empty structured data if offline and no cache
       return { events: [], births: [], deaths: [] };
     }
 
@@ -175,9 +155,8 @@ async function fetchWikipediaEvents(month, day) {
         `No data for English Wikipedia for ${month}/${day} (Status: ${response.status})`
       );
       const emptyData = { events: [], births: [], deaths: [] };
-      // Cache empty result to avoid repeated failed requests
       eventCache.set(cacheKey, { data: emptyData, timestamp: Date.now() });
-      saveCacheToLocalStorage(eventCache); // Update localStorage
+      saveCacheToLocalStorage(eventCache);
       return emptyData;
     }
 
@@ -186,15 +165,12 @@ async function fetchWikipediaEvents(month, day) {
     const processedBirths = [];
     const processedDeaths = [];
 
-    // Helper to process an array of items (events, births, deaths)
     const processItems = (items, targetArray, type) => {
       if (items && Array.isArray(items)) {
         items.forEach((item) => {
           if (!item || !item.text) return;
-
           let wikipediaLink = "";
           let thumbnailUrl = "";
-
           if (
             item.pages &&
             Array.isArray(item.pages) &&
@@ -208,19 +184,17 @@ async function fetchWikipediaEvents(month, day) {
               thumbnailUrl = page.thumbnail.source;
             }
           }
-
           targetArray.push({
-            title: item.text.split(".")[0] + ".", // Basic title extraction
+            title: item.text.split(".")[0] + ".",
             description: item.text,
             year: item.year || "Unknown",
             sourceUrl: wikipediaLink,
             thumbnailUrl: thumbnailUrl,
-            type: type, // Explicitly add type for categorization
+            type: type,
           });
         });
       }
     };
-
     processItems(data.events, processedEvents, "event");
     processItems(data.births, processedBirths, "birth");
     processItems(data.deaths, processedDeaths, "death");
@@ -230,166 +204,226 @@ async function fetchWikipediaEvents(month, day) {
       births: processedBirths,
       deaths: processedDeaths,
     };
-
-    // Cache the result with timestamp
     eventCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
-    saveCacheToLocalStorage(eventCache); // Update localStorage
+    saveCacheToLocalStorage(eventCache);
     return resultData;
   } catch (error) {
     console.error(`Error fetching events for ${month}/${day}:`, error);
-    // Return empty structured data but don't cache errors to allow retries
     return { events: [], births: [], deaths: [] };
   }
 }
 
-// Enhanced carousel population to load blog posts from /blog/ folder structure
+// --- NEW/MODIFIED CAROUSEL AND BLOG POST LOGIC ---
+
+// Helper function to render a single carousel item
+function renderCarouselItem(container, post, index) {
+  const carouselItem = document.createElement("div");
+  carouselItem.className = `carousel-item${index === 0 ? " active" : ""}`;
+  const monthNames = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+  const imageUrl =
+    post.imageUrl ||
+    `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
+  const fallbackImageUrl = `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
+  const MAX_WORDS = 15;
+  let titleContent =
+    post.title ||
+    `Blog Post - ${post.day} ${monthNames[new Date().getMonth()]} ${post.year}`;
+  const titleWords = titleContent.split(" ");
+  let truncatedTitle = titleWords.slice(0, MAX_WORDS).join(" ");
+  if (titleWords.length > MAX_WORDS) {
+    truncatedTitle += "...";
+  }
+  const dateLabel = `<span class="year-label">${post.day} ${
+    monthNames[new Date().getMonth()]
+  } ${post.year}</span>`;
+
+  carouselItem.innerHTML = `
+    <div style="position:relative;">
+      ${dateLabel}
+      <div class="carousel-image-container">
+        <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
+             onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
+             ${
+               index === 0 ? 'fetchpriority="high"' : 'loading="lazy"'
+             } decoding="async" width="1200" height="350">
+      </div>
+    </div>
+    <div class="carousel-caption">
+      <h5>${truncatedTitle}</h5>
+      <p>${post.excerpt || "Read this blog post about historical events."}</p>
+      <a href="${post.url}" class="btn btn-primary btn-sm"
+         ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>
+         Read Full Post
+      </a>
+    </div>
+  `;
+  container.appendChild(carouselItem);
+}
+
+// Helper function to render a single carousel indicator
+function renderIndicator(container, index) {
+  const indicator = document.createElement("button");
+  indicator.setAttribute("type", "button");
+  indicator.setAttribute("data-bs-target", "#historicalCarousel");
+  indicator.setAttribute("data-bs-slide-to", index);
+  indicator.setAttribute("aria-label", `Slide ${index + 1}`);
+  if (index === 0) {
+    indicator.className = "active";
+    indicator.setAttribute("aria-current", "true");
+  }
+  container.appendChild(indicator);
+}
+
+// Helper function to render the "No Posts" placeholder
+function renderPlaceholder(container, month) {
+  const defaultItem = document.createElement("div");
+  defaultItem.className = "carousel-item active";
+  defaultItem.innerHTML = `
+    <div class="carousel-image-container">
+      <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Blog+Posts+Available+for+${monthNames[month]}"
+           class="d-block w-100" alt="No blog posts available" width="1200" height="350" fetchpriority="high" decoding="async">
+    </div>
+    <div class="carousel-caption">
+      <h5>Blog Posts for ${monthNames[month]}</h5>
+      <p>No blog posts available for this month. Check back later for new content!</p>
+      <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
+    </div>
+  `;
+  container.appendChild(defaultItem);
+}
+
+// Helper function to render an error state
+function renderErrorState(container) {
+  const errorItem = document.createElement("div");
+  errorItem.className = "carousel-item active";
+  errorItem.innerHTML = `
+    <div class="carousel-image-container">
+      <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Blog+Posts"
+           class="d-block w-100" alt="Error loading" width="1200" height="350" fetchpriority="high" decoding="async">
+    </div>
+    <div class="carousel-caption">
+      <h5>Unable to Load Blog Posts</h5>
+      <p>Please check your internet connection and try again.</p>
+    </div>
+  `;
+  container.appendChild(errorItem);
+}
+
+// Helper function to initialize the Bootstrap Carousel
+function initializeCarousel() {
+  const carouselElement = document.getElementById("historicalCarousel");
+  const bsCarousel = bootstrap.Carousel.getInstance(carouselElement);
+  if (bsCarousel) {
+    bsCarousel.to(0);
+    bsCarousel.cycle();
+  } else {
+    new bootstrap.Carousel(carouselElement, {
+      interval: 3000,
+      ride: "carousel",
+    });
+  }
+}
+
+// Optimized function to fetch and return only the latest post
+async function fetchLatestBlogPost(monthName, monthIndex) {
+  const today = new Date();
+  const currentDay = today.getDate();
+  const currentYear = today.getFullYear();
+
+  // Start from the current day and go backward to find the latest available post
+  for (let day = currentDay; day >= 1; day--) {
+    const folderName = `${day}-${currentYear}`;
+    try {
+      const response = await fetch(`/blog/${monthName}/${folderName}/`, {
+        method: "HEAD",
+        cache: "no-cache",
+      });
+      if (response.ok) {
+        console.log(`Found latest blog post: ${folderName}`);
+        const post = await fetchBlogPostData(
+          monthName,
+          folderName,
+          day,
+          currentYear,
+          monthIndex
+        );
+        return post;
+      }
+    } catch (error) {
+      // Ignore errors for non-existent posts
+    }
+  }
+
+  // Fallback: If no post found for the current month, try to generate the latest available
+  console.log(
+    `No post found for ${monthName}, attempting to generate the latest available post.`
+  );
+  const generatedPosts = await generateMonthBlogPosts(monthName, monthIndex);
+  return generatedPosts.length > 0 ? generatedPosts[0] : null;
+}
+
+// Enhanced carousel population to load latest post instantly, and rest later
 async function populateCarousel(month, year) {
+  const carouselInner = document.getElementById("carouselInner");
+  const carouselIndicators = document.getElementById("carouselIndicators");
+
   carouselInner.innerHTML = "";
   carouselIndicators.innerHTML = "";
 
   try {
-    const today = new Date();
-    const currentMonth = today.getMonth(); // 0-indexed
-    const currentDay = today.getDate();
+    const monthName = monthNames[month].toLowerCase();
 
-    // Get month name for folder structure
-    const monthName = monthNames[currentMonth].toLowerCase();
+    // Phase 1: INSTANTLY load and display the latest post for quick render
+    const latestPost = await fetchLatestBlogPost(monthName, month);
 
-    console.log(`Fetching ALL blog posts for entire month: ${monthName}`);
-
-    // Fetch ALL blog posts for the current month (not just current day)
-    const blogPosts = await fetchBlogPosts(monthName, currentMonth);
-
-    console.log(`Found ${blogPosts.length} blog posts`);
-
-    if (blogPosts.length === 0) {
-      // Default placeholder if no blog posts are found
-      const defaultItem = document.createElement("div");
-      defaultItem.className = "carousel-item active";
-      defaultItem.innerHTML = `
-        <div class="carousel-image-container">
-          <img src="https://placehold.co/1200x350/6c757d/ffffff?text=No+Blog+Posts+Available+for+${monthName}"
-               class="d-block w-100" alt="No blog posts available" width="1200" height="350" fetchpriority="high" decoding="async">
-        </div>
-        <div class="carousel-caption">
-          <h5>Blog Posts for ${monthNames[currentMonth]}</h5>
-          <p>No blog posts available for this month. Check back later for new content!</p>
-          <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
-        </div>
-      `;
-      carouselInner.appendChild(defaultItem);
+    if (!latestPost) {
+      renderPlaceholder(carouselInner, month);
       return;
     }
 
-    // Create carousel items for each blog post
-    blogPosts.forEach((post, index) => {
-      const carouselItem = document.createElement("div");
-      carouselItem.className = `carousel-item${index === 0 ? " active" : ""}`;
+    // Render the latest post and its indicator
+    renderCarouselItem(carouselInner, latestPost, 0);
+    renderIndicator(carouselIndicators, 0);
+    initializeCarousel();
 
-      const imageUrl =
-        post.imageUrl ||
-        `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
-      const fallbackImageUrl = `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
+    // Phase 2: Asynchronously load/generate the rest of the posts in the background
+    console.log("Loading remaining posts in the background...");
+    const allPosts = await fetchBlogPosts(monthName, month);
 
-      // Truncate title if too long
-      const MAX_WORDS = 15;
-      let titleContent =
-        post.title ||
-        `Blog Post - ${post.day} ${monthNames[currentMonth]} ${post.year}`;
-      const titleWords = titleContent.split(" ");
-      let truncatedTitle = titleWords.slice(0, MAX_WORDS).join(" ");
+    const latestPostIndex = allPosts.findIndex(
+      (p) => p.day === latestPost.day && p.year === latestPost.year
+    );
+    const remainingPosts = allPosts.filter(
+      (_, index) => index !== latestPostIndex
+    );
 
-      if (titleWords.length > MAX_WORDS) {
-        truncatedTitle += "...";
-      }
-
-      // Date label for the blog post
-      const dateLabel = `
-        <span class="year-label">
-          ${post.day} ${monthNames[currentMonth]} ${post.year}
-        </span>
-      `;
-
-      carouselItem.innerHTML = `
-        <div style="position:relative;">
-          ${dateLabel}
-          <div class="carousel-image-container">
-            <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
-                 onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
-                 ${
-                   index === 0 ? 'fetchpriority="high"' : 'loading="lazy"'
-                 } decoding="async" width="1200" height="350">
-          </div>
-        </div>
-        <div class="carousel-caption">
-          <h5>${truncatedTitle}</h5>
-          <p>${
-            post.excerpt || "Read this blog post about historical events."
-          }</p>
-          <a href="${post.url}" class="btn btn-primary btn-sm"
-             ${
-               post.isExternal
-                 ? 'target="_blank" rel="noopener noreferrer"'
-                 : ""
-             }>
-             Read Full Post
-          </a>
-        </div>
-      `;
-      carouselInner.appendChild(carouselItem);
-
-      // Create carousel indicators
-      const indicator = document.createElement("button");
-      indicator.setAttribute("type", "button");
-      indicator.setAttribute("data-bs-target", "#historicalCarousel");
-      indicator.setAttribute("data-bs-slide-to", index);
-      indicator.setAttribute("aria-label", `Slide ${index + 1}`);
-      if (index === 0) {
-        indicator.className = "active";
-        indicator.setAttribute("aria-current", "true");
-      }
-      carouselIndicators.appendChild(indicator);
+    remainingPosts.forEach((post, index) => {
+      const newIndex = index + 1;
+      renderCarouselItem(carouselInner, post, newIndex);
+      renderIndicator(carouselIndicators, newIndex);
     });
-
-    // Initialize carousel
-    const carouselElement = document.getElementById("historicalCarousel");
-    const bsCarousel = bootstrap.Carousel.getInstance(carouselElement);
-    if (bsCarousel) {
-      bsCarousel.to(0);
-      bsCarousel.cycle();
-    } else {
-      new bootstrap.Carousel(carouselElement, {
-        interval: 3000, // 3 seconds per slide
-        ride: "carousel",
-      });
-    }
   } catch (error) {
     console.error("Error populating carousel:", error);
-    // Show error state in carousel
-    const errorItem = document.createElement("div");
-    errorItem.className = "carousel-item active";
-    errorItem.innerHTML = `
-      <div class="carousel-image-container">
-        <img src="https://placehold.co/1200x350/dc3545/ffffff?text=Error+Loading+Blog+Posts"
-             class="d-block w-100" alt="Error loading" width="1200" height="350" fetchpriority="high" decoding="async">
-      </div>
-      <div class="carousel-caption">
-        <h5>Unable to Load Blog Posts</h5>
-        <p>Please check your internet connection and try again.</p>
-      </div>
-    `;
-    carouselInner.appendChild(errorItem);
+    renderErrorState(carouselInner);
   }
 }
 
-// fetch blog posts from the /blog/ folder structure
+// fetch all blog posts from the /blog/ folder structure
 async function fetchBlogPosts(monthName, monthIndex) {
-  const blogPosts = [];
   const BLOG_CACHE_KEY = `blogPosts_${monthName}`;
-
-  console.log(`Attempting to fetch ALL blog posts for ${monthName}`);
-
-  // Check cache first (using in-memory cache)
   const cachedPosts = getCachedBlogPosts(BLOG_CACHE_KEY);
   if (cachedPosts) {
     console.log("Using cached blog posts");
@@ -397,26 +431,20 @@ async function fetchBlogPosts(monthName, monthIndex) {
   }
 
   try {
-    // Method 1: Try to fetch from manifest file first (recommended approach)
     const manifestPosts = await fetchBlogPostsFromManifest(monthName);
     if (manifestPosts.length > 0) {
-      console.log(`Found ${manifestPosts.length} posts from manifest`);
       setCachedBlogPosts(BLOG_CACHE_KEY, manifestPosts);
       return manifestPosts;
     }
 
-    // Method 2: Try to fetch all posts from the month folder
     const allPosts = await fetchAllBlogPostsFromFolder(monthName, monthIndex);
     if (allPosts.length > 0) {
-      console.log(`Found ${allPosts.length} posts from folder scanning`);
       setCachedBlogPosts(BLOG_CACHE_KEY, allPosts);
       return allPosts;
     }
 
-    // Method 3: Generate posts for all days in the month
     const generatedPosts = await generateMonthBlogPosts(monthName, monthIndex);
     if (generatedPosts.length > 0) {
-      console.log(`Generated ${generatedPosts.length} posts for the month`);
       setCachedBlogPosts(BLOG_CACHE_KEY, generatedPosts);
       return generatedPosts;
     }
@@ -425,10 +453,7 @@ async function fetchBlogPosts(monthName, monthIndex) {
     return [];
   } catch (error) {
     console.error("Error fetching blog posts:", error);
-
-    // Fallback: try to generate blog posts for the entire month
     const fallbackPosts = await generateMonthBlogPosts(monthName, monthIndex);
-    console.log(`Using fallback posts: ${fallbackPosts.length}`);
     return fallbackPosts;
   }
 }
@@ -437,42 +462,28 @@ async function fetchBlogPosts(monthName, monthIndex) {
 async function fetchAllBlogPostsFromFolder(monthName, monthIndex) {
   const allPosts = [];
   const currentYear = new Date().getFullYear();
-  const startYear = Math.max(2025, currentYear); // Start from 2025 or current year, whichever is higher
+  const startYear = Math.max(2025, currentYear);
 
   const today = new Date();
   const currentMonth = today.getMonth();
   const currentDay = today.getDate();
 
-  console.log(
-    `Scanning for all blog posts in ${monthName} folder starting from ${startYear} (only before today)...`
-  );
-
-  // Get number of days in the month
   const daysInMonth = new Date(startYear, monthIndex + 1, 0).getDate();
 
-  // Try to find posts for all days of the month, but only for days before today
   for (let day = 1; day <= daysInMonth; day++) {
-    // Skip future days (allow today)
     if (monthIndex === currentMonth && day > currentDay) {
       continue;
     }
-
-    // Skip future months
     if (monthIndex > currentMonth) {
       continue;
     }
-
     const folderName = `${day}-${startYear}`;
-
     try {
-      // Check if this post exists by trying to fetch it
       const response = await fetch(`/blog/${monthName}/${folderName}/`, {
         method: "HEAD",
         cache: "no-cache",
       });
-
       if (response.ok) {
-        console.log(`Found blog post: ${folderName}`);
         const postData = await fetchBlogPostData(
           monthName,
           folderName,
@@ -484,12 +495,8 @@ async function fetchAllBlogPostsFromFolder(monthName, monthIndex) {
           allPosts.push(postData);
         }
       }
-    } catch (error) {
-      // Ignore errors for non-existent posts
-    }
+    } catch (error) {}
   }
-
-  // Sort posts by day (most recent first)
   return allPosts.sort((a, b) => b.day - a.day);
 }
 
@@ -497,36 +504,22 @@ async function fetchAllBlogPostsFromFolder(monthName, monthIndex) {
 async function generateMonthBlogPosts(monthName, monthIndex) {
   const posts = [];
   const currentYear = new Date().getFullYear();
-  const year = Math.max(2025, currentYear); // Use 2025 or current year, whichever is higher
-
+  const year = Math.max(2025, currentYear);
   const today = new Date();
   const currentMonth = today.getMonth();
   const currentDay = today.getDate();
 
-  console.log(
-    `Generating blog posts for all days in ${monthName} ${year} (only before today)...`
-  );
-
-  // Get number of days in the month
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
 
-  // Generate posts for each day, but only for days before today
   for (let day = 1; day <= daysInMonth; day++) {
-    // Skip days that are today or in the future
-    if (monthIndex === currentMonth && day >= currentDay) {
+    if (monthIndex === currentMonth && day > currentDay) {
       continue;
     }
-
-    // Skip future months
     if (monthIndex > currentMonth) {
       continue;
     }
-
     const folderName = `${day}-${year}`;
-
-    // Create image URL using the format day.month.jpg (e.g., 18.7.jpg)
     const imageUrl = `/images/blog/${day}.${monthIndex + 1}.jpg`;
-
     const postData = {
       day: day,
       year: year,
@@ -536,39 +529,26 @@ async function generateMonthBlogPosts(monthName, monthIndex) {
       url: `/blog/${monthName}/${folderName}/`,
       isExternal: false,
     };
-
     posts.push(postData);
   }
-
-  // Sort posts by day (most recent first)
   return posts.sort((a, b) => b.day - a.day);
 }
 
 // fetch individual blog post data
 async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
   try {
-    console.log(`Fetching HTML for blog post: ${monthName}/${folder}`); // Updated log message
-
-    // Create image URL using the format day.month.jpg (e.g., 18.7.jpg)
     const imageUrl = `/images/blog/${day}.${monthIndex + 1}.jpg`;
-
-    // --- Directly try to fetch index.html and parse it ---
     const htmlResponse = await fetch(`/blog/${monthName}/${folder}/index.html`);
-
     if (htmlResponse.ok) {
       const html = await htmlResponse.text();
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
-
-      // Extract title from various possible sources
       const title =
         doc
           .querySelector('meta[property="og:title"]')
           ?.getAttribute("content") ||
         doc.querySelector("title")?.textContent ||
         `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`;
-
-      // Extract excerpt/description
       const excerpt =
         doc
           .querySelector('meta[property="og:description"]')
@@ -577,24 +557,16 @@ async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
           .querySelector('meta[name="description"]')
           ?.getAttribute("content") ||
         `Discover what happened on ${day} ${monthNames[monthIndex]} ${year}`;
-
-      console.log(`Parsed HTML for ${folder}:`, { title, excerpt });
-
       return {
         day: day,
         year: year,
         title: title.trim(),
         excerpt: excerpt.trim(),
-        imageUrl: imageUrl, // Always use the standardized image format
+        imageUrl: imageUrl,
         url: `/blog/${monthName}/${folder}/`,
         isExternal: false,
       };
     }
-
-    // If no content found (index.html not found/OK), return basic info with standardized image
-    console.warn(
-      `No index.html found for ${monthName}/${folder}, returning basic info.`
-    );
     return {
       day: day,
       year: year,
@@ -609,8 +581,6 @@ async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
       `Error fetching or parsing blog post HTML for ${folder}:`,
       error
     );
-
-    // Return basic data with standardized image even on error
     return {
       day: day,
       year: year,
@@ -623,7 +593,7 @@ async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
   }
 }
 
-// In-memory cache for blog posts (replacing localStorage)
+// In-memory cache for blog posts
 const blogPostCache = new Map();
 
 function getCachedBlogPosts(key) {
@@ -631,7 +601,6 @@ function getCachedBlogPosts(key) {
     const cached = blogPostCache.get(key);
     if (cached) {
       if (Date.now() - cached.timestamp < 60 * 60 * 1000) {
-        // 1 hour cache
         return cached.posts;
       } else {
         blogPostCache.delete(key);
@@ -654,44 +623,28 @@ function setCachedBlogPosts(key, posts) {
   }
 }
 
-// Improved manifest-based approach (only before today)
 async function fetchBlogPostsFromManifest(monthName) {
   try {
-    console.log(`Trying to fetch manifest for ${monthName}`);
     const response = await fetch(`/blog/${monthName}/manifest.json`);
     if (!response.ok) {
-      console.log(
-        `Manifest not found for ${monthName} (Status: ${response.status})`
-      );
       return [];
     }
-
     const manifest = await response.json();
-    console.log(`Manifest loaded for ${monthName}:`, manifest);
-
     const today = new Date();
     const currentMonth = today.getMonth();
     const currentDay = today.getDate();
     const monthIndex = monthNames.findIndex(
       (m) => m.toLowerCase() === monthName.toLowerCase()
     );
-
     const blogPosts = [];
-
     for (const post of manifest.posts || []) {
-      // Skip future days (allow today)
       if (monthIndex === currentMonth && post.day > currentDay) {
         continue;
       }
-
-      // Skip future months
       if (monthIndex > currentMonth) {
         continue;
       }
-
-      // Use standardized image format
       const imageUrl = `/images/blog/${post.day}.${monthIndex + 1}.jpg`;
-
       const postData = {
         day: post.day,
         year: post.year,
@@ -703,7 +656,6 @@ async function fetchBlogPostsFromManifest(monthName) {
       };
       blogPosts.push(postData);
     }
-
     return blogPosts.sort((a, b) => b.day - a.day);
   } catch (error) {
     console.error("Error fetching from manifest:", error);
@@ -711,7 +663,6 @@ async function fetchBlogPostsFromManifest(monthName) {
   }
 }
 
-// Debug test blog post fetching
 async function debugBlogPosts() {
   const today = new Date();
   const monthName = monthNames[today.getMonth()].toLowerCase();
@@ -722,12 +673,10 @@ async function debugBlogPosts() {
   console.log(`Starting from year: ${Math.min(2025, today.getFullYear())}`);
   console.log(`Using image format: /images/blog/[day].[month].jpg`);
 
-  // Test manifest
   console.log("Testing manifest...");
   const manifestPosts = await fetchBlogPostsFromManifest(monthName);
   console.log("Manifest posts:", manifestPosts);
 
-  // Test folder scanning
   console.log("Testing folder scanning...");
   const folderPosts = await fetchAllBlogPostsFromFolder(
     monthName,
@@ -735,7 +684,6 @@ async function debugBlogPosts() {
   );
   console.log("Folder posts:", folderPosts);
 
-  // Test month generation
   console.log("Testing month generation...");
   const generatedPosts = await generateMonthBlogPosts(
     monthName,
@@ -743,7 +691,6 @@ async function debugBlogPosts() {
   );
   console.log("Generated posts:", generatedPosts);
 
-  // Test specific posts
   console.log("Testing specific posts...");
   const testDays = [1, 15, 18, 25, 31];
   for (const day of testDays) {
@@ -758,57 +705,41 @@ async function debugBlogPosts() {
   }
 }
 
-// create day card element// create day card element
 function createDayCard(day, month) {
   const dayCard = document.createElement("div");
-  dayCard.className = "day-card"; // Remove initial loading class
+  dayCard.className = "day-card";
   dayCard.setAttribute("data-day", day);
   dayCard.setAttribute("data-month", month + 1);
-
   const dayNumber = document.createElement("div");
   dayNumber.className = "day-number";
   dayNumber.textContent = day;
   dayCard.appendChild(dayNumber);
-
   const eventSummary = document.createElement("div");
   eventSummary.className = "event-summary";
-  eventSummary.textContent = "Click to load"; // Default inactive state
+  eventSummary.textContent = "Click to load";
   dayCard.appendChild(eventSummary);
-
   return dayCard;
 }
 
-// load events for a specific day card
 async function loadDayEvents(dayCard, month, forceLoad = false) {
   const day = parseInt(dayCard.getAttribute("data-day"));
-  // Only load if not already loaded or if forceLoad is true
   if (dayCard.classList.contains("loaded") && !forceLoad) {
-    console.log(`Events for day ${day} already loaded.`);
     return true;
   }
-
-  // Set loading state
   const eventSummary = dayCard.querySelector(".event-summary");
   dayCard.classList.add("loading");
   dayCard.classList.remove("needs-load");
   eventSummary.innerHTML =
     '<div class="spinner-border spinner-border-sm" role="status"></div>';
-
   try {
-    // Expect structured data from fetchWikipediaEvents
     const eventsData = await fetchWikipediaEvents(month + 1, day);
-    // Store the structured events data directly on the card
     dayCard.eventsData = eventsData;
-
-    // Update UI based on combined event count
     const totalEvents =
       (eventsData.events?.length || 0) +
       (eventsData.births?.length || 0) +
       (eventsData.deaths?.length || 0);
-
     dayCard.classList.remove("loading");
-    dayCard.classList.add("loaded"); // Mark as loaded
-
+    dayCard.classList.add("loaded");
     if (totalEvents > 0) {
       eventSummary.textContent = `${totalEvents} Events`;
       dayCard.classList.remove("no-events");
@@ -816,21 +747,17 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
       eventSummary.textContent = "No Events";
       dayCard.classList.add("no-events");
     }
-
-    // Attach click listener if not already attached for this card's data state
-    // Ensure click listener is only attached once or updates its bound data
     if (!dayCard._hasClickListener) {
       dayCard.addEventListener("click", () => {
         showEventDetails(
           day,
           month + 1,
           currentDate.getFullYear(),
-          dayCard.eventsData // Pass pre-fetched structured data
+          dayCard.eventsData
         );
       });
-      dayCard._hasClickListener = true; // Mark that listener is attached
+      dayCard._hasClickListener = true;
     }
-
     return true;
   } catch (error) {
     console.error(`Error loading events for day ${day}:`, error);
@@ -838,54 +765,40 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
     eventSummary.textContent = "Error";
     dayCard.classList.remove("loading");
     dayCard.classList.add("error");
-    dayCard.classList.remove("loaded"); // If error, not fully loaded
+    dayCard.classList.remove("loaded");
     return false;
   }
 }
 
 async function renderCalendar() {
-  // Clear only day cards from the calendar grid
-  calendarGrid.innerHTML = ""; // Clear previous content
-
+  calendarGrid.innerHTML = "";
   calendarGrid.setAttribute("role", "grid");
   calendarGrid.setAttribute("aria-label", "Historical events calendar");
-
   const year = currentDate.getFullYear();
-  const month = currentDate.getMonth(); // 0-indexed month
+  const month = currentDate.getMonth();
   const today = new Date();
   const isCurrentMonth =
     year === today.getFullYear() && month === today.getMonth();
   const todayDate = today.getDate();
-
   currentMonthYearDisplay.textContent = `${monthNames[month]}`;
   document.title = `What Happened on This Day | ${monthNames[month]} Historical Events`;
-
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  // 1. Create all calendar grid structure first in inactive state
   const dayCards = [];
   for (let i = 1; i <= daysInMonth; i++) {
     const dayCard = createDayCard(i, month);
-
-    // Add ARIA roles and labels
     dayCard.setAttribute("role", "button");
     dayCard.setAttribute("tabindex", "0");
     dayCard.setAttribute("aria-label", `Events for ${i} ${monthNames[month]}`);
     dayCard.setAttribute("aria-pressed", "false");
-
-    // Mark all cards as needing to load initially
     dayCard.classList.add("needs-load");
-
-    // Add click listener for lazy loading to all cards
     dayCard.addEventListener("click", async () => {
       if (
         dayCard.classList.contains("needs-load") ||
         dayCard.classList.contains("error")
       ) {
-        await loadDayEvents(dayCard, month, true); // Force load
+        await loadDayEvents(dayCard, month, true);
         dayCard.classList.remove("needs-load");
       }
-      // After loading (or if already loaded), show event details
       if (dayCard.eventsData) {
         showEventDetails(
           parseInt(dayCard.getAttribute("data-day")),
@@ -896,48 +809,35 @@ async function renderCalendar() {
       }
     });
     dayCard._hasClickListener = true;
-
     if (isCurrentMonth && i === todayDate) {
       dayCard.classList.add("today-highlight");
       dayCard.setAttribute("aria-current", "date");
     }
-
     calendarGrid.appendChild(dayCard);
     dayCards.push(dayCard);
   }
-
   try {
-    // 2. Load Carousel content in parallel
     const carouselPromise = populateCarousel(month, year);
-
-    // 3. Only load events for today's date if we're viewing the current month
     if (isCurrentMonth) {
       const todayCard = dayCards.find(
         (card) => parseInt(card.getAttribute("data-day")) === todayDate
       );
-
       if (todayCard) {
-        // Load today's events immediately
         await loadDayEvents(todayCard, month, true);
-
-        // Scroll to today's card after its events are loaded
         setTimeout(() => {
           todayCard.scrollIntoView({
             behavior: "smooth",
             block: "center",
           });
-        }, 300); // Small delay to allow rendering
+        }, 300);
       }
     }
-
-    // Ensure carousel is also finished
     await carouselPromise;
   } catch (error) {
     console.error("Error during calendar rendering:", error);
     console.error(
       "This error could be due to network issues, API rate limits, or unexpected data format. Please check your internet connection, ensure the API is accessible, and verify the data structure."
     );
-    // Display a general error message if something critical fails
     calendarGrid.innerHTML = `
       <div class="col-12 text-center py-5">
         <div class="alert alert-danger" role="alert">
@@ -949,11 +849,9 @@ async function renderCalendar() {
   }
 }
 
-// --- GLOBAL VARIABLES FOR FILTERING ---
-let currentDayAllItems = []; // Stores all events for the currently opened day, with assigned categories
-let currentActiveFilter = "all"; // Tracks the currently active filter category
+let currentDayAllItems = [];
+let currentActiveFilter = "all";
 
-// --- CATEGORY DEFINITIONS WITH INCLUDE/EXCLUDE PRINCIPLE ---
 const eventCategories = {
   "War & Conflict": {
     include: [
@@ -1037,7 +935,6 @@ const eventCategories = {
       "browser war",
     ],
   },
-
   "Politics & Government": {
     include: [
       "president",
@@ -1118,7 +1015,6 @@ const eventCategories = {
       "political philosophy",
     ],
   },
-
   "Science & Technology": {
     include: [
       "discovery",
@@ -1199,7 +1095,6 @@ const eventCategories = {
       "space race",
     ],
   },
-
   "Arts & Culture": {
     include: [
       "art",
@@ -1273,7 +1168,6 @@ const eventCategories = {
       "craft fair",
     ],
   },
-
   "Disasters & Accidents": {
     include: [
       "earthquake",
@@ -1334,7 +1228,6 @@ const eventCategories = {
       "rescue dog",
     ],
   },
-
   Sports: {
     include: [
       "olympic",
@@ -1402,7 +1295,6 @@ const eventCategories = {
       "medal of honor",
     ],
   },
-
   "Social & Human Rights": {
     include: [
       "slavery",
@@ -1454,7 +1346,6 @@ const eventCategories = {
       "reform school",
     ],
   },
-
   "Economy & Business": {
     include: [
       "bank",
@@ -1522,7 +1413,6 @@ const eventCategories = {
       "tax shelter",
     ],
   },
-
   "Famous Persons": {
     include: [
       "author",
@@ -1579,32 +1469,23 @@ const eventCategories = {
   },
 };
 
-// Helper function to check if text matches include/exclude criteria
 function matchesCategory(text, categoryRules) {
   const lowerText = text.toLowerCase();
-
-  // Check if any exclude keywords are present
   for (const excludeKeyword of categoryRules.exclude) {
     if (lowerText.includes(excludeKeyword.toLowerCase())) {
       return false;
     }
   }
-
-  // Check if any include keywords are present
   for (const includeKeyword of categoryRules.include) {
     if (lowerText.includes(includeKeyword.toLowerCase())) {
       return true;
     }
   }
-
   return false;
 }
 
-// Main categorization function
 function assignCategories(item) {
   const categoriesFound = new Set();
-
-  // 1. Handle explicit type-based categories first
   if (item.type === "birth") {
     categoriesFound.add("Births");
     categoriesFound.add("Famous Persons");
@@ -1612,49 +1493,37 @@ function assignCategories(item) {
     categoriesFound.add("Deaths");
     categoriesFound.add("Famous Persons");
   }
-
-  // 2. Categorize based on include/exclude keyword matching
   const itemText = (item.description || item.title || "").toLowerCase();
-
   for (const categoryName in eventCategories) {
     if (matchesCategory(itemText, eventCategories[categoryName])) {
       categoriesFound.add(categoryName);
     }
   }
-
-  // 3. Add 'Miscellaneous' if no categories found (excluding type-based ones)
   const nonTypeBased = Array.from(categoriesFound).filter(
     (cat) => cat !== "Births" && cat !== "Deaths"
   );
-
   if (nonTypeBased.length === 0 && !categoriesFound.has("Famous Persons")) {
     categoriesFound.add("Miscellaneous");
   }
-
   return Array.from(categoriesFound);
 }
 
-// Render Items in the Modal
 function renderFilteredItems(itemsToRender) {
   const eventsListDiv = document.getElementById("modal-events-list");
   if (!eventsListDiv) return;
-
   if (itemsToRender.length === 0) {
     eventsListDiv.innerHTML =
       "<p class='text-muted text-center'>No items found for this category.</p>";
     return;
   }
-
   let htmlContent = `<ul class="list-unstyled">`;
   itemsToRender.forEach((event) => {
-    // Determine special emphasis based on explicit 'type'
     let specialEmphasis = "";
     if (event.type === "birth") {
       specialEmphasis = "<strong>Birth:</strong> ";
     } else if (event.type === "death") {
       specialEmphasis = "<strong>Death:</strong> ";
     }
-
     htmlContent += `
             <li class="mb-3 p-3 border rounded">
                 <div class="d-flex justify-content-between align-items-start">
@@ -1695,11 +1564,9 @@ function renderFilteredItems(itemsToRender) {
             </li>`;
   });
   htmlContent += `</ul>`;
-
   eventsListDiv.innerHTML = htmlContent;
 }
 
-// Apply the Filter
 function applyFilter() {
   const filteredItems = currentDayAllItems.filter((item) => {
     if (currentActiveFilter === "all") {
@@ -1709,11 +1576,9 @@ function applyFilter() {
       .map((cat) => cat.toLowerCase())
       .includes(currentActiveFilter);
   });
-
   renderFilteredItems(filteredItems);
 }
 
-// showEventDetails include filtering and process structured data
 async function showEventDetails(
   day,
   month,
@@ -1723,11 +1588,8 @@ async function showEventDetails(
   modalDate.textContent = `${day}. ${monthNames[month - 1]}`;
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
-
   let structuredEvents = preFetchedStructuredEvents;
-
   try {
-    // If no pre-fetched structured events, fetch new ones (this will check cache first)
     if (
       !structuredEvents ||
       (structuredEvents.events?.length === 0 &&
@@ -1736,33 +1598,24 @@ async function showEventDetails(
     ) {
       structuredEvents = await fetchWikipediaEvents(month, day);
     }
-
-    // --- Combine all event types into a single array for processing ---
     currentDayAllItems = [
       ...(structuredEvents.events || []),
       ...(structuredEvents.births || []),
       ...(structuredEvents.deaths || []),
     ].map((item) => ({
       ...item,
-      // Pass the entire item to assignCategories to leverage 'type' and 'description'
       categories: assignCategories(item),
     }));
-
-    // Sort events by year
     currentDayAllItems.sort((a, b) => {
       const yearA = parseInt(a.year) || 0;
       const yearB = parseInt(b.year) || 0;
       return yearA - yearB;
     });
-
-    // --- Generate Filter Buttons ---
     const allAvailableCategories = new Set(["All"]);
     currentDayAllItems.forEach((item) => {
       item.categories.forEach((cat) => allAvailableCategories.add(cat));
     });
-
     const sortedCategories = Array.from(allAvailableCategories).sort((a, b) => {
-      // Prioritize "All", then "Births", "Deaths", "Famous Persons", then alphabetical
       if (a === "All") return -1;
       if (b === "All") return 1;
       if (a === "Births") return -1;
@@ -1773,7 +1626,6 @@ async function showEventDetails(
       if (b === "Famous Persons" && a !== "Births" && a !== "Deaths") return 1;
       return a.localeCompare(b);
     });
-
     let filterButtonsHtml = `<div id="eventFilterContainer" class="d-flex flex-wrap gap-2 mb-3">`;
     sortedCategories.forEach((category) => {
       const isActive =
@@ -1781,9 +1633,6 @@ async function showEventDetails(
       filterButtonsHtml += `<button class="btn btn-sm btn-outline-primary filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
     });
     filterButtonsHtml += `</div>`;
-    // --- END Filter Buttons ---
-
-    // --- Build Modal Content HTML with Filter Container ---
     modalBodyContent.innerHTML = `
     <div class="modal-header-content">
         ${filterButtonsHtml}
@@ -1791,19 +1640,12 @@ async function showEventDetails(
     <div id="modal-events-list">
         </div>
 `;
-    // --- END Modal Content ---
-
-    // Attach event listeners to filter buttons
     modalBodyContent.querySelectorAll(".filter-btn").forEach((button) => {
       button.addEventListener("click", (event) => {
         const clickedCategory = event.target.dataset.category;
-
         if (clickedCategory === currentActiveFilter) {
-          // If the active filter button is clicked again, reset to "All"
           currentActiveFilter = "all";
-          // Remove active class from current button
           event.target.classList.remove("active");
-          // Find and activate the "All" button
           const allButton = modalBodyContent.querySelector(
             '.filter-btn[data-category="all"]'
           );
@@ -1811,20 +1653,15 @@ async function showEventDetails(
             allButton.classList.add("active");
           }
         } else {
-          // Normal behavior: set new active filter
           currentActiveFilter = clickedCategory;
-          // Update active state in UI
           modalBodyContent
             .querySelectorAll(".filter-btn")
             .forEach((btn) => btn.classList.remove("active"));
           event.target.classList.add("active");
         }
-
         applyFilter();
       });
     });
-
-    // Initial render based on the current active filter (which is "all" by default or from previous modal open)
     applyFilter();
   } catch (error) {
     console.error("Error loading event details:", error);
@@ -1835,17 +1672,14 @@ async function showEventDetails(
       </div>
     `;
   }
-
   eventDetailModal.show();
 }
 
-// Theme management functions
 function setTheme(theme) {
   if (theme === "dark") {
     body.classList.add("dark-theme");
     if (themeSwitchMobile) themeSwitchMobile.checked = true;
     if (themeSwitchDesktop) themeSwitchDesktop.checked = true;
-
     if (themeSwitchMobile && themeSwitchMobile.nextElementSibling) {
       const icon = themeSwitchMobile.nextElementSibling.querySelector("i");
       if (icon) {
@@ -1853,17 +1687,14 @@ function setTheme(theme) {
         icon.classList.add("bi-brightness-high-fill");
       }
     }
-
     if (themeSwitchDesktop && themeSwitchDesktop.nextElementSibling) {
       themeSwitchDesktop.nextElementSibling.textContent = "Light Mode";
     }
-
     localStorage.setItem("theme", "dark");
   } else {
     body.classList.remove("dark-theme");
     if (themeSwitchMobile) themeSwitchMobile.checked = false;
     if (themeSwitchDesktop) themeSwitchDesktop.checked = false;
-
     if (themeSwitchMobile && themeSwitchMobile.nextElementSibling) {
       const icon = themeSwitchMobile.nextElementSibling.querySelector("i");
       if (icon) {
@@ -1871,29 +1702,20 @@ function setTheme(theme) {
         icon.classList.add("bi-moon-fill");
       }
     }
-
     if (themeSwitchDesktop && themeSwitchDesktop.nextElementSibling) {
       themeSwitchDesktop.nextElementSibling.textContent = "Dark Mode";
     }
-
     localStorage.setItem("theme", "light");
   }
 }
 
-// Initialize application with TODAY-FIRST approach
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    console.log("Initializing calendar with today-first loading strategy...");
-
     const savedTheme = localStorage.getItem("theme") || "dark";
     setTheme(savedTheme);
-
-    // Initial skeleton shown
-    // Render the calendar
     await renderCalendar();
   } catch (error) {
     console.error("Error initializing application:", error);
-    // Show error message to user
     if (calendarGrid) {
       calendarGrid.innerHTML = `
         <div class="col-12">
@@ -1907,7 +1729,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 });
 
-// Event listeners with error handling
 if (themeSwitchMobile) {
   themeSwitchMobile.addEventListener("change", () => {
     setTheme(themeSwitchMobile.checked ? "dark" : "light");
@@ -1920,7 +1741,6 @@ if (themeSwitchDesktop) {
   });
 }
 
-// Navigation event listeners
 const prevMonthBtn = document.getElementById("prevMonthBtn");
 const nextMonthBtn = document.getElementById("nextMonthBtn");
 
@@ -1952,101 +1772,74 @@ if (nextMonthBtn) {
   });
 }
 
-// Set current year in footer (Moved from inline script in index.html)
 const currentYearElement = document.getElementById("currentYear");
 if (currentYearElement) {
   currentYearElement.textContent = new Date().getFullYear();
 }
 
-// Cleanup function for cache management
 function cleanupCache() {
   const now = Date.now();
   const keysToDelete = [];
-
   for (const [key, value] of eventCache.entries()) {
     if (now - value.timestamp > CACHE_EXPIRY_TIME) {
       keysToDelete.push(key);
     }
   }
-
   if (keysToDelete.length > 0) {
     keysToDelete.forEach((key) => eventCache.delete(key));
-    saveCacheToLocalStorage(eventCache); // Update localStorage after cleanup
+    saveCacheToLocalStorage(eventCache);
   }
 }
 
-// Run cache cleanup every hour
 setInterval(cleanupCache, 60 * 60 * 1000);
 
-// Add visibility change handler to pause/resume when tab becomes visible/hidden
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    // Optionally refresh data when tab becomes visible again
     cleanupCache();
   }
 });
 
-// Add error boundary for unhandled promise rejections
 window.addEventListener("unhandledrejection", (event) => {
   console.error("Unhandled promise rejection:", event.reason);
-  // Optionally show user-friendly error message
   event.preventDefault();
 });
 
-// Performance monitoring (optional)
 if (typeof PerformanceObserver !== "undefined") {
   const observer = new PerformanceObserver((list) => {
     list.getEntries().forEach((entry) => {
       if (entry.duration > 1000) {
-        // Log slow operations
         console.warn(
           `Slow operation detected: ${entry.name} took ${entry.duration}ms`
         );
       }
     });
   });
-
   try {
     observer.observe({ entryTypes: ["measure", "navigation"] });
-  } catch (e) {
-    // Performance Observer not supported, ignore
-  }
+  } catch (e) {}
 }
 
 document.addEventListener("DOMContentLoaded", () => {
   if (navigator.onLine && location.pathname === "/") {
     const PREFETCH_KEY = "imagePrefetchDone";
     const today = new Date().toISOString().slice(0, 10);
-
     if (localStorage.getItem(PREFETCH_KEY) !== today) {
       fetch("https://thisday.info/api/today-images")
         .then((res) => res.json())
         .then((data) => {
-          console.log("Image prefetch data from worker:", data);
-
-          // Client-side prefetching based on worker's response
           if (data && data.prefetched) {
-            // Preload eager image (if any)
             if (data.prefetched.eager) {
               const link = document.createElement("link");
               link.rel = "preload";
               link.as = "image";
               link.href = data.prefetched.eager;
               document.head.appendChild(link);
-              console.log(
-                "Client-side preloaded eager image:",
-                data.prefetched.eager
-              );
             }
-
-            // Prefetch lazy images (e.g., by creating Image objects)
             data.prefetched.lazy.forEach((url) => {
               const img = new Image();
               img.src = url;
-              console.log("Client-side prefetched lazy image:", url);
             });
           }
-
           localStorage.setItem(PREFETCH_KEY, today);
         })
         .catch((err) => console.warn("Prefetching error:", err));
@@ -2054,18 +1847,15 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-// Modal close listener to reset filter
-// Add event listener for the modal close button
 const eventDetailModalElement = document.getElementById("eventDetailModal");
 if (eventDetailModalElement) {
   eventDetailModalElement
     .querySelector(".btn-close")
     .addEventListener("click", () => {
-      eventDetailModal.hide(); // Use Bootstrap's hide method
-      currentActiveFilter = "all"; // Reset filter on close
+      eventDetailModal.hide();
+      currentActiveFilter = "all";
     });
-  // Also handle when dismissed via backdrop click or ESC key
   eventDetailModalElement.addEventListener("hidden.bs.modal", function () {
-    currentActiveFilter = "all"; // Reset filter when modal is completely hidden
+    currentActiveFilter = "all";
   });
 }

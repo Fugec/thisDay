@@ -246,9 +246,9 @@ function renderCarouselItem(container, post, index) {
   if (titleWords.length > MAX_WORDS) {
     truncatedTitle += "...";
   }
-  const dateLabel = `<span class="year-label">${post.day} ${
-    monthNames[new Date().getMonth()]
-  } ${post.year}</span>`;
+  const dateLabel = `<span style="display:none;" class="year-label">${
+    post.day
+  } ${monthNames[new Date().getMonth()]} ${post.year}</span>`;
 
   carouselItem.innerHTML = `
     <div style="position:relative;">

@@ -213,7 +213,197 @@ async function fetchWikipediaEvents(month, day) {
   }
 }
 
-// --- NEW/MODIFIED CAROUSEL AND BLOG POST LOGIC ---
+async function fetchWikipediaEventsForCarousel() {
+  try {
+    console.log("Fetching Wikipedia events for carousel...");
+
+    // First, check if Worker preloaded the data
+    const preloadedScript = document.getElementById(
+      "preloaded-carousel-events"
+    );
+    if (preloadedScript) {
+      const wikipediaEvents = JSON.parse(preloadedScript.textContent);
+      console.log(
+        "Using preloaded Wikipedia events from Worker:",
+        wikipediaEvents.length
+      );
+      return wikipediaEvents.map((event) => ({
+        day: new Date().getDate(),
+        year: event.year,
+        title: `${event.year}: ${event.title}`,
+        excerpt: event.description,
+        imageUrl: event.imageUrl,
+        url: event.url,
+        isExternal: true,
+      }));
+    }
+
+    // If not preloaded (local development), fetch directly
+    console.log("No preloaded data, fetching from Wikipedia API...");
+    const today = new Date();
+    const month = today.getMonth() + 1;
+    const day = today.getDate();
+
+    const monthPadded = String(month).padStart(2, "0");
+    const dayPadded = String(day).padStart(2, "0");
+    const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${monthPadded}/${dayPadded}`;
+
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      console.warn("Failed to fetch Wikipedia events for carousel");
+      return [];
+    }
+
+    const data = await response.json();
+    console.log("Wikipedia API response:", data);
+
+    // Filter events with images
+    const eventsWithImages = data.events.filter(
+      (event) => event.pages?.[0]?.thumbnail?.source
+    );
+
+    console.log(`Found ${eventsWithImages.length} events with images`);
+
+    // Take 3 random events
+    const shuffled = [...eventsWithImages].sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, 3);
+
+    const carouselEvents = selected.map((event) => {
+      const wikiTitle =
+        event.pages?.[0]?.title || event.text.split(" ").slice(0, 5).join(" ");
+      const wikiUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(
+        wikiTitle.replace(/ /g, "_")
+      )}`;
+      const imageUrl = event.pages[0].thumbnail.source;
+      const eventText =
+        event.text.length > 150
+          ? event.text.substring(0, 150) + "..."
+          : event.text;
+
+      return {
+        day: day,
+        year: event.year,
+        title: `${event.year}: ${
+          wikiTitle.length > 60 ? wikiTitle.substring(0, 60) + "..." : wikiTitle
+        }`,
+        excerpt: eventText,
+        imageUrl: imageUrl,
+        url: wikiUrl,
+        isExternal: true,
+      };
+    });
+
+    console.log("Prepared carousel events:", carouselEvents);
+    return carouselEvents;
+  } catch (error) {
+    console.error("Error fetching Wikipedia carousel events:", error);
+    return [];
+  }
+}
+
+// REPLACE your existing populateCarousel function with this (around line 272):
+async function populateCarousel(month, year) {
+  console.log("populateCarousel called for month:", monthNames[month]);
+
+  const carouselInner = document.getElementById("carouselInner");
+  const carouselIndicators = document.getElementById("carouselIndicators");
+
+  if (!carouselInner || !carouselIndicators) {
+    console.error("Carousel elements not found!");
+    console.log("carouselInner:", carouselInner);
+    console.log("carouselIndicators:", carouselIndicators);
+    return;
+  }
+
+  carouselInner.innerHTML = "";
+  carouselIndicators.innerHTML = "";
+
+  try {
+    const monthName = monthNames[month].toLowerCase();
+
+    // Phase 1: Load Wikipedia events FIRST
+    console.log("Phase 1: Loading Wikipedia events...");
+    const wikipediaEvents = await fetchWikipediaEventsForCarousel();
+
+    if (wikipediaEvents && wikipediaEvents.length > 0) {
+      console.log(
+        `Got ${wikipediaEvents.length} Wikipedia events for carousel`
+      );
+
+      // Render Wikipedia events
+      wikipediaEvents.forEach((event, index) => {
+        console.log(`Rendering Wikipedia event ${index + 1}:`, event.title);
+        renderCarouselItem(carouselInner, event, index);
+        renderIndicator(carouselIndicators, index);
+      });
+
+      initializeCarousel();
+      console.log("Wikipedia events rendered and carousel initialized!");
+    } else {
+      console.log("No Wikipedia events found");
+    }
+
+    // Phase 2: Load latest blog post
+    console.log("Phase 2: Loading latest blog post...");
+    const latestPost = await fetchLatestBlogPost(monthName, month);
+
+    let currentItemCount = wikipediaEvents ? wikipediaEvents.length : 0;
+
+    if (latestPost) {
+      console.log("Got latest blog post:", latestPost.title);
+      renderCarouselItem(carouselInner, latestPost, currentItemCount);
+      renderIndicator(carouselIndicators, currentItemCount);
+      currentItemCount++;
+    }
+
+    // If we have no items at all, show placeholder
+    if (currentItemCount === 0) {
+      console.log("No carousel items, showing placeholder");
+      renderPlaceholder(carouselInner, month);
+      return;
+    }
+
+    // Reinitialize carousel after adding blog post
+    if (latestPost) {
+      initializeCarousel();
+    }
+
+    // Phase 3: Load remaining blog posts in background
+    console.log("Phase 3: Loading remaining blog posts in background...");
+    const allBlogPosts = await fetchBlogPosts(monthName, month);
+
+    const latestPostIndex = latestPost
+      ? allBlogPosts.findIndex(
+          (p) => p.day === latestPost.day && p.year === latestPost.year
+        )
+      : -1;
+
+    const remainingPosts = allBlogPosts.filter(
+      (_, index) => index !== latestPostIndex
+    );
+
+    remainingPosts.forEach((post) => {
+      renderCarouselItem(carouselInner, post, currentItemCount);
+      renderIndicator(carouselIndicators, currentItemCount);
+      currentItemCount++;
+    });
+
+    console.log(`Carousel complete with ${currentItemCount} total items`);
+  } catch (error) {
+    console.error("Error populating carousel:", error);
+    renderErrorState(carouselInner);
+  }
+}
+
+// Make sure your renderCarouselItem function handles external links properly
+// Update it to check for isExternal flag (should already be there around line 209)
+
+console.log("Wikipedia carousel functions loaded!");
 
 // Helper function to render a single carousel item
 function renderCarouselItem(container, post, index) {

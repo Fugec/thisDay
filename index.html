@@ -576,6 +576,64 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         pointer-events: none;
       }
+      /* Fullscreen overlay */
+      .support-popup-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.35);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(2px);
+        z-index: 9999;
+        opacity: 0;
+        transition: opacity 0.4s ease;
+      }
+
+      /* Show state */
+      .support-popup-overlay.show {
+        display: flex;
+        opacity: 1;
+      }
+
+      /* Popup box */
+      .support-popup-content {
+        background: var(--card-bg);
+        color: var(--text-color);
+        padding: 25px 28px;
+        border-radius: 12px;
+        max-width: 300px;
+        text-align: center;
+        border: 1px solid var(--card-border);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        position: relative;
+        animation: popupFadeIn 0.35s ease;
+      }
+
+      /* Close button */
+      .support-close-btn {
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        border: none;
+        background: transparent;
+        color: var(--text-color);
+        font-size: 22px;
+        cursor: pointer;
+        padding: 0;
+      }
+
+      /* Smooth scale/fade animation */
+      @keyframes popupFadeIn {
+        0% {
+          transform: scale(0.8);
+          opacity: 0;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
     </style>
 
     <link
@@ -880,4 +938,21 @@
       });
     </script>
   </body>
+
+  <div id="supportPopup" class="support-popup-overlay">
+    <div class="support-popup-content">
+      <button class="support-close-btn">&times;</button>
+
+      <h4>History runs on facts, and this project runs on coffee!</h4>
+      <p>Your support is incredibly helpful and genuinely appreciated.</p>
+
+      <a
+        href="https://buymeacoffee.com/fugec?new=1"
+        target="_blank"
+        class="btn btn-primary btn-sm"
+      >
+        Support with a coffee
+      </a>
+    </div>
+  </div>
 </html>

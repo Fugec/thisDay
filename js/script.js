@@ -2049,29 +2049,3 @@ if (eventDetailModalElement) {
     currentActiveFilter = "all";
   });
 }
-
-// ----------------------------
-// Support Popup Function
-// ----------------------------
-function initSupportPopup() {
-  const popup = document.getElementById("supportPopup");
-  const closeBtn = document.querySelector(".support-close-btn");
-
-  if (!popup || !closeBtn) return;
-
-  // Show popup after 10 seconds (only if not previously closed)
-  setTimeout(() => {
-    if (!localStorage.getItem("supportPopupClosed")) {
-      popup.classList.add("show");
-    }
-  }, 5000);
-
-  // Handle close button click
-  closeBtn.addEventListener("click", () => {
-    popup.classList.remove("show");
-    localStorage.setItem("supportPopupClosed", "true");
-  });
-}
-
-// Run when DOM is ready
-document.addEventListener("DOMContentLoaded", initSupportPopup);

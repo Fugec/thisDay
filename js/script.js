@@ -126,6 +126,46 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
   throw new Error(`Failed after ${maxRetries} attempts`);
 }
 
+// Converts raw Wikipedia API response into the app's internal event format
+function processRawWikipediaData(data) {
+  const processedEvents = [];
+  const processedBirths = [];
+  const processedDeaths = [];
+
+  const processItems = (items, targetArray, type) => {
+    if (items && Array.isArray(items)) {
+      items.forEach((item) => {
+        if (!item || !item.text) return;
+        let wikipediaLink = "";
+        let thumbnailUrl = "";
+        if (item.pages && Array.isArray(item.pages) && item.pages.length > 0) {
+          const page = item.pages[0];
+          if (page.content_urls && page.content_urls.desktop) {
+            wikipediaLink = page.content_urls.desktop.page;
+          }
+          if (page.thumbnail && page.thumbnail.source) {
+            thumbnailUrl = page.thumbnail.source;
+          }
+        }
+        targetArray.push({
+          title: item.text.split(".")[0] + ".",
+          description: item.text,
+          year: item.year || "Unknown",
+          sourceUrl: wikipediaLink,
+          thumbnailUrl: thumbnailUrl,
+          type: type,
+        });
+      });
+    }
+  };
+
+  processItems(data.events, processedEvents, "event");
+  processItems(data.births, processedBirths, "birth");
+  processItems(data.deaths, processedDeaths, "death");
+
+  return { events: processedEvents, births: processedBirths, deaths: processedDeaths };
+}
+
 async function fetchWikipediaEvents(month, day) {
   const cacheKey = `${month}-${day}-en`;
   if (eventCache.has(cacheKey)) {
@@ -135,6 +175,26 @@ async function fetchWikipediaEvents(month, day) {
     } else {
       eventCache.delete(cacheKey);
       saveCacheToLocalStorage(eventCache);
+    }
+  }
+
+  // For today's date, use data the Cloudflare Worker already injected — no API call needed
+  const now = new Date();
+  if (month === now.getMonth() + 1 && day === now.getDate()) {
+    const preloadedScript = document.getElementById("preloaded-today-events");
+    if (preloadedScript) {
+      try {
+        const raw = JSON.parse(preloadedScript.textContent);
+        if (raw && raw.events && raw.events.length > 0) {
+          const resultData = processRawWikipediaData(raw);
+          eventCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
+          saveCacheToLocalStorage(eventCache);
+          console.log("Using preloaded worker data for today's events.");
+          return resultData;
+        }
+      } catch (e) {
+        console.warn("Failed to parse preloaded events, falling back to API.", e);
+      }
     }
   }
 
@@ -161,49 +221,7 @@ async function fetchWikipediaEvents(month, day) {
     }
 
     const data = await response.json();
-    const processedEvents = [];
-    const processedBirths = [];
-    const processedDeaths = [];
-
-    const processItems = (items, targetArray, type) => {
-      if (items && Array.isArray(items)) {
-        items.forEach((item) => {
-          if (!item || !item.text) return;
-          let wikipediaLink = "";
-          let thumbnailUrl = "";
-          if (
-            item.pages &&
-            Array.isArray(item.pages) &&
-            item.pages.length > 0
-          ) {
-            const page = item.pages[0];
-            if (page.content_urls && page.content_urls.desktop) {
-              wikipediaLink = page.content_urls.desktop.page;
-            }
-            if (page.thumbnail && page.thumbnail.source) {
-              thumbnailUrl = page.thumbnail.source;
-            }
-          }
-          targetArray.push({
-            title: item.text.split(".")[0] + ".",
-            description: item.text,
-            year: item.year || "Unknown",
-            sourceUrl: wikipediaLink,
-            thumbnailUrl: thumbnailUrl,
-            type: type,
-          });
-        });
-      }
-    };
-    processItems(data.events, processedEvents, "event");
-    processItems(data.births, processedBirths, "birth");
-    processItems(data.deaths, processedDeaths, "death");
-
-    const resultData = {
-      events: processedEvents,
-      births: processedBirths,
-      deaths: processedDeaths,
-    };
+    const resultData = processRawWikipediaData(data);
     eventCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
     saveCacheToLocalStorage(eventCache);
     return resultData;

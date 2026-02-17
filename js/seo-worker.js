@@ -7,14 +7,12 @@
 // Define a User-Agent for API requests to Wikipedia.
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 
-// Key for storing today's events in KV
-const TODAY_EVENTS_KV_KEY = "today-events-data";
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
 
 // --- Helper function to fetch daily events from Wikipedia API ---
 async function fetchDailyEvents(date) {
-  const month = date.getMonth() + 1; // getMonth() is 0-indexed
-  const day = date.getDate();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${month}/${day}`;
 
   const workerCache = caches.default;
@@ -72,7 +70,7 @@ function extractLocationFromName(text) {
 }
 
 // --- Main Request Handler (for user requests) ---
-async function handleFetchRequest(request, env) {
+async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
 
   if (url.pathname === "/llms.txt") {
@@ -84,7 +82,11 @@ async function handleFetchRequest(request, env) {
 
   // Only handle requests for the root path or /index.html
   // Pass through all other requests (e.g., for JS, CSS, images) directly to the origin
-  if (url.pathname !== "/" && url.pathname !== "/index.html") {
+  if (
+    url.pathname !== "/" &&
+    url.pathname !== "/index.html" &&
+    url.pathname !== "/manifest.json"
+  ) {
     return fetch(request);
   }
 
@@ -174,13 +176,13 @@ async function handleFetchRequest(request, env) {
   }
 
   const today = new Date(); // Current date (at Cloudflare edge)
+  const isoDateKey = today.toISOString().split("T")[0]; // e.g. "2026-02-17"
+  const todayKvKey = `today-events-${isoDateKey}`; // Date-specific key prevents stale cross-day data
 
   // 1. Try to get events data from KV first
   let eventsData;
   try {
-    const cachedKvData = await env.EVENTS_KV.get(TODAY_EVENTS_KV_KEY, {
-      type: "json",
-    });
+    const cachedKvData = await env.EVENTS_KV.get(todayKvKey, { type: "json" });
     if (cachedKvData) {
       eventsData = cachedKvData;
       console.log("KV Cache HIT for today's events!");
@@ -190,14 +192,14 @@ async function handleFetchRequest(request, env) {
         "KV Cache MISS for today's events, fetching live and populating KV...",
       );
       eventsData = await fetchDailyEvents(today);
-      // Asynchronously update KV to not block the current request
+      // Queue KV write without blocking — handled after response is sent
       if (eventsData && eventsData.events && eventsData.events.length > 0) {
-        await env.EVENTS_KV.put(
-          TODAY_EVENTS_KV_KEY,
-          JSON.stringify(eventsData),
-          { expirationTtl: KV_CACHE_TTL_SECONDS },
+        ctx.waitUntil(
+          env.EVENTS_KV.put(todayKvKey, JSON.stringify(eventsData), {
+            expirationTtl: KV_CACHE_TTL_SECONDS,
+          }),
         );
-        console.log("KV updated with live fetched data.");
+        console.log("KV update queued (non-blocking).");
       }
     }
   } catch (kvError) {
@@ -237,10 +239,16 @@ async function handleFetchRequest(request, env) {
       .map((event) => `In ${event.year}, ${event.text}`)
       .join("; ");
 
-    dynamicTitle = `On This Day, ${formattedDate}: ${
-      eventsData.events[0].year
-    }, ${eventsData.events[0].text.substring(0, 70)}... | thisDay.info`;
-    dynamicDescription = `Discover what happened on ${formattedDate}: ${topEvents}. Explore historical events, births, and deaths.`;
+    const firstEventText = eventsData.events[0].text;
+    const titleSnippet = firstEventText.length > 65
+      ? firstEventText.substring(0, firstEventText.lastIndexOf(" ", 65)) + "..."
+      : firstEventText;
+    dynamicTitle = `On This Day, ${formattedDate}: ${eventsData.events[0].year}, ${titleSnippet} | thisDay.info`;
+
+    const rawDesc = `Discover what happened on ${formattedDate}: ${topEvents}. Explore historical events, births, and deaths.`;
+    dynamicDescription = rawDesc.length > 155
+      ? rawDesc.substring(0, rawDesc.lastIndexOf(" ", 155)) + "..."
+      : rawDesc;
 
     // Add relevant keywords from event texts (simple approach)
     const eventKeywords = eventsData.events
@@ -323,6 +331,11 @@ async function handleFetchRequest(request, env) {
     .on("meta[name='twitter:image']", {
       element(element) {
         element.setAttribute("content", ogImageUrl);
+      },
+    })
+    .on("meta[property='og:image:alt']", {
+      element(element) {
+        element.setAttribute("content", dynamicTitle);
       },
     });
 
@@ -718,6 +731,21 @@ async function handleFetchRequest(request, env) {
   // X-Frame-Options: DENY - Also for ClickJacking protection. Redundant if CSP frame-ancestors 'none' is used, but good for older browsers.
   newResponse.headers.set("X-Frame-Options", "DENY");
 
+  // Referrer-Policy - controls what referrer info is sent with outbound requests
+  newResponse.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+
+  // Permissions-Policy - disable browser features the site doesn't use
+  newResponse.headers.set(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+  );
+
+  // Cache-Control - allow CDN/edge to cache transformed HTML for 1 hour, serve stale for 24h while revalidating
+  newResponse.headers.set(
+    "Cache-Control",
+    "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400",
+  );
+
   return newResponse;
 }
 
@@ -725,14 +753,16 @@ async function handleFetchRequest(request, env) {
 async function handleScheduledEvent(env) {
   console.log("Scheduled event triggered: Pre-fetching today's events to KV.");
   const today = new Date();
+  const isoDateKey = today.toISOString().split("T")[0];
+  const todayKvKey = `today-events-${isoDateKey}`;
   const eventsData = await fetchDailyEvents(today);
 
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
     try {
-      await env.EVENTS_KV.put(TODAY_EVENTS_KV_KEY, JSON.stringify(eventsData), {
+      await env.EVENTS_KV.put(todayKvKey, JSON.stringify(eventsData), {
         expirationTtl: KV_CACHE_TTL_SECONDS,
       });
-      console.log("Successfully pre-fetched and stored today's events in KV.");
+      console.log(`Successfully pre-fetched and stored events for ${isoDateKey} in KV.`);
     } catch (e) {
       console.error("Failed to put data into KV:", e);
     }
@@ -744,7 +774,7 @@ async function handleScheduledEvent(env) {
 // --- Worker Entry Point (ES Module Format) ---
 export default {
   async fetch(request, env, ctx) {
-    return handleFetchRequest(request, env);
+    return handleFetchRequest(request, env, ctx);
   },
   async scheduled(event, env, ctx) {
     ctx.waitUntil(handleScheduledEvent(env));

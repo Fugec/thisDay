@@ -34,11 +34,11 @@ async function fetchDailyEvents(date) {
 
     if (!fetchResponse.ok) {
       console.error(
-        `Wikipedia API responded with status ${fetchResponse.status} for ${apiUrl}`
+        `Wikipedia API responded with status ${fetchResponse.status} for ${apiUrl}`,
       );
       await fetchResponse.text(); // Consume body to prevent issues
       throw new Error(
-        `Failed to fetch Wikipedia events: ${fetchResponse.statusText}`
+        `Failed to fetch Wikipedia events: ${fetchResponse.statusText}`,
       );
     }
 
@@ -57,7 +57,7 @@ async function fetchDailyEvents(date) {
 function extractLocationFromName(text) {
   // Try to find patterns like "in City, Country" or "in City"
   let match = text.match(
-    /(?:in|near)\s+([A-Za-z\s,\-]+(?:,\s*[A-Za-z\s\-]+)?)\b/i
+    /(?:in|near)\s+([A-Za-z\s,\-]+(?:,\s*[A-Za-z\s\-]+)?)\b/i,
   );
   if (match && match[1]) {
     // Basic cleaning: remove trailing punctuation if any
@@ -187,7 +187,7 @@ async function handleFetchRequest(request, env) {
     } else {
       // 2. If not in KV, fetch it now and update KV (this means KV wasn't pre-populated yet)
       console.log(
-        "KV Cache MISS for today's events, fetching live and populating KV..."
+        "KV Cache MISS for today's events, fetching live and populating KV...",
       );
       eventsData = await fetchDailyEvents(today);
       // Asynchronously update KV to not block the current request
@@ -195,7 +195,7 @@ async function handleFetchRequest(request, env) {
         await env.EVENTS_KV.put(
           TODAY_EVENTS_KV_KEY,
           JSON.stringify(eventsData),
-          { expirationTtl: KV_CACHE_TTL_SECONDS }
+          { expirationTtl: KV_CACHE_TTL_SECONDS },
         );
         console.log("KV updated with live fetched data.");
       }
@@ -338,7 +338,7 @@ async function handleFetchRequest(request, env) {
         // --- Inject Preloaded Data for Client-Side JS ---
         element.append(
           `<script id="preloaded-today-events" type="application/json">${jsonData}</script>`,
-          { html: true }
+          { html: true },
         );
 
         // --- Main WebPage Schema with Events Collection ---
@@ -384,9 +384,9 @@ async function handleFetchRequest(request, env) {
 
         element.append(
           `<script type="application/ld+json">${JSON.stringify(
-            webPageSchema
+            webPageSchema,
           )}</script>`,
-          { html: true }
+          { html: true },
         );
 
         // --- Consolidated Events Schema (limit to top events to avoid bloat) ---
@@ -420,10 +420,10 @@ async function handleFetchRequest(request, env) {
                       ? eventItem.text.substring(0, 100) + "..."
                       : eventItem.text,
                   startDate: `${eventItem.year}-${String(
-                    today.getMonth() + 1
+                    today.getMonth() + 1,
                   ).padStart(2, "0")}-${String(today.getDate()).padStart(
                     2,
-                    "0"
+                    "0",
                   )}`,
                   description: eventItem.text,
                   // Temporal Coverage
@@ -442,9 +442,9 @@ async function handleFetchRequest(request, env) {
 
           element.append(
             `<script type="application/ld+json">${JSON.stringify(
-              eventsListSchema
+              eventsListSchema,
             )}</script>`,
-            { html: true }
+            { html: true },
           );
         }
 
@@ -479,10 +479,10 @@ async function handleFetchRequest(request, env) {
                   "@type": "Person",
                   name: personName,
                   birthDate: `${birthItem.year}-${String(
-                    today.getMonth() + 1
+                    today.getMonth() + 1,
                   ).padStart(2, "0")}-${String(today.getDate()).padStart(
                     2,
-                    "0"
+                    "0",
                   )}`,
                   description: birthItem.text,
                   url: ogUrl, // This 'url' is acceptable for Person if no specific profile page exists
@@ -491,7 +491,7 @@ async function handleFetchRequest(request, env) {
                     birthItem.pages.length > 0 && {
                       sameAs: [
                         `https://en.wikipedia.org/wiki/${encodeURIComponent(
-                          birthItem.pages[0].title.replace(/ /g, "_")
+                          birthItem.pages[0].title.replace(/ /g, "_"),
                         )}`,
                       ],
                     }),
@@ -504,9 +504,9 @@ async function handleFetchRequest(request, env) {
 
           element.append(
             `<script type="application/ld+json">${JSON.stringify(
-              birthsListSchema
+              birthsListSchema,
             )}</script>`,
-            { html: true }
+            { html: true },
           );
         }
 
@@ -540,10 +540,10 @@ async function handleFetchRequest(request, env) {
                   "@type": "Person",
                   name: personName,
                   deathDate: `${deathItem.year}-${String(
-                    today.getMonth() + 1
+                    today.getMonth() + 1,
                   ).padStart(2, "0")}-${String(today.getDate()).padStart(
                     2,
-                    "0"
+                    "0",
                   )}`,
                   description: deathItem.text,
                   url: ogUrl, // This 'url' is acceptable for Person if no specific profile page exists
@@ -552,7 +552,7 @@ async function handleFetchRequest(request, env) {
                     deathItem.pages.length > 0 && {
                       sameAs: [
                         `https://en.wikipedia.org/wiki/${encodeURIComponent(
-                          deathItem.pages[0].title.replace(/ /g, "_")
+                          deathItem.pages[0].title.replace(/ /g, "_"),
                         )}`,
                       ],
                     }),
@@ -565,9 +565,9 @@ async function handleFetchRequest(request, env) {
 
           element.append(
             `<script type="application/ld+json">${JSON.stringify(
-              deathsListSchema
+              deathsListSchema,
             )}</script>`,
-            { html: true }
+            { html: true },
           );
         }
 
@@ -593,9 +593,9 @@ async function handleFetchRequest(request, env) {
 
         element.append(
           `<script type="application/ld+json">${JSON.stringify(
-            breadcrumbSchema
+            breadcrumbSchema,
           )}</script>`,
-          { html: true }
+          { html: true },
         );
 
         // --- Add FAQ Schema if you have common questions ---
@@ -624,9 +624,9 @@ async function handleFetchRequest(request, env) {
 
         element.append(
           `<script type="application/ld+json">${JSON.stringify(
-            faqSchema
+            faqSchema,
           )}</script>`,
-          { html: true }
+          { html: true },
         );
       },
     });
@@ -638,7 +638,7 @@ async function handleFetchRequest(request, env) {
   // Clone the response to modify headers
   const newResponse = new Response(
     transformedResponse.body,
-    transformedResponse
+    transformedResponse,
   );
 
   // --- Add Security Headers ---
@@ -651,7 +651,7 @@ async function handleFetchRequest(request, env) {
   // Be very careful with this; if you ever revert to HTTP, users might be locked out for max-age duration.
   newResponse.headers.set(
     "Strict-Transport-Security",
-    "max-age=31536000; includeSubDomains; preload"
+    "max-age=31536000; includeSubDomains; preload",
   );
 
   // Content-Security-Policy (CSP) - Most comprehensive.
@@ -676,7 +676,8 @@ async function handleFetchRequest(request, env) {
     `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com; ` +
     `base-uri 'self'; ` +
     `frame-ancestors 'none'; ` +
-    `object-src 'none';`;
+    `object-src 'none'; ` +
+    `script-src 'self' https://pagead2.googlesyndication.com https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://static.cloudflareinsights.com 'unsafe-inline'; `;
   newResponse.headers.set("Content-Security-Policy", csp);
 
   // X-Frame-Options: DENY - Also for ClickJacking protection. Redundant if CSP frame-ancestors 'none' is used, but good for older browsers.

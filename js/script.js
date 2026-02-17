@@ -3,7 +3,7 @@ const currentMonthYearDisplay = document.getElementById("currentMonthYear");
 const modalDate = document.getElementById("modalDate");
 const modalBodyContent = document.getElementById("modalBodyContent");
 const eventDetailModal = new bootstrap.Modal(
-  document.getElementById("eventDetailModal")
+  document.getElementById("eventDetailModal"),
 );
 const loadingIndicator = document.getElementById("loadingIndicator");
 
@@ -100,14 +100,14 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
       } else if (response.status === 429) {
         const waitTime = Math.pow(2, attempt) * 1000;
         console.warn(
-          `Rate limited. Waiting ${waitTime}ms before retry ${attempt + 1}`
+          `Rate limited. Waiting ${waitTime}ms before retry ${attempt + 1}`,
         );
         await new Promise((resolve) => setTimeout(resolve, waitTime));
         continue;
       } else if (response.status >= 500) {
         const waitTime = Math.pow(2, attempt) * 500;
         console.warn(
-          `Server error ${response.status}. Retrying in ${waitTime}ms`
+          `Server error ${response.status}. Retrying in ${waitTime}ms`,
         );
         await new Promise((resolve) => setTimeout(resolve, waitTime));
         continue;
@@ -126,6 +126,54 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
   throw new Error(`Failed after ${maxRetries} attempts`);
 }
 
+// Route a Wikimedia image URL through the on-site image proxy.
+// The proxy resizes Wikipedia thumbnails, sets a 30-day cache, and uses
+// Cloudflare Image Resizing (WebP/AVIF) when available on Pro+ plans.
+function getOptimizedImageUrl(url, width = 1200, quality = 82) {
+  if (!url || !url.includes("wikimedia.org")) return url;
+  return `/img?src=${encodeURIComponent(url)}&w=${width}&q=${quality}`;
+}
+
+// Converts raw Wikipedia API response into the app's internal event format
+function processRawWikipediaData(data) {
+  const processedEvents = [];
+  const processedBirths = [];
+  const processedDeaths = [];
+
+  const processItems = (items, targetArray, type) => {
+    if (items && Array.isArray(items)) {
+      items.forEach((item) => {
+        if (!item || !item.text) return;
+        let wikipediaLink = "";
+        let thumbnailUrl = "";
+        if (item.pages && Array.isArray(item.pages) && item.pages.length > 0) {
+          const page = item.pages[0];
+          if (page.content_urls && page.content_urls.desktop) {
+            wikipediaLink = page.content_urls.desktop.page;
+          }
+          if (page.thumbnail && page.thumbnail.source) {
+            thumbnailUrl = page.thumbnail.source;
+          }
+        }
+        targetArray.push({
+          title: item.text.split(".")[0] + ".",
+          description: item.text,
+          year: item.year || "Unknown",
+          sourceUrl: wikipediaLink,
+          thumbnailUrl: thumbnailUrl,
+          type: type,
+        });
+      });
+    }
+  };
+
+  processItems(data.events, processedEvents, "event");
+  processItems(data.births, processedBirths, "birth");
+  processItems(data.deaths, processedDeaths, "death");
+
+  return { events: processedEvents, births: processedBirths, deaths: processedDeaths };
+}
+
 async function fetchWikipediaEvents(month, day) {
   const cacheKey = `${month}-${day}-en`;
   if (eventCache.has(cacheKey)) {
@@ -135,6 +183,25 @@ async function fetchWikipediaEvents(month, day) {
     } else {
       eventCache.delete(cacheKey);
       saveCacheToLocalStorage(eventCache);
+    }
+  }
+
+  // For today's date, use data the Cloudflare Worker already injected — no API call needed
+  const now = new Date();
+  if (month === now.getMonth() + 1 && day === now.getDate()) {
+    const preloadedScript = document.getElementById("preloaded-today-events");
+    if (preloadedScript) {
+      try {
+        const raw = JSON.parse(preloadedScript.textContent);
+        if (raw && raw.events && raw.events.length > 0) {
+          const resultData = processRawWikipediaData(raw);
+          eventCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
+          saveCacheToLocalStorage(eventCache);
+          return resultData;
+        }
+      } catch (e) {
+        console.warn("Failed to parse preloaded events, falling back to API.", e);
+      }
     }
   }
 
@@ -152,7 +219,7 @@ async function fetchWikipediaEvents(month, day) {
 
     if (!response.ok) {
       console.warn(
-        `No data for English Wikipedia for ${month}/${day} (Status: ${response.status})`
+        `No data for English Wikipedia for ${month}/${day} (Status: ${response.status})`,
       );
       const emptyData = { events: [], births: [], deaths: [] };
       eventCache.set(cacheKey, { data: emptyData, timestamp: Date.now() });
@@ -161,49 +228,7 @@ async function fetchWikipediaEvents(month, day) {
     }
 
     const data = await response.json();
-    const processedEvents = [];
-    const processedBirths = [];
-    const processedDeaths = [];
-
-    const processItems = (items, targetArray, type) => {
-      if (items && Array.isArray(items)) {
-        items.forEach((item) => {
-          if (!item || !item.text) return;
-          let wikipediaLink = "";
-          let thumbnailUrl = "";
-          if (
-            item.pages &&
-            Array.isArray(item.pages) &&
-            item.pages.length > 0
-          ) {
-            const page = item.pages[0];
-            if (page.content_urls && page.content_urls.desktop) {
-              wikipediaLink = page.content_urls.desktop.page;
-            }
-            if (page.thumbnail && page.thumbnail.source) {
-              thumbnailUrl = page.thumbnail.source;
-            }
-          }
-          targetArray.push({
-            title: item.text.split(".")[0] + ".",
-            description: item.text,
-            year: item.year || "Unknown",
-            sourceUrl: wikipediaLink,
-            thumbnailUrl: thumbnailUrl,
-            type: type,
-          });
-        });
-      }
-    };
-    processItems(data.events, processedEvents, "event");
-    processItems(data.births, processedBirths, "birth");
-    processItems(data.deaths, processedDeaths, "death");
-
-    const resultData = {
-      events: processedEvents,
-      births: processedBirths,
-      deaths: processedDeaths,
-    };
+    const resultData = processRawWikipediaData(data);
     eventCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
     saveCacheToLocalStorage(eventCache);
     return resultData;
@@ -213,216 +238,12 @@ async function fetchWikipediaEvents(month, day) {
   }
 }
 
-async function fetchWikipediaEventsForCarousel() {
-  try {
-    console.log("Fetching Wikipedia events for carousel...");
-
-    // First, check if Worker preloaded the data
-    const preloadedScript = document.getElementById(
-      "preloaded-carousel-events"
-    );
-    if (preloadedScript) {
-      const wikipediaEvents = JSON.parse(preloadedScript.textContent);
-      console.log(
-        "Using preloaded Wikipedia events from Worker:",
-        wikipediaEvents.length
-      );
-      return wikipediaEvents.map((event) => ({
-        day: new Date().getDate(),
-        year: event.year,
-        title: `${event.year}: ${event.title}`,
-        excerpt: event.description,
-        imageUrl: event.imageUrl,
-        url: event.url,
-        isExternal: true,
-      }));
-    }
-
-    // If not preloaded (local development), fetch directly
-    console.log("No preloaded data, fetching from Wikipedia API...");
-    const today = new Date();
-    const month = today.getMonth() + 1;
-    const day = today.getDate();
-
-    const monthPadded = String(month).padStart(2, "0");
-    const dayPadded = String(day).padStart(2, "0");
-    const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${monthPadded}/${dayPadded}`;
-
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      console.warn("Failed to fetch Wikipedia events for carousel");
-      return [];
-    }
-
-    const data = await response.json();
-    console.log("Wikipedia API response:", data);
-
-    // Filter events with images
-    const eventsWithImages = data.events.filter(
-      (event) => event.pages?.[0]?.thumbnail?.source
-    );
-
-    console.log(`Found ${eventsWithImages.length} events with images`);
-
-    // Take 3 random events
-    const shuffled = [...eventsWithImages].sort(() => Math.random() - 0.5);
-    const selected = shuffled.slice(0, 3);
-
-    const carouselEvents = selected.map((event) => {
-      const wikiTitle =
-        event.pages?.[0]?.title || event.text.split(" ").slice(0, 5).join(" ");
-      const wikiUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(
-        wikiTitle.replace(/ /g, "_")
-      )}`;
-      const imageUrl = event.pages[0].thumbnail.source;
-      const eventText =
-        event.text.length > 150
-          ? event.text.substring(0, 150) + "..."
-          : event.text;
-
-      return {
-        day: day,
-        year: event.year,
-        title: `${event.year}: ${
-          wikiTitle.length > 60 ? wikiTitle.substring(0, 60) + "..." : wikiTitle
-        }`,
-        excerpt: eventText,
-        imageUrl: imageUrl,
-        url: wikiUrl,
-        isExternal: true,
-      };
-    });
-
-    console.log("Prepared carousel events:", carouselEvents);
-    return carouselEvents;
-  } catch (error) {
-    console.error("Error fetching Wikipedia carousel events:", error);
-    return [];
-  }
-}
-
-// REPLACE your existing populateCarousel function with this (around line 272):
-async function populateCarousel(month, year) {
-  console.log("populateCarousel called for month:", monthNames[month]);
-
-  const carouselInner = document.getElementById("carouselInner");
-  const carouselIndicators = document.getElementById("carouselIndicators");
-
-  if (!carouselInner || !carouselIndicators) {
-    console.error("Carousel elements not found!");
-    console.log("carouselInner:", carouselInner);
-    console.log("carouselIndicators:", carouselIndicators);
-    return;
-  }
-
-  carouselInner.innerHTML = "";
-  carouselIndicators.innerHTML = "";
-
-  try {
-    const monthName = monthNames[month].toLowerCase();
-
-    // Phase 1: Load Wikipedia events FIRST
-    console.log("Phase 1: Loading Wikipedia events...");
-    const wikipediaEvents = await fetchWikipediaEventsForCarousel();
-
-    if (wikipediaEvents && wikipediaEvents.length > 0) {
-      console.log(
-        `Got ${wikipediaEvents.length} Wikipedia events for carousel`
-      );
-
-      // Render Wikipedia events
-      wikipediaEvents.forEach((event, index) => {
-        console.log(`Rendering Wikipedia event ${index + 1}:`, event.title);
-        renderCarouselItem(carouselInner, event, index);
-        renderIndicator(carouselIndicators, index);
-      });
-
-      initializeCarousel();
-      console.log("Wikipedia events rendered and carousel initialized!");
-    } else {
-      console.log("No Wikipedia events found");
-    }
-
-    // Phase 2: Load latest blog post
-    console.log("Phase 2: Loading latest blog post...");
-    const latestPost = await fetchLatestBlogPost(monthName, month);
-
-    let currentItemCount = wikipediaEvents ? wikipediaEvents.length : 0;
-
-    if (latestPost) {
-      console.log("Got latest blog post:", latestPost.title);
-      renderCarouselItem(carouselInner, latestPost, currentItemCount);
-      renderIndicator(carouselIndicators, currentItemCount);
-      currentItemCount++;
-    }
-
-    // If we have no items at all, show placeholder
-    if (currentItemCount === 0) {
-      console.log("No carousel items, showing placeholder");
-      renderPlaceholder(carouselInner, month);
-      return;
-    }
-
-    // Reinitialize carousel after adding blog post
-    if (latestPost) {
-      initializeCarousel();
-    }
-
-    // Phase 3: Load remaining blog posts in background
-    console.log("Phase 3: Loading remaining blog posts in background...");
-    const allBlogPosts = await fetchBlogPosts(monthName, month);
-
-    const latestPostIndex = latestPost
-      ? allBlogPosts.findIndex(
-          (p) => p.day === latestPost.day && p.year === latestPost.year
-        )
-      : -1;
-
-    const remainingPosts = allBlogPosts.filter(
-      (_, index) => index !== latestPostIndex
-    );
-
-    remainingPosts.forEach((post) => {
-      renderCarouselItem(carouselInner, post, currentItemCount);
-      renderIndicator(carouselIndicators, currentItemCount);
-      currentItemCount++;
-    });
-
-    console.log(`Carousel complete with ${currentItemCount} total items`);
-  } catch (error) {
-    console.error("Error populating carousel:", error);
-    renderErrorState(carouselInner);
-  }
-}
-
-// Make sure your renderCarouselItem function handles external links properly
-// Update it to check for isExternal flag (should already be there around line 209)
-
-console.log("Wikipedia carousel functions loaded!");
+// --- NEW/MODIFIED CAROUSEL AND BLOG POST LOGIC ---
 
 // Helper function to render a single carousel item
 function renderCarouselItem(container, post, index) {
   const carouselItem = document.createElement("div");
   carouselItem.className = `carousel-item${index === 0 ? " active" : ""}`;
-  const monthNames = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
   const imageUrl =
     post.imageUrl ||
     `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
@@ -463,20 +284,6 @@ function renderCarouselItem(container, post, index) {
   container.appendChild(carouselItem);
 }
 
-// Helper function to render a single carousel indicator
-function renderIndicator(container, index) {
-  const indicator = document.createElement("button");
-  indicator.setAttribute("type", "button");
-  indicator.setAttribute("data-bs-target", "#historicalCarousel");
-  indicator.setAttribute("data-bs-slide-to", index);
-  indicator.setAttribute("aria-label", `Slide ${index + 1}`);
-  if (index === 0) {
-    indicator.className = "active";
-    indicator.setAttribute("aria-current", "true");
-  }
-  container.appendChild(indicator);
-}
-
 // Helper function to render the "No Posts" placeholder
 function renderPlaceholder(container, month) {
   const defaultItem = document.createElement("div");
@@ -512,111 +319,12 @@ function renderErrorState(container) {
   container.appendChild(errorItem);
 }
 
-// Helper function to initialize the Bootstrap Carousel
-function initializeCarousel() {
-  const carouselElement = document.getElementById("historicalCarousel");
-  const bsCarousel = bootstrap.Carousel.getInstance(carouselElement);
-  if (bsCarousel) {
-    bsCarousel.to(0);
-    bsCarousel.cycle();
-  } else {
-    new bootstrap.Carousel(carouselElement, {
-      interval: 3000,
-      ride: "carousel",
-    });
-  }
-}
-
-// Optimized function to fetch and return only the latest post
-async function fetchLatestBlogPost(monthName, monthIndex) {
-  const today = new Date();
-  const currentDay = today.getDate();
-  const currentYear = today.getFullYear();
-
-  // Start from the current day and go backward to find the latest available post
-  for (let day = currentDay; day >= 1; day--) {
-    const folderName = `${day}-${currentYear}`;
-    try {
-      const response = await fetch(`/blog/${monthName}/${folderName}/`, {
-        method: "HEAD",
-        cache: "no-cache",
-      });
-      if (response.ok) {
-        console.log(`Found latest blog post: ${folderName}`);
-        const post = await fetchBlogPostData(
-          monthName,
-          folderName,
-          day,
-          currentYear,
-          monthIndex
-        );
-        return post;
-      }
-    } catch (error) {
-      // Ignore errors for non-existent posts
-    }
-  }
-
-  // Fallback: If no post found for the current month, try to generate the latest available
-  console.log(
-    `No post found for ${monthName}, attempting to generate the latest available post.`
-  );
-  const generatedPosts = await generateMonthBlogPosts(monthName, monthIndex);
-  return generatedPosts.length > 0 ? generatedPosts[0] : null;
-}
-
-// Enhanced carousel population to load latest post instantly, and rest later
-async function populateCarousel(month, year) {
-  const carouselInner = document.getElementById("carouselInner");
-  const carouselIndicators = document.getElementById("carouselIndicators");
-
-  carouselInner.innerHTML = "";
-  carouselIndicators.innerHTML = "";
-
-  try {
-    const monthName = monthNames[month].toLowerCase();
-
-    // Phase 1: INSTANTLY load and display the latest post for quick render
-    const latestPost = await fetchLatestBlogPost(monthName, month);
-
-    if (!latestPost) {
-      renderPlaceholder(carouselInner, month);
-      return;
-    }
-
-    // Render the latest post and its indicator
-    renderCarouselItem(carouselInner, latestPost, 0);
-    renderIndicator(carouselIndicators, 0);
-    initializeCarousel();
-
-    // Phase 2: Asynchronously load/generate the rest of the posts in the background
-    console.log("Loading remaining posts in the background...");
-    const allPosts = await fetchBlogPosts(monthName, month);
-
-    const latestPostIndex = allPosts.findIndex(
-      (p) => p.day === latestPost.day && p.year === latestPost.year
-    );
-    const remainingPosts = allPosts.filter(
-      (_, index) => index !== latestPostIndex
-    );
-
-    remainingPosts.forEach((post, index) => {
-      const newIndex = index + 1;
-      renderCarouselItem(carouselInner, post, newIndex);
-      renderIndicator(carouselIndicators, newIndex);
-    });
-  } catch (error) {
-    console.error("Error populating carousel:", error);
-    renderErrorState(carouselInner);
-  }
-}
 
 // fetch all blog posts from the /blog/ folder structure
 async function fetchBlogPosts(monthName, monthIndex) {
   const BLOG_CACHE_KEY = `blogPosts_${monthName}`;
   const cachedPosts = getCachedBlogPosts(BLOG_CACHE_KEY);
   if (cachedPosts) {
-    console.log("Using cached blog posts");
     return cachedPosts;
   }
 
@@ -639,7 +347,6 @@ async function fetchBlogPosts(monthName, monthIndex) {
       return generatedPosts;
     }
 
-    console.log(`No blog posts found for ${monthName}`);
     return [];
   } catch (error) {
     console.error("Error fetching blog posts:", error);
@@ -679,7 +386,7 @@ async function fetchAllBlogPostsFromFolder(monthName, monthIndex) {
           folderName,
           day,
           startYear,
-          monthIndex
+          monthIndex,
         );
         if (postData) {
           allPosts.push(postData);
@@ -769,7 +476,7 @@ async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
   } catch (error) {
     console.error(
       `Error fetching or parsing blog post HTML for ${folder}:`,
-      error
+      error,
     );
     return {
       day: day,
@@ -824,7 +531,7 @@ async function fetchBlogPostsFromManifest(monthName) {
     const currentMonth = today.getMonth();
     const currentDay = today.getDate();
     const monthIndex = monthNames.findIndex(
-      (m) => m.toLowerCase() === monthName.toLowerCase()
+      (m) => m.toLowerCase() === monthName.toLowerCase(),
     );
     const blogPosts = [];
     for (const post of manifest.posts || []) {
@@ -853,47 +560,6 @@ async function fetchBlogPostsFromManifest(monthName) {
   }
 }
 
-async function debugBlogPosts() {
-  const today = new Date();
-  const monthName = monthNames[today.getMonth()].toLowerCase();
-
-  console.log("=== Blog Post Debug ===");
-  console.log(`Month: ${monthName}`);
-  console.log(`Looking for ALL posts in /blog/${monthName}/`);
-  console.log(`Starting from year: ${Math.min(2025, today.getFullYear())}`);
-  console.log(`Using image format: /images/blog/[day].[month].jpg`);
-
-  console.log("Testing manifest...");
-  const manifestPosts = await fetchBlogPostsFromManifest(monthName);
-  console.log("Manifest posts:", manifestPosts);
-
-  console.log("Testing folder scanning...");
-  const folderPosts = await fetchAllBlogPostsFromFolder(
-    monthName,
-    today.getMonth()
-  );
-  console.log("Folder posts:", folderPosts);
-
-  console.log("Testing month generation...");
-  const generatedPosts = await generateMonthBlogPosts(
-    monthName,
-    today.getMonth()
-  );
-  console.log("Generated posts:", generatedPosts);
-
-  console.log("Testing specific posts...");
-  const testDays = [1, 15, 18, 25, 31];
-  for (const day of testDays) {
-    const testPost = await fetchBlogPostData(
-      monthName,
-      `${day}-${Math.max(2025, today.getFullYear())}`,
-      day,
-      Math.max(2025, today.getFullYear()),
-      today.getMonth()
-    );
-    console.log(`Test post ${day}:`, testPost);
-  }
-}
 
 function createDayCard(day, month) {
   const dayCard = document.createElement("div");
@@ -912,7 +578,7 @@ function createDayCard(day, month) {
 }
 
 async function loadDayEvents(dayCard, month, forceLoad = false) {
-  const day = parseInt(dayCard.getAttribute("data-day"));
+  const day = parseInt(dayCard.getAttribute("data-day"), 10);
   if (dayCard.classList.contains("loaded") && !forceLoad) {
     return true;
   }
@@ -943,7 +609,7 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
           day,
           month + 1,
           currentDate.getFullYear(),
-          dayCard.eventsData
+          dayCard.eventsData,
         );
       });
       dayCard._hasClickListener = true;
@@ -991,10 +657,10 @@ async function renderCalendar() {
       }
       if (dayCard.eventsData) {
         showEventDetails(
-          parseInt(dayCard.getAttribute("data-day")),
+          parseInt(dayCard.getAttribute("data-day"), 10),
           month + 1,
           currentDate.getFullYear(),
-          dayCard.eventsData
+          dayCard.eventsData,
         );
       }
     });
@@ -1006,11 +672,14 @@ async function renderCalendar() {
     calendarGrid.appendChild(dayCard);
     dayCards.push(dayCard);
   }
+  // Observe all day cards so events load automatically as they scroll into view
+  initDayCardObserver(dayCards, month);
+
   try {
     const carouselPromise = populateCarousel(month, year);
     if (isCurrentMonth) {
       const todayCard = dayCards.find(
-        (card) => parseInt(card.getAttribute("data-day")) === todayDate
+        (card) => parseInt(card.getAttribute("data-day"), 10) === todayDate,
       );
       if (todayCard) {
         await loadDayEvents(todayCard, month, true);
@@ -1026,7 +695,7 @@ async function renderCalendar() {
   } catch (error) {
     console.error("Error during calendar rendering:", error);
     console.error(
-      "This error could be due to network issues, API rate limits, or unexpected data format. Please check your internet connection, ensure the API is accessible, and verify the data structure."
+      "This error could be due to network issues, API rate limits, or unexpected data format. Please check your internet connection, ensure the API is accessible, and verify the data structure.",
     );
     calendarGrid.innerHTML = `
       <div class="col-12 text-center py-5">
@@ -1037,6 +706,38 @@ async function renderCalendar() {
       </div>
     `;
   }
+}
+
+// IntersectionObserver: auto-load events when day cards scroll into the viewport
+let dayCardObserver = null;
+
+function initDayCardObserver(dayCards, month) {
+  if (dayCardObserver) {
+    dayCardObserver.disconnect();
+  }
+  if (!("IntersectionObserver" in window)) return;
+
+  dayCardObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (
+          entry.isIntersecting &&
+          entry.target.classList.contains("needs-load") &&
+          !entry.target.classList.contains("loading")
+        ) {
+          loadDayEvents(entry.target, month);
+          dayCardObserver.unobserve(entry.target);
+        }
+      });
+    },
+    { rootMargin: "100px", threshold: 0.1 },
+  );
+
+  dayCards.forEach((card) => {
+    if (card.classList.contains("needs-load")) {
+      dayCardObserver.observe(card);
+    }
+  });
 }
 
 let currentDayAllItems = [];
@@ -1690,7 +1391,7 @@ function assignCategories(item) {
     }
   }
   const nonTypeBased = Array.from(categoriesFound).filter(
-    (cat) => cat !== "Births" && cat !== "Deaths"
+    (cat) => cat !== "Births" && cat !== "Deaths",
   );
   if (nonTypeBased.length === 0 && !categoriesFound.has("Famous Persons")) {
     categoriesFound.add("Miscellaneous");
@@ -1720,8 +1421,8 @@ function renderFilteredItems(itemsToRender) {
                     <div class="flex-grow-1">
                         <strong class="text-primary">${event.year}</strong>
                         <p class="mb-1">${specialEmphasis}${
-      event.description
-    }</p>
+                          event.description
+                        }</p>
                         ${
                           event.sourceUrl
                             ? `
@@ -1773,7 +1474,7 @@ async function showEventDetails(
   day,
   month,
   year,
-  preFetchedStructuredEvents = null
+  preFetchedStructuredEvents = null,
 ) {
   modalDate.textContent = `${day}. ${monthNames[month - 1]}`;
   modalBodyContent.innerHTML =
@@ -1797,8 +1498,8 @@ async function showEventDetails(
       categories: assignCategories(item),
     }));
     currentDayAllItems.sort((a, b) => {
-      const yearA = parseInt(a.year) || 0;
-      const yearB = parseInt(b.year) || 0;
+      const yearA = parseInt(a.year, 10) || 0;
+      const yearB = parseInt(b.year, 10) || 0;
       return yearA - yearB;
     });
     const allAvailableCategories = new Set(["All"]);
@@ -1837,7 +1538,7 @@ async function showEventDetails(
           currentActiveFilter = "all";
           event.target.classList.remove("active");
           const allButton = modalBodyContent.querySelector(
-            '.filter-btn[data-category="all"]'
+            '.filter-btn[data-category="all"]',
           );
           if (allButton) {
             allButton.classList.add("active");
@@ -1999,7 +1700,7 @@ if (typeof PerformanceObserver !== "undefined") {
     list.getEntries().forEach((entry) => {
       if (entry.duration > 1000) {
         console.warn(
-          `Slow operation detected: ${entry.name} took ${entry.duration}ms`
+          `Slow operation detected: ${entry.name} took ${entry.duration}ms`,
         );
       }
     });
@@ -2048,4 +1749,211 @@ if (eventDetailModalElement) {
   eventDetailModalElement.addEventListener("hidden.bs.modal", function () {
     currentActiveFilter = "all";
   });
+}
+
+// Enhanced function to fetch Wikipedia events with better randomization
+async function fetchWikipediaEventsForCarousel() {
+  try {
+    // Try preloaded data from Cloudflare Worker first
+    const preloadedScript = document.getElementById("preloaded-today-events");
+
+    if (preloadedScript) {
+      try {
+        const rawData = JSON.parse(preloadedScript.textContent);
+
+        if (rawData && rawData.events && Array.isArray(rawData.events)) {
+          // Filter for events that have images
+          const eventsWithImages = rawData.events.filter(
+            (e) =>
+              e.pages &&
+              e.pages[0] &&
+              e.pages[0].thumbnail &&
+              e.pages[0].thumbnail.source,
+          );
+
+          // Randomly select 3 events
+          const shuffled = eventsWithImages.sort(() => Math.random() - 0.5);
+          const selectedEvents = shuffled.slice(0, 3);
+
+          return selectedEvents.map((event) => {
+            const wikiPage = event.pages[0];
+            const optimized = getOptimizedImageUrl(wikiPage.thumbnail.source, 1200);
+            return {
+              day: new Date().getDate(),
+              year: event.year,
+              title: wikiPage.title || event.text.split(".")[0],
+              excerpt: event.text,
+              imageUrl: optimized,
+              backgroundUrl: optimized,
+              url: wikiPage.content_urls.desktop.page,
+              isExternal: true,
+            };
+          });
+        }
+      } catch (e) {
+        console.error("Error parsing preloaded worker data:", e);
+      }
+    }
+
+    // Fallback: Fetch from Wikipedia API
+    const today = new Date();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
+    const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${month}/${day}`;
+
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      console.error("Wikipedia API request failed:", response.status);
+      return [];
+    }
+
+    const data = await response.json();
+
+    // Filter events with images
+    const eventsWithImages = data.events.filter(
+      (event) => event.pages?.[0]?.thumbnail?.source,
+    );
+
+    // Randomly select 3 events
+    const shuffled = eventsWithImages.sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, 3);
+
+    return selected.map((event) => {
+      const wikiPage = event.pages[0];
+      const optimized = getOptimizedImageUrl(wikiPage.thumbnail.source, 1200);
+      return {
+        day: today.getDate(),
+        year: event.year,
+        title: wikiPage.title,
+        excerpt: event.text,
+        imageUrl: optimized,
+        backgroundUrl: optimized,
+        url: wikiPage.content_urls.desktop.page,
+        isExternal: true,
+      };
+    });
+  } catch (error) {
+    console.error("Error fetching Wikipedia carousel events:", error);
+    return [];
+  }
+}
+
+// Render a carousel item using existing img + carousel-caption CSS
+function renderFullWidthCarouselItem(container, event, index) {
+  const item = document.createElement("div");
+  item.className = `carousel-item${index === 0 ? " active" : ""}`;
+
+  const title = (event.title || "").replace(/_/g, " ");
+  const imageUrl =
+    event.backgroundUrl ||
+    event.imageUrl ||
+    `https://placehold.co/1200x350/3b82f6/ffffff?text=${encodeURIComponent(title)}`;
+  const fallbackUrl = `https://placehold.co/1200x350/3b82f6/ffffff?text=${encodeURIComponent(title)}`;
+  const excerpt =
+    event.excerpt && event.excerpt.length > 160
+      ? event.excerpt.substring(0, 160) + "..."
+      : event.excerpt || "";
+
+  item.innerHTML = `
+    <div class="carousel-image-container">
+      <img src="${imageUrl}" class="d-block w-100" alt="${title}"
+           onerror="this.onerror=null;this.src='${fallbackUrl}';"
+           ${index === 0 ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async" width="1200" height="350">
+    </div>
+    <div class="carousel-caption">
+      <small style="opacity:0.75;font-size:0.85em;display:block;margin-bottom:6px;letter-spacing:0.05em;">${event.year}</small>
+      <h5 style="font-size:20px;font-weight:700;line-height:1.2;margin-bottom:0.75rem;">${title}</h5>
+      <p>${excerpt}</p>
+      <a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">
+        Read on Wikipedia
+      </a>
+    </div>
+  `;
+
+  container.appendChild(item);
+}
+
+// Render carousel indicator
+function renderIndicator(container, index) {
+  const indicator = document.createElement("button");
+  indicator.type = "button";
+  indicator.setAttribute("data-bs-target", "#historicalCarousel");
+  indicator.setAttribute("data-bs-slide-to", index.toString());
+  if (index === 0) {
+    indicator.className = "active";
+    indicator.setAttribute("aria-current", "true");
+  }
+  indicator.setAttribute("aria-label", `Slide ${index + 1}`);
+  container.appendChild(indicator);
+}
+
+// Initialize Bootstrap carousel
+function initializeCarousel() {
+  const carouselElement = document.getElementById("historicalCarousel");
+  if (carouselElement && typeof bootstrap !== "undefined") {
+    new bootstrap.Carousel(carouselElement, {
+      interval: 5000,
+      wrap: true,
+      touch: true,
+    });
+  }
+}
+
+// Main function to populate carousel
+async function populateCarousel(month, year) {
+  const carouselInner = document.getElementById("carouselInner");
+  const carouselIndicators = document.getElementById("carouselIndicators");
+
+  if (!carouselInner || !carouselIndicators) {
+    console.error("Carousel elements not found!");
+    return;
+  }
+
+  // Clear existing content
+  carouselInner.innerHTML = "";
+  carouselIndicators.innerHTML = "";
+
+  try {
+    // Fetch 2 random Wikipedia events
+    const wikipediaEvents = await fetchWikipediaEventsForCarousel();
+
+    if (wikipediaEvents && wikipediaEvents.length > 0) {
+      wikipediaEvents.forEach((event, index) => {
+        renderFullWidthCarouselItem(carouselInner, event, index);
+        renderIndicator(carouselIndicators, index);
+      });
+
+      document.getElementById("historicalCarousel").style.display = "block";
+      initializeCarousel();
+    } else {
+      // Show placeholder if no events found
+      carouselInner.innerHTML = `
+        <div class="carousel-item active">
+          <div class="carousel-slide" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="carousel-overlay"></div>
+            <div class="carousel-content">
+              <h3 class="carousel-title">No Events Available</h3>
+              <p class="carousel-excerpt">Unable to load historical events for today.</p>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+  } catch (error) {
+    console.error("Error populating carousel:", error);
+    carouselInner.innerHTML = `
+      <div class="carousel-item active">
+        <div class="carousel-slide" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+          <div class="carousel-overlay"></div>
+          <div class="carousel-content">
+            <h3 class="carousel-title">Error Loading Events</h3>
+            <p class="carousel-excerpt">Something went wrong. Please try again later.</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
 }

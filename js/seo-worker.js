@@ -7,14 +7,12 @@
 // Define a User-Agent for API requests to Wikipedia.
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 
-// Key for storing today's events in KV
-const TODAY_EVENTS_KV_KEY = "today-events-data";
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
 
 // --- Helper function to fetch daily events from Wikipedia API ---
 async function fetchDailyEvents(date) {
-  const month = date.getMonth() + 1; // getMonth() is 0-indexed
-  const day = date.getDate();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
   const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${month}/${day}`;
 
   const workerCache = caches.default;
@@ -34,11 +32,11 @@ async function fetchDailyEvents(date) {
 
     if (!fetchResponse.ok) {
       console.error(
-        `Wikipedia API responded with status ${fetchResponse.status} for ${apiUrl}`
+        `Wikipedia API responded with status ${fetchResponse.status} for ${apiUrl}`,
       );
       await fetchResponse.text(); // Consume body to prevent issues
       throw new Error(
-        `Failed to fetch Wikipedia events: ${fetchResponse.statusText}`
+        `Failed to fetch Wikipedia events: ${fetchResponse.statusText}`,
       );
     }
 
@@ -57,7 +55,7 @@ async function fetchDailyEvents(date) {
 function extractLocationFromName(text) {
   // Try to find patterns like "in City, Country" or "in City"
   let match = text.match(
-    /(?:in|near)\s+([A-Za-z\s,\-]+(?:,\s*[A-Za-z\s\-]+)?)\b/i
+    /(?:in|near)\s+([A-Za-z\s,\-]+(?:,\s*[A-Za-z\s\-]+)?)\b/i,
   );
   if (match && match[1]) {
     // Basic cleaning: remove trailing punctuation if any
@@ -71,8 +69,73 @@ function extractLocationFromName(text) {
   return "Historical Location";
 }
 
+// --- Image Proxy: resize, cache, and optionally convert Wikipedia images ---
+async function handleImageProxy(_request, url, ctx) {
+  const src = url.searchParams.get("src");
+  const width = Math.min(parseInt(url.searchParams.get("w") || "1200", 10), 2000);
+  const quality = Math.min(parseInt(url.searchParams.get("q") || "82", 10), 100);
+
+  if (!src) return new Response("Missing src parameter", { status: 400 });
+
+  let imageUrl;
+  try {
+    const decoded = decodeURIComponent(src);
+    const parsed = new URL(decoded);
+    if (!parsed.hostname.endsWith("wikimedia.org")) {
+      return new Response("Forbidden: only Wikimedia images allowed", { status: 403 });
+    }
+    // Resize by swapping the pixel-width segment in Wikipedia thumbnail paths
+    // e.g. /320px-File.jpg  →  /1200px-File.jpg
+    imageUrl = decoded.replace(/\/\d+px-/, `/${width}px-`);
+  } catch {
+    return new Response("Invalid URL", { status: 400 });
+  }
+
+  // Check worker-level cache first (keyed on final URL + dimensions)
+  const workerCache = caches.default;
+  const cacheKey = new Request(
+    `https://img-cache.thisday.info/${encodeURIComponent(imageUrl)}?w=${width}&q=${quality}`,
+  );
+  const cached = await workerCache.match(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const imageResponse = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": WIKIPEDIA_USER_AGENT,
+        Accept: "image/avif,image/webp,image/jpeg,image/*",
+      },
+      cf: {
+        cacheTtl: 60 * 60 * 24 * 30, // 30-day Cloudflare edge cache
+        cacheEverything: true,
+        // Cloudflare Image Resizing (Pro plan+): converts to WebP/AVIF automatically
+        image: { width, quality, format: "auto" },
+      },
+    });
+
+    if (!imageResponse.ok) {
+      return new Response("Image not found", { status: imageResponse.status });
+    }
+
+    const headers = new Headers();
+    headers.set(
+      "Content-Type",
+      imageResponse.headers.get("Content-Type") || "image/jpeg",
+    );
+    headers.set("Cache-Control", "public, max-age=2592000, immutable"); // 30 days browser cache
+    headers.set("Access-Control-Allow-Origin", "*");
+    headers.set("Vary", "Accept"); // separate cache entry per Accept header (WebP vs JPEG)
+
+    const result = new Response(imageResponse.body, { status: 200, headers });
+    ctx.waitUntil(workerCache.put(cacheKey, result.clone()));
+    return result;
+  } catch {
+    return new Response("Error fetching image", { status: 500 });
+  }
+}
+
 // --- Main Request Handler (for user requests) ---
-async function handleFetchRequest(request, env) {
+async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
 
   if (url.pathname === "/llms.txt") {
@@ -82,9 +145,18 @@ async function handleFetchRequest(request, env) {
     });
   }
 
+  // Image proxy — must be handled before the HTML pass-through guard
+  if (url.pathname === "/img") {
+    return handleImageProxy(request, url, ctx);
+  }
+
   // Only handle requests for the root path or /index.html
   // Pass through all other requests (e.g., for JS, CSS, images) directly to the origin
-  if (url.pathname !== "/" && url.pathname !== "/index.html") {
+  if (
+    url.pathname !== "/" &&
+    url.pathname !== "/index.html" &&
+    url.pathname !== "/manifest.json"
+  ) {
     return fetch(request);
   }
 
@@ -174,30 +246,30 @@ async function handleFetchRequest(request, env) {
   }
 
   const today = new Date(); // Current date (at Cloudflare edge)
+  const isoDateKey = today.toISOString().split("T")[0]; // e.g. "2026-02-17"
+  const todayKvKey = `today-events-${isoDateKey}`; // Date-specific key prevents stale cross-day data
 
   // 1. Try to get events data from KV first
   let eventsData;
   try {
-    const cachedKvData = await env.EVENTS_KV.get(TODAY_EVENTS_KV_KEY, {
-      type: "json",
-    });
+    const cachedKvData = await env.EVENTS_KV.get(todayKvKey, { type: "json" });
     if (cachedKvData) {
       eventsData = cachedKvData;
       console.log("KV Cache HIT for today's events!");
     } else {
       // 2. If not in KV, fetch it now and update KV (this means KV wasn't pre-populated yet)
       console.log(
-        "KV Cache MISS for today's events, fetching live and populating KV..."
+        "KV Cache MISS for today's events, fetching live and populating KV...",
       );
       eventsData = await fetchDailyEvents(today);
-      // Asynchronously update KV to not block the current request
+      // Queue KV write without blocking — handled after response is sent
       if (eventsData && eventsData.events && eventsData.events.length > 0) {
-        await env.EVENTS_KV.put(
-          TODAY_EVENTS_KV_KEY,
-          JSON.stringify(eventsData),
-          { expirationTtl: KV_CACHE_TTL_SECONDS }
+        ctx.waitUntil(
+          env.EVENTS_KV.put(todayKvKey, JSON.stringify(eventsData), {
+            expirationTtl: KV_CACHE_TTL_SECONDS,
+          }),
         );
-        console.log("KV updated with live fetched data.");
+        console.log("KV update queued (non-blocking).");
       }
     }
   } catch (kvError) {
@@ -212,7 +284,7 @@ async function handleFetchRequest(request, env) {
     "thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history, history, educational, timeline, trivia, historical figures";
   let dynamicTitle =
     "thisDay. | What Happened on This Day? | Historical Events";
-  const ogImageUrl = "https://thisday.info/assets/default-social-share.jpg"; // Default image
+  let ogImageUrl = "https://thisday.info/images/logo.png"; // Default fallback image
   const ogUrl = "https://thisday.info/"; // Canonical URL
 
   // Format the date for the title and description
@@ -221,16 +293,32 @@ async function handleFetchRequest(request, env) {
   const isoDate = today.toISOString().split("T")[0]; // e.g., "2025-07-12"
 
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
+    // Use the first event's Wikipedia thumbnail for social sharing if available
+    const firstWithImage = eventsData.events.find(
+      (e) => e.pages?.[0]?.thumbnail?.source
+    );
+    if (firstWithImage) {
+      const rawImgUrl = firstWithImage.pages[0].thumbnail.source;
+      // Route through the image proxy: resizes to 1200px and caches at edge for 30 days
+      ogImageUrl = `/img?src=${encodeURIComponent(rawImgUrl)}&w=1200&q=82`;
+    }
+
     // Pick the top 3-5 events for a concise description
     const topEvents = eventsData.events
       .slice(0, 5)
       .map((event) => `In ${event.year}, ${event.text}`)
       .join("; ");
 
-    dynamicTitle = `On This Day, ${formattedDate}: ${
-      eventsData.events[0].year
-    }, ${eventsData.events[0].text.substring(0, 70)}... | thisDay.info`;
-    dynamicDescription = `Discover what happened on ${formattedDate}: ${topEvents}. Explore historical events, births, and deaths.`;
+    const firstEventText = eventsData.events[0].text;
+    const titleSnippet = firstEventText.length > 65
+      ? firstEventText.substring(0, firstEventText.lastIndexOf(" ", 65)) + "..."
+      : firstEventText;
+    dynamicTitle = `On This Day, ${formattedDate}: ${eventsData.events[0].year}, ${titleSnippet} | thisDay.info`;
+
+    const rawDesc = `Discover what happened on ${formattedDate}: ${topEvents}. Explore historical events, births, and deaths.`;
+    dynamicDescription = rawDesc.length > 155
+      ? rawDesc.substring(0, rawDesc.lastIndexOf(" ", 155)) + "..."
+      : rawDesc;
 
     // Add relevant keywords from event texts (simple approach)
     const eventKeywords = eventsData.events
@@ -314,6 +402,21 @@ async function handleFetchRequest(request, env) {
       element(element) {
         element.setAttribute("content", ogImageUrl);
       },
+    })
+    .on("meta[property='og:image:alt']", {
+      element(element) {
+        element.setAttribute("content", dynamicTitle);
+      },
+    })
+    .on("meta[property='og:image:width']", {
+      element(element) {
+        element.setAttribute("content", "1200");
+      },
+    })
+    .on("meta[property='og:image:height']", {
+      element(element) {
+        element.setAttribute("content", "630");
+      },
     });
 
   // Inject preloaded data for the current day into the HTML
@@ -338,7 +441,7 @@ async function handleFetchRequest(request, env) {
         // --- Inject Preloaded Data for Client-Side JS ---
         element.append(
           `<script id="preloaded-today-events" type="application/json">${jsonData}</script>`,
-          { html: true }
+          { html: true },
         );
 
         // --- Main WebPage Schema with Events Collection ---
@@ -384,9 +487,9 @@ async function handleFetchRequest(request, env) {
 
         element.append(
           `<script type="application/ld+json">${JSON.stringify(
-            webPageSchema
+            webPageSchema,
           )}</script>`,
-          { html: true }
+          { html: true },
         );
 
         // --- Consolidated Events Schema (limit to top events to avoid bloat) ---
@@ -420,10 +523,10 @@ async function handleFetchRequest(request, env) {
                       ? eventItem.text.substring(0, 100) + "..."
                       : eventItem.text,
                   startDate: `${eventItem.year}-${String(
-                    today.getMonth() + 1
+                    today.getMonth() + 1,
                   ).padStart(2, "0")}-${String(today.getDate()).padStart(
                     2,
-                    "0"
+                    "0",
                   )}`,
                   description: eventItem.text,
                   // Temporal Coverage
@@ -442,9 +545,9 @@ async function handleFetchRequest(request, env) {
 
           element.append(
             `<script type="application/ld+json">${JSON.stringify(
-              eventsListSchema
+              eventsListSchema,
             )}</script>`,
-            { html: true }
+            { html: true },
           );
         }
 
@@ -472,6 +575,11 @@ async function handleFetchRequest(request, env) {
                   ? birthItem.pages[0].thumbnail.source
                   : undefined;
 
+              const wikiUrl =
+                birthItem.pages && birthItem.pages.length > 0 && birthItem.pages[0].content_urls?.desktop?.page
+                  ? birthItem.pages[0].content_urls.desktop.page
+                  : ogUrl;
+
               return {
                 "@type": "ListItem",
                 position: index + 1,
@@ -479,19 +587,19 @@ async function handleFetchRequest(request, env) {
                   "@type": "Person",
                   name: personName,
                   birthDate: `${birthItem.year}-${String(
-                    today.getMonth() + 1
+                    today.getMonth() + 1,
                   ).padStart(2, "0")}-${String(today.getDate()).padStart(
                     2,
-                    "0"
+                    "0",
                   )}`,
                   description: birthItem.text,
-                  url: ogUrl, // This 'url' is acceptable for Person if no specific profile page exists
+                  url: wikiUrl,
                   // Add additional context if available
                   ...(birthItem.pages &&
                     birthItem.pages.length > 0 && {
                       sameAs: [
                         `https://en.wikipedia.org/wiki/${encodeURIComponent(
-                          birthItem.pages[0].title.replace(/ /g, "_")
+                          birthItem.pages[0].title.replace(/ /g, "_"),
                         )}`,
                       ],
                     }),
@@ -504,9 +612,9 @@ async function handleFetchRequest(request, env) {
 
           element.append(
             `<script type="application/ld+json">${JSON.stringify(
-              birthsListSchema
+              birthsListSchema,
             )}</script>`,
-            { html: true }
+            { html: true },
           );
         }
 
@@ -533,6 +641,11 @@ async function handleFetchRequest(request, env) {
                   ? deathItem.pages[0].thumbnail.source
                   : undefined;
 
+              const wikiUrl =
+                deathItem.pages && deathItem.pages.length > 0 && deathItem.pages[0].content_urls?.desktop?.page
+                  ? deathItem.pages[0].content_urls.desktop.page
+                  : ogUrl;
+
               return {
                 "@type": "ListItem",
                 position: index + 1,
@@ -540,19 +653,19 @@ async function handleFetchRequest(request, env) {
                   "@type": "Person",
                   name: personName,
                   deathDate: `${deathItem.year}-${String(
-                    today.getMonth() + 1
+                    today.getMonth() + 1,
                   ).padStart(2, "0")}-${String(today.getDate()).padStart(
                     2,
-                    "0"
+                    "0",
                   )}`,
                   description: deathItem.text,
-                  url: ogUrl, // This 'url' is acceptable for Person if no specific profile page exists
+                  url: wikiUrl,
                   // Add Wikipedia link if available
                   ...(deathItem.pages &&
                     deathItem.pages.length > 0 && {
                       sameAs: [
                         `https://en.wikipedia.org/wiki/${encodeURIComponent(
-                          deathItem.pages[0].title.replace(/ /g, "_")
+                          deathItem.pages[0].title.replace(/ /g, "_"),
                         )}`,
                       ],
                     }),
@@ -565,9 +678,9 @@ async function handleFetchRequest(request, env) {
 
           element.append(
             `<script type="application/ld+json">${JSON.stringify(
-              deathsListSchema
+              deathsListSchema,
             )}</script>`,
-            { html: true }
+            { html: true },
           );
         }
 
@@ -593,9 +706,9 @@ async function handleFetchRequest(request, env) {
 
         element.append(
           `<script type="application/ld+json">${JSON.stringify(
-            breadcrumbSchema
+            breadcrumbSchema,
           )}</script>`,
-          { html: true }
+          { html: true },
         );
 
         // --- Add FAQ Schema if you have common questions ---
@@ -616,7 +729,33 @@ async function handleFetchRequest(request, env) {
               name: "How do I find historical events for other dates?",
               acceptedAnswer: {
                 "@type": "Answer",
-                text: "Use the date picker or search functionality to explore historical events, births, and deaths for any date in history.",
+                text: "Use the interactive calendar on thisDay.info to navigate to any month and day. Click a day card to see all events, births, and deaths that occurred on that date throughout history.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Where does thisDay.info get its historical data?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "All historical event data is sourced from Wikipedia via the Wikimedia REST API. Each event links directly to its Wikipedia article for further reading.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: `Who was born on ${formattedDate}?`,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: eventsData?.births?.length > 0
+                  ? `Notable people born on ${formattedDate} include: ${eventsData.births.slice(0, 3).map(b => b.text.split(",")[0]).join(", ")}. Browse the full list on thisDay.info.`
+                  : `Explore thisDay.info to discover notable people born on ${formattedDate} throughout history.`,
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Is thisDay.info free to use?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "Yes, thisDay.info is completely free. Explore historical events, famous birthdays, and notable deaths for any date without any registration or subscription.",
               },
             },
           ],
@@ -624,9 +763,9 @@ async function handleFetchRequest(request, env) {
 
         element.append(
           `<script type="application/ld+json">${JSON.stringify(
-            faqSchema
+            faqSchema,
           )}</script>`,
-          { html: true }
+          { html: true },
         );
       },
     });
@@ -638,7 +777,7 @@ async function handleFetchRequest(request, env) {
   // Clone the response to modify headers
   const newResponse = new Response(
     transformedResponse.body,
-    transformedResponse
+    transformedResponse,
   );
 
   // --- Add Security Headers ---
@@ -651,7 +790,7 @@ async function handleFetchRequest(request, env) {
   // Be very careful with this; if you ever revert to HTTP, users might be locked out for max-age duration.
   newResponse.headers.set(
     "Strict-Transport-Security",
-    "max-age=31536000; includeSubDomains; preload"
+    "max-age=31536000; includeSubDomains; preload",
   );
 
   // Content-Security-Policy (CSP) - Most comprehensive.
@@ -668,10 +807,10 @@ async function handleFetchRequest(request, env) {
   // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
   const csp =
     `default-src 'none'; ` +
-    `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com https://www.google.com https://www.gstatic.com https://www.googleadservices.com; ` +
-    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://static.cloudflareinsights.com 'unsafe-inline'; ` +
+    `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com https://www.google.com https://www.gstatic.com https://www.googleadservices.com https://pagead2.googlesyndication.com; ` +
+    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://static.cloudflareinsights.com 'unsafe-inline'; ` +
     `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
-    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com; ` +
+    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com; ` +
     `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
     `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com; ` +
     `base-uri 'self'; ` +
@@ -682,6 +821,24 @@ async function handleFetchRequest(request, env) {
   // X-Frame-Options: DENY - Also for ClickJacking protection. Redundant if CSP frame-ancestors 'none' is used, but good for older browsers.
   newResponse.headers.set("X-Frame-Options", "DENY");
 
+  // Referrer-Policy - controls what referrer info is sent with outbound requests
+  newResponse.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+
+  // Permissions-Policy - disable browser features the site doesn't use
+  newResponse.headers.set(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+  );
+
+  // Cache-Control - allow CDN/edge to cache transformed HTML for 1 hour, serve stale for 24h while revalidating
+  newResponse.headers.set(
+    "Cache-Control",
+    "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400",
+  );
+
+  // Vary - tell proxies/CDNs this response varies by encoding, ensuring compressed variants are cached separately
+  newResponse.headers.set("Vary", "Accept-Encoding");
+
   return newResponse;
 }
 
@@ -689,14 +846,16 @@ async function handleFetchRequest(request, env) {
 async function handleScheduledEvent(env) {
   console.log("Scheduled event triggered: Pre-fetching today's events to KV.");
   const today = new Date();
+  const isoDateKey = today.toISOString().split("T")[0];
+  const todayKvKey = `today-events-${isoDateKey}`;
   const eventsData = await fetchDailyEvents(today);
 
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
     try {
-      await env.EVENTS_KV.put(TODAY_EVENTS_KV_KEY, JSON.stringify(eventsData), {
+      await env.EVENTS_KV.put(todayKvKey, JSON.stringify(eventsData), {
         expirationTtl: KV_CACHE_TTL_SECONDS,
       });
-      console.log("Successfully pre-fetched and stored today's events in KV.");
+      console.log(`Successfully pre-fetched and stored events for ${isoDateKey} in KV.`);
     } catch (e) {
       console.error("Failed to put data into KV:", e);
     }
@@ -708,9 +867,9 @@ async function handleScheduledEvent(env) {
 // --- Worker Entry Point (ES Module Format) ---
 export default {
   async fetch(request, env, ctx) {
-    return handleFetchRequest(request, env);
+    return handleFetchRequest(request, env, ctx);
   },
-  async scheduled(event, env, ctx) {
+  async scheduled(_event, env, ctx) {
     ctx.waitUntil(handleScheduledEvent(env));
   },
 };

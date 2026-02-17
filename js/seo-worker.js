@@ -69,6 +69,71 @@ function extractLocationFromName(text) {
   return "Historical Location";
 }
 
+// --- Image Proxy: resize, cache, and optionally convert Wikipedia images ---
+async function handleImageProxy(_request, url, ctx) {
+  const src = url.searchParams.get("src");
+  const width = Math.min(parseInt(url.searchParams.get("w") || "1200"), 2000);
+  const quality = Math.min(parseInt(url.searchParams.get("q") || "82"), 100);
+
+  if (!src) return new Response("Missing src parameter", { status: 400 });
+
+  let imageUrl;
+  try {
+    const decoded = decodeURIComponent(src);
+    const parsed = new URL(decoded);
+    if (!parsed.hostname.endsWith("wikimedia.org")) {
+      return new Response("Forbidden: only Wikimedia images allowed", { status: 403 });
+    }
+    // Resize by swapping the pixel-width segment in Wikipedia thumbnail paths
+    // e.g. /320px-File.jpg  →  /1200px-File.jpg
+    imageUrl = decoded.replace(/\/\d+px-/, `/${width}px-`);
+  } catch {
+    return new Response("Invalid URL", { status: 400 });
+  }
+
+  // Check worker-level cache first (keyed on final URL + dimensions)
+  const workerCache = caches.default;
+  const cacheKey = new Request(
+    `https://img-cache.thisday.info/${encodeURIComponent(imageUrl)}?w=${width}&q=${quality}`,
+  );
+  const cached = await workerCache.match(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const imageResponse = await fetch(imageUrl, {
+      headers: {
+        "User-Agent": WIKIPEDIA_USER_AGENT,
+        Accept: "image/avif,image/webp,image/jpeg,image/*",
+      },
+      cf: {
+        cacheTtl: 60 * 60 * 24 * 30, // 30-day Cloudflare edge cache
+        cacheEverything: true,
+        // Cloudflare Image Resizing (Pro plan+): converts to WebP/AVIF automatically
+        image: { width, quality, format: "auto" },
+      },
+    });
+
+    if (!imageResponse.ok) {
+      return new Response("Image not found", { status: imageResponse.status });
+    }
+
+    const headers = new Headers();
+    headers.set(
+      "Content-Type",
+      imageResponse.headers.get("Content-Type") || "image/jpeg",
+    );
+    headers.set("Cache-Control", "public, max-age=2592000, immutable"); // 30 days browser cache
+    headers.set("Access-Control-Allow-Origin", "*");
+    headers.set("Vary", "Accept"); // separate cache entry per Accept header (WebP vs JPEG)
+
+    const result = new Response(imageResponse.body, { status: 200, headers });
+    ctx.waitUntil(workerCache.put(cacheKey, result.clone()));
+    return result;
+  } catch {
+    return new Response("Error fetching image", { status: 500 });
+  }
+}
+
 // --- Main Request Handler (for user requests) ---
 async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
@@ -78,6 +143,11 @@ async function handleFetchRequest(request, env, ctx) {
     return new Response(llmsContent, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
+  }
+
+  // Image proxy — must be handled before the HTML pass-through guard
+  if (url.pathname === "/img") {
+    return handleImageProxy(request, url, ctx);
   }
 
   // Only handle requests for the root path or /index.html
@@ -228,9 +298,9 @@ async function handleFetchRequest(request, env, ctx) {
       (e) => e.pages?.[0]?.thumbnail?.source
     );
     if (firstWithImage) {
-      ogImageUrl =
-        firstWithImage.pages[0].originalimage?.source ||
-        firstWithImage.pages[0].thumbnail.source;
+      const rawImgUrl = firstWithImage.pages[0].thumbnail.source;
+      // Route through the image proxy: resizes to 1200px and caches at edge for 30 days
+      ogImageUrl = `/img?src=${encodeURIComponent(rawImgUrl)}&w=1200&q=82`;
     }
 
     // Pick the top 3-5 events for a concise description
@@ -336,6 +406,16 @@ async function handleFetchRequest(request, env, ctx) {
     .on("meta[property='og:image:alt']", {
       element(element) {
         element.setAttribute("content", dynamicTitle);
+      },
+    })
+    .on("meta[property='og:image:width']", {
+      element(element) {
+        element.setAttribute("content", "1200");
+      },
+    })
+    .on("meta[property='og:image:height']", {
+      element(element) {
+        element.setAttribute("content", "630");
       },
     });
 
@@ -746,6 +826,9 @@ async function handleFetchRequest(request, env, ctx) {
     "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400",
   );
 
+  // Vary - tell proxies/CDNs this response varies by encoding, ensuring compressed variants are cached separately
+  newResponse.headers.set("Vary", "Accept-Encoding");
+
   return newResponse;
 }
 
@@ -776,7 +859,7 @@ export default {
   async fetch(request, env, ctx) {
     return handleFetchRequest(request, env, ctx);
   },
-  async scheduled(event, env, ctx) {
+  async scheduled(_event, env, ctx) {
     ctx.waitUntil(handleScheduledEvent(env));
   },
 };

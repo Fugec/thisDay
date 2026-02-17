@@ -126,6 +126,14 @@ async function rateLimitedFetch(url, options = {}, maxRetries = 3) {
   throw new Error(`Failed after ${maxRetries} attempts`);
 }
 
+// Route a Wikimedia image URL through the on-site image proxy.
+// The proxy resizes Wikipedia thumbnails, sets a 30-day cache, and uses
+// Cloudflare Image Resizing (WebP/AVIF) when available on Pro+ plans.
+function getOptimizedImageUrl(url, width = 1200, quality = 82) {
+  if (!url || !url.includes("wikimedia.org")) return url;
+  return `/img?src=${encodeURIComponent(url)}&w=${width}&q=${quality}`;
+}
+
 // Converts raw Wikipedia API response into the app's internal event format
 function processRawWikipediaData(data) {
   const processedEvents = [];
@@ -834,6 +842,9 @@ async function renderCalendar() {
     calendarGrid.appendChild(dayCard);
     dayCards.push(dayCard);
   }
+  // Observe all day cards so events load automatically as they scroll into view
+  initDayCardObserver(dayCards, month);
+
   try {
     const carouselPromise = populateCarousel(month, year);
     if (isCurrentMonth) {
@@ -865,6 +876,38 @@ async function renderCalendar() {
       </div>
     `;
   }
+}
+
+// IntersectionObserver: auto-load events when day cards scroll into the viewport
+let dayCardObserver = null;
+
+function initDayCardObserver(dayCards, month) {
+  if (dayCardObserver) {
+    dayCardObserver.disconnect();
+  }
+  if (!("IntersectionObserver" in window)) return;
+
+  dayCardObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (
+          entry.isIntersecting &&
+          entry.target.classList.contains("needs-load") &&
+          !entry.target.classList.contains("loading")
+        ) {
+          loadDayEvents(entry.target, month);
+          dayCardObserver.unobserve(entry.target);
+        }
+      });
+    },
+    { rootMargin: "100px", threshold: 0.1 },
+  );
+
+  dayCards.forEach((card) => {
+    if (card.classList.contains("needs-load")) {
+      dayCardObserver.observe(card);
+    }
+  });
 }
 
 let currentDayAllItems = [];
@@ -1908,15 +1951,14 @@ async function fetchWikipediaEventsForCarousel() {
 
           return selectedEvents.map((event) => {
             const wikiPage = event.pages[0];
+            const optimized = getOptimizedImageUrl(wikiPage.thumbnail.source, 1200);
             return {
               day: new Date().getDate(),
               year: event.year,
               title: wikiPage.title || event.text.split(".")[0],
               excerpt: event.text,
-              imageUrl: wikiPage.thumbnail.source,
-              // Use original image if available, fallback to thumbnail
-              backgroundUrl:
-                wikiPage.originalimage?.source || wikiPage.thumbnail.source,
+              imageUrl: optimized,
+              backgroundUrl: optimized,
               url: wikiPage.content_urls.desktop.page,
               isExternal: true,
             };
@@ -1956,14 +1998,14 @@ async function fetchWikipediaEventsForCarousel() {
 
     return selected.map((event) => {
       const wikiPage = event.pages[0];
+      const optimized = getOptimizedImageUrl(wikiPage.thumbnail.source, 1200);
       return {
         day: today.getDate(),
         year: event.year,
         title: wikiPage.title,
         excerpt: event.text,
-        imageUrl: wikiPage.thumbnail.source,
-        backgroundUrl:
-          wikiPage.originalimage?.source || wikiPage.thumbnail.source,
+        imageUrl: optimized,
+        backgroundUrl: optimized,
         url: wikiPage.content_urls.desktop.page,
         isExternal: true,
       };

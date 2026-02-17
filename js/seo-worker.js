@@ -212,7 +212,7 @@ async function handleFetchRequest(request, env) {
     "thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history, history, educational, timeline, trivia, historical figures";
   let dynamicTitle =
     "thisDay. | What Happened on This Day? | Historical Events";
-  const ogImageUrl = "https://thisday.info/assets/default-social-share.jpg"; // Default image
+  let ogImageUrl = "https://thisday.info/images/logo.png"; // Default fallback image
   const ogUrl = "https://thisday.info/"; // Canonical URL
 
   // Format the date for the title and description
@@ -221,6 +221,16 @@ async function handleFetchRequest(request, env) {
   const isoDate = today.toISOString().split("T")[0]; // e.g., "2025-07-12"
 
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
+    // Use the first event's Wikipedia thumbnail for social sharing if available
+    const firstWithImage = eventsData.events.find(
+      (e) => e.pages?.[0]?.thumbnail?.source
+    );
+    if (firstWithImage) {
+      ogImageUrl =
+        firstWithImage.pages[0].originalimage?.source ||
+        firstWithImage.pages[0].thumbnail.source;
+    }
+
     // Pick the top 3-5 events for a concise description
     const topEvents = eventsData.events
       .slice(0, 5)
@@ -616,7 +626,33 @@ async function handleFetchRequest(request, env) {
               name: "How do I find historical events for other dates?",
               acceptedAnswer: {
                 "@type": "Answer",
-                text: "Use the date picker or search functionality to explore historical events, births, and deaths for any date in history.",
+                text: "Use the interactive calendar on thisDay.info to navigate to any month and day. Click a day card to see all events, births, and deaths that occurred on that date throughout history.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Where does thisDay.info get its historical data?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "All historical event data is sourced from Wikipedia via the Wikimedia REST API. Each event links directly to its Wikipedia article for further reading.",
+              },
+            },
+            {
+              "@type": "Question",
+              name: `Who was born on ${formattedDate}?`,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: eventsData?.births?.length > 0
+                  ? `Notable people born on ${formattedDate} include: ${eventsData.births.slice(0, 3).map(b => b.text.split(",")[0]).join(", ")}. Browse the full list on thisDay.info.`
+                  : `Explore thisDay.info to discover notable people born on ${formattedDate} throughout history.`,
+              },
+            },
+            {
+              "@type": "Question",
+              name: "Is thisDay.info free to use?",
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: "Yes, thisDay.info is completely free. Explore historical events, famous birthdays, and notable deaths for any date without any registration or subscription.",
               },
             },
           ],
@@ -668,16 +704,15 @@ async function handleFetchRequest(request, env) {
   // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
   const csp =
     `default-src 'none'; ` +
-    `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com https://www.google.com https://www.gstatic.com https://www.googleadservices.com; ` +
-    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://static.cloudflareinsights.com 'unsafe-inline'; ` +
+    `connect-src 'self' https://api.wikimedia.org https://www.google-analytics.com https://www.google.com https://www.gstatic.com https://www.googleadservices.com https://pagead2.googlesyndication.com; ` +
+    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://static.cloudflareinsights.com 'unsafe-inline'; ` +
     `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
-    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com; ` +
+    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com; ` +
     `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
     `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com; ` +
     `base-uri 'self'; ` +
     `frame-ancestors 'none'; ` +
-    `object-src 'none'; ` +
-    `script-src 'self' https://pagead2.googlesyndication.com https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://static.cloudflareinsights.com 'unsafe-inline'; `;
+    `object-src 'none';`;
   newResponse.headers.set("Content-Security-Policy", csp);
 
   // X-Frame-Options: DENY - Also for ClickJacking protection. Redundant if CSP frame-ancestors 'none' is used, but good for older browsers.

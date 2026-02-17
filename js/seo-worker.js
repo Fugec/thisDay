@@ -72,8 +72,8 @@ function extractLocationFromName(text) {
 // --- Image Proxy: resize, cache, and optionally convert Wikipedia images ---
 async function handleImageProxy(_request, url, ctx) {
   const src = url.searchParams.get("src");
-  const width = Math.min(parseInt(url.searchParams.get("w") || "1200"), 2000);
-  const quality = Math.min(parseInt(url.searchParams.get("q") || "82"), 100);
+  const width = Math.min(parseInt(url.searchParams.get("w") || "1200", 10), 2000);
+  const quality = Math.min(parseInt(url.searchParams.get("q") || "82", 10), 100);
 
   if (!src) return new Response("Missing src parameter", { status: 400 });
 
@@ -575,6 +575,11 @@ async function handleFetchRequest(request, env, ctx) {
                   ? birthItem.pages[0].thumbnail.source
                   : undefined;
 
+              const wikiUrl =
+                birthItem.pages && birthItem.pages.length > 0 && birthItem.pages[0].content_urls?.desktop?.page
+                  ? birthItem.pages[0].content_urls.desktop.page
+                  : ogUrl;
+
               return {
                 "@type": "ListItem",
                 position: index + 1,
@@ -588,7 +593,7 @@ async function handleFetchRequest(request, env, ctx) {
                     "0",
                   )}`,
                   description: birthItem.text,
-                  url: ogUrl, // This 'url' is acceptable for Person if no specific profile page exists
+                  url: wikiUrl,
                   // Add additional context if available
                   ...(birthItem.pages &&
                     birthItem.pages.length > 0 && {
@@ -636,6 +641,11 @@ async function handleFetchRequest(request, env, ctx) {
                   ? deathItem.pages[0].thumbnail.source
                   : undefined;
 
+              const wikiUrl =
+                deathItem.pages && deathItem.pages.length > 0 && deathItem.pages[0].content_urls?.desktop?.page
+                  ? deathItem.pages[0].content_urls.desktop.page
+                  : ogUrl;
+
               return {
                 "@type": "ListItem",
                 position: index + 1,
@@ -649,7 +659,7 @@ async function handleFetchRequest(request, env, ctx) {
                     "0",
                   )}`,
                   description: deathItem.text,
-                  url: ogUrl, // This 'url' is acceptable for Person if no specific profile page exists
+                  url: wikiUrl,
                   // Add Wikipedia link if available
                   ...(deathItem.pages &&
                     deathItem.pages.length > 0 && {

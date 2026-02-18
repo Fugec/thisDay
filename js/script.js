@@ -1957,21 +1957,16 @@ function renderFullWidthCarouselItem(container, event, index) {
     <div class="carousel-image-container">
       <img src="${imageUrl}" class="d-block w-100" alt="${title}"
            onerror="this.onerror=null;this.src='${fallbackUrl}';"
-           ${index === 0 ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async" width="1200" height="350">
+           ${index === 0 ? 'fetchpriority="high"' : 'fetchpriority="low"'} decoding="async" width="1200" height="350">
     </div>
     <div class="carousel-caption">
       <small style="opacity:0.75;font-size:0.85em;display:block;margin-bottom:6px;letter-spacing:0.05em;">${event.year}</small>
       <h5 style="font-size:20px;font-weight:700;line-height:1.2;margin-bottom:0.75rem;">${title}</h5>
       <p>${excerpt}</p>
-      <a href="${window.__todayGeneratedUrl || event.url}"
-         ${!window.__todayGeneratedUrl ? 'target="_blank" rel="noopener noreferrer"' : ''}
-         class="btn btn-primary btn-sm">
-        ${window.__todayGeneratedUrl ? 'Read Full Story' : 'Read on Wikipedia'}
-      </a>
-      ${window.__todayGeneratedUrl
-        ? `<a href="${event.url}" target="_blank" rel="noopener noreferrer"
-             class="btn btn-outline-light btn-sm ms-2" style="font-size:.75rem">Wikipedia ↗</a>`
-        : ''}
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+        <a href="${window.__todayGeneratedUrl || event.url}" ${!window.__todayGeneratedUrl ? 'target="_blank" rel="noopener noreferrer"' : ''} class="btn btn-primary btn-sm">Read Full Story</a>
+        ${window.__todayGeneratedUrl ? `<a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Wikipedia ↗</a>` : ''}
+      </div>
     </div>
   `;
 

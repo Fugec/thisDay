@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contact Us | thisDay. — What Happened on This Day in History</title>
+    <link rel="canonical" href="https://thisday.info/contact/" />
+    <meta name="robots" content="index, follow" />
+    <meta
+      name="description"
+      content="Contact the thisDay.info team. Report an error, suggest a feature, or just say hello. We'd love to hear from you."
+    />
+    <meta property="og:title" content="Contact | thisDay." />
+    <meta property="og:description" content="Get in touch with the thisDay.info team. We welcome feedback, corrections, and collaboration inquiries." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://thisday.info/contact/" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content="https://thisday.info/images/logo.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Contact | thisDay." />
+    <meta name="twitter:description" content="Get in touch with the thisDay.info team." />
+    <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
+    <meta name="author" content="Armin Kapetanović" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ContactPage",
+      "name": "Contact thisDay.info",
+      "description": "Contact the thisDay.info team for feedback, error reports, or collaboration inquiries.",
+      "url": "https://thisday.info/contact/",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "thisDay.info",
+        "url": "https://thisday.info/"
+      },
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "email": "kapetanovic.armin@gmail.com",
+        "contactType": "customer support"
+      }
+    }
+    </script>
+
+    <!-- Favicons -->
+    <link rel="icon" href="/images/favicon.ico" type="image/x-icon" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Bootstrap CSS & Icons -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+    />
+
+    <style>
+      :root {
+        --primary-bg: #3b82f6;
+        --secondary-bg: #fff;
+        --text-color: #6c757d;
+        --header-text-color: #ffffff;
+        --footer-bg: #3b82f6;
+        --footer-text-color: #ffffff;
+        --link-color: #2563eb;
+        --switch-track-off: #e2e8f0;
+        --switch-thumb-off: #cbd5e1;
+        --switch-track-on: #2563eb;
+        --switch-thumb-on: #ffffff;
+        --card-bg: #ffffff;
+        --card-border: rgba(0,0,0,0.1);
+        --input-bg: #ffffff;
+        --input-border: #ced4da;
+        --input-color: #212529;
+      }
+
+      body.dark-theme {
+        --primary-bg: #020617;
+        --secondary-bg: #1e293b;
+        --text-color: #f8fafc;
+        --header-text-color: #ffffff;
+        --footer-bg: #020617;
+        --footer-text-color: #ffffff;
+        --link-color: #60a5fa;
+        --switch-track-off: #334155;
+        --switch-thumb-off: #64748b;
+        --switch-track-on: #2563eb;
+        --switch-thumb-on: #f8fafc;
+        --card-bg: #1e293b;
+        --card-border: rgba(255,255,255,0.1);
+        --input-bg: #0f172a;
+        --input-border: #334155;
+        --input-color: #f8fafc;
+      }
+
+      body {
+        font-family: Inter, sans-serif;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        transition: background-color 0.3s ease, color 0.3s ease;
+        background-color: var(--secondary-bg);
+        color: var(--text-color);
+      }
+
+      .navbar {
+        background-color: var(--primary-bg) !important;
+        transition: background-color 0.3s ease;
+        position: sticky;
+        top: 0;
+        z-index: 1030;
+      }
+
+      .navbar-brand,
+      .navbar-nav .nav-link {
+        color: var(--header-text-color) !important;
+        font-weight: bold !important;
+      }
+
+      main {
+        flex: 1;
+        padding: 20px 0;
+      }
+
+      .footer {
+        background-color: var(--footer-bg);
+        color: var(--footer-text-color);
+        text-align: center;
+        padding: 20px;
+        margin-top: 30px;
+        transition: background-color 0.3s ease, color 0.3s ease;
+        font-size: 14px;
+      }
+
+      .footer a {
+        color: var(--footer-text-color);
+        text-decoration: underline;
+        transition: color 0.3s ease;
+      }
+
+      h1, h2, h3, h4, h5, h6 {
+        color: var(--text-color);
+        transition: color 0.3s ease;
+      }
+
+      body.dark-theme h1,
+      body.dark-theme h2,
+      body.dark-theme h3,
+      body.dark-theme h4,
+      body.dark-theme h5,
+      body.dark-theme h6 {
+        color: #f8fafc;
+      }
+
+      a {
+        color: var(--link-color);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .form-check-input:checked {
+        background-color: var(--switch-track-on) !important;
+        border-color: var(--switch-track-on) !important;
+      }
+
+      .form-check-input {
+        background-color: var(--switch-track-off);
+        border-color: var(--switch-track-off);
+        transition: background-color 0.3s ease, border-color 0.3s ease;
+      }
+
+      .form-switch .form-check-input {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+        background-color: var(--switch-thumb-off);
+        transition: background-color 0.3s ease, transform 0.3s ease;
+      }
+
+      .form-switch .form-check-input:checked {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+        background-color: var(--switch-thumb-on);
+      }
+
+      .theme-switch-mobile label i {
+        color: var(--header-text-color);
+        font-size: 1.2rem;
+        margin-left: 0.5rem;
+      }
+
+      .theme-switch-desktop label {
+        color: var(--header-text-color);
+      }
+
+      .container {
+        max-width: 960px;
+      }
+
+      .contact-card {
+        background-color: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 12px;
+        padding: 36px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+      }
+
+      .form-control, .form-select {
+        background-color: var(--input-bg);
+        border-color: var(--input-border);
+        color: var(--input-color);
+        transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+      }
+
+      .form-control:focus, .form-select:focus {
+        background-color: var(--input-bg);
+        color: var(--input-color);
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 0.2rem rgba(59,130,246,0.25);
+      }
+
+      .form-label {
+        color: var(--text-color);
+        font-weight: 500;
+      }
+
+      .contact-info-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        margin-bottom: 20px;
+      }
+
+      .contact-info-icon {
+        font-size: 1.4rem;
+        color: #3b82f6;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+
+      .success-message {
+        display: none;
+        padding: 16px;
+        background-color: #d1fae5;
+        border: 1px solid #6ee7b7;
+        border-radius: 8px;
+        color: #065f46;
+        margin-top: 16px;
+      }
+
+      body.dark-theme .success-message {
+        background-color: #064e3b;
+        border-color: #059669;
+        color: #d1fae5;
+      }
+    </style>
+  </head>
+
+  <body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/">thisDay.</a>
+
+        <div class="form-check form-switch theme-switch-mobile d-lg-none me-2">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            id="themeSwitchMobile"
+            aria-label="Toggle dark mode"
+          />
+          <label class="form-check-label" for="themeSwitchMobile">
+            <i class="bi bi-moon-fill"></i>
+          </label>
+        </div>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav ms-auto">
+            <li class="nav-item d-flex align-items-center">
+              <div class="form-check form-switch theme-switch-desktop d-none d-lg-block me-2">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="themeSwitchDesktop"
+                  aria-label="Toggle dark mode"
+                />
+                <label class="form-check-label" for="themeSwitchDesktop">Dark Mode</label>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container my-5">
+      <h1 class="mb-2">Contact Us</h1>
+      <p class="mb-5">Have a question, spotted an error, or want to collaborate? We'd love to hear from you.</p>
+
+      <div class="row g-4">
+        <!-- Contact Form -->
+        <div class="col-lg-7">
+          <div class="contact-card">
+            <h2 class="h4 mb-4">Send a Message</h2>
+            <form id="contactForm" action="https://formspree.io/f/kapetanovic.armin@gmail.com" method="POST" novalidate>
+              <div class="mb-3">
+                <label for="contactName" class="form-label">Your Name <span class="text-danger">*</span></label>
+                <input
+                  type="text"
+                  class="form-control"
+                  id="contactName"
+                  name="name"
+                  placeholder="e.g. Jane Smith"
+                  required
+                />
+              </div>
+              <div class="mb-3">
+                <label for="contactEmail" class="form-label">Email Address <span class="text-danger">*</span></label>
+                <input
+                  type="email"
+                  class="form-control"
+                  id="contactEmail"
+                  name="email"
+                  placeholder="you@example.com"
+                  required
+                />
+              </div>
+              <div class="mb-3">
+                <label for="contactSubject" class="form-label">Subject</label>
+                <select class="form-select" id="contactSubject" name="subject">
+                  <option value="General Inquiry">General Inquiry</option>
+                  <option value="Error Report">Error Report / Correction</option>
+                  <option value="Feature Request">Feature Request</option>
+                  <option value="Blog Suggestion">Blog Topic Suggestion</option>
+                  <option value="Collaboration">Collaboration / Partnership</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div class="mb-4">
+                <label for="contactMessage" class="form-label">Message <span class="text-danger">*</span></label>
+                <textarea
+                  class="form-control"
+                  id="contactMessage"
+                  name="message"
+                  rows="5"
+                  placeholder="Tell us what's on your mind..."
+                  required
+                ></textarea>
+              </div>
+              <button type="submit" class="btn btn-primary px-4">
+                <i class="bi bi-send me-2"></i>Send Message
+              </button>
+            </form>
+            <div class="success-message" id="successMsg">
+              <i class="bi bi-check-circle-fill me-2"></i>
+              <strong>Message sent!</strong> Thank you for reaching out. We'll get back to you as soon as possible.
+            </div>
+          </div>
+        </div>
+
+        <!-- Contact Info -->
+        <div class="col-lg-5">
+          <div class="contact-card h-100">
+            <h2 class="h4 mb-4">Get in Touch Directly</h2>
+
+            <div class="contact-info-item">
+              <div class="contact-info-icon"><i class="bi bi-envelope-fill"></i></div>
+              <div>
+                <strong>Email</strong><br />
+                <a href="mailto:kapetanovic.armin@gmail.com">kapetanovic.armin@gmail.com</a>
+              </div>
+            </div>
+
+            <div class="contact-info-item">
+              <div class="contact-info-icon"><i class="bi bi-github"></i></div>
+              <div>
+                <strong>GitHub</strong><br />
+                <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer">github.com/Fugec</a>
+              </div>
+            </div>
+
+            <div class="contact-info-item">
+              <div class="contact-info-icon"><i class="bi bi-instagram"></i></div>
+              <div>
+                <strong>Instagram</strong><br />
+                <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer">@thisday.info</a>
+              </div>
+            </div>
+
+            <div class="contact-info-item">
+              <div class="contact-info-icon"><i class="bi bi-facebook"></i></div>
+              <div>
+                <strong>Facebook</strong><br />
+                <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer">thisDay. on Facebook</a>
+              </div>
+            </div>
+
+            <hr class="my-4" />
+
+            <h3 class="h6 mb-3">Common Reasons to Contact Us</h3>
+            <ul class="list-unstyled">
+              <li class="mb-2"><i class="bi bi-check2 text-primary me-2"></i>Reporting an inaccurate historical event</li>
+              <li class="mb-2"><i class="bi bi-check2 text-primary me-2"></i>Suggesting a blog post topic</li>
+              <li class="mb-2"><i class="bi bi-check2 text-primary me-2"></i>Requesting a new feature</li>
+              <li class="mb-2"><i class="bi bi-check2 text-primary me-2"></i>Advertising or partnership inquiries</li>
+              <li class="mb-2"><i class="bi bi-check2 text-primary me-2"></i>General feedback and compliments</li>
+            </ul>
+
+            <div class="mt-4">
+              <a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener noreferrer" class="btn btn-warning btn-sm">
+                <i class="bi bi-cup-hot-fill me-1"></i> Support This Project
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="container d-flex justify-content-center my-2">
+        <div class="me-2">
+          <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+            <i class="bi bi-github h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook">
+            <i class="bi bi-facebook h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
+            <i class="bi bi-instagram h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok">
+            <i class="bi bi-tiktok h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
+            <i class="bi bi-youtube h3 text-white"></i>
+          </a>
+        </div>
+      </div>
+      <div class="container"></div>
+      <p>© <span id="currentYear"></span> thisDay. All rights reserved.</p>
+      <p>
+        Historical data sourced from Wikipedia.org under
+        <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" title="Creative Commons Attribution-ShareAlike 4.0 International License">CC BY-SA 4.0</a>
+        license. Note: Data is for informational purposes and requires verification.
+      </p>
+      <p>
+        This website is not affiliated with any official historical organization or entity.
+        The content is provided for educational and entertainment purposes only.
+      </p>
+      <p>
+        <a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> |
+        <a href="/about/">About Us</a> |
+        <a href="/contact/">Contact</a> |
+        <a href="/terms/">Terms and Conditions</a> |
+        <a href="/privacy-policy/">Privacy Policy</a>
+      </p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      document.getElementById("currentYear").textContent = new Date().getFullYear();
+
+      const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
+      const themeSwitchMobile = document.getElementById("themeSwitchMobile");
+
+      const applyTheme = (isDark) => {
+        document.body.classList.toggle("dark-theme", isDark);
+      };
+
+      const isDark =
+        localStorage.getItem("theme") === "dark" ||
+        (window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches &&
+          localStorage.getItem("theme") !== "light");
+      applyTheme(isDark);
+      if (themeSwitchDesktop) themeSwitchDesktop.checked = isDark;
+      if (themeSwitchMobile) themeSwitchMobile.checked = isDark;
+
+      if (themeSwitchDesktop) {
+        themeSwitchDesktop.addEventListener("change", () => {
+          applyTheme(themeSwitchDesktop.checked);
+          localStorage.setItem("theme", themeSwitchDesktop.checked ? "dark" : "light");
+          if (themeSwitchMobile) themeSwitchMobile.checked = themeSwitchDesktop.checked;
+        });
+      }
+      if (themeSwitchMobile) {
+        themeSwitchMobile.addEventListener("change", () => {
+          applyTheme(themeSwitchMobile.checked);
+          localStorage.setItem("theme", themeSwitchMobile.checked ? "dark" : "light");
+          if (themeSwitchDesktop) themeSwitchDesktop.checked = themeSwitchMobile.checked;
+        });
+      }
+
+      // Handle contact form submission
+      const contactForm = document.getElementById("contactForm");
+      const successMsg = document.getElementById("successMsg");
+
+      if (contactForm) {
+        contactForm.addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const name = document.getElementById("contactName").value.trim();
+          const email = document.getElementById("contactEmail").value.trim();
+          const message = document.getElementById("contactMessage").value.trim();
+
+          if (!name || !email || !message) {
+            alert("Please fill in all required fields.");
+            return;
+          }
+
+          const submitBtn = contactForm.querySelector('button[type="submit"]');
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Sending...';
+
+          // Build mailto link as fallback
+          const subject = document.getElementById("contactSubject").value;
+          const mailtoBody = encodeURIComponent(`Name: ${name}\n\n${message}`);
+          const mailtoLink = `mailto:kapetanovic.armin@gmail.com?subject=${encodeURIComponent(subject)}&body=${mailtoBody}`;
+
+          // Try formspree, fall back to mailto
+          try {
+            const response = await fetch(contactForm.action, {
+              method: "POST",
+              body: new FormData(contactForm),
+              headers: { Accept: "application/json" },
+            });
+
+            if (response.ok) {
+              contactForm.reset();
+              successMsg.style.display = "block";
+            } else {
+              window.location.href = mailtoLink;
+            }
+          } catch {
+            window.location.href = mailtoLink;
+          } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<i class="bi bi-send me-2"></i>Send Message';
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

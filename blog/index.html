@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>History Blog | thisDay. — Original Articles on Historical Events</title>
+    <link rel="canonical" href="https://thisday.info/blog/" />
+    <meta name="robots" content="index, follow" />
+    <meta
+      name="description"
+      content="Browse original articles about historical events, figures, and turning points in world history. From ancient battles to modern milestones — written by thisDay.info."
+    />
+    <meta name="keywords" content="history blog, historical events, world history articles, on this day, historical figures, battles, discoveries, milestones" />
+    <meta property="og:title" content="History Blog | thisDay. — Original Articles on Historical Events" />
+    <meta property="og:description" content="Original in-depth articles about the events, people, and moments that shaped world history." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://thisday.info/blog/" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content="https://thisday.info/images/logo.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="History Blog | thisDay." />
+    <meta name="twitter:description" content="Original in-depth articles about the events, people, and moments that shaped world history." />
+    <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
+    <meta name="author" content="Armin Kapetanović" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Blog",
+      "name": "thisDay. History Blog",
+      "description": "Original articles about historical events, figures, and turning points in world history.",
+      "url": "https://thisday.info/blog/",
+      "publisher": {
+        "@type": "Organization",
+        "name": "thisDay.info",
+        "url": "https://thisday.info/"
+      },
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "thisDay.info",
+        "url": "https://thisday.info/"
+      }
+    }
+    </script>
+
+    <!-- Favicons -->
+    <link rel="icon" href="/images/favicon.ico" type="image/x-icon" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Bootstrap CSS & Icons -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+    />
+
+    <style>
+      :root {
+        --primary-bg: #3b82f6;
+        --secondary-bg: #fff;
+        --text-color: #6c757d;
+        --header-text-color: #ffffff;
+        --footer-bg: #3b82f6;
+        --footer-text-color: #ffffff;
+        --link-color: #2563eb;
+        --switch-track-off: #e2e8f0;
+        --switch-thumb-off: #cbd5e1;
+        --switch-track-on: #2563eb;
+        --switch-thumb-on: #ffffff;
+        --card-bg: #ffffff;
+        --card-border: rgba(0,0,0,0.1);
+      }
+
+      body.dark-theme {
+        --primary-bg: #020617;
+        --secondary-bg: #1e293b;
+        --text-color: #f8fafc;
+        --header-text-color: #ffffff;
+        --footer-bg: #020617;
+        --footer-text-color: #ffffff;
+        --link-color: #60a5fa;
+        --switch-track-off: #334155;
+        --switch-thumb-off: #64748b;
+        --switch-track-on: #2563eb;
+        --switch-thumb-on: #f8fafc;
+        --card-bg: #1e293b;
+        --card-border: rgba(255,255,255,0.1);
+      }
+
+      body {
+        font-family: Inter, sans-serif;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        transition: background-color 0.3s ease, color 0.3s ease;
+        background-color: var(--secondary-bg);
+        color: var(--text-color);
+      }
+
+      .navbar {
+        background-color: var(--primary-bg) !important;
+        transition: background-color 0.3s ease;
+        position: sticky;
+        top: 0;
+        z-index: 1030;
+      }
+
+      .navbar-brand,
+      .navbar-nav .nav-link {
+        color: var(--header-text-color) !important;
+        font-weight: bold !important;
+      }
+
+      main {
+        flex: 1;
+        padding: 20px 0;
+      }
+
+      .footer {
+        background-color: var(--footer-bg);
+        color: var(--footer-text-color);
+        text-align: center;
+        padding: 20px;
+        margin-top: 30px;
+        transition: background-color 0.3s ease, color 0.3s ease;
+        font-size: 14px;
+      }
+
+      .footer a {
+        color: var(--footer-text-color);
+        text-decoration: underline;
+        transition: color 0.3s ease;
+      }
+
+      h1, h2, h3, h4, h5, h6 {
+        color: var(--text-color);
+        transition: color 0.3s ease;
+      }
+
+      body.dark-theme h1,
+      body.dark-theme h2,
+      body.dark-theme h3,
+      body.dark-theme h4,
+      body.dark-theme h5,
+      body.dark-theme h6 {
+        color: #f8fafc;
+      }
+
+      a {
+        color: var(--link-color);
+        text-decoration: none;
+      }
+
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .form-check-input:checked {
+        background-color: var(--switch-track-on) !important;
+        border-color: var(--switch-track-on) !important;
+      }
+
+      .form-check-input {
+        background-color: var(--switch-track-off);
+        border-color: var(--switch-track-off);
+        transition: background-color 0.3s ease, border-color 0.3s ease;
+      }
+
+      .form-switch .form-check-input {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+        background-color: var(--switch-thumb-off);
+        transition: background-color 0.3s ease, transform 0.3s ease;
+      }
+
+      .form-switch .form-check-input:checked {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+        background-color: var(--switch-thumb-on);
+      }
+
+      .theme-switch-mobile label i {
+        color: var(--header-text-color);
+        font-size: 1.2rem;
+        margin-left: 0.5rem;
+      }
+
+      .theme-switch-desktop label {
+        color: var(--header-text-color);
+      }
+
+      .blog-post-link {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 14px 16px;
+        border: 1px solid var(--card-border);
+        border-radius: 8px;
+        background-color: var(--card-bg);
+        text-decoration: none;
+        color: var(--text-color);
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.3s ease;
+        margin-bottom: 10px;
+      }
+
+      .blog-post-link:hover {
+        transform: translateX(4px);
+        box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+        text-decoration: none;
+        color: var(--text-color);
+      }
+
+      .blog-post-link .post-icon {
+        color: #3b82f6;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+
+      .blog-post-link .post-title {
+        font-weight: 600;
+        font-size: 0.95rem;
+        line-height: 1.4;
+        color: var(--link-color);
+      }
+
+      body.dark-theme .blog-post-link .post-title {
+        color: #60a5fa;
+      }
+
+      .month-section {
+        margin-bottom: 40px;
+      }
+
+      .month-header {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #3b82f6 !important;
+        border-bottom: 2px solid #3b82f6;
+        padding-bottom: 8px;
+        margin-bottom: 16px;
+      }
+
+      .blog-hero {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: #fff;
+        padding: 50px 20px;
+        text-align: center;
+        margin-bottom: 40px;
+      }
+
+      body.dark-theme .blog-hero {
+        background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+      }
+
+      .blog-hero h1 {
+        color: #fff !important;
+        font-size: 2.2rem;
+        font-weight: 700;
+      }
+
+      .blog-hero p {
+        opacity: 0.9;
+        max-width: 600px;
+        margin: 10px auto 0;
+      }
+
+      .post-count-badge {
+        background: rgba(59,130,246,0.12);
+        color: #3b82f6;
+        font-size: 0.78rem;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 20px;
+        margin-left: 8px;
+        vertical-align: middle;
+      }
+
+      body.dark-theme .post-count-badge {
+        background: rgba(96,165,250,0.15);
+        color: #60a5fa;
+      }
+    </style>
+  </head>
+
+  <body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/">thisDay.</a>
+
+        <div class="form-check form-switch theme-switch-mobile d-lg-none me-2">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            id="themeSwitchMobile"
+            aria-label="Toggle dark mode"
+          />
+          <label class="form-check-label" for="themeSwitchMobile">
+            <i class="bi bi-moon-fill"></i>
+          </label>
+        </div>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav ms-auto">
+            <li class="nav-item d-flex align-items-center">
+              <div class="form-check form-switch theme-switch-desktop d-none d-lg-block me-2">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="themeSwitchDesktop"
+                  aria-label="Toggle dark mode"
+                />
+                <label class="form-check-label" for="themeSwitchDesktop">Dark Mode</label>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <div class="blog-hero">
+      <h1><i class="bi bi-journal-richtext me-2"></i>History Blog</h1>
+      <p>Original in-depth articles about the events, people, and moments that shaped our world.</p>
+    </div>
+
+    <main class="container my-2" style="max-width: 860px;">
+
+      <!-- July -->
+      <section class="month-section">
+        <h2 class="month-header">
+          <i class="bi bi-calendar3 me-2"></i>July
+          <span class="post-count-badge">17 posts</span>
+        </h2>
+        <a href="/blog/july/10-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Great Fire of London 1212 – Southwark in Flames</span>
+        </a>
+        <a href="/blog/july/11-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Martin Frobisher Mistakes Greenland For Frisland 1576</span>
+        </a>
+        <a href="/blog/july/12-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Nuremberg Chronicle 1493 – Illustrating World History</span>
+        </a>
+        <a href="/blog/july/13-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Treaty of Berlin 1878 – Settling the Eastern Question</span>
+        </a>
+        <a href="/blog/july/14-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Mario Bros. (1983) – History &amp; Legacy</span>
+        </a>
+        <a href="/blog/july/15-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Emil Kraepelin: The Pioneer of Modern Psychiatry</span>
+        </a>
+        <a href="/blog/july/16-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Hijrah – Muhammad's Migration from Mecca to Medina</span>
+        </a>
+        <a href="/blog/july/17-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Potsdam Conference – Shaping the Post-War World</span>
+        </a>
+        <a href="/blog/july/18-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Intel Corporation – Powering the Digital Age Since 1968</span>
+        </a>
+        <a href="/blog/july/19-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Bombing of Rome 1943–44 – Allied Air Raids on San Lorenzo</span>
+        </a>
+        <a href="/blog/july/20-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Apollo 11 Moon Landing July 1969 – First Steps on the Moon</span>
+        </a>
+        <a href="/blog/july/21-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Scopes Monkey Trial Verdict – July 21, 1925</span>
+        </a>
+        <a href="/blog/july/22-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Slavery Abolition Act – July 22, 1833 – End of Slavery in the British Empire</span>
+        </a>
+        <a href="/blog/july/23-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Telstar 1 – First Live Transatlantic TV via Satellite</span>
+        </a>
+        <a href="/blog/july/25-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Concorde Crash – Air France Flight 4590 Disaster</span>
+        </a>
+        <a href="/blog/july/26-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">The Cuban Revolution Ignites – July 26, 1953</span>
+        </a>
+        <a href="/blog/july/30-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">England Wins the World Cup – July 30, 1966</span>
+        </a>
+      </section>
+
+      <!-- August -->
+      <section class="month-section">
+        <h2 class="month-header">
+          <i class="bi bi-calendar3 me-2"></i>August
+          <span class="post-count-badge">12 posts</span>
+        </h2>
+        <a href="/blog/august/1-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Founding of the Swiss Confederacy – August 1, 1291</span>
+        </a>
+        <a href="/blog/august/3-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Christopher Columbus Sets Sail – August 3, 1492</span>
+        </a>
+        <a href="/blog/august/7-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">First Picture of Earth from Orbit – August 7, 1959</span>
+        </a>
+        <a href="/blog/august/9-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Nagasaki Bombing – August 9, 1945</span>
+        </a>
+        <a href="/blog/august/11-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Battle of Konzer Brücke – August 11, 1675</span>
+        </a>
+        <a href="/blog/august/13-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">East Germany Begins Building the Berlin Wall – August 13, 1961</span>
+        </a>
+        <a href="/blog/august/16-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Elvis Presley Dies – The King of Rock and Roll</span>
+        </a>
+        <a href="/blog/august/18-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Death of Genghis Khan – Founder of the Mongol Empire</span>
+        </a>
+        <a href="/blog/august/20-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">First Africans in English America – August 20, 1619</span>
+        </a>
+        <a href="/blog/august/23-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Execution of William Wallace – August 23, 1305</span>
+        </a>
+        <a href="/blog/august/26-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Battle of Manzikert – August 26, 1071</span>
+        </a>
+        <a href="/blog/august/30-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Battle of Lake Poyang – August 30, 1363</span>
+        </a>
+      </section>
+
+      <!-- September -->
+      <section class="month-section">
+        <h2 class="month-header">
+          <i class="bi bi-calendar3 me-2"></i>September
+          <span class="post-count-badge">9 posts</span>
+        </h2>
+        <a href="/blog/september/2-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">The End of World War II – September 2, 1945</span>
+        </a>
+        <a href="/blog/september/5-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Birth of Freddie Mercury – September 5, 1946</span>
+        </a>
+        <a href="/blog/september/8-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">Michelangelo's David Unveiled – September 8, 1504</span>
+        </a>
+        <a href="/blog/september/11-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">September 11, 2001 – Twin Towers Attacks</span>
+        </a>
+        <a href="/blog/september/15-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">September 15, 1440 – Gilles de Rais Arrested, France's First Known Serial Killer</span>
+        </a>
+        <a href="/blog/september/18-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">September 18, 1931 – The Mukden Incident and Japan's Invasion of Manchuria</span>
+        </a>
+        <a href="/blog/september/22-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">September 22, 1359 – The Battle of Araviana</span>
+        </a>
+        <a href="/blog/september/26-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">September 26, 1983 – Nuclear War Prevented by Stanislav Petrov</span>
+        </a>
+        <a href="/blog/september/29-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">September 29, 480 BCE – The Battle of Salamis</span>
+        </a>
+      </section>
+
+      <!-- October -->
+      <section class="month-section">
+        <h2 class="month-header">
+          <i class="bi bi-calendar3 me-2"></i>October
+          <span class="post-count-badge">5 posts</span>
+        </h2>
+        <a href="/blog/october/2-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">October 2, 1187 – Saladin Captures Jerusalem</span>
+        </a>
+        <a href="/blog/october/5-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">October 5–6, 1789 – Women's March on Versailles</span>
+        </a>
+        <a href="/blog/october/13-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">October 13, 1307 – Arrest of the Knights Templar</span>
+        </a>
+        <a href="/blog/october/21-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">October 21, 1984 – Niki Lauda's Final Championship</span>
+        </a>
+        <a href="/blog/october/28-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">October 28, 1636 – Harvard College is Established</span>
+        </a>
+      </section>
+
+      <!-- November -->
+      <section class="month-section">
+        <h2 class="month-header">
+          <i class="bi bi-calendar3 me-2"></i>November
+          <span class="post-count-badge">1 post</span>
+        </h2>
+        <a href="/blog/november/3-2025/" class="blog-post-link">
+          <i class="bi bi-arrow-right-circle-fill post-icon"></i>
+          <span class="post-title">November 3, 1957 – Laika Becomes the First Living Creature in Orbit</span>
+        </a>
+      </section>
+
+      <div class="text-center mt-4 mb-2">
+        <a href="/" class="btn btn-primary">
+          <i class="bi bi-calendar3 me-2"></i>Explore the Full History Calendar
+        </a>
+      </div>
+
+    </main>
+
+    <footer class="footer">
+      <div class="container d-flex justify-content-center my-2">
+        <div class="me-2">
+          <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+            <i class="bi bi-github h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook">
+            <i class="bi bi-facebook h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
+            <i class="bi bi-instagram h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok">
+            <i class="bi bi-tiktok h3 text-white"></i>
+          </a>
+        </div>
+        <div class="me-2">
+          <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
+            <i class="bi bi-youtube h3 text-white"></i>
+          </a>
+        </div>
+      </div>
+      <div class="container"></div>
+      <p>© <span id="currentYear"></span> thisDay. All rights reserved.</p>
+      <p>
+        Historical data sourced from Wikipedia.org under
+        <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" title="Creative Commons Attribution-ShareAlike 4.0 International License">CC BY-SA 4.0</a>
+        license. Note: Data is for informational purposes and requires verification.
+      </p>
+      <p>
+        This website is not affiliated with any official historical organization or entity.
+        The content is provided for educational and entertainment purposes only.
+      </p>
+      <p>
+        <a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> |
+        <a href="/about/">About Us</a> |
+        <a href="/contact/">Contact</a> |
+        <a href="/terms/">Terms and Conditions</a> |
+        <a href="/privacy-policy/">Privacy Policy</a>
+      </p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      document.getElementById("currentYear").textContent = new Date().getFullYear();
+
+      const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
+      const themeSwitchMobile = document.getElementById("themeSwitchMobile");
+
+      const applyTheme = (isDark) => {
+        document.body.classList.toggle("dark-theme", isDark);
+      };
+
+      const isDark =
+        localStorage.getItem("theme") === "dark" ||
+        (window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches &&
+          localStorage.getItem("theme") !== "light");
+      applyTheme(isDark);
+      if (themeSwitchDesktop) themeSwitchDesktop.checked = isDark;
+      if (themeSwitchMobile) themeSwitchMobile.checked = isDark;
+
+      if (themeSwitchDesktop) {
+        themeSwitchDesktop.addEventListener("change", () => {
+          applyTheme(themeSwitchDesktop.checked);
+          localStorage.setItem("theme", themeSwitchDesktop.checked ? "dark" : "light");
+          if (themeSwitchMobile) themeSwitchMobile.checked = themeSwitchDesktop.checked;
+        });
+      }
+      if (themeSwitchMobile) {
+        themeSwitchMobile.addEventListener("change", () => {
+          applyTheme(themeSwitchMobile.checked);
+          localStorage.setItem("theme", themeSwitchMobile.checked ? "dark" : "light");
+          if (themeSwitchDesktop) themeSwitchDesktop.checked = themeSwitchMobile.checked;
+        });
+      }
+    </script>
+  </body>
+</html>

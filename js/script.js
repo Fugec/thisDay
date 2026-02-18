@@ -1964,8 +1964,8 @@ function renderFullWidthCarouselItem(container, event, index) {
       <h5 style="font-size:20px;font-weight:700;line-height:1.2;margin-bottom:0.75rem;">${title}</h5>
       <p>${excerpt}</p>
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-        <a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Read Full Story</a>
-        ${window.__todayGeneratedUrl ? `<a href="${window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Today's Post</a>` : ''}
+        <a href="${window.__todayGeneratedUrl || event.url}" ${!window.__todayGeneratedUrl ? 'target="_blank" rel="noopener noreferrer"' : ''} class="btn btn-primary btn-sm">Read Full Story</a>
+        ${window.__todayGeneratedUrl ? `<a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Wikipedia ↗</a>` : ''}
       </div>
     </div>
   `;

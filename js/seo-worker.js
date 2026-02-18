@@ -172,6 +172,8 @@ function workerCommentary(year, text) {
   const dis  = /earthquake|hurricane|typhoon|tsunami|eruption|wildfire|flood|epidemic|plague|famine|disaster|collapsed|shipwreck/.test(t);
   const art  = /\bfilm\b|novel|painting|symphony|opera|theatre|theater|poem|published|premiered|literary|artist|composer|sculptor|architecture|museum/.test(t);
   const rel  = /church|cathedral|pope|bishop|crusade|mosque|temple|monastery|reformation|heresy|clergy|saint|protestant|catholic/.test(t);
+  const econ = /bank|stock market|recession|depression|financial crisis|bankruptcy|currency|inflation|trade|tariff|crash|bubble|debt|deficit|gdp|economy|market/.test(t);
+  const sport = /olympic|championship|world cup|tournament|record|gold medal|title|final|super bowl|grand slam|marathon|formula|athlete/.test(t);
 
   const era =
     y < 500  ? "ancient"      :
@@ -180,6 +182,51 @@ function workerCommentary(year, text) {
     y < 1900 ? "modern"       : "contemporary";
 
   if (war) {
+    // Sub-categories within war for more connected commentary
+    const isSiege      = /siege|besieg|surrounded|fortif|garrison|blockade|starv/.test(t);
+    const isNaval      = /naval|fleet|ship|sea battle|maritime|admiral|frigate|armada/.test(t);
+    const isLiberation = /liberat|resist|partisan|guerrilla|occupied|underground|freed/.test(t);
+    const isAttrition  = /world war|trench|western front|eastern front|million|casualties|stalemate/.test(t);
+    const isCivilWar   = /civil war|civil conflict|secession|rebel|faction|brother against/.test(t);
+    const isSurrender  = /surrender|capitulat|armistice|ceasefire|truce|ended|concluded|peace/.test(t);
+    const isAerial     = /bombing|air raid|aerial|blitz|airforce|aircraft|bomb|drone|air strike/.test(t);
+
+    if (isSiege) return [
+      "Sieges reduced warfare to its starkest arithmetic: the rate at which defenders consumed supplies versus the patience and resources of those outside the walls. Starvation and disease killed as reliably as any weapon.",
+      "A successful siege required controlling the surrounding territory, maintaining reliable supply lines, and sustaining political will across months or even years. These were rarely guaranteed — many sieges collapsed not through military defeat but through the besieger's own logistical failures.",
+      "For civilians trapped inside, the siege was not a military calculation but a daily question of survival — who controlled the food, who maintained order, and whether the walls could hold long enough for relief to arrive.",
+    ];
+    if (isNaval) return [
+      "Naval power has always been primarily about logistics: the ability to project force, protect trade routes, and deny the same to an opponent. Battles at sea decided not just military outcomes but the economic fate of empires.",
+      "A naval engagement concentrated enormous irreplaceable capital — ships, trained crews, experienced officers — into a few hours of chaotic violence. Fleets built over decades could be destroyed in a single afternoon.",
+      "Control of the sea never guaranteed control of everything, but losing it tended to mean losing most things eventually. Maritime supremacy has consistently translated into commercial and strategic advantage in ways that land power alone could not replicate.",
+    ];
+    if (isLiberation) return [
+      "Resistance movements rarely succeed through armed force alone. The combination of sustained guerrilla action, international pressure, the political delegitimization of the occupying power, and the mounting cost of repression tends to determine outcomes more than any single engagement.",
+      "Occupation reshapes societies in ways that outlast the occupation itself. Identity hardens, collaboration becomes a lasting moral category, and the politics of the post-liberation period are defined by who resisted, who accommodated, and under what circumstances.",
+      "What gets called liberation looks different depending on where you stand. The formal removal of an occupying power rarely resolves the underlying questions of who governs next, on whose behalf, and with what legitimacy.",
+    ];
+    if (isAttrition) return [
+      "Industrial-scale warfare transformed conflict from a contest of tactics and leadership into a problem of production and endurance. The side that could sustain losses longest — in material, in manpower, in political will — tended to prevail, regardless of battlefield skill.",
+      "Mass mobilization reshaped societies as profoundly as the fighting itself. Economies were restructured, gender roles disrupted, political compacts renegotiated. A society that entered a total war rarely emerged with its internal arrangements intact.",
+      "The arithmetic of attrition was visible to everyone in real time, which is what made it so politically corrosive. Governments that could not explain why the losses were worth the gains eventually faced a crisis of legitimacy as dangerous as any military setback.",
+    ];
+    if (isCivilWar) return [
+      "Civil wars are distinguished from other conflicts by who the enemy is: not a foreign power but a neighbour, a former ally, sometimes a family member. That proximity produces a particular kind of violence — intimate, difficult to end, and long-remembered.",
+      "The causes of civil war are almost always multiple and contested. Economic inequality, ethnic or religious divisions, disputed legitimacy, and the collapse of institutions capable of managing disagreement tend to combine rather than act in isolation. Single-cause explanations come later, from the winners.",
+      "Civil wars rarely end cleanly. The formal conclusion of fighting is followed by years of contested reconstruction — who gets to write the history, which grievances are acknowledged, and how the losing side is reintegrated into a shared political life. These questions prove at least as difficult as the war itself.",
+    ];
+    if (isSurrender) return [
+      "Surrenders are often the moment when the real negotiation begins. The terms imposed on the defeated — reparations, territorial loss, political reorganization — shape the next generation's grievances as surely as the fighting shaped this one.",
+      "The decision to stop fighting requires someone with authority to make it and the political standing to enforce it. Armies that refuse to accept the reality of defeat, or governments that collapse before surrender can be formalized, tend to produce prolonged and chaotic aftermaths.",
+      "What the armistice ends is the shooting. What it does not end is the underlying conflict of interests, identities, and claims that produced the war. The durability of any peace depends on how seriously those deeper questions are addressed — a test that many ceasefires fail.",
+    ];
+    if (isAerial) return [
+      "Aerial warfare added a dimension that fundamentally changed what it meant to be a civilian in wartime. The front line disappeared; distance from the fighting no longer offered safety. Cities, factories, and populations became legitimate targets under doctrines that were being improvised in real time.",
+      "Strategic bombing promised to end wars quickly by destroying an enemy's will and capacity to fight from the air. The evidence for its effectiveness has always been contested — civilian populations proved more resilient than theorists predicted, and the economic disruption less decisive than promised.",
+      "The moral framework for aerial warfare has never been fully resolved. The same technology used to deliver humanitarian aid can deliver ordnance. Drones, precision munitions, and autonomous systems have shifted the calculus again, raising questions that the laws of war — written for earlier technologies — struggle to answer.",
+    ];
+
     if (era === "ancient") return [
       "In the ancient world, warfare was the ultimate arbiter of civilization. Kingdoms that had stood for centuries could be erased in a single campaign season — their people absorbed, enslaved, or scattered across unfamiliar lands.",
       "What the victors recorded as glorious triumph was, for the defeated, the collapse of everything they knew: language, gods, customs, and kinship networks reduced first to memory, then eventually to silence.",
@@ -208,8 +255,53 @@ function workerCommentary(year, text) {
   }
 
   if (sci) {
+    // Sub-categories within science for more connected commentary
+    const isSpace      = /space|orbit|satellite|rocket|moon|mars|astronaut|cosmonaut|shuttle|spacecraft|launch pad/.test(t);
+    const isMedical    = /vaccine|medicine|disease|cure|surgery|antibiotic|virus|epidemic|dna|gene|genome|transplant/.test(t);
+    const isPhysics    = /atom|nuclear|quantum|relativity|particle|radiation|element|periodic|chemistry|fission|fusion/.test(t);
+    const isComputing  = /computer|software|internet|algorithm|digital|program|data|network|code|processor|artificial intelligence/.test(t);
+    const isAstronomy  = /comet|asteroid|star|planet|galaxy|nebula|eclipse|celestial|constellation|telescope|observatory/.test(t);
+    const isEnv        = /climate|pollution|environment|ecosystem|conservation|species|extinction|carbon|deforestation|ozone/.test(t);
+    const isMath       = /mathemati|theorem|proof|calculus|algebra|geometry|statistics|cipher|equation|formula|number/.test(t);
+
+    if (isSpace) return [
+      "Space exploration demands solving problems at the absolute edge of what materials, mathematics, and human physiology can withstand. Every successful mission represents the convergence of thousands of engineering decisions, each of which had to be right.",
+      "The political dimensions of space programs have always matched their scientific ones. National prestige, military capability signals, and the projection of technological power drove funding and timelines as forcefully as the pursuit of knowledge.",
+      "What space exploration changed most durably was human self-perception. Seeing Earth from outside it — as a single, fragile object against an indifferent darkness — produced a shift in perspective that no purely terrestrial experience could replicate.",
+    ];
+    if (isMedical) return [
+      "Medical progress rarely arrives as a clean breakthrough. It accumulates through decades of failure, partial understanding, and contested results — punctuated occasionally by discoveries that genuinely restructure everything that came before and after them.",
+      "The gap between what medicine can do and what it actually delivers has always been one of the defining inequalities of every era. A treatment proven effective in one setting may be inaccessible, unaffordable, or contested in another. Discovery and access are separate problems.",
+      "Disease has altered the course of history in ways that armies and diplomacy could not. Pathogens do not respect borders, social hierarchies, or military formations. Understanding this link between medicine and power is inseparable from understanding history itself.",
+    ];
+    if (isPhysics) return [
+      "Discoveries at the fundamental level of physics have a habit of producing consequences that appear only decades later. The theoretical insights of one generation become the technological infrastructure of the next — and the ethical frameworks for managing them typically arrive last.",
+      "Nuclear and quantum physics revealed that the universe operates by rules radically different from everyday experience. This created both extraordinary power and extraordinary conceptual difficulty — a science whose implications even its creators spent years working to understand.",
+      "The institutional structures of modern science — large international collaborations, government-funded research, peer review at scale — were largely built around the demands of physics. In shaping how science is organized, the discipline reshaped the entire enterprise of knowledge-making.",
+    ];
+    if (isComputing) return [
+      "Computing technology accelerated through a feedback loop: each generation of hardware enabled the development of the next, compressing decades of expected progress into years. The pace consistently outran the ability of legal, educational, and social institutions to adapt.",
+      "The internet restructured the fundamental economics of information. When copying and distributing knowledge approaches zero cost, the industries and power structures built on controlling its scarcity face questions they were not designed to answer.",
+      "What computing changed most profoundly was not any specific industry but the underlying assumption about what could be automated, optimized, and quantified. That assumption continues expanding into domains — creativity, judgment, interpersonal trust — that once seemed safely beyond its reach.",
+    ];
+    if (isAstronomy) return [
+      "Astronomy has always occupied an unusual position in the hierarchy of sciences: its objects of study are entirely inaccessible, observable only at a distance measured in light-years, yet the patterns they reveal have structured timekeeping, navigation, and human self-understanding since the earliest civilizations.",
+      "Each step outward in scale — from solar system to galaxy to observable universe — has required revising not just measurements but foundational assumptions about where we are and what we are made of. The universe turned out to be far older, larger, and stranger than anyone's first guess.",
+      "Modern astronomy is fundamentally collaborative in a way few disciplines match. Telescopes span continents; data is shared across borders; discoveries arrive not through individual genius but through networked observation and computation. The romantic image of the lone astronomer at the eyepiece describes almost nothing about how the field actually works.",
+    ];
+    if (isEnv) return [
+      "Environmental history reframes the standard narrative of progress by asking what was lost — ecologically, biologically, climatically — in the process of producing what we typically count as gains. The accounting looks considerably different when the costs are included.",
+      "Ecosystems do not register political borders. A species extinction, an aquifer depleted, a river system dammed — these changes propagate across boundaries in ways that no single government is positioned to fully manage. The mismatch between the scale of environmental problems and the scale of political institutions is one of the central dilemmas of the modern era.",
+      "The pace of environmental change in the industrial period has no precedent in human history and few in geological time. What makes this moment unusual is not that nature is changing — it always has — but that the driver of change is now the cumulative weight of human activity, and the timeline for consequences is measured in decades rather than millennia.",
+    ];
+    if (isMath) return [
+      "Mathematics is unusual among intellectual disciplines in that its results, once proven, do not become obsolete. A theorem established two thousand years ago requires no revision when new evidence arrives — the proof either holds or it doesn't, and if it holds, it holds permanently.",
+      "Mathematical structures discovered in purely abstract contexts have a persistent habit of turning out to describe physical reality with uncanny precision — often decades or centuries after the original work. This relationship between abstract reasoning and the behaviour of the physical world remains philosophically puzzling.",
+      "The history of mathematics is also a history of expanding the concept of number itself: from counting integers to fractions, to irrational and imaginary numbers, to infinities of different sizes. Each expansion felt, to contemporaries, like a violation of common sense — and each eventually became indispensable.",
+    ];
+
     if (era === "ancient" || era === "medieval") return [
-      "In the ancient and medieval world, scientific inquiry was inseparable from philosophy and theology. Observation of the natural world was a form of reading a divine text — each pattern in the stars or body a reflection of cosmic order.",
+      "In the ancient and medieval world, scientific inquiry was inseparable from philosophy and theology. Observation of the natural world was a form of reading a divine text — each pattern in the stars or in the body a reflection of a larger cosmic order.",
       "This did not make early scholars incurious. The great minds of antiquity and the Islamic Golden Age made advances in mathematics, astronomy, and medicine that Europe would not surpass for centuries — achieved without the institutional infrastructure we now take for granted.",
       "What we retrospectively label superstition was often simply the best available framework — a coherent attempt to understand cause and effect with the tools at hand. History remembers the failures. It rarely appreciates how remarkable it was to try at all.",
     ];
@@ -254,14 +346,62 @@ function workerCommentary(year, text) {
     "The relationship between faith and secular authority has never been permanently resolved — only temporarily arranged. Every settlement between them eventually produces the conditions for the next renegotiation, and the terms are always contested.",
   ];
 
-  if (pol) return [
-    y < 1800
-      ? "Political power in this era was deeply personal. Constitutions and treaties were essentially agreements between powerful individuals — protections for ordinary people were largely absent from the political calculus, because ordinary people were largely absent from political life entirely."
-      : "Modern political history is largely the story of who gets counted. The franchise expanded, contracted, and expanded again. Rights were declared, ignored, fought for, and sometimes, eventually, won.",
-    y < 1800
-      ? "The concepts we now treat as foundational to governance — popular sovereignty, individual rights, the separation of powers — were, in this period, radical ideas at the fringes of political thought. Not yet organizing principles of states, but dangerous propositions held by a small and often persecuted minority."
-      : "Political moments that seem minor at the time — a speech, a vote, a protest, an arrest — often define entire generations. The seeds of major historical shifts are almost always visible in retrospect, hidden in plain sight at the time.",
-    "The political structures we inhabit today were built on particular compromises, by particular people, under particular pressures. History could plausibly have produced very different outcomes — and very nearly did, more often than is comfortable to acknowledge.",
+  if (pol) {
+    // Sub-categories within politics so commentary matches the actual event type
+    const isElection     = /election|vote|ballot|elected|campaign|referendum|suffrage|polling/.test(t);
+    const isTreaty       = /treaty|accord|agreement|peace|diplomatic|negotiat|ceasefire|armistice/.test(t);
+    const isRevolution   = /revolution|independence|uprising|coup|overthrow|liberat|rebel|proclaimed/.test(t);
+    const isAssassination = /assassin|murder|killed|shot|executed|impeach/.test(t);
+    const isLegislation  = /constitution|legislation|bill|charter|amendment|decree|enacted|signed into law/.test(t);
+
+    if (isElection) return [
+      "Elections are democracy's recurring proof of concept — contested, imperfect, and still the most reliable mechanism humanity has produced for transferring power without immediate violence.",
+      "The outcome of any election is shaped by forces that begin years before polling day: demographic shifts, economic anxieties, media narratives, and the accumulated weight of earlier decisions. The ballot box measures a political moment, not just an individual preference.",
+      "History judges elections not only by who won, but by what became possible — or permanently foreclosed — because of them. The full consequences of a particular result are rarely visible on election night.",
+    ];
+    if (isTreaty) return [
+      "Treaties are political documents dressed as resolutions. What they commit to on paper and what they produce in practice are rarely identical — the gap between the two is where much of the subsequent history tends to unfold.",
+      "Every peace agreement encodes the power imbalance of the moment it was signed. Those who negotiated from weakness rarely secured terms that held indefinitely. The seeds of the next conflict are almost always present in the language of the settlement.",
+      "The durability of any treaty depends less on its wording than on whether the conditions that produced the original conflict have genuinely changed — a question that no signature alone can answer.",
+    ];
+    if (isRevolution) return [
+      "Revolutions are rarely as sudden as they appear. The conditions that make them possible — accumulated grievances, weakened institutions, competing claims to legitimacy — build over years before a single event transforms long-standing tension into open rupture.",
+      "Every revolution produces a gap between what it promised and what it delivers. The ideals of the opening phase are typically constrained by the practical pressures of consolidation, when the question shifts from 'what do we want?' to 'how do we hold this together?'",
+      "What makes a revolutionary moment historically decisive is not simply that it changed who held power, but whether it changed the underlying rules by which power could be held, challenged, and transferred. By that measure, the verdict on most revolutions takes generations to reach.",
+    ];
+    if (isAssassination) return [
+      "Political violence aimed at individuals rarely eliminates the ideas those individuals represented. Assassinations tend to accelerate the forces they aimed to stop — converting people into symbols and grievances into movements with longer half-lives than the original.",
+      "The aftermath of a political killing reveals far more about a society than the act itself. How institutions respond, whether successor governments are strengthened or destabilized, and whether the act achieves its intended effect — these are the real historical questions.",
+      "The counterfactual is irresistible but ultimately unanswerable: would history have unfolded differently had the individual survived? More revealing is the question of what conditions made such an outcome possible in the first place.",
+    ];
+    if (isLegislation) return [
+      "Laws are not self-executing. A constitution can articulate rights that exist nowhere in practice; legislation can transform a society or gather dust depending entirely on whether the political will that produced it survives the moment of passage.",
+      "The language of law is always a compromise — an attempt to build a durable framework from competing interests and predictions about the future that will inevitably prove partly wrong. The meaning of any law continues to shift as the circumstances it was written for change.",
+      "Constitutional moments feel more decisive at the time than they often prove to be. What determines their legacy is whether the institutions built around them are strong enough to hold when the document is tested — as it always eventually is.",
+    ];
+
+    // General political fallback
+    return [
+      y < 1800
+        ? "Political power in this era was deeply personal. Constitutions and treaties were essentially agreements between powerful individuals — the interests of ordinary people were largely absent from the political calculus, because ordinary people were largely absent from political life."
+        : "Political decisions that shape generations are rarely made with clear visibility into their long-term consequences. Those in power respond to immediate pressures — the long view is a luxury that the moment rarely permits.",
+      y < 1800
+        ? "The concepts we now treat as foundational to governance — popular sovereignty, individual rights, the separation of powers — were radical ideas in this period, held by a small and often persecuted minority at the fringes of political thought."
+        : "Every political settlement eventually generates the conditions for its own renegotiation. What one era treats as a permanent arrangement, the next often treats as a grievance.",
+      "The political structures that shape daily life today were built through specific compromises, under specific pressures, by people who could not anticipate what came after. History could plausibly have produced very different arrangements — and very nearly did.",
+    ];
+  }
+
+  if (econ) return [
+    "Economic crises have a way of revealing, very quickly, which elements of a financial system were more fragile than they appeared. The mechanisms that work smoothly during expansion — leverage, interconnection, confidence — amplify losses with equal efficiency on the way down.",
+    "Markets are built on expectations about the future, which means they are built on collective psychology as much as on fundamentals. Confidence, once lost, tends to be slow to return and easy to shatter again. The narrative a society tells about its economy matters — sometimes as much as the underlying reality.",
+    "The political consequences of economic crises consistently outlast the crises themselves. Governments that presided over financial collapses rarely survived them with their authority intact. The social strains produced by mass unemployment, lost savings, and deflated expectations tend to find political expression — not always in forms that democratic institutions can easily absorb.",
+  ];
+
+  if (sport) return [
+    "Sporting achievement exists at the intersection of biological capacity, systematic training, and favorable circumstance — with the last element more consequential than athletic mythologies typically acknowledge. Champions are also products of access: to coaching, facilities, nutrition, and the freedom to specialize.",
+    "Major sporting events have always served purposes beyond competition. They are displays of national prestige, commercial spectacles, diplomatic signals, and platforms for political statements — sometimes all simultaneously. The sport itself is embedded in a context that shapes everything from the schedule to the broadcast rights.",
+    "Records exist to be broken, which is precisely what makes them useful as historical markers. Each time a presumed human limit is surpassed, the achievement recalibrates what the next generation believes is possible — a compounding effect that extends beyond sport into every domain where belief in possibility matters.",
   ];
 
   // Default — era-based

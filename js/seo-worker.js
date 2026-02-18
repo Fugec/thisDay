@@ -159,39 +159,137 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
+// Returns an array of 2-3 original editorial paragraphs for the featured event.
+// All text is authored by thisDay.info — safe to render as HTML without escaping.
 function workerCommentary(year, text) {
   const y = parseInt(year, 10);
   const t = (text || "").toLowerCase();
-  const war = /war|battle|siege|invasion|conflict|defeat|victory|troops|army/.test(t);
-  const sci = /discover|invent|launch|orbit|experiment|vaccine|gene|atom|microscope|telescope/.test(t);
-  const pol = /treaty|signed|declared|constitution|independence|election|revolution/.test(t);
+
+  const war  = /war|battle|siege|invasion|conflict|defeat|victory|troops|army|military|combat/.test(t);
+  const sci  = /discover|invent|launch|orbit|experiment|vaccine|gene|atom|microscope|telescope|theory|equation|element|laboratory/.test(t);
+  const pol  = /treaty|signed|declared|constitution|independence|election|revolution|parliament|senate|congress|legislation/.test(t);
+  const expl = /expedition|voyage|navigator|circumnavigat|new world|explorer|coloniz|sailing|landed/.test(t);
+  const dis  = /earthquake|hurricane|typhoon|tsunami|eruption|wildfire|flood|epidemic|plague|famine|disaster|collapsed|shipwreck/.test(t);
+  const art  = /\bfilm\b|novel|painting|symphony|opera|theatre|theater|poem|published|premiered|literary|artist|composer|sculptor|architecture|museum/.test(t);
+  const rel  = /church|cathedral|pope|bishop|crusade|mosque|temple|monastery|reformation|heresy|clergy|saint|protestant|catholic/.test(t);
+
   const era =
-    y < 500 ? "ancient" :
-    y < 1400 ? "medieval" :
+    y < 500  ? "ancient"      :
+    y < 1400 ? "medieval"     :
     y < 1700 ? "early_modern" :
-    y < 1900 ? "modern" : "contemporary";
+    y < 1900 ? "modern"       : "contemporary";
+
   if (war) {
-    if (era === "ancient") return "Conflict in the ancient world was total — no distinction between soldier and civilian.";
-    if (era === "medieval") return "Medieval warfare was as much about starvation and disease as the battlefield itself.";
-    if (era === "early_modern") return "Gunpowder reshaped the nature of war forever — this conflict reflects that transformation.";
-    if (era === "modern") return "By this era, war had become industrialized. Individual soldiers became statistics.";
-    return "Modern conflicts are fought as much in media and diplomacy as on the ground.";
+    if (era === "ancient") return [
+      "In the ancient world, warfare was the ultimate arbiter of civilization. Kingdoms that had stood for centuries could be erased in a single campaign season — their people absorbed, enslaved, or scattered across unfamiliar lands.",
+      "What the victors recorded as glorious triumph was, for the defeated, the collapse of everything they knew: language, gods, customs, and kinship networks reduced first to memory, then eventually to silence.",
+      "Yet conflict also accelerated exchange. Technologies, crops, religions, and ideas spread fastest along routes carved by armies. War built the ancient world as much as it destroyed it.",
+    ];
+    if (era === "medieval") return [
+      "Medieval warfare was rarely the chivalric contest romanticized in later literature. Sieges could last months, reducing entire populations to starvation; plague followed armies as reliably as supply carts followed generals.",
+      "Feudal loyalty made alliances permanently treacherous. Kings who commanded the battlefield could lose the political war at home — undone by barons whose interests never fully aligned with the crown's ambitions.",
+      "Still, medieval conflicts reshaped Europe's borders so profoundly that their lines echo in national identities today. The map of the modern world was drawn, in large part, by medieval swords.",
+    ];
+    if (era === "early_modern") return [
+      "The introduction of gunpowder fundamentally restructured the calculus of war. Castle walls that had held for centuries became liabilities overnight. The armored knight — product of decades of expensive training — could be felled by a conscript armed with a musket.",
+      "Early modern warfare also began to operate at imperial scale. Conflicts no longer stayed within European borders; they extended across oceans, reshaping the Americas, Africa, and Asia as collateral damage in European quarrels.",
+      "These wars demanded new financial systems, bureaucracies, and supply chains — and in the effort to fund and sustain them, the modern nation-state was essentially invented.",
+    ];
+    if (era === "modern") return [
+      "By the 19th century, industrialization had turned war into a logistical problem as much as a tactical one. Railroads, telegraphs, and mass production allowed armies to field hundreds of thousands — and to sustain those losses across years of grinding attrition.",
+      "The wars of this era carried an ideological weight their predecessors lacked. Nationalism, liberation, imperial expansion — soldiers increasingly fought for abstractions rather than simply for monarchs or wages.",
+      "The human cost was staggering enough to inspire the first serious international attempts at limiting conflict — the Geneva Conventions, the Hague Agreements — though none succeeded in curbing the century's appetite for war.",
+    ];
+    return [
+      "20th and 21st century conflicts redefined what war means entirely. The industrial-scale destruction of two World Wars gave way to nuclear deterrence, proxy conflicts, and asymmetric warfare — each a different answer to the question of how to fight when total war means mutual annihilation.",
+      "Today's wars are fought simultaneously on the ground, in the air, in cyberspace, and across media narratives. Shaping global perception has become as strategically important as seizing territory — sometimes more so.",
+      "The century's sharpest lesson — that modern war produces no clean victors, only varying degrees of ruin — has yet to be fully absorbed by those who still reach for it as a first resort.",
+    ];
   }
+
   if (sci) {
-    if (era === "ancient" || era === "medieval") return "In this era, science and philosophy were inseparable — observation met mythology.";
-    if (era === "early_modern") return "The Scientific Revolution was underway — each discovery chipped away at centuries of assumption.";
-    return "Science in this period moved so fast that today's breakthrough became tomorrow's footnote.";
+    if (era === "ancient" || era === "medieval") return [
+      "In the ancient and medieval world, scientific inquiry was inseparable from philosophy and theology. Observation of the natural world was a form of reading a divine text — each pattern in the stars or body a reflection of cosmic order.",
+      "This did not make early scholars incurious. The great minds of antiquity and the Islamic Golden Age made advances in mathematics, astronomy, and medicine that Europe would not surpass for centuries — achieved without the institutional infrastructure we now take for granted.",
+      "What we retrospectively label superstition was often simply the best available framework — a coherent attempt to understand cause and effect with the tools at hand. History remembers the failures. It rarely appreciates how remarkable it was to try at all.",
+    ];
+    if (era === "early_modern") return [
+      "The Scientific Revolution was not a single event but a slow erosion of inherited certainty. Each discovery challenged not just a theory but an entire worldview — and the institutions, both religious and political, that depended on that worldview remaining intact.",
+      "Figures like Galileo, Copernicus, and Newton were not safely distant academics. They were, in their time, radicals — challenging what powerful institutions held to be settled truth, and sometimes paying a serious personal price for doing so.",
+      "The methods they established — observation, hypothesis, experiment, replication — are now so thoroughly embedded in how we think that it is almost impossible to imagine reasoning without them. That is how completely they changed the world.",
+    ];
+    if (era === "modern") return [
+      "The 19th century turned science into an industry. What had been the work of gentlemen-scholars with private means became organized, funded, and institutionalized — universities, peer-reviewed journals, international conferences. Discovery accelerated accordingly.",
+      "The consequences extended far beyond the laboratory. Steam power, electrification, chemistry, and germ theory reshaped daily life faster than any social revolution had managed. A person born in 1800 who lived to 1900 witnessed changes that would have been indistinguishable from magic to their grandparents.",
+      "Science also began to carry new moral weight in this period. Darwinian evolution, in particular, forced a renegotiation between empirical inquiry and religious identity that societies are, in some respects, still working through.",
+    ];
+    return [
+      "Modern scientific progress has outpaced humanity's ability to fully absorb its own implications. In less than a century, we moved from the first powered flight to landing on the Moon — and from discovering the structure of DNA to editing it in living organisms.",
+      "This pace creates a particular kind of vertigo. Technologies arrive before the ethical frameworks to govern them. The internet, CRISPR, and artificial intelligence all changed the world before anyone had agreed on the rules of engagement.",
+      "Yet science remains the most reliable method humanity has found for separating truth from wishful thinking. Its willingness to revise itself when evidence demands it — to discard even beloved theories — is one of our most underappreciated cultural achievements.",
+    ];
   }
-  if (pol) {
-    return y < 1800
-      ? "Political power in this era was deeply personal — empires rose and fell with individuals."
-      : "Political moments that seem minor at the time often define entire generations.";
-  }
-  if (era === "ancient") return "Events from this era survive only through fragments — every detail was preserved against the odds.";
-  if (era === "medieval") return "The medieval world was far more connected and complex than popular imagination allows.";
-  if (era === "early_modern") return "This was an age of transition — old certainties crumbling, new ones not yet formed.";
-  if (era === "modern") return "The 19th century compressed centuries of change into a matter of decades.";
-  return "History is still being written about this period. Perspective always takes time.";
+
+  if (expl) return [
+    "For those who undertook these journeys, the unknown was not an abstraction — it was literal. Coastlines that ended without warning, prevailing winds that shifted unpredictably, diseases no European immune system had encountered. The odds of safe return were never guaranteed.",
+    "What exploration produced, beyond geographical knowledge, was a catastrophic redistribution of power, population, and disease. Civilizations encountered along the way — many sophisticated in their own right — were transformed, reduced, or erased within generations of first contact.",
+    "We still speak of the 'discovery' of places that had been continuously inhabited for millennia. Revisiting this history honestly means holding two truths simultaneously: the genuine courage these journeys required, and the devastation that followed in their wake.",
+  ];
+
+  if (dis) return [
+    "Natural disasters operate on geological or meteorological scales entirely indifferent to human plans. Yet their death tolls are shaped as much by social factors — poverty, inequality, political negligence — as by the event itself. The same earthquake kills thousands in one city and dozens in another.",
+    "Catastrophe reveals a society's real priorities with uncomfortable clarity. Which communities get rebuilt first, which are quietly abandoned, who receives compensation and who is forgotten — these decisions expose power structures that official policy rarely acknowledges directly.",
+    "History's great disasters also tend to accelerate reform. Building codes, early warning systems, and emergency response frameworks were largely built in the aftermath of tragedies that revealed how preventable the worst outcomes were. Progress here has almost always been reactive rather than proactive.",
+  ];
+
+  if (art) return [
+    "Cultural history moves differently from political history. Where political events can be dated to a specific day, artistic movements accumulate gradually — a novel published here, a manifesto there, a performance that contemporary audiences found outrageous and critics a generation later called definitive.",
+    "Art produced in one era is constantly reread by those that follow. Works dismissed as obscene or trivial are restored to the canon; once-celebrated masterworks lose their urgency. The cultural record is perpetually being negotiated and revised by new eyes.",
+    "What tends to endure — across centuries and cultural contexts — is work that captured something true about human experience. Not necessarily the technically perfect or the ideologically correct, but the honest. History has a long memory for authenticity.",
+  ];
+
+  if (rel) return [
+    "Religious history resists easy reduction. Doctrinal disputes that seem, in retrospect, impossibly arcane — precise questions of theology, the authority of a particular text, the correct form of a ritual — were, for those living through them, matters of ultimate consequence, worth dying and killing for.",
+    "Religious institutions have simultaneously served as preservers of knowledge, patrons of the arts, centers of social organization, and engines of oppression. Rarely has any one of these functions entirely eclipsed the others in any tradition, for any sustained period.",
+    "The relationship between faith and secular authority has never been permanently resolved — only temporarily arranged. Every settlement between them eventually produces the conditions for the next renegotiation, and the terms are always contested.",
+  ];
+
+  if (pol) return [
+    y < 1800
+      ? "Political power in this era was deeply personal. Constitutions and treaties were essentially agreements between powerful individuals — protections for ordinary people were largely absent from the political calculus, because ordinary people were largely absent from political life entirely."
+      : "Modern political history is largely the story of who gets counted. The franchise expanded, contracted, and expanded again. Rights were declared, ignored, fought for, and sometimes, eventually, won.",
+    y < 1800
+      ? "The concepts we now treat as foundational to governance — popular sovereignty, individual rights, the separation of powers — were, in this period, radical ideas at the fringes of political thought. Not yet organizing principles of states, but dangerous propositions held by a small and often persecuted minority."
+      : "Political moments that seem minor at the time — a speech, a vote, a protest, an arrest — often define entire generations. The seeds of major historical shifts are almost always visible in retrospect, hidden in plain sight at the time.",
+    "The political structures we inhabit today were built on particular compromises, by particular people, under particular pressures. History could plausibly have produced very different outcomes — and very nearly did, more often than is comfortable to acknowledge.",
+  ];
+
+  // Default — era-based
+  if (era === "ancient") return [
+    "Events from the ancient world survive only through fragments — inscriptions, papyri, and secondhand accounts filtered through centuries of copying and interpretation. Every surviving detail was preserved against considerable odds.",
+    "The civilizations that produced these events were far more complex and interconnected than popular imagination typically allows. Trade routes, diplomatic correspondence, and shared mythologies linked the ancient Mediterranean, Middle East, and Asia in ways that are still being mapped.",
+    "What we call ancient history is largely the record of elites and institutions. The daily lives, beliefs, and experiences of ordinary people — the overwhelming majority — remain largely invisible, recoverable only in fragments through archaeology.",
+  ];
+  if (era === "medieval") return [
+    "The medieval world was far more dynamic and interconnected than the 'Dark Ages' label once suggested. Scholarly exchange between Islamic, Jewish, Byzantine, and European traditions kept classical knowledge alive and advanced it significantly.",
+    "Life in the medieval period was shaped by rhythms — liturgical, agricultural, and dynastic — that gave time a different texture than the linear, progress-oriented narrative we tend to impose on it from the outside.",
+    "Medieval people were not primitive versions of us, waiting for modernity to arrive. They were fully formed human beings navigating a specific set of circumstances with intelligence, humor, ambition, and fear — much as we do now.",
+  ];
+  if (era === "early_modern") return [
+    "The early modern period was defined by collisions: of continents, religions, political systems, and ways of understanding the world. Old certainties were crumbling faster than new ones could be built to replace them.",
+    "Print technology, oceanic navigation, and the Reformation all arrived within decades of each other — a convergence of disruptions that transformed European society more rapidly than anything since the fall of Rome.",
+    "People living through this period had no way of knowing they were in a hinge moment of history. They experienced it as confusion, opportunity, and violence in roughly equal measure — which is, perhaps, how most pivotal eras feel from the inside.",
+  ];
+  if (era === "modern") return [
+    "The 19th century compressed centuries of prior change into a matter of decades. Industrial production, mass literacy, global communication, and modern medicine all emerged or transformed so rapidly that contemporaries frequently described feeling unmoored.",
+    "This era also produced the modern concept of progress — the idea that history moves in a direction, that tomorrow will be materially better than today. It was a genuinely new way of relating to time, and it reshaped everything from politics to personal ambition.",
+    "The century's confidence in its own advancement was not entirely misplaced, but it obscured the costs: ecological damage, colonial exploitation, and social displacement that would take the following century to begin reckoning with.",
+  ];
+  return [
+    "Every event recorded in history represents a decision by someone to consider it worth preserving. The archives of any civilization reveal as much about its values — what it found worth recording — as about what actually occurred.",
+    "Much of what happened on any given day was never written down at all. The farmers, merchants, and ordinary people who constituted the overwhelming majority of any era left almost no direct trace. What we call history is largely the record of the exceptional — the violent, the powerful, and the fortunate.",
+    "This is precisely why revisiting dates matters. Not simply to accumulate facts, but to notice which stories were preserved and which were not — and to hold some humility about the vast quantity of human experience that passed through this world without leaving a single word behind.",
+  ];
 }
 
 function generateBlogPostHTML(monthName, day, eventsData, siteUrl) {
@@ -217,9 +315,12 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl) {
   const ogImg = featured?.pages?.[0]?.thumbnail?.source || `${siteUrl}/images/logo.png`;
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featWiki = featured?.pages?.[0]?.content_urls?.desktop?.page || "";
-  const commentary = featured
+  const commentaryParas = featured
     ? workerCommentary(featured.year, featured.text)
-    : "Every date in history is someone's entire world.";
+    : [
+        "Every date in history is someone's entire world.",
+        "What we record as a footnote was, for those living it, the defining moment of their lives. The past was always someone's present.",
+      ];
   const featTitle = featured
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
@@ -350,7 +451,7 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     ${featImg ? `<img src="${escapeHtml(featImg)}" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
-    <div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${escapeHtml(commentary)}</div>
+    <div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>
     <table class="table table-sm table-bordered mt-3" style="max-width:480px">
       <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
       <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>

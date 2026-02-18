@@ -134,6 +134,346 @@ async function handleImageProxy(_request, url, ctx) {
   }
 }
 
+// ─── Auto-Generated Blog Posts ───────────────────────────────────────────────
+
+const MONTH_NUM_MAP = {
+  january:1, february:2, march:3, april:4, may:5, june:6,
+  july:7, august:8, september:9, october:10, november:11, december:12,
+};
+const MONTH_DISPLAY_NAMES = [
+  "","January","February","March","April","May","June",
+  "July","August","September","October","November","December",
+];
+const MONTHS_ALL = [
+  "january","february","march","april","may","june",
+  "july","august","september","october","november","december",
+];
+const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31]; // Feb=29 to cover all possible dates
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function workerCommentary(year, text) {
+  const y = parseInt(year, 10);
+  const t = (text || "").toLowerCase();
+  const war = /war|battle|siege|invasion|conflict|defeat|victory|troops|army/.test(t);
+  const sci = /discover|invent|launch|orbit|experiment|vaccine|gene|atom|microscope|telescope/.test(t);
+  const pol = /treaty|signed|declared|constitution|independence|election|revolution/.test(t);
+  const era =
+    y < 500 ? "ancient" :
+    y < 1400 ? "medieval" :
+    y < 1700 ? "early_modern" :
+    y < 1900 ? "modern" : "contemporary";
+  if (war) {
+    if (era === "ancient") return "Conflict in the ancient world was total — no distinction between soldier and civilian.";
+    if (era === "medieval") return "Medieval warfare was as much about starvation and disease as the battlefield itself.";
+    if (era === "early_modern") return "Gunpowder reshaped the nature of war forever — this conflict reflects that transformation.";
+    if (era === "modern") return "By this era, war had become industrialized. Individual soldiers became statistics.";
+    return "Modern conflicts are fought as much in media and diplomacy as on the ground.";
+  }
+  if (sci) {
+    if (era === "ancient" || era === "medieval") return "In this era, science and philosophy were inseparable — observation met mythology.";
+    if (era === "early_modern") return "The Scientific Revolution was underway — each discovery chipped away at centuries of assumption.";
+    return "Science in this period moved so fast that today's breakthrough became tomorrow's footnote.";
+  }
+  if (pol) {
+    return y < 1800
+      ? "Political power in this era was deeply personal — empires rose and fell with individuals."
+      : "Political moments that seem minor at the time often define entire generations.";
+  }
+  if (era === "ancient") return "Events from this era survive only through fragments — every detail was preserved against the odds.";
+  if (era === "medieval") return "The medieval world was far more connected and complex than popular imagination allows.";
+  if (era === "early_modern") return "This was an age of transition — old certainties crumbling, new ones not yet formed.";
+  if (era === "modern") return "The 19th century compressed centuries of change into a matter of decades.";
+  return "History is still being written about this period. Perspective always takes time.";
+}
+
+function generateBlogPostHTML(monthName, day, eventsData, siteUrl) {
+  const mNum = MONTH_NUM_MAP[monthName] || 1;
+  const mDisplay = MONTH_DISPLAY_NAMES[mNum];
+  const canonical = `${siteUrl}/generated/${monthName}/${day}/`;
+  const events = eventsData?.events || [];
+  const births = eventsData?.births || [];
+  const deaths = eventsData?.deaths || [];
+
+  const featured = events.find(e => e.pages?.[0]?.thumbnail?.source) || events[0] || null;
+  const others = events.filter(e => e !== featured).slice(0, 8);
+  const topBirths = births.slice(0, 5);
+  const topDeaths = deaths.slice(0, 5);
+
+  const pageTitle = featured
+    ? `${mDisplay} ${day} in History: ${featured.text.split(".")[0]} | thisDay.info`
+    : `${mDisplay} ${day} in History | thisDay.info`;
+  const rawDesc = featured
+    ? `Discover what happened on ${mDisplay} ${day} throughout history. In ${featured.year}: ${featured.text.substring(0, 115)}...`
+    : `Explore historical events, births, and deaths that occurred on ${mDisplay} ${day} throughout world history.`;
+  const pageDesc = rawDesc.substring(0, 155);
+  const ogImg = featured?.pages?.[0]?.thumbnail?.source || `${siteUrl}/images/logo.png`;
+  const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
+  const featWiki = featured?.pages?.[0]?.content_urls?.desktop?.page || "";
+  const commentary = featured
+    ? workerCommentary(featured.year, featured.text)
+    : "Every date in history is someone's entire world.";
+  const featTitle = featured
+    ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
+    : escapeHtml(`Events on ${mDisplay} ${day}`);
+  const today = new Date().toISOString().split("T")[0];
+
+  const articleSchema = JSON.stringify({
+    "@context": "https://schema.org", "@type": "Article",
+    "headline": pageTitle, "description": pageDesc, "url": canonical,
+    "datePublished": today, "dateModified": today,
+    "author": { "@type": "Organization", "name": "thisDay.info", "url": siteUrl },
+    "publisher": { "@type": "Organization", "name": "thisDay.info", "url": siteUrl },
+    ...(featImg && { "image": featImg }),
+  }).replace(/<\//g, "<\\/");
+
+  const eventsSchema = events.length > 0 ? JSON.stringify({
+    "@context": "https://schema.org", "@type": "ItemList",
+    "name": `Historical Events on ${mDisplay} ${day}`, "numberOfItems": events.length,
+    "itemListElement": events.slice(0, 5).map((e, i) => ({
+      "@type": "ListItem", "position": i + 1,
+      "item": { "@type": "Event", "name": e.text.substring(0, 100), "description": e.text, "temporalCoverage": String(e.year) },
+    })),
+  }).replace(/<\//g, "<\\/") : null;
+
+  const othersHtml = others.map(e => {
+    const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
+    const th = e.pages?.[0]?.thumbnail?.source || "";
+    return `<div class="ev-row d-flex align-items-start gap-3">
+  <div class="flex-grow-1"><span class="yr">${escapeHtml(String(e.year))}</span> ${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
+  ${th ? `<img src="${escapeHtml(th)}" alt="" width="44" height="44" style="border-radius:4px;object-fit:cover;flex-shrink:0" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : ""}
+</div>`;
+  }).join("");
+
+  const birthsHtml = topBirths.map(b => {
+    const th = b.pages?.[0]?.thumbnail?.source || "";
+    const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
+    const name = escapeHtml(b.text.split(",")[0]);
+    return `<div class="person-row d-flex align-items-center gap-3">
+  ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : '<div class="p-thumb-blank"><i class="bi bi-person"></i></div>'}
+  <div><span class="yr">${escapeHtml(String(b.year))}</span> ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.text)}</a>` : escapeHtml(b.text)}</div>
+</div>`;
+  }).join("");
+
+  const deathsHtml = topDeaths.map(d => {
+    const th = d.pages?.[0]?.thumbnail?.source || "";
+    const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
+    const name = escapeHtml(d.text.split(",")[0]);
+    return `<div class="person-row d-flex align-items-center gap-3">
+  ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : '<div class="p-thumb-blank"><i class="bi bi-person"></i></div>'}
+  <div><span class="yr" style="background:#6c757d">${escapeHtml(String(d.year))}</span> ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${escapeHtml(d.text)}</a>` : escapeHtml(d.text)}</div>
+</div>`;
+  }).join("");
+
+  return `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${escapeHtml(pageTitle)}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/><meta name="robots" content="index, follow"/><meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/><meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="article"/><meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:locale" content="en_US"/><meta property="og:image" content="${escapeHtml(ogImg)}"/>
+<meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/><meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
+<meta name="author" content="thisDay.info"/>
+<script type="application/ld+json">${articleSchema}</script>
+${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` : ""}
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<style>
+:root{--pb:#3b82f6;--sb:#fff;--tc:#1e293b;--htc:#fff;--fb:#3b82f6;--ftc:#fff;--lc:#2563eb;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#6c757d}
+body.dark-theme{--pb:#020617;--sb:#1e293b;--tc:#f8fafc;--fb:#020617;--lc:#60a5fa;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#94a3b8}
+body{font-family:Inter,sans-serif;min-height:100vh;display:flex;flex-direction:column;background:var(--sb);color:var(--tc);transition:background .3s,color .3s}
+.navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
+main{flex:1;padding:20px 0}
+.footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:30px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
+h1,h2,h3,h4{color:var(--tc)}body.dark-theme h1,body.dark-theme h2,body.dark-theme h3,body.dark-theme h4{color:#f8fafc}
+a{color:var(--lc)}a:hover{text-decoration:underline}
+.form-check-input:checked{background-color:#2563eb!important;border-color:#2563eb!important}
+.form-check-input{background:#e2e8f0;border-color:#e2e8f0}body.dark-theme .form-check-input{background:#334155;border-color:#334155}
+.form-switch .form-check-input{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e")}
+.card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
+.feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
+.commentary{border-left:4px solid #3b82f6;padding:10px 14px;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--mu);margin:18px 0}
+body.dark-theme .commentary{background:rgba(59,130,246,.15)}
+.yr{background:#3b82f6;color:#fff;padding:2px 7px;border-radius:4px;font-size:.78rem;font-weight:600;margin-right:6px;white-space:nowrap}
+.ev-row{padding:11px 0;border-bottom:1px solid var(--cbr)}.ev-row:last-child{border-bottom:none}
+.person-row{padding:9px 0;border-bottom:1px solid var(--cbr)}.person-row:last-child{border-bottom:none}
+.p-thumb{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.p-thumb-blank{width:44px;height:44px;border-radius:50%;background:#e2e8f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#6c757d}
+body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
+.auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
+body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
+</style></head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">thisDay.</a>
+    <div class="form-check form-switch d-lg-none me-2">
+      <input class="form-check-input" type="checkbox" id="tsm" aria-label="Toggle dark mode"/>
+      <label class="form-check-label" for="tsm"><i class="bi bi-moon-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
+    </div>
+    <div class="collapse navbar-collapse">
+      <ul class="navbar-nav ms-auto">
+        <li class="nav-item d-flex align-items-center">
+          <div class="form-check form-switch d-none d-lg-block me-2">
+            <input class="form-check-input" type="checkbox" id="tsd" aria-label="Toggle dark mode"/>
+            <label class="form-check-label" for="tsd" style="color:#fff">Dark Mode</label>
+          </div>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="/blog/">Blog</a></li>
+      <li class="breadcrumb-item active">${escapeHtml(mDisplay)} ${day}</li>
+    </ol>
+  </nav>
+  <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} in History <span class="auto-tag">Auto</span></h1>
+  <p class="text-muted mb-4" style="font-size:.9rem">A thisDay.info historical overview &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${featured ? `
+  <div class="card-box">
+    ${featImg ? `<img src="${escapeHtml(featImg)}" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
+    <h2>${featTitle}</h2>
+    <p class="mb-3">${escapeHtml(featured.text)}</p>
+    <div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${escapeHtml(commentary)}</div>
+    <table class="table table-sm table-bordered mt-3" style="max-width:480px">
+      <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
+      <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
+      <tr><th>Events recorded</th><td>${events.length}</td></tr>
+      <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
+    </table>
+    ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right me-1"></i>Full Article on Wikipedia</a>` : ""}
+  </div>` : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  ${others.length > 0 ? `
+  <div class="card-box">
+    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
+    ${othersHtml}
+  </div>` : ""}
+  ${topBirths.length > 0 ? `
+  <div class="card-box">
+    <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
+    ${birthsHtml}
+  </div>` : ""}
+  ${topDeaths.length > 0 ? `
+  <div class="card-box">
+    <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day}</h2>
+    ${deathsHtml}
+  </div>` : ""}
+  <div class="text-center my-5 pt-3 border-top">
+    <p class="text-muted mb-3">Explore history for any date on the interactive calendar.</p>
+    <a href="/" class="btn btn-primary me-2"><i class="bi bi-calendar3 me-1"></i>Open the Calendar</a>
+    <a href="/blog/" class="btn btn-outline-primary"><i class="bi bi-journal-text me-1"></i>All Blog Posts</a>
+  </div>
+</main>
+<footer class="footer">
+  <div class="container d-flex justify-content-center my-2">
+    <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
+  </div>
+  <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
+  <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
+  <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
+  <p><a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+document.getElementById('yr').textContent=new Date().getFullYear();
+const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
+const ap=d=>document.body.classList.toggle('dark-theme',d);
+const dk=localStorage.getItem('theme')==='dark'||(window.matchMedia?.('(prefers-color-scheme:dark)').matches&&localStorage.getItem('theme')!=='light');
+ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
+if(ds)ds.addEventListener('change',()=>{ap(ds.checked);localStorage.setItem('theme',ds.checked?'dark':'light');if(ms)ms.checked=ds.checked;});
+if(ms)ms.addEventListener('change',()=>{ap(ms.checked);localStorage.setItem('theme',ms.checked?'dark':'light');if(ds)ds.checked=ms.checked;});
+</script>
+</body></html>`;
+}
+
+function serveGeneratedSitemap(siteUrl) {
+  const today = new Date().toISOString().split("T")[0];
+  let urls = "";
+  for (let m = 0; m < 12; m++) {
+    for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
+      urls += `  <url>\n    <loc>${siteUrl}/generated/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.6</priority>\n  </url>\n`;
+    }
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
+}
+
+async function handleGeneratedPost(_request, env, ctx, url) {
+  const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+  // Expect: ['generated', 'july', '20']
+  if (parts.length < 3) return new Response("Not Found", { status: 404 });
+  const monthName = parts[1].toLowerCase();
+  const day = parseInt(parts[2], 10);
+  if (!MONTH_NUM_MAP[monthName] || isNaN(day) || day < 1 || day > 31) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  // Try KV cache (7-day TTL)
+  const kvKey = `gen-post-v1-${monthName}-${day}`;
+  try {
+    if (env.EVENTS_KV) {
+      const cached = await env.EVENTS_KV.get(kvKey);
+      if (cached) {
+        return new Response(cached, {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=3600, s-maxage=604800",
+            "X-Cache": "HIT",
+          },
+        });
+      }
+    }
+  } catch (e) { console.error("KV read:", e); }
+
+  // Fetch from Wikipedia /all/ endpoint (returns events + births + deaths)
+  const mPad = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
+  const dPad = String(day).padStart(2, "0");
+  const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
+  let eventsData = { events: [], births: [], deaths: [] };
+  try {
+    const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+    if (r.ok) eventsData = await r.json();
+  } catch (e) { console.error("Wikipedia API:", e); }
+
+  const siteUrl = `${url.protocol}//${url.host}`;
+  const html = generateBlogPostHTML(monthName, day, eventsData, siteUrl);
+
+  // Queue KV write without blocking response
+  if (env.EVENTS_KV) {
+    ctx.waitUntil(
+      env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 })
+        .catch(e => console.error("KV write:", e))
+    );
+  }
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=3600, s-maxage=604800",
+      "X-Cache": "MISS",
+    },
+  });
+}
+
 // --- Main Request Handler (for user requests) ---
 async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
@@ -148,6 +488,22 @@ async function handleFetchRequest(request, env, ctx) {
   // Image proxy — must be handled before the HTML pass-through guard
   if (url.pathname === "/img") {
     return handleImageProxy(request, url, ctx);
+  }
+
+  // Auto-generated blog posts — must be before the HTML pass-through guard
+  if (url.pathname.startsWith("/generated/")) {
+    return handleGeneratedPost(request, env, ctx, url);
+  }
+
+  // Generated sitemap listing all 366 /generated/ pages
+  if (url.pathname === "/sitemap-generated.xml") {
+    const siteUrl = `${url.protocol}//${url.host}`;
+    return new Response(serveGeneratedSitemap(siteUrl), {
+      headers: {
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      },
+    });
   }
 
   // Only handle requests for the root path or /index.html
@@ -765,6 +1121,14 @@ async function handleFetchRequest(request, env, ctx) {
           `<script type="application/ld+json">${JSON.stringify(
             faqSchema,
           )}</script>`,
+          { html: true },
+        );
+
+        // --- Inject today's generated URL so the carousel can link internally ---
+        const mn = MONTHS_ALL[today.getMonth()];
+        const dd = today.getDate();
+        element.append(
+          `<script>window.__todayGeneratedUrl="/generated/${mn}/${dd}/";</script>`,
           { html: true },
         );
       },

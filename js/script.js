@@ -1399,6 +1399,98 @@ function assignCategories(item) {
   return Array.from(categoriesFound);
 }
 
+// Returns a short editorial commentary for a given event based on its era and category
+function getEventCommentary(event) {
+  const year = parseInt(event.year, 10);
+  const text = (event.description || "").toLowerCase();
+  const cats = event.categories || [];
+
+  // Births and deaths get their own commentary
+  if (event.type === "birth") {
+    if (year < 500) return "A figure from the ancient world whose ideas still echo today.";
+    if (year < 1400) return "Born in an era before mass literacy, yet their legacy endured for centuries.";
+    if (year < 1700) return "Their birth came at a time when the modern world was just taking shape.";
+    if (year < 1900) return "A product of the industrial age, shaped by revolution and rapid change.";
+    return "A life lived in the modern era — closer to us than it might feel.";
+  }
+  if (event.type === "death") {
+    if (year < 500) return "Their passing marked the end of a chapter in the ancient world.";
+    if (year < 1400) return "With their death, an era drew to a close — but their influence lingered.";
+    if (year < 1700) return "The world they left behind would soon look very different from the one they knew.";
+    return "History often turns on the loss of a single person. This was one of those moments.";
+  }
+
+  // Category-based commentary for events
+  const isWar = cats.some(c => /war|conflict|battle|military/i.test(c)) ||
+    /war|battle|siege|troops|army|invasion|conflict|defeat|victory/i.test(text);
+  const isScience = cats.some(c => /science|technology|discovery/i.test(c)) ||
+    /discover|invent|patent|experiment|launch|orbit|atom|gene|vaccine|telescope|microscope/i.test(text);
+  const isPolitics = cats.some(c => /politic|government|law/i.test(c)) ||
+    /treaty|signed|declared|constitution|parliament|election|president|king|queen|emperor|independence/i.test(text);
+  const isExploration = /explorer|voyage|expedition|columbus|magellan|circumnavigat|territory|discovered/i.test(text);
+  const isReligion = /pope|church|cathedral|crusade|reformation|religion|faith|missionary/i.test(text);
+  const isArts = cats.some(c => /art|culture|literature/i.test(c)) ||
+    /publish|painting|novel|symphony|poem|theatre|opera|film|broadcast/i.test(text);
+
+  const era = year < 500 ? "ancient" : year < 1400 ? "medieval" : year < 1700 ? "early modern" : year < 1900 ? "modern" : "contemporary";
+
+  if (isWar) {
+    const warComments = {
+      ancient: "Conflict in the ancient world was total — no distinction between soldier and civilian, victor and conquered.",
+      medieval: "Medieval warfare was as much about starvation and disease as it was about the battlefield.",
+      "early modern": "Gunpowder changed the nature of war forever — this event reflects that transformation.",
+      modern: "By this point, warfare had become industrialized, turning individual soldiers into statistics.",
+      contemporary: "Modern conflicts are fought as much in the media as on the ground — context matters enormously.",
+    };
+    return warComments[era] || "War has always reshaped the boundaries of the possible.";
+  }
+  if (isScience) {
+    const sciComments = {
+      ancient: "In the ancient world, science and philosophy were inseparable — observation met mythology.",
+      medieval: "Medieval scholars preserved and debated classical knowledge, laying groundwork they'd never see built.",
+      "early modern": "The Scientific Revolution was underway — each discovery chipped away at centuries of assumption.",
+      modern: "The 19th century turned science into an industry, accelerating change at an unprecedented rate.",
+      contemporary: "Modern science moves so fast that today's breakthrough can become tomorrow's footnote.",
+    };
+    return sciComments[era] || "Every scientific breakthrough begins with someone daring to ask a different question.";
+  }
+  if (isExploration) {
+    return year < 1600
+      ? "The Age of Exploration reshaped the world — and not always for the better for those already living in it."
+      : "Exploration is humanity's oldest instinct; the destinations just keep changing.";
+  }
+  if (isPolitics) {
+    const polComments = {
+      ancient: "Political power in the ancient world was deeply personal — empires rose and fell with individual rulers.",
+      medieval: "Feudal politics were a constant negotiation between loyalty, land, and survival.",
+      "early modern": "Nation-states were being invented in real time — the rules of governance were far from settled.",
+      modern: "The 19th century saw democracy and nationalism collide with old imperial order.",
+      contemporary: "Political events rarely happen in isolation — every decision carries the weight of what came before.",
+    };
+    return polComments[era] || "Political moments that seem small at the time often define generations.";
+  }
+  if (isReligion) {
+    return year < 1500
+      ? "In this era, religious authority and political power were nearly impossible to separate."
+      : "Religion has always been both a comfort and a flashpoint — this event is a reminder of both.";
+  }
+  if (isArts) {
+    return year < 1800
+      ? "Art in this period was largely patronage-driven — what survived reflects who had money and power."
+      : "Culture is the record a society keeps of itself. This moment left a lasting mark.";
+  }
+
+  // Generic era-based fallback
+  const generic = {
+    ancient: "Events from this era survive through fragments — every detail we have was preserved against the odds.",
+    medieval: "The medieval world was far more connected and complex than popular imagination suggests.",
+    "early modern": "This was an age of transition — old certainties crumbling, new ones not yet formed.",
+    modern: "The 19th century compressed centuries of change into decades.",
+    contemporary: "History is still being written about this period. Perspective takes time.",
+  };
+  return generic[era] || "Every date in history is someone's entire world.";
+}
+
 function renderFilteredItems(itemsToRender) {
   const eventsListDiv = document.getElementById("modal-events-list");
   if (!eventsListDiv) return;
@@ -1415,6 +1507,7 @@ function renderFilteredItems(itemsToRender) {
     } else if (event.type === "death") {
       specialEmphasis = "<strong>Death:</strong> ";
     }
+    const commentary = getEventCommentary(event);
     htmlContent += `
             <li class="mb-3 p-3 border rounded">
                 <div class="d-flex justify-content-between align-items-start">
@@ -1423,6 +1516,9 @@ function renderFilteredItems(itemsToRender) {
                         <p class="mb-1">${specialEmphasis}${
                           event.description
                         }</p>
+                        <p class="mb-2 fst-italic text-muted" style="font-size:0.82rem; border-left: 3px solid #3b82f6; padding-left: 8px;">
+                          <i class="bi bi-chat-quote me-1" style="color:#3b82f6;"></i>${commentary}
+                        </p>
                         ${
                           event.sourceUrl
                             ? `

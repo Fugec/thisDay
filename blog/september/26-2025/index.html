@@ -558,4 +558,28 @@ crossorigin="anonymous">
   });
 </script>
   </body>
+<!-- Google Ads: 60 Seconds on Site -->
+<script>
+(function() {
+  var fired = false;
+  var timer = null;
+  function fireConversion() {
+    if (fired) return;
+    fired = true;
+    gtag('event', 'conversion', {
+      'send_to': 'AW-17262488503/pnJhCPrptfsbELfXsqdA'
+    });
+  }
+  function startTimer() {
+    if (!timer) timer = setTimeout(fireConversion, 60000);
+  }
+  function stopTimer() {
+    if (timer) { clearTimeout(timer); timer = null; }
+  }
+  document.addEventListener('visibilitychange', function() {
+    document.hidden ? stopTimer() : (!fired && startTimer());
+  });
+  if (!document.hidden) startTimer();
+})();
+</script>
 </html>

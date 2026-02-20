@@ -68,6 +68,19 @@ export default {
       return serveListing(env);
     }
 
+    // JSON index used by the main blog page to dynamically render AI posts
+    if (path === "/blog/archive.json") {
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      return new Response(JSON.stringify(index), {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=300",
+        },
+      });
+    }
+
     // Individual post: /blog/[slug]  (single-segment slugs only — e.g. /blog/20-february-2026)
     // Two-segment paths like /blog/august/1-2025/ are existing static posts — pass them through.
     const postMatch = path.match(/^\/blog\/([^/]+)$/);
@@ -230,7 +243,6 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
  * hand-written posts on thisday.info.
  */
 function buildPostHTML(c, date, slug) {
-  const monthSlug = MONTH_SLUGS[date.getMonth()];
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
   const publishYear = date.getFullYear();

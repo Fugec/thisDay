@@ -1,0 +1,50 @@
+{
+  // Blog Post Worker — publishes a new blog post every other day
+  // using Cloudflare Workers AI (free, no external API key needed).
+  //
+  // Deploy:  npx wrangler deploy --config wrangler-blog.jsonc
+  // Dev:     npx wrangler dev --config wrangler-blog.jsonc
+  //
+  // Setup (one-time):
+  //   1. Create the KV namespace:
+  //        npx wrangler kv:namespace create BLOG_AI_KV --config wrangler-blog.jsonc
+  //      Paste the returned id into kv_namespaces[0].id below.
+  //
+  //   2. Deploy:
+  //        npx wrangler deploy --config wrangler-blog.jsonc
+  //
+  //   3. Test immediately (no need to wait for cron):
+  //        curl -X POST https://thisday.info/blog/publish
+
+  "name": "thisday-blog-ai-worker",
+  "compatibility_date": "2025-06-27",
+  "main": "js/blog-ai-worker.js",
+
+  // Routes — this worker handles:
+  //   /blog/archive/          → listing page
+  //   /blog/archive/[slug]/   → individual post pages
+  //   /blog/publish           → manual trigger endpoint
+  // The main SEO worker (seo-worker.js) keeps handling everything else.
+  "routes": [
+    { "pattern": "thisday.info/blog/*", "zone_name": "thisday.info" }
+  ],
+
+  // Cron trigger — runs every day at 06:00 UTC.
+  // The worker itself decides every other day based on the KV-stored last-run date.
+  "triggers": {
+    "crons": ["0 6 * * *"]
+  },
+
+  // KV namespace — stores generated posts and the index.
+  "kv_namespaces": [
+    {
+      "binding": "BLOG_AI_KV",
+      "id": "5173c34a7bd04cde9988c0e89d77bb6e"
+    }
+  ],
+
+  // Cloudflare Workers AI — free tier, no external key required.
+  "ai": {
+    "binding": "AI"
+  }
+}

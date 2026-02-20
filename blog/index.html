@@ -336,6 +336,15 @@
 
     <main class="container my-2" style="max-width: 860px;">
 
+      <!-- 2026 — dynamically loaded posts -->
+      <section class="month-section" id="posts-2026" style="display:none">
+        <h2 class="month-header">
+          <i class="bi bi-calendar3 me-2"></i>2026
+          <span class="post-count-badge" id="posts-2026-count"></span>
+        </h2>
+        <div id="posts-2026-list"></div>
+      </section>
+
       <!-- July -->
       <section class="month-section">
         <h2 class="month-header">
@@ -643,6 +652,30 @@
         });
       }
     </script>
+  <script>
+    (function () {
+      fetch("/blog/archive.json")
+        .then(function (r) { return r.json(); })
+        .then(function (posts) {
+          if (!posts || !posts.length) return;
+          var section = document.getElementById("posts-2026");
+          var list    = document.getElementById("posts-2026-list");
+          var badge   = document.getElementById("posts-2026-count");
+          badge.textContent = posts.length + (posts.length === 1 ? " post" : " posts");
+          posts.forEach(function (p) {
+            var a = document.createElement("a");
+            a.href = "/blog/" + p.slug + "/";
+            a.className = "blog-post-link";
+            a.innerHTML =
+              '<i class="bi bi-arrow-right-circle-fill post-icon"></i>' +
+              '<span class="post-title">' + p.title.replace(/</g, "&lt;") + "</span>";
+            list.appendChild(a);
+          });
+          section.style.display = "";
+        })
+        .catch(function () { /* silently ignore if endpoint unavailable */ });
+    })();
+  </script>
   </body>
 <!-- Google Ads: 60 Seconds on Site -->
 <script>

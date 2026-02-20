@@ -123,11 +123,45 @@ async function maybeGenerateBlogPost(env) {
 }
 
 /**
+ * Fetches a real image URL from the Wikipedia REST API for the given event title.
+ * Falls back to null if the request fails or no image is found.
+ */
+async function fetchWikipediaImage(eventTitle, wikiUrl) {
+  try {
+    // Prefer the article slug from the wikiUrl so we hit the right page
+    let title = eventTitle;
+    if (wikiUrl) {
+      const m = wikiUrl.match(/wikipedia\.org\/wiki\/(.+?)(?:\s|$)/);
+      if (m) title = decodeURIComponent(m[1].split("#")[0]);
+    }
+
+    const apiUrl =
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+    const res = await fetch(apiUrl, {
+      headers: { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.thumbnail?.source ?? data.originalimage?.source ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Calls the Claude API, builds the HTML page, and persists everything to KV.
  */
 async function generateAndStore(env) {
   const now = new Date();
   const content = await callWorkersAI(env.AI, now);
+
+  // Replace the hallucinated Wikimedia URL with a real Wikipedia image.
+  const realImage = await fetchWikipediaImage(content.eventTitle, content.wikiUrl);
+  if (realImage) {
+    content.imageUrl = realImage;
+    // Wikipedia thumbnails already have attribution baked into the caption field;
+    // keep whatever the model wrote for imageCaption so the source stays clear.
+  }
 
   const slug = buildSlug(now);
   const html = buildPostHTML(content, now, slug);
@@ -497,16 +531,23 @@ ${quickFactsRows}
 ${overviewParas}
           </section>
 
-          <div class="ratio ratio-16x9 my-4">
-            <iframe
-              src="https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(c.youtubeSearchQuery || c.eventTitle)}"
-              title="${esc(c.title)}"
-              frameborder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              referrerpolicy="strict-origin-when-cross-origin"
-              allowfullscreen
-              loading="lazy"
-            ></iframe>
+          <div class="my-4 p-4 rounded d-flex align-items-center gap-3"
+               style="background:#ff0000;color:#fff;text-decoration:none;">
+            <i class="bi bi-youtube" style="font-size:2.5rem;flex-shrink:0;"></i>
+            <div>
+              <div style="font-weight:700;font-size:1.05rem;margin-bottom:4px">Watch on YouTube</div>
+              <div style="font-size:0.88rem;opacity:0.9;margin-bottom:10px">
+                Find documentaries and videos about: ${esc(c.eventTitle)}
+              </div>
+              <a
+                href="https://www.youtube.com/results?search_query=${encodeURIComponent(c.youtubeSearchQuery || c.eventTitle)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                style="display:inline-block;background:#fff;color:#ff0000;font-weight:700;padding:6px 16px;border-radius:4px;text-decoration:none;font-size:0.9rem;"
+              >
+                <i class="bi bi-play-fill me-1"></i>Search Videos
+              </a>
+            </div>
           </div>
 
           <section class="mt-5">

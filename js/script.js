@@ -447,6 +447,7 @@ async function fetchBlogPostData(monthName, folder, day, year, monthIndex) {
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, "text/html");
       const title =
+        doc.querySelector("h1")?.textContent?.trim() ||
         doc
           .querySelector('meta[property="og:title"]')
           ?.getAttribute("content") ||

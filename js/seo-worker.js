@@ -669,7 +669,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   }
 
   // Try KV cache (7-day TTL)
-  const kvKey = `gen-post-v1-${monthName}-${day}`;
+  const kvKey = `gen-post-v2-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -698,8 +698,8 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   const siteUrl = `${url.protocol}//${url.host}`;
   const html = generateBlogPostHTML(monthName, day, eventsData, siteUrl);
 
-  // Queue KV write without blocking response
-  if (env.EVENTS_KV) {
+  // Only cache to KV when we have actual events (avoids caching API failure responses)
+  if (env.EVENTS_KV && (eventsData?.events?.length || 0) > 0) {
     ctx.waitUntil(
       env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 })
         .catch(e => console.error("KV write:", e))

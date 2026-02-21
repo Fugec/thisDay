@@ -248,7 +248,7 @@ async function fetchWikipediaEvents(month, day) {
 // --- NEW/MODIFIED CAROUSEL AND BLOG POST LOGIC ---
 
 // Helper function to render a single carousel item
-function renderCarouselItem(container, post, index, monthName) {
+function renderCarouselItem(container, post, index) {
   const carouselItem = document.createElement("div");
   carouselItem.className = `carousel-item${index === 0 ? " active" : ""}`;
   const imageUrl =
@@ -282,13 +282,10 @@ function renderCarouselItem(container, post, index, monthName) {
     <div class="carousel-caption">
       <h5>${truncatedTitle}</h5>
       <p>${post.excerpt || "Read this blog post about historical events."}</p>
-      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-        <a href="${post.url}" class="btn btn-primary btn-sm"
-           ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>
-           Read More
-        </a>
-        ${monthName ? `<a href="/blog/${monthName}/" class="btn btn-primary btn-sm">This Month's Posts</a>` : ""}
-      </div>
+      <a href="${post.url}" class="btn btn-primary btn-sm"
+         ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>
+         Read Full Post
+      </a>
     </div>
   `;
   container.appendChild(carouselItem);
@@ -364,16 +361,17 @@ async function fetchBlogPosts(monthName, monthIndex) {
   }
 }
 
-// Fetch ALL blog posts from the month folder (checks 2025 up to current year)
+// Fetch ALL blog posts from the month folder (starting from 2025, only before today)
 async function fetchAllBlogPostsFromFolder(monthName, monthIndex) {
   const allPosts = [];
   const currentYear = new Date().getFullYear();
+  const startYear = Math.max(2025, currentYear);
 
   const today = new Date();
   const currentMonth = today.getMonth();
   const currentDay = today.getDate();
 
-  const daysInMonth = new Date(currentYear, monthIndex + 1, 0).getDate();
+  const daysInMonth = new Date(startYear, monthIndex + 1, 0).getDate();
 
   for (let day = 1; day <= daysInMonth; day++) {
     if (monthIndex === currentMonth && day > currentDay) {
@@ -382,30 +380,25 @@ async function fetchAllBlogPostsFromFolder(monthName, monthIndex) {
     if (monthIndex > currentMonth) {
       continue;
     }
-
-    // Try each year from 2025 up to the current year
-    for (let year = 2025; year <= currentYear; year++) {
-      const folderName = `${day}-${year}`;
-      try {
-        const response = await fetch(`/blog/${monthName}/${folderName}/`, {
-          method: "HEAD",
-          cache: "no-cache",
-        });
-        if (response.ok) {
-          const postData = await fetchBlogPostData(
-            monthName,
-            folderName,
-            day,
-            year,
-            monthIndex,
-          );
-          if (postData) {
-            allPosts.push(postData);
-            break; // found a post for this day, no need to check other years
-          }
+    const folderName = `${day}-${startYear}`;
+    try {
+      const response = await fetch(`/blog/${monthName}/${folderName}/`, {
+        method: "HEAD",
+        cache: "no-cache",
+      });
+      if (response.ok) {
+        const postData = await fetchBlogPostData(
+          monthName,
+          folderName,
+          day,
+          startYear,
+          monthIndex,
+        );
+        if (postData) {
+          allPosts.push(postData);
         }
-      } catch (error) {}
-    }
+      }
+    } catch (error) {}
   }
   return allPosts.sort((a, b) => b.day - a.day);
 }
@@ -688,7 +681,7 @@ async function renderCalendar() {
   initDayCardObserver(dayCards, month);
 
   try {
-    const carouselPromise = populateCarousel(month);
+    const carouselPromise = populateCarousel(month, year);
     if (isCurrentMonth) {
       const todayCard = dayCards.find(
         (card) => parseInt(card.getAttribute("data-day"), 10) === todayDate,
@@ -2013,7 +2006,7 @@ async function fetchWikipediaEventsForCarousel() {
 }
 
 // Render a carousel item using existing img + carousel-caption CSS
-function renderFullWidthCarouselItem(container, event, index, monthName) {
+function renderFullWidthCarouselItem(container, event, index) {
   const item = document.createElement("div");
   item.className = `carousel-item${index === 0 ? " active" : ""}`;
 
@@ -2039,7 +2032,7 @@ function renderFullWidthCarouselItem(container, event, index, monthName) {
       <h5 style="font-size:20px;font-weight:700;line-height:1.2;margin-bottom:0.75rem;">${title}</h5>
       <p>${excerpt}</p>
       <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
-        ${monthName ? `<a href="/blog/${monthName}/" class="btn btn-primary btn-sm">This Month's Posts</a>` : `<a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Wikipedia ↗</a>`}
+        <a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Wikipedia ↗</a>
         ${window.__todayGeneratedUrl ? `<a href="${window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Explore Today's Events</a>` : ""}
       </div>
     </div>
@@ -2075,7 +2068,7 @@ function initializeCarousel() {
 }
 
 // Main function to populate carousel
-async function populateCarousel(month) {
+async function populateCarousel(month, year) {
   const carouselInner = document.getElementById("carouselInner");
   const carouselIndicators = document.getElementById("carouselIndicators");
 
@@ -2088,44 +2081,44 @@ async function populateCarousel(month) {
   carouselInner.innerHTML = "";
   carouselIndicators.innerHTML = "";
 
-  const monthName = monthNames[month].toLowerCase();
-
   try {
-    // Fetch blog posts for this month
-    const blogPosts = await fetchBlogPosts(monthName, month);
+    // Fetch 2 random Wikipedia events
+    const wikipediaEvents = await fetchWikipediaEventsForCarousel();
 
-    if (blogPosts && blogPosts.length > 0) {
-      blogPosts.slice(0, 5).forEach((post, index) => {
-        renderCarouselItem(carouselInner, post, index, monthName);
+    if (wikipediaEvents && wikipediaEvents.length > 0) {
+      wikipediaEvents.forEach((event, index) => {
+        renderFullWidthCarouselItem(carouselInner, event, index);
         renderIndicator(carouselIndicators, index);
       });
 
       document.getElementById("historicalCarousel").style.display = "block";
       initializeCarousel();
     } else {
-      // Fallback: Wikipedia events when no blog posts are available
-      const wikipediaEvents = await fetchWikipediaEventsForCarousel();
-
-      if (wikipediaEvents && wikipediaEvents.length > 0) {
-        wikipediaEvents.forEach((event, index) => {
-          renderFullWidthCarouselItem(carouselInner, event, index, monthName);
-          renderIndicator(carouselIndicators, index);
-        });
-
-        document.getElementById("historicalCarousel").style.display = "block";
-        initializeCarousel();
-      } else {
-        renderPlaceholder(carouselInner, month);
-        renderIndicator(carouselIndicators, 0);
-        document.getElementById("historicalCarousel").style.display = "block";
-        initializeCarousel();
-      }
+      // Show placeholder if no events found
+      carouselInner.innerHTML = `
+        <div class="carousel-item active">
+          <div class="carousel-slide" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="carousel-overlay"></div>
+            <div class="carousel-content">
+              <h3 class="carousel-title">No Events Available</h3>
+              <p class="carousel-excerpt">Unable to load historical events for today.</p>
+            </div>
+          </div>
+        </div>
+      `;
     }
   } catch (error) {
     console.error("Error populating carousel:", error);
-    renderErrorState(carouselInner);
-    renderIndicator(carouselIndicators, 0);
-    document.getElementById("historicalCarousel").style.display = "block";
-    initializeCarousel();
+    carouselInner.innerHTML = `
+      <div class="carousel-item active">
+        <div class="carousel-slide" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+          <div class="carousel-overlay"></div>
+          <div class="carousel-content">
+            <h3 class="carousel-title">Error Loading Events</h3>
+            <p class="carousel-excerpt">Something went wrong. Please try again later.</p>
+          </div>
+        </div>
+      </div>
+    `;
   }
 }

@@ -2034,7 +2034,7 @@ function renderFullWidthCarouselItem(container, event, index) {
       <p>${excerpt}</p>
       <div style="display:inline-flex;gap:8px;justify-content:center;flex-direction:row;">
         <a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Read on Wikipedia</a>
-        ${window.__todayGeneratedUrl ? `<a href="${window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Explore Today's Events</a>` : ""}
+        ${window.__todayGeneratedUrl ? `<a href="${window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Today's Events</a>` : ""}
       </div>
     </div>
   `;

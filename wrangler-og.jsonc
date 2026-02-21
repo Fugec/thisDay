@@ -19,6 +19,6 @@
   "main": "js/og-image-worker.js",
 
   "routes": [
-    { "pattern": "thisday.info/og-image", "zone_name": "thisday.info" }
+    { "pattern": "thisday.info/og-image*", "zone_name": "thisday.info" }
   ]
 }

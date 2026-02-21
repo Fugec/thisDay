@@ -1,0 +1,27 @@
+{
+  // Wikipedia Cache Warm-Up Worker — pre-fetches today's and tomorrow's
+  // Wikipedia "On This Day" API data into Cloudflare's shared zone cache
+  // at 00:01 UTC, before any real visitors arrive.
+  //
+  // The seo-worker reads from the same caches.default, so this warm-up
+  // ensures the first request of the day is always a cache HIT.
+  //
+  // Deploy:  npx wrangler deploy --config wrangler-warmup.jsonc
+  // Dev:     npx wrangler dev --config wrangler-warmup.jsonc
+  //
+  // No KV or AI bindings needed — only caches.default (always available).
+
+  "name": "thisday-warmup-worker",
+  "compatibility_date": "2025-06-27",
+  "main": "js/warmup-worker.js",
+
+  // HTTP route for manual trigger: POST https://thisday.info/warmup
+  "routes": [
+    { "pattern": "thisday.info/warmup", "zone_name": "thisday.info" }
+  ],
+
+  // Cron — runs at 00:01 UTC daily, well before the blog cron at 06:00 UTC.
+  "triggers": {
+    "crons": ["1 0 * * *"]
+  }
+}

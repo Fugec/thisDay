@@ -32,10 +32,19 @@ export default {
   },
 
   // HTTP handler — allows a manual warm-up via POST /warmup for testing.
-  async fetch(request) {
+  // Requires:  Authorization: Bearer <WARMUP_SECRET>
+  async fetch(request, env) {
     const url = new URL(request.url);
 
     if (url.pathname === "/warmup" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.WARMUP_SECRET || auth !== `Bearer ${env.WARMUP_SECRET}`) {
+        return new Response(JSON.stringify({ status: "unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
       try {
         const report = await warmUpCache();
         return new Response(JSON.stringify({ status: "ok", report }), {

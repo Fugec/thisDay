@@ -54,7 +54,12 @@ export default {
     const path = url.pathname.replace(/\/$/, "") || "/";
 
     // Manual trigger (POST /blog/publish)
+    // Requires:  Authorization: Bearer <PUBLISH_SECRET>
     if (path === "/blog/publish" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
       try {
         await generateAndStore(env);
         return jsonResponse({ status: "ok", message: "Blog post published." });
@@ -192,6 +197,16 @@ async function generateAndStore(env) {
     if (index.length > 200) index.splice(200);
     await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
   }
+
+  // Purge the cached sitemap and RSS feed so they reflect the new post immediately
+  // (both workers cache for 1 h — without this, the new post would be invisible
+  //  to crawlers until the next cache expiry).
+  const cache = caches.default;
+  await Promise.allSettled([
+    cache.delete(new Request("https://thisday.info/sitemap.xml")),
+    cache.delete(new Request("https://thisday.info/rss.xml")),
+    cache.delete(new Request("https://thisday.info/news-sitemap.xml")),
+  ]);
 
   console.log(`Blog: published post "${content.title}" → /blog/archive/${slug}/`);
 }

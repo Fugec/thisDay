@@ -1,0 +1,9 @@
+# Secrets — never commit
+.secrets
+.env
+.env.*
+*.env
+
+# Wrangler build artifacts
+.wrangler/
+node_modules/

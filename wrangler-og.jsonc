@@ -1,0 +1,24 @@
+{
+  // OG Image Worker — generates a branded SVG social-sharing card at /og-image.
+  // The seo-worker points og:image here when no Wikipedia thumbnail is available.
+  //
+  // Query params:
+  //   ?title=...   Page or event title (wrapped into ≤3 lines)
+  //   ?date=...    Formatted date shown in the badge (e.g. "February 21")
+  //
+  // Output: image/svg+xml — works on Facebook, LinkedIn, WhatsApp, Slack, Discord.
+  // For Twitter/X PNG support, add @resvg/resvg-wasm to the project.
+  //
+  // Deploy:  npx wrangler deploy --config wrangler-og.jsonc
+  // Dev:     npx wrangler dev --config wrangler-og.jsonc
+  //
+  // No KV or AI bindings needed.
+
+  "name": "thisday-og-image-worker",
+  "compatibility_date": "2025-06-27",
+  "main": "js/og-image-worker.js",
+
+  "routes": [
+    { "pattern": "thisday.info/og-image", "zone_name": "thisday.info" }
+  ]
+}

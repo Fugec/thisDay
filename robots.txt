@@ -1,5 +1,5 @@
 User-agent: *
 Allow: /
 Sitemap: https://thisday.info/sitemap.xml
-Sitemap: https://thisday.info/sitemap-generated.xml
+Feed: https://thisday.info/rss.xml
 

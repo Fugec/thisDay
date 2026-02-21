@@ -1,0 +1,21 @@
+{
+  // Canonical Redirect Worker — enforces non-www and clean URL patterns.
+  //
+  // Routes:
+  //   www.thisday.info/*       → 301 redirect to thisday.info/*
+  //   thisday.info/index.html  → 301 redirect to thisday.info/
+  //
+  // Deploy:  npx wrangler deploy --config wrangler-redirect.jsonc
+  // Dev:     npx wrangler dev --config wrangler-redirect.jsonc
+
+  "name": "thisday-redirect-worker",
+  "compatibility_date": "2025-06-27",
+  "main": "js/redirect-worker.js",
+
+  "routes": [
+    // Catches any www request — must point to the same zone.
+    { "pattern": "www.thisday.info/*",      "zone_name": "thisday.info" },
+    // Catches the bare /index.html path before the SEO worker processes it.
+    { "pattern": "thisday.info/index.html", "zone_name": "thisday.info" }
+  ]
+}

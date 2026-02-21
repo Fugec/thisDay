@@ -89,8 +89,15 @@ export default {
       if (html) return htmlResponse(html);
     }
 
-    // Pass through to origin for anything this worker doesn't own.
-    return fetch(request);
+    // Pass through to origin; intercept 404 HTML responses with a helpful page.
+    const originResponse = await fetch(request);
+    if (
+      originResponse.status === 404 &&
+      (request.headers.get("Accept") ?? "").includes("text/html")
+    ) {
+      return serve404(env);
+    }
+    return originResponse;
   },
 };
 
@@ -840,6 +847,113 @@ function todayDateString() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Smart 404 page
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a styled 404 HTML response with links to the 3 most recent posts
+ * from KV, giving visitors somewhere to go instead of a dead end.
+ */
+async function serve404(env) {
+  let recentPosts = [];
+  try {
+    const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+    recentPosts = indexRaw ? JSON.parse(indexRaw).slice(0, 3) : [];
+  } catch {
+    // Suggestions are optional — don't let a KV failure block the 404 page.
+  }
+
+  const suggestions = recentPosts.length > 0
+    ? `<h5 class="mt-5 mb-3 fw-semibold">Recent Articles</h5>
+        <div class="list-group">
+          ${recentPosts.map((p) => `
+          <a href="/blog/${esc(p.slug)}/" class="list-group-item list-group-item-action py-3">
+            <div class="fw-semibold">${esc(p.title)}</div>
+            <div class="small text-muted mt-1">${esc(p.description)}</div>
+          </a>`).join("")}
+        </div>`
+    : "";
+
+  const year = new Date().getFullYear();
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Page Not Found — thisDay.</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" href="/images/favicon.ico" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <style>
+    body { font-family: Inter, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+    .navbar { background-color: #3b82f6 !important; position: sticky; top: 0; z-index: 1030; }
+    .navbar-brand, .navbar-nav .nav-link { color: #fff !important; font-weight: bold !important; }
+    main { flex: 1; }
+    .footer { background-color: #3b82f6; color: #fff; text-align: center; padding: 20px; margin-top: 30px; }
+    .footer a { color: #fff; text-decoration: underline; }
+    .hero-code { font-size: 6rem; font-weight: 700; color: #3b82f6; line-height: 1; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">thisDay.</a>
+    <ul class="navbar-nav ms-auto">
+      <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
+      <li class="nav-item"><a class="nav-link" href="/blog/">Blog</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-7 text-center">
+      <div class="hero-code">404</div>
+      <h1 class="h3 mt-2 mb-3">Page Not Found</h1>
+      <p class="text-muted mb-4">
+        This page doesn&rsquo;t exist or may have moved.<br />
+        Try the <a href="/">homepage</a> to explore today&rsquo;s events, or browse the <a href="/blog/">blog</a>.
+      </p>
+      <a href="/" class="btn btn-primary px-4 me-2">
+        <i class="bi bi-house-door me-1"></i>Home
+      </a>
+      <a href="/blog/" class="btn btn-outline-secondary px-4">
+        <i class="bi bi-journal-text me-1"></i>Blog
+      </a>
+      ${suggestions}
+    </div>
+  </div>
+</main>
+
+<footer class="footer">
+  <p class="mb-0">
+    &copy; ${year} <a href="/">thisDay.info</a> &middot;
+    <a href="/privacy-policy/">Privacy</a> &middot;
+    <a href="/contact/">Contact</a>
+  </p>
+</footer>
+</body>
+</html>`;
+
+  return new Response(html, {
+    status: 404,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Robots-Tag": "noindex",
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function buildSlug(date) {
   return `${date.getDate()}-${MONTH_SLUGS[date.getMonth()]}-${date.getFullYear()}`;

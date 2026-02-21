@@ -929,6 +929,12 @@ async function handleFetchRequest(request, env, ctx) {
     dynamicKeywords = `${dynamicKeywords}, ${eventKeywords}`;
   }
 
+  // When no Wikipedia thumbnail was found, fall back to the dynamic OG image
+  // worker which generates a branded SVG card with the date and event title.
+  if (ogImageUrl === "https://thisday.info/images/logo.png") {
+    ogImageUrl = `/og-image?title=${encodeURIComponent(dynamicTitle)}&date=${encodeURIComponent(formattedDate)}`;
+  }
+
   // Fetch the original index.html from the origin server
   const originalResponse = await fetch(url.origin, request);
   let contentType = originalResponse.headers.get("content-type") || "";
@@ -1376,6 +1382,54 @@ async function handleFetchRequest(request, env, ctx) {
     });
   }
 
+  // --- Resource Hints -------------------------------------------------------
+  // Prepend preconnect / dns-prefetch tags to <head> so the browser opens
+  // TCP/TLS connections to critical external domains as early as possible,
+  // before the parser reaches those resources further down the page.
+  rewriter.on("head", {
+    element(element) {
+      element.prepend(
+        '<link rel="preconnect" href="https://fonts.googleapis.com">\n' +
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n' +
+        '<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>\n' +
+        '<link rel="dns-prefetch" href="https://api.wikimedia.org">\n' +
+        '<link rel="dns-prefetch" href="https://upload.wikimedia.org">\n' +
+        '<link rel="dns-prefetch" href="https://www.googletagmanager.com">\n' +
+        '<link rel="dns-prefetch" href="https://pagead2.googlesyndication.com">',
+        { html: true },
+      );
+    },
+  });
+
+  // --- SSR Pre-render -------------------------------------------------------
+  // Injects today's top 5 historical events as real HTML into #calendarGrid,
+  // replacing the loading spinner. Crawlers that don't execute JavaScript
+  // (or render slowly) can index meaningful text content instead of a spinner.
+  //
+  // For real users: script.js does `calendarGrid.innerHTML = ""` on line 636
+  // when it renders the interactive calendar, cleanly replacing this content.
+  if (eventsData && eventsData.events && eventsData.events.length > 0) {
+    const ssrItems = eventsData.events
+      .slice(0, 5)
+      .map(
+        (e) =>
+          `<li class="mb-2"><b>${escapeHtml(String(e.year))}:</b> ${escapeHtml(e.text)}</li>`,
+      )
+      .join("");
+
+    rewriter.on("#calendarGrid", {
+      element(element) {
+        element.setInnerContent(
+          `<section class="p-4" aria-label="Today's events in history">\n` +
+          `<h2 class="h5 mb-3">On This Day, ${escapeHtml(formattedDate)}</h2>\n` +
+          `<ul class="list-unstyled mb-0">${ssrItems}</ul>\n` +
+          `</section>`,
+          { html: true },
+        );
+      },
+    });
+  }
+
   // Transform the response
   const transformedResponse = rewriter.transform(originalResponse);
 
@@ -1444,6 +1498,18 @@ async function handleFetchRequest(request, env, ctx) {
 
   // Vary - tell proxies/CDNs this response varies by encoding, ensuring compressed variants are cached separately
   newResponse.headers.set("Vary", "Accept-Encoding");
+
+  // HTTP Link header — browsers and CDNs act on preconnect hints in HTTP
+  // headers before they even start parsing HTML, giving an extra head-start.
+  newResponse.headers.set(
+    "Link",
+    [
+      '<https://fonts.googleapis.com>; rel=preconnect',
+      '<https://fonts.gstatic.com>; rel=preconnect; crossorigin',
+      '<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin',
+      '<https://api.wikimedia.org>; rel=dns-prefetch',
+    ].join(", "),
+  );
 
   return newResponse;
 }

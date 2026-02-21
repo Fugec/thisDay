@@ -1,0 +1,27 @@
+{
+  // Dynamic Sitemap Worker — serves /sitemap.xml with AI blog posts from KV
+  // merged with all static pages. Cached at the edge for 1 hour.
+  //
+  // Deploy:  npx wrangler deploy --config wrangler-sitemap.jsonc
+  // Dev:     npx wrangler dev --config wrangler-sitemap.jsonc
+  //
+  // No one-time setup needed — reuses the existing BLOG_AI_KV namespace
+  // that was already created for the blog worker.
+
+  "name": "thisday-sitemap-worker",
+  "compatibility_date": "2025-06-27",
+  "main": "js/sitemap-worker.js",
+
+  // Intercepts /sitemap.xml before Cloudflare Pages serves the static file.
+  "routes": [
+    { "pattern": "thisday.info/sitemap.xml", "zone_name": "thisday.info" }
+  ],
+
+  // Same KV namespace as the blog worker — read-only access to the post index.
+  "kv_namespaces": [
+    {
+      "binding": "BLOG_AI_KV",
+      "id": "5173c34a7bd04cde9988c0e89d77bb6e"
+    }
+  ]
+}

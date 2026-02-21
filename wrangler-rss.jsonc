@@ -1,0 +1,27 @@
+{
+  // RSS Feed Worker — serves a valid RSS 2.0 feed at /rss.xml, built live
+  // from the AI blog post index stored in BLOG_AI_KV. Cached at the edge for
+  // 1 hour. /feed.xml redirects to /rss.xml (301).
+  //
+  // Deploy:  npx wrangler deploy --config wrangler-rss.jsonc
+  // Dev:     npx wrangler dev --config wrangler-rss.jsonc
+  //
+  // No one-time setup needed — reuses the existing BLOG_AI_KV namespace.
+
+  "name": "thisday-rss-worker",
+  "compatibility_date": "2025-06-27",
+  "main": "js/rss-worker.js",
+
+  "routes": [
+    { "pattern": "thisday.info/rss.xml",  "zone_name": "thisday.info" },
+    { "pattern": "thisday.info/feed.xml", "zone_name": "thisday.info" }
+  ],
+
+  // Same KV namespace as the blog worker — read-only access to the post index.
+  "kv_namespaces": [
+    {
+      "binding": "BLOG_AI_KV",
+      "id": "5173c34a7bd04cde9988c0e89d77bb6e"
+    }
+  ]
+}

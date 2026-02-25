@@ -20,6 +20,8 @@
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 const WIKIPEDIA_BASE =
   "https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events";
+const WIKIPEDIA_ALL_BASE =
+  "https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all";
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -73,12 +75,15 @@ async function warmUpCache() {
   const tomorrow = new Date(today.getTime() + 86_400_000);
 
   const results = await Promise.allSettled([
-    prefetchDate(today),
-    prefetchDate(tomorrow),
+    prefetchDate(today, WIKIPEDIA_BASE),
+    prefetchDate(tomorrow, WIKIPEDIA_BASE),
+    prefetchDate(today, WIKIPEDIA_ALL_BASE),
+    prefetchDate(tomorrow, WIKIPEDIA_ALL_BASE),
   ]);
 
+  const labels = ["today/events", "tomorrow/events", "today/all", "tomorrow/all"];
   const report = results.map((r, i) => ({
-    date: i === 0 ? "today" : "tomorrow",
+    date: labels[i],
     status: r.status,
     ...(r.status === "rejected" ? { error: String(r.reason) } : {}),
   }));
@@ -97,10 +102,10 @@ async function warmUpCache() {
  * Fetches a single date's Wikipedia data and stores it in caches.default
  * using the exact same URL key that seo-worker.js uses for its cache lookups.
  */
-async function prefetchDate(date) {
+async function prefetchDate(date, base = WIKIPEDIA_BASE) {
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
-  const apiUrl = `${WIKIPEDIA_BASE}/${month}/${day}`;
+  const apiUrl = `${base}/${month}/${day}`;
 
   const cache = caches.default;
 

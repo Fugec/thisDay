@@ -221,12 +221,18 @@ async function callWorkersAI(ai, date) {
 
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.
 
-Write a blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this date.
+Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this date.
+
+The article must be thorough and long — at least 800 words of body content — with multiple sections including eyewitness accounts, aftermath, and a personal editorial analysis of what went right and wrong about the event or the response to it.
+
+Writing style rules:
+- Do not use dashes ("-" or "—") inside sentences. Use commas, periods, or rewrite the sentence instead.
+- Write in a natural, human tone. Avoid bullet-point thinking inside paragraphs.
 
 Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation — just the JSON.
 
 {
-  "title": "Event Title - Month Day, Year",
+  "title": "Event Title: Month Day, Year",
   "eventTitle": "Short event name",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
@@ -243,6 +249,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "jsonLdDescription": "Schema.org description one or two sentences",
   "jsonLdUrl": "https://en.wikipedia.org/wiki/Article",
   "organizerName": "Key figure or organization",
+  "readingTimeMinutes": 8,
   "quickFacts": [
     { "label": "Event", "value": "Full event name" },
     { "label": "Date", "value": "Month Day, Year" },
@@ -251,15 +258,46 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     { "label": "Significance", "value": "Why it matters" },
     { "label": "Legacy", "value": "Long-term impact" }
   ],
+  "didYouKnowFacts": [
+    "Surprising or lesser-known fact about the event, 1 to 2 sentences.",
+    "Another interesting detail readers might not expect, 1 to 2 sentences.",
+    "A third fact that adds color or context to the main story, 1 to 2 sentences."
+  ],
   "overviewParagraphs": [
-    "First paragraph with context and background, 3 to 4 sentences.",
-    "Second paragraph about main events and key actors, 3 to 4 sentences.",
-    "Third paragraph about consequences and reactions, 3 to 4 sentences."
+    "First paragraph: context and background leading up to the event, 4 to 5 sentences.",
+    "Second paragraph: what happened — the main events, key actors, turning points, 4 to 5 sentences.",
+    "Third paragraph: immediate consequences and how people reacted in the moment, 4 to 5 sentences.",
+    "Fourth paragraph: broader context — how this fits into the larger history of the period, 3 to 4 sentences."
+  ],
+  "eyewitnessOrChronicle": [
+    "First paragraph about contemporary accounts, documents, or eyewitness descriptions of the event, 4 to 5 sentences. Include the name of the source if known.",
+    "Second paragraph with a paraphrased quote or summary of another account, or elaboration on what survivors or observers reported, 3 to 4 sentences.",
+    "Optional third paragraph addressing the reliability of sources — what historians accept, what is disputed, and why, 3 to 4 sentences."
+  ],
+  "eyewitnessQuote": "A short paraphrased or real quote from a contemporary source about the event, under 200 characters.",
+  "eyewitnessQuoteSource": "Name of the source, e.g. 'John Smith, Diary, 1776'",
+  "aftermathParagraphs": [
+    "First paragraph about immediate aftermath — what changed physically, politically, or socially in the weeks and months after the event, 4 to 5 sentences.",
+    "Second paragraph about medium-term consequences — reforms, rebuilding, institutional changes, reactions from other nations or groups, 4 to 5 sentences.",
+    "Third paragraph about long-term legacy — how historians view it today, what monuments or traditions commemorate it, and what was ultimately forgotten or ignored, 3 to 4 sentences."
   ],
   "conclusionParagraphs": [
-    "First conclusion paragraph about long-term legacy, 3 to 4 sentences.",
-    "Second conclusion paragraph about relevance today, 2 to 3 sentences."
+    "First conclusion paragraph summarizing the event's place in history, 3 to 4 sentences.",
+    "Second conclusion paragraph about its relevance to the modern world, 2 to 3 sentences.",
+    "Third conclusion paragraph with a thought-provoking closing observation, 2 to 3 sentences."
   ],
+  "analysisGood": [
+    { "title": "Short label for what went right", "detail": "2 to 3 sentences explaining this positive aspect, who deserves credit, and why it mattered." },
+    { "title": "Another positive aspect", "detail": "2 to 3 sentences of explanation." },
+    { "title": "A third positive aspect", "detail": "2 to 3 sentences of explanation." }
+  ],
+  "analysisBad": [
+    { "title": "Short label for what went wrong", "detail": "2 to 3 sentences explaining this failure, who is responsible, and what the consequences were." },
+    { "title": "Another failure or missed opportunity", "detail": "2 to 3 sentences of explanation." },
+    { "title": "A third thing that went wrong", "detail": "2 to 3 sentences of explanation." },
+    { "title": "Optional fourth point about institutional or systemic failure", "detail": "2 to 3 sentences of explanation." }
+  ],
+  "editorialNote": "A 3 to 4 sentence personal editorial reflection from the thisDay. team — a frank, opinionated observation about what this event reveals about human nature, institutions, or history in general. Write in first-person plural (we think, what strikes us).",
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
   "youtubeSearchQuery": "specific event name year history documentary"
 }`;
@@ -272,7 +310,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
       },
       { role: "user", content: prompt },
     ],
-    max_tokens: 2048,
+    max_tokens: 4096,
   });
 
   const raw = (result.response ?? "").trim();
@@ -309,13 +347,48 @@ function buildPostHTML(c, date, slug) {
     .map((f) => `              <tr><th scope="row">${esc(f.label)}</th><td>${esc(f.value)}</td></tr>`)
     .join("\n");
 
+  const didYouKnowItems = (c.didYouKnowFacts || [])
+    .map((f) => `              <li>${esc(f)}</li>`)
+    .join("\n");
+
   const overviewParas = (c.overviewParagraphs || [])
+    .map((p) => `            <p>${esc(p)}</p>`)
+    .join("\n");
+
+  const eyewitnessParas = (c.eyewitnessOrChronicle || [])
+    .map((p) => `            <p>${esc(p)}</p>`)
+    .join("\n");
+
+  const eyewitnessQuoteBlock = (c.eyewitnessQuote)
+    ? `          <blockquote class="historical-quote mt-3">
+            <p>"${esc(c.eyewitnessQuote)}"</p>
+            <footer class="article-meta">${esc(c.eyewitnessQuoteSource || "Contemporary source")}</footer>
+          </blockquote>`
+    : "";
+
+  const aftermathParas = (c.aftermathParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
 
   const conclusionParas = (c.conclusionParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
+
+  const analysisGoodItems = (c.analysisGood || [])
+    .map((item) => `                    <li class="mb-2"><strong>${esc(item.title)}:</strong> ${esc(item.detail)}</li>`)
+    .join("\n");
+
+  const analysisBadItems = (c.analysisBad || [])
+    .map((item) => `                    <li class="mb-2"><strong>${esc(item.title)}:</strong> ${esc(item.detail)}</li>`)
+    .join("\n");
+
+  const editorialNote = c.editorialNote
+    ? `          <p class="mt-4 fst-italic" style="font-size: 0.93rem; opacity: 0.85; border-left: 3px solid #3b82f6; padding-left: 1rem;">
+            ${esc(c.editorialNote)}
+          </p>`
+    : "";
+
+  const readingTime = c.readingTimeMinutes ? `&nbsp;|&nbsp;${esc(String(c.readingTimeMinutes))} min read` : "";
 
   const jsonLd = JSON.stringify(
     {
@@ -460,7 +533,23 @@ ${jsonLd}
         font-weight: bold !important;
       }
       main { flex: 1; margin-top: 20px; }
-      .text-muted { color: #fff !important; }
+      .footer .text-muted { color: rgba(255,255,255,0.85) !important; }
+      .article-meta { color: #6c757d; font-size: 0.875rem; }
+      body.dark-theme .article-meta { color: #94a3b8; }
+      .breadcrumb { background: transparent; padding: 0; margin-bottom: 1rem; }
+      body.dark-theme .breadcrumb-item a { color: #60a5fa; }
+      body.dark-theme .breadcrumb-item.active { color: #94a3b8; }
+      body.dark-theme .breadcrumb-item + .breadcrumb-item::before { color: #64748b; }
+      .did-you-know { background: rgba(59,130,246,0.08); border-left: 4px solid #3b82f6; border-radius: 0 0.5rem 0.5rem 0; }
+      body.dark-theme .did-you-know { background: rgba(59,130,246,0.15); }
+      .analysis-good { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); }
+      body.dark-theme .analysis-good { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25); }
+      .analysis-bad { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); }
+      body.dark-theme .analysis-bad { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); }
+      .related-card { border: 1px solid var(--card-border); background: var(--card-bg); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+      .related-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-decoration: none; }
+      blockquote.historical-quote { border-left: 3px solid #3b82f6; padding-left: 1rem; margin-left: 0.5rem; font-style: italic; }
+      body.dark-theme blockquote.historical-quote footer { color: #94a3b8; }
       .border {
         border: 1px solid var(--card-border);
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -519,12 +608,25 @@ ${jsonLd}
   <main class="container my-5">
     <div class="row justify-content-center">
       <div class="col-lg-10 col-xl-8">
+        <!-- Breadcrumb -->
+        <nav aria-label="breadcrumb" class="mb-3">
+          <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/blog/">Blog</a></li>
+            <li class="breadcrumb-item active" aria-current="page">${esc(c.eventTitle)}</li>
+          </ol>
+        </nav>
+
         <article class="p-4 rounded border shadow-sm" style="background-color: var(--card-bg); color: var(--text-color)">
 
           <header class="mb-4 text-center">
             <h1 class="mb-2 fw-bold">${esc(c.title)}</h1>
-            <p class="text-muted">
-              <small>Published: ${esc(publishedStr)} | Event Date: ${esc(c.historicalDate)}</small>
+            <p class="article-meta mb-0">
+              <small>
+                Published: ${esc(publishedStr)} &nbsp;|&nbsp;
+                Event Date: ${esc(c.historicalDate)} &nbsp;|&nbsp;
+                thisDay. Editorial Team${readingTime}
+              </small>
             </p>
           </header>
 
@@ -536,11 +638,12 @@ ${jsonLd}
               style="max-height: 400px; object-fit: cover; width: 100%"
               loading="lazy"
             />
-            <figcaption class="text-muted mt-2">
+            <figcaption class="article-meta mt-2">
               <small>${esc(c.imageCaption || "Image: Wikimedia Commons")}</small>
             </figcaption>
           </figure>
 
+          <!-- Quick Facts -->
           <h3 class="mt-4">Quick Facts</h3>
           <table class="table table-bordered">
             <tbody>
@@ -548,45 +651,88 @@ ${quickFactsRows}
             </tbody>
           </table>
 
+          <!-- Did You Know -->
+          ${didYouKnowItems ? `<div class="did-you-know p-3 rounded mb-4">
+            <strong>Did You Know?</strong>
+            <ul class="mb-0 mt-2">
+${didYouKnowItems}
+            </ul>
+          </div>` : ""}
+
+          <!-- Overview -->
           <section class="mt-4">
             <h3>Overview</h3>
 ${overviewParas}
           </section>
 
-          <div class="my-4 p-4 rounded d-flex align-items-center gap-3"
-               style="background:#ff0000;color:#fff;text-decoration:none;">
-            <i class="bi bi-youtube" style="font-size:2.5rem;flex-shrink:0;"></i>
-            <div>
-              <div style="font-weight:700;font-size:1.05rem;margin-bottom:4px">Watch on YouTube</div>
-              <div style="font-size:0.88rem;opacity:0.9;margin-bottom:10px">
-                Find documentaries and videos about: ${esc(c.eventTitle)}
-              </div>
-              <a
-                href="https://www.youtube.com/results?search_query=${encodeURIComponent(c.youtubeSearchQuery || c.eventTitle)}"
-                target="_blank"
-                rel="noopener noreferrer"
-                style="display:inline-block;background:#fff;color:#ff0000;font-weight:700;padding:6px 16px;border-radius:4px;text-decoration:none;font-size:0.9rem;"
-              >
-                <i class="bi bi-play-fill me-1"></i>Search Videos
-              </a>
+          <!-- Eyewitness / Chronicle Accounts -->
+          ${eyewitnessParas ? `<section class="mt-5">
+            <h3>Eyewitness &amp; Chronicle Accounts</h3>
+${eyewitnessParas}
+${eyewitnessQuoteBlock}
+          </section>` : ""}
+
+          <!-- YouTube -->
+          <div class="my-4 p-4 rounded" style="background:#ff0000;color:#fff;">
+            <div style="font-weight:700;font-size:1.05rem;margin-bottom:4px">Watch on YouTube</div>
+            <div style="font-size:0.88rem;opacity:0.9;margin-bottom:10px">
+              Find documentaries and videos about: ${esc(c.eventTitle)}
             </div>
+            <a
+              href="https://www.youtube.com/results?search_query=${encodeURIComponent(c.youtubeSearchQuery || c.eventTitle)}"
+              target="_blank"
+              rel="noopener noreferrer"
+              style="display:inline-block;background:#fff;color:#ff0000;font-weight:700;padding:6px 16px;border-radius:4px;text-decoration:none;font-size:0.9rem;"
+            >Search Videos</a>
           </div>
 
+          <!-- Aftermath -->
+          ${aftermathParas ? `<section class="mt-5">
+            <h3>Aftermath &amp; What Changed</h3>
+${aftermathParas}
+          </section>` : ""}
+
+          <!-- Conclusion -->
           <section class="mt-5">
             <h3>Conclusion</h3>
 ${conclusionParas}
           </section>
 
+          <!-- Personal Analysis -->
+          ${(analysisGoodItems || analysisBadItems) ? `<section class="mt-5">
+            <h3>Our Take: What Went Right &amp; What Went Wrong</h3>
+            <div class="row g-3 mt-1">
+              <div class="col-md-6">
+                <div class="analysis-good p-3 rounded h-100">
+                  <h5 style="color:#16a34a">What Went Right</h5>
+                  <ul class="mb-0">
+${analysisGoodItems}
+                  </ul>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="analysis-bad p-3 rounded h-100">
+                  <h5 style="color:#dc2626">What Went Wrong</h5>
+                  <ul class="mb-0">
+${analysisBadItems}
+                  </ul>
+                </div>
+              </div>
+            </div>
+            ${editorialNote}
+          </section>` : ""}
+
+          <!-- Wikipedia source -->
           <div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);">
-            <small class="text-muted">
-              <i class="bi bi-info-circle me-1"></i>
+            <small class="article-meta">
               Want to learn more? Read the full article on
               <a href="${esc(c.wikiUrl || c.jsonLdUrl)}" target="_blank" rel="noopener noreferrer">Wikipedia</a>.
+              Historical data sourced under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.
             </small>
           </div>
 
           <footer class="text-center mt-5 pt-3 border-top">
-            <small class="text-muted">
+            <small class="article-meta">
               Part of the <strong>thisDay.</strong> historical blog archive &mdash;
               <a href="/blog/archive/">Browse more posts</a> &bull;
               <a href="/blog/">All posts</a>

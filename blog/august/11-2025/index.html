@@ -222,8 +222,9 @@
         font-weight: bold !important;
       }
 
-      .text-muted {
-        color: #fff !important;
+      /* Fix: .text-muted should only be white inside the blue footer, not the article body */
+      .footer .text-muted {
+        color: rgba(255, 255, 255, 0.85) !important;
       }
      
       .theme-switch-mobile label i {
@@ -311,6 +312,87 @@
       body.dark-theme .text-primary {
         color: #60a5fa !important;
       }
+
+      /* Article-specific styles */
+      .article-meta {
+        color: #6c757d;
+        font-size: 0.875rem;
+      }
+
+      body.dark-theme .article-meta {
+        color: #94a3b8;
+      }
+
+      .breadcrumb {
+        background: transparent;
+        padding: 0;
+        margin-bottom: 1rem;
+      }
+
+      body.dark-theme .breadcrumb-item a {
+        color: #60a5fa;
+      }
+
+      body.dark-theme .breadcrumb-item.active {
+        color: #94a3b8;
+      }
+
+      body.dark-theme .breadcrumb-item + .breadcrumb-item::before {
+        color: #64748b;
+      }
+
+      .did-you-know {
+        background: rgba(59, 130, 246, 0.08);
+        border-left: 4px solid #3b82f6;
+        border-radius: 0 0.5rem 0.5rem 0;
+      }
+
+      body.dark-theme .did-you-know {
+        background: rgba(59, 130, 246, 0.15);
+      }
+
+      .analysis-good {
+        background: rgba(34, 197, 94, 0.08);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+      }
+
+      body.dark-theme .analysis-good {
+        background: rgba(34, 197, 94, 0.1);
+        border-color: rgba(34, 197, 94, 0.25);
+      }
+
+      .analysis-bad {
+        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
+
+      body.dark-theme .analysis-bad {
+        background: rgba(239, 68, 68, 0.1);
+        border-color: rgba(239, 68, 68, 0.25);
+      }
+
+      .related-card {
+        border: 1px solid var(--card-border);
+        background: var(--card-bg);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .related-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        text-decoration: none;
+      }
+
+      blockquote.historical-quote {
+        border-left: 3px solid #3b82f6;
+        padding-left: 1rem;
+        margin-left: 0.5rem;
+        font-style: italic;
+      }
+
+      body.dark-theme blockquote.historical-quote footer {
+        color: #94a3b8;
+      }
     </style>
   </head>
   <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -356,8 +438,14 @@
       <div class="col-lg-10 col-xl-8">
         <article class="p-4 rounded border shadow-sm" style="background-color: var(--card-bg); color: var(--text-color)">
           <header class="mb-4 text-center">
-            <h1 class="mb-2 fw-bold">Battle of Konzer Brücke – August 11, 1675</h1>
-            <p class="text-muted"><small>Published: August 11, 2025 | Event Date: August 11, 1675</small></p>
+            <h1 class="mb-2 fw-bold">Battle of Konzer Brücke: August 11, 1675</h1>
+            <p class="article-meta mb-0">
+              <small>
+                Published: August 11, 2025 &nbsp;|&nbsp; Event Date: August 11, 1675 &nbsp;|&nbsp;
+                thisDay. Editorial Team &nbsp;|&nbsp;
+                6 min read
+              </small>
+            </p>
           </header>
   
           <figure class="text-center mb-4">
@@ -411,7 +499,7 @@
           </section>
   
           <footer class="text-center mt-5 pt-3 border-top">
-            <small class="text-muted">Part of the <strong>thisDay.</strong> historical blog archive</small>
+            <small class="article-meta">Part of the <strong>thisDay.</strong> historical blog archive</small>
           </footer>
         </article>
       </div>

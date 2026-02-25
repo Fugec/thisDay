@@ -731,6 +731,40 @@ async function handleFetchRequest(request, env, ctx) {
     return handleImageProxy(request, url, ctx);
   }
 
+  // Wikipedia events proxy — avoids CORS issues from direct browser requests
+  const eventsProxyMatch = url.pathname.match(/^\/api\/events\/(\d{2})\/(\d{2})$/);
+  if (eventsProxyMatch) {
+    const mm = eventsProxyMatch[1];
+    const dd = eventsProxyMatch[2];
+    const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mm}/${dd}`;
+    const corsHeaders = {
+      "Content-Type": "application/json; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=3600, s-maxage=86400",
+    };
+
+    const workerCache = caches.default;
+    const cacheKey = new Request(apiUrl);
+    const cached = await workerCache.match(cacheKey);
+    if (cached) {
+      const body = await cached.text();
+      return new Response(body, { headers: corsHeaders });
+    }
+
+    try {
+      const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+      if (!r.ok) throw new Error(r.statusText);
+      const body = await r.text();
+      ctx.waitUntil(workerCache.put(cacheKey, new Response(body, {
+        headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" },
+      })));
+      return new Response(body, { headers: corsHeaders });
+    } catch (e) {
+      console.error("Events proxy error:", e);
+      return new Response(JSON.stringify({ events: [], births: [], deaths: [] }), { headers: corsHeaders });
+    }
+  }
+
   // Auto-generated blog posts — must be before the HTML pass-through guard
   if (url.pathname.startsWith("/generated/")) {
     return handleGeneratedPost(request, env, ctx, url);
@@ -1024,13 +1058,9 @@ async function handleFetchRequest(request, env, ctx) {
 
   // Inject preloaded data for the current day into the HTML
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
-    const initialEventsForClient = eventsData.events.slice(0, 20); // Limit data
-    const initialBirthsForClient = eventsData.births
-      ? eventsData.births.slice(0, 10)
-      : [];
-    const initialDeathsForClient = eventsData.deaths
-      ? eventsData.deaths.slice(0, 10)
-      : [];
+    const initialEventsForClient = eventsData.events;
+    const initialBirthsForClient = eventsData.births || [];
+    const initialDeathsForClient = eventsData.deaths || [];
 
     const preloadedData = {
       events: initialEventsForClient,

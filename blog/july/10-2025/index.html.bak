@@ -4,63 +4,50 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="X-UA-Compatible" content="ie=edge" />
-    <title>England Wins the World Cup – July 30, 1966 | thisDay.</title>
-    <link rel="canonical" href="https://thisday.info/blog/july/30-2025/" />
+    <title>Great Fire of London 1212 – Southwark in Flames | thisDay.</title>
+    <link rel="canonical" href="https://thisday.info/blog/july/10-2025/" />
     <meta name="robots" content="index, follow" />
-    <meta name="description" content="On July 30, 1966, England defeated West Germany 4–2 in extra time at Wembley Stadium to win their first and only FIFA World Cup title." />
-    <meta name="keywords" content="England World Cup 1966, Geoff Hurst, Wembley Stadium, West Germany, World Cup Final, 1966 football, July 30 1966" />
-    
+    <meta name="description" content="Discover the Great Fire of London in 1212, one of the city's deadliest disasters, which devastated Southwark and engulfed London Bridge." />
+    <meta name="keywords" content="Great Fire of London, 1212, Southwark fire, London Bridge fire, medieval disasters, London history, St Mary Overie, fire of 1212" />
+
     <!-- Open Graph -->
-    <meta property="og:title" content="England Wins the World Cup – July 30, 1966" />
-    <meta property="og:description" content="England defeated West Germany in the 1966 FIFA World Cup Final at Wembley Stadium. Read about the iconic match and Geoff Hurst's legendary hat-trick." />
+    <meta property="og:title" content="Great Fire of London 1212 – Southwark in Flames" />
+    <meta property="og:description" content="Learn about the devastating fire of July 10, 1212, which ravaged Southwark and trapped thousands on London Bridge." />
     <meta property="og:type" content="article" />
-    <meta property="og:url" content="https://thisday.info/blog/july/30-2025/" />
-    <meta property="og:image" content="https://www.sportphotogallery.com/content/images/cmsfiles/product/24093/24349-list.jpg" />
-    
+    <meta property="og:url" content="https://thisday.info/blog/july/10-2025/" />
+    <meta property="og:image" content="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Great_Fire_London.jpg/500px-Great_Fire_London.jpg" />
+
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="England Wins the World Cup – July 30, 1966" />
-    <meta name="twitter:description" content="England defeated West Germany in the 1966 FIFA World Cup Final at Wembley Stadium. Read about the iconic match and Geoff Hurst's legendary hat-trick." />
-    <meta name="twitter:image" content="https://www.sportphotogallery.com/content/images/cmsfiles/product/24093/24349-list.jpg" />
-    
-    <!-- JSON-LD Schema -->
+    <meta name="twitter:title" content="Great Fire of London 1212 – Southwark in Flames" />
+    <meta name="twitter:description" content="Discover the 1212 fire that consumed Southwark and London Bridge, claiming thousands of lives and reshaping medieval London." />
+    <meta name="twitter:image" content="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Great_Fire_London.jpg/500px-Great_Fire_London.jpg" />
+
+    <!-- JSON-LD Schema.org -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "SportsEvent",
-      "name": "1966 FIFA World Cup Final",
-      "startDate": "1966-07-30",
+      "@type": "Event",
+      "name": "Great Fire of London (1212)",
+      "description": "The Great Fire of 1212 devastated Southwark and engulfed London Bridge, resulting in thousands of deaths and massive destruction.",
+      "startDate": "1212-07-10",
       "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode",
       "eventStatus": "https://schema.org/EventCompleted",
       "location": {
         "@type": "Place",
-        "name": "Wembley Stadium",
+        "name": "Southwark and London Bridge",
         "address": {
           "@type": "PostalAddress",
           "addressLocality": "London",
-          "addressCountry": "UK"
+          "addressCountry": "England"
         }
       },
-      "competitor": [
-        {
-          "@type": "SportsTeam",
-          "name": "England"
-        },
-        {
-          "@type": "SportsTeam",
-          "name": "West Germany"
-        }
-      ],
-      "organizer": {
-        "@type": "Organization",
-        "name": "FIFA"
-      },
-      "image": "https://www.sportphotogallery.com/content/images/cmsfiles/product/24093/24349-list.jpg",
-      "description": "England defeated West Germany 4–2 in the 1966 FIFA World Cup Final at Wembley Stadium, with Geoff Hurst scoring the only hat-trick ever in a World Cup final.",
-      "url": "https://en.wikipedia.org/wiki/1966_FIFA_World_Cup_Final"
+      "isAccessibleForFree": true,
+      "image": "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Great_Fire_London.jpg/500px-Great_Fire_London.jpg",
+      "url": "https://en.wikipedia.org/wiki/Early_fires_of_London"
     }
     </script>
-    
+
     <link rel="icon" href="/images/favicon.ico" />
     <link
       rel="stylesheet"
@@ -140,7 +127,7 @@ crossorigin="anonymous">
 
         /* Apply default body colors */
         background-color: var(--secondary-bg);
-        color: var(--text-color);  
+        color: var(--text-color);
       }
 
       /* Dark Theme - Critical Variables and Applications */
@@ -194,7 +181,7 @@ crossorigin="anonymous">
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       }
 
-      /* Base styles for body and navbar - these will be overridden by dark-theme if present */
+      /* Base styles for body and navbar */
       body {
         font-family: Inter, sans-serif;
         min-height: 100vh;
@@ -242,9 +229,9 @@ crossorigin="anonymous">
       .footer .text-muted {
         color: rgba(255, 255, 255, 0.85) !important;
       }
-     
+
       .theme-switch-mobile label i {
-        color: var(--header-text-color); /* Icon color */
+        color: var(--header-text-color);
         font-size: 1.2rem;
         margin-left: 0.5rem;
       }
@@ -288,6 +275,7 @@ crossorigin="anonymous">
         color: var(--text-color);
         transition: color 0.3s ease;
       }
+
       .footer {
         background-color: var(--footer-bg);
         color: var(--footer-text-color);
@@ -448,82 +436,210 @@ crossorigin="anonymous">
       </div>
     </div>
   </nav>
+
   <main class="container my-5">
     <div class="row justify-content-center">
       <div class="col-lg-10 col-xl-8">
-        <article class="p-4 rounded border shadow-sm" style="background-color: var(--card-bg); color: var(--text-color)">
+
+        <!-- Breadcrumb -->
+        <nav aria-label="breadcrumb" class="mb-3">
+          <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/blog/">Blog</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Great Fire of London 1212</li>
+          </ol>
+        </nav>
+
+        <article class="p-4 rounded border shadow-sm"
+                 style="background-color: var(--card-bg); color: var(--text-color)">
+
           <header class="mb-4 text-center">
-            <h1 class="mb-2 fw-bold">England Wins the World Cup: July 30, 1966</h1>
+            <h1 class="mb-2 fw-bold">Great Fire of London: Southwark Inferno (10 July 1212)</h1>
             <p class="article-meta mb-0">
               <small>
-                Published: July 30, 2025 &nbsp;|&nbsp; Event Date: July 30, 1966 &nbsp;|&nbsp;
-                thisDay. Editorial Team &nbsp;|&nbsp;
-                6 min read
+                <i class="bi bi-calendar3 me-1"></i>Published: July 10, 2025 &nbsp;|&nbsp;
+                <i class="bi bi-clock-history me-1"></i>Event Date: 10 July 1212 &nbsp;|&nbsp;
+                <i class="bi bi-person me-1"></i>thisDay. Editorial Team &nbsp;|&nbsp;
+                <i class="bi bi-book me-1"></i>8 min read
               </small>
             </p>
           </header>
-  
+
           <figure class="text-center mb-4">
             <img
-              src="/images/blog/30.7.jpg"
+              src="/images/blog/10.7.jpg"
               class="img-fluid rounded"
-              alt="England lifts the 1966 FIFA World Cup trophy at Wembley Stadium"
+              alt="Medieval depiction of the Great Fire of London, 1212"
               style="max-height: 400px; object-fit: cover; width: 100%"
               loading="lazy"
+              aria-label="Medieval depiction of the Great Fire of London, 1212"
             />
-            <figcaption class="text-muted mt-2"><small>Image: Sport Photo Gallery</small></figcaption>
+            <figcaption class="article-meta mt-2"><small>Image: Great Fire of Southwark – medieval illustration (Wikimedia Commons)</small></figcaption>
           </figure>
-  
+
+          <!-- Quick Facts -->
           <h3 class="mt-4">Quick Facts</h3>
           <table class="table table-bordered">
             <tbody>
-              <tr><th>Event</th><td>1966 FIFA World Cup Final</td></tr>
-              <tr><th>Date</th><td>30 July 1966</td></tr>
-              <tr><th>Location</th><td>Wembley Stadium, London</td></tr>
-              <tr><th>Result</th><td>England 4–2 West Germany (after extra time)</td></tr>
-              <tr><th>Winning Team</th><td>England</td></tr>
-              <tr><th>Key Player</th><td>Geoff Hurst (scored a hat-trick)</td></tr>
-              <tr><th>Attendance</th><td>96,924</td></tr>
-              <tr><th>Referee</th><td>Gottfried Dienst (Switzerland)</td></tr>
+              <tr><th>Event</th><td>Great Fire of Southwark</td></tr>
+              <tr><th>Date</th><td>10 July 1212</td></tr>
+              <tr><th>Location</th><td>Southwark &amp; London Bridge, London, England</td></tr>
+              <tr><th>Key Sites Destroyed</th><td>St Mary Overie (Southwark Cathedral), London Bridge buildings</td></tr>
+              <tr><th>Estimated Fatalities</th><td>Up to 3,000 (reports vary)</td></tr>
+              <tr><th>Cause</th><td>Unknown (possibly accidental in bakery)</td></tr>
             </tbody>
           </table>
-  
+
+          <!-- Did You Know -->
+          <div class="did-you-know p-3 rounded mb-4">
+            <strong><i class="bi bi-lightbulb me-2" style="color:#3b82f6"></i>Did You Know?</strong>
+            <ul class="mb-0 mt-2">
+              <li>The 1212 fire predates the famous 1666 Great Fire of London by 454 years — yet claimed a comparable death toll relative to the city's population.</li>
+              <li>London Bridge at the time had over 100 buildings on it, functioning as a fully inhabited street suspended over the Thames, complete with shops, homes, and a chapel.</li>
+              <li>The disaster accelerated a city-wide push to ban thatched roofs, a fire risk that city authorities had been slow to address for generations.</li>
+            </ul>
+          </div>
+
+          <!-- Overview -->
           <section class="mt-4">
             <h3>Overview</h3>
             <p>
-              On July 30, 1966, <a href="https://en.wikipedia.org/wiki/England_national_football_team" target="_blank">England</a> defeated <a href="https://en.wikipedia.org/wiki/West_Germany_national_football_team" target="_blank">West Germany</a> 4–2 in the FIFA World Cup Final held at Wembley Stadium in London. It was England’s first, and remains their only World Cup title.
+              On 10 July 1212, a devastating fire, later called the Great Fire of Southwark, broke out in the timber-built borough of Southwark, just south of London Bridge. The blaze consumed the church of St Mary Overie and surrounding structures before spreading across the bridge under strong southerly winds. The origins of the fire remain unclear, with some chronicles pointing to a bakery or domestic accident — a frustratingly familiar cause for medieval urban fires.
             </p>
             <p>
-              The match was a dramatic showdown between two football giants. West Germany took the lead, but England quickly equalized and went ahead. With the game tied 2–2 at the end of regular time, the final went into extra time. Geoff Hurst scored twice more, completing the first and only hat-trick in a World Cup final, recently reached by Kylian Mbappé, also scoring hat-trick in World Cup Final, 2022.
+              London Bridge, lined with wooden houses and shops, became engulfed from both ends. Thousands rushed onto the bridge, either fleeing or attempting to help, but many were trapped when the fire broke out on both the north and south approaches simultaneously. Contemporary accounts report that as many as 3,000 people perished, though modern historians regard this figure as likely exaggerated given London's total population at the time of around 20–50,000.
             </p>
             <p>
-              The most debated moment came with Hurst’s second goal, which bounced down off the crossbar. Referee Gottfried Dienst awarded the goal after consulting the linesman, sparking decades of controversy and discussion.
+              Firefighters, if any, resorted to primitive bucket-brigades drawn from the Thames. With no organized fire service, no firebreaks in the urban plan, and no evacuation procedure, the blaze spread rapidly through the densely packed wooden homes and shops. The fire eventually burned itself out — not because of human intervention, but because there was simply nothing left to burn.
             </p>
           </section>
-  
-          <iframe width="100%" height="600" src="https://www.youtube.com/embed/ghRpsTOdXEM" title="🏆 July 30, 1966 – England Wins the World Cup" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-  
+
+          <!-- Eyewitness Accounts -->
+          <section class="mt-5">
+            <h3>Eyewitness &amp; Chronicle Accounts</h3>
+            <p>
+              The fire was documented by several 13th-century monastic chroniclers, including Roger of Wendover at St Albans Abbey. His account describes people flooding onto London Bridge from both sides to watch or assist — and being cut off when the flames consumed both ends of the bridge simultaneously. The bridge, normally a chaotic but lively street, became a furnace from which there was no escape except the Thames below.
+            </p>
+            <p>
+              The <em>Annals of Waverley</em>, another monastic record, documented the disaster with a tone of divine warning common to the era — interpreting the fire as God's judgment on a sinful city. Whether divine punishment or architectural folly, both accounts agree on the horrifying spectacle of thousands trapped between two walls of flame, with the river offering the only escape for those desperate enough to leap. Some were rescued by boatmen who rowed toward the burning bridge; many were not.
+            </p>
+            <blockquote class="historical-quote mt-3">
+              <p>"The fire spread so rapidly over the bridge that no one could cross it, and many who had crowded upon it to watch were burned or drowned attempting to escape."</p>
+              <footer class="article-meta">Paraphrased from Roger of Wendover, <cite>Flores Historiarum</cite>, c. 1230</footer>
+            </blockquote>
+            <p class="mt-3">
+              It is worth noting that these accounts were written years or decades after the event, and monastic chronicles of this era routinely inflated casualties for dramatic effect. The real death toll was almost certainly lower than 3,000 — but even a few hundred deaths in a single afternoon would have been a catastrophe on a scale medieval London had never seen.
+            </p>
+          </section>
+
+          <!-- YouTube -->
+          <iframe class="mt-4" width="100%" height="500" src="https://www.youtube.com/embed/-vE9nKPUYlE" title="July 10, 1212 – London Fire" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
+          <!-- Aftermath -->
+          <section class="mt-5">
+            <h3>Aftermath &amp; What Changed</h3>
+            <p>
+              In the immediate aftermath, the destruction of buildings on London Bridge forced a partial redesign of the crossing. Stone gradually replaced timber in subsequent repairs, and the lesson — that densely packed wooden structures on a single-entry bridge were a catastrophic fire hazard — slowly filtered into city thinking, though change came frustratingly slowly by modern standards.
+            </p>
+            <p>
+              St Mary Overie church (today's Southwark Cathedral) was rebuilt in stone following the fire, becoming one of the earliest Gothic structures south of the Thames. The disaster also contributed to pressure on city authorities to ban thatched roofing across London — a regulation that took decades to fully enforce but would meaningfully reduce fire risk across the city.
+            </p>
+            <p>
+              Perhaps the most striking legacy is what <em>didn't</em> change: organized firefighting. For another four and a half centuries, London had no fire brigade. It took the even more spectacular Great Fire of 1666 — which burned the City itself rather than just a borough across the river — to finally produce lasting institutional reform. The 1212 fire is a sobering illustration of how societies often need a second, bigger catastrophe before they truly learn from the first.
+            </p>
+          </section>
+
+          <!-- Conclusion -->
           <section class="mt-5">
             <h3>Conclusion</h3>
             <p>
-              The 1966 World Cup final became a defining moment in English football history. With a home crowd behind them and legends like Bobby Charlton and Geoff Hurst on the field, England seized the greatest prize in the sport.
+              The July 1212 fire remains London's deadliest recorded fire, claiming thousands of lives and decimating the critical bridge connection between the City and Southwark. It inspired some early building reforms — including pressure to ban thatched roofs — but largely faded from public memory in favor of the 1666 Great Fire, which left far more physical and institutional traces.
             </p>
             <p>
-              Decades later, the victory still echoes in the hearts of English fans. The phrase “They think it's all over, it is now!” from the match’s final moments has become part of football folklore.
+              The disaster underscores the perils of medieval urban design: wooden structures, narrow streets, dense population, and no formal fire defense system whatsoever. Lessons from the 1212 fire eventually influenced later urban planning and fire safety regulations in London, but the pace of change was slow enough that the city remained dangerously vulnerable for centuries.
             </p>
             <p>
-              England's 1966 win remains not just a triumph in sport, but a moment of national pride and honor. It marked an unforgettable summer where football truly came home.
+              Even after eight centuries, the Great Fire of Southwark serves as a stark reminder that rapid urban growth without proper safety infrastructure can lead to catastrophe — and that the human tendency to forget past disasters is one of our most persistent and dangerous traits.
             </p>
           </section>
-  
+
+          <!-- Personal Analysis -->
+          <section class="mt-5">
+            <h3>Our Take: What Went Right &amp; What Went Wrong</h3>
+            <div class="row g-3 mt-1">
+              <div class="col-md-6">
+                <div class="analysis-good p-3 rounded h-100">
+                  <h5 style="color: #16a34a;"><i class="bi bi-check-circle me-2"></i>What Went Right</h5>
+                  <ul class="mb-0">
+                    <li class="mb-2"><strong>River rescue:</strong> Boatmen on the Thames pulled hundreds of survivors from the water. Without those impromptu rescuers, the death toll would have been dramatically higher — it was ordinary people, not officials, who saved the most lives.</li>
+                    <li class="mb-2"><strong>Stone reconstruction:</strong> The fire's destruction of London Bridge led to more stone being used in repairs, making the structure safer. St Mary Overie's stone rebuild also set a better precedent for construction in the borough.</li>
+                    <li><strong>Historical documentation:</strong> Monastic chroniclers recorded the event in detail, giving us a rare window into medieval disaster response and urban life. Without them, this catastrophe might have been entirely forgotten.</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="analysis-bad p-3 rounded h-100">
+                  <h5 style="color: #dc2626;"><i class="bi bi-x-circle me-2"></i>What Went Wrong</h5>
+                  <ul class="mb-0">
+                    <li class="mb-2"><strong>No fire service:</strong> Medieval London had zero organized firefighting. Bucket brigades from the Thames were heroic but completely inadequate against a fire of this scale. No city of this size should have had no contingency plan whatsoever.</li>
+                    <li class="mb-2"><strong>Bridge as a death trap:</strong> Allowing dense wooden housing on a bridge with limited exit points was a planning disaster waiting to happen. When fire blocked both ends, the bridge became a cage. The city had built a structure that maximized casualties in exactly this scenario.</li>
+                    <li class="mb-2"><strong>Crowd instinct backfired:</strong> People rushing onto the bridge to watch or help — a completely natural human reaction — dramatically worsened the death count once the fire spread. There was no authority, no system, and no voice telling people to stay back.</li>
+                    <li><strong>Institutional amnesia:</strong> Despite losing thousands of people in a single afternoon, London did not build a fire brigade. It took the Great Fire of 1666 — 454 years later — to finally force that change. That failure of institutional memory may be the most damning verdict on the city's response.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+            <p class="mt-4 fst-italic" style="font-size: 0.93rem; opacity: 0.85; border-left: 3px solid #3b82f6; padding-left: 1rem;">
+              <i class="bi bi-chat-quote me-1"></i>
+              What strikes us most about the 1212 fire is not the scale of the disaster itself — medieval cities burned regularly — but the gap between how much was lost and how little changed in response. Three thousand deaths (even if exaggerated) in a city of 20,000–50,000 people represents a catastrophic proportion of the population. Yet the city rebuilt in the same materials, with the same density, and without a fire service. It took another 454 years and an even bigger fire before London finally acted. If there is a lesson from 1212, it is that societies almost never act on a disaster until the pain becomes truly impossible to ignore — and by then, the next disaster is usually already inevitable.
+            </p>
+          </section>
+
+          <!-- Wikipedia source box -->
+          <div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);">
+            <small class="article-meta">
+              <i class="bi bi-info-circle me-1"></i>
+              Want to learn more? Read the full article on
+              <a href="https://en.wikipedia.org/wiki/Early_fires_of_London" target="_blank" rel="noopener noreferrer">Wikipedia</a>.
+              Historical data sourced under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.
+            </small>
+          </div>
+
+          <!-- Related Articles -->
+          <section class="mt-5 pt-3 border-top">
+            <h4 class="mb-3">Related Articles</h4>
+            <div class="row g-3">
+              <div class="col-md-4">
+                <a href="/blog/july/11-2025/" class="d-block p-3 rounded text-decoration-none related-card">
+                  <small class="article-meta d-block mb-1"><i class="bi bi-calendar3 me-1"></i>July 11, 2025</small>
+                  <span style="color: var(--link-color); font-weight: 600; font-size: 0.92rem;">Martin Frobisher Mistakes Greenland For Frisland in 1576</span>
+                </a>
+              </div>
+              <div class="col-md-4">
+                <a href="/blog/july/12-2025/" class="d-block p-3 rounded text-decoration-none related-card">
+                  <small class="article-meta d-block mb-1"><i class="bi bi-calendar3 me-1"></i>July 12, 2025</small>
+                  <span style="color: var(--link-color); font-weight: 600; font-size: 0.92rem;">Nuremberg Chronicle 1493 Illustrated World History</span>
+                </a>
+              </div>
+              <div class="col-md-4">
+                <a href="/blog/august/1-2025/" class="d-block p-3 rounded text-decoration-none related-card">
+                  <small class="article-meta d-block mb-1"><i class="bi bi-calendar3 me-1"></i>August 1, 2025</small>
+                  <span style="color: var(--link-color); font-weight: 600; font-size: 0.92rem;">Founding of the Swiss Confederacy – August 1, 1291</span>
+                </a>
+              </div>
+            </div>
+          </section>
+
           <footer class="text-center mt-5 pt-3 border-top">
-            <small class="article-meta">Part of the <strong>thisDay.</strong> historical blog archive</small>
+            <small class="article-meta">Part of the <strong>thisDay.</strong> historical blog archive &mdash; <a href="/blog/">Browse all posts</a></small>
           </footer>
+
         </article>
       </div>
     </div>
-  </main>  
-  
+  </main>
+
+
 <script src="/js/chatbot.js"></script>
     <footer class="footer">
       <div class="container d-flex justify-content-center my-2">
@@ -567,7 +683,7 @@ crossorigin="anonymous">
             <i class="bi bi-tiktok h3 text-white"></i>
           </a>
         </div>
-        
+
 
         <div class="me-2">
           <a
@@ -630,7 +746,7 @@ crossorigin="anonymous">
         localStorage.setItem(DARK_THEME_KEY, "true");
       } else {
         body.classList.remove("dark-theme");
-        localStorage.setItem(DARK_THEME_KEY, "false"); // Store 'false' when light theme is active
+        localStorage.setItem(DARK_THEME_KEY, "false");
       }
       if (themeSwitchDesktop) themeSwitchDesktop.checked = isDark;
       if (themeSwitchMobile) themeSwitchMobile.checked = isDark;

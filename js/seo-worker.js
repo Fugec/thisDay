@@ -13,7 +13,7 @@ const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
 async function fetchDailyEvents(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
-  const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${month}/${day}`;
+  const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${month}/${day}`;
 
   const workerCache = caches.default;
   let response = await workerCache.match(apiUrl);

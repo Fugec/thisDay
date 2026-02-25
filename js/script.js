@@ -214,7 +214,7 @@ async function fetchWikipediaEvents(month, day) {
 
   const monthPadded = String(month).padStart(2, "0");
   const dayPadded = String(day).padStart(2, "0");
-  const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${monthPadded}/${dayPadded}?origin=*`;
+  const url = `/api/events/${monthPadded}/${dayPadded}`;
 
   try {
     const response = await rateLimitedFetch(url);
@@ -1964,7 +1964,7 @@ async function fetchWikipediaEventsForCarousel() {
     const today = new Date();
     const month = String(today.getMonth() + 1).padStart(2, "0");
     const day = String(today.getDate()).padStart(2, "0");
-    const url = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${month}/${day}`;
+    const url = `/api/events/${month}/${day}`;
 
     const response = await fetch(url, {
       headers: { Accept: "application/json" },

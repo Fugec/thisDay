@@ -51,7 +51,7 @@ export default {
 
     const urlEntries = recentPosts
       .map((post) => {
-        const loc = `${SITE_URL}/blog/archive/${post.slug}/`;
+        const loc = `${SITE_URL}/blog/${post.slug}/`;
         const pubDate = new Date(post.publishedAt).toISOString();
         return (
           `  <url>\n` +

@@ -678,8 +678,7 @@ async function renderCalendar() {
     calendarGrid.appendChild(dayCard);
     dayCards.push(dayCard);
   }
-  // Observe all day cards so events load automatically as they scroll into view
-  initDayCardObserver(dayCards, month);
+  // Events load on click only (see click listener above) — no auto-loading observer.
 
   try {
     const carouselPromise = populateCarousel(month, year);
@@ -714,37 +713,6 @@ async function renderCalendar() {
   }
 }
 
-// IntersectionObserver: auto-load events when day cards scroll into the viewport
-let dayCardObserver = null;
-
-function initDayCardObserver(dayCards, month) {
-  if (dayCardObserver) {
-    dayCardObserver.disconnect();
-  }
-  if (!("IntersectionObserver" in window)) return;
-
-  dayCardObserver = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (
-          entry.isIntersecting &&
-          entry.target.classList.contains("needs-load") &&
-          !entry.target.classList.contains("loading")
-        ) {
-          loadDayEvents(entry.target, month);
-          dayCardObserver.unobserve(entry.target);
-        }
-      });
-    },
-    { rootMargin: "100px", threshold: 0.1 },
-  );
-
-  dayCards.forEach((card) => {
-    if (card.classList.contains("needs-load")) {
-      dayCardObserver.observe(card);
-    }
-  });
-}
 
 let currentDayAllItems = [];
 let currentActiveFilter = "all";

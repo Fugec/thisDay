@@ -165,7 +165,16 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
  */
 async function generateAndStore(env) {
   const now = new Date();
-  const content = await callWorkersAI(env.AI, now);
+
+  // Collect titles already published this month so the AI avoids duplicates
+  const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+  const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
+  const thisMonthPrefix = now.toISOString().slice(0, 7); // "YYYY-MM"
+  const takenThisMonth = existingIndex
+    .filter((e) => e.publishedAt && e.publishedAt.startsWith(thisMonthPrefix))
+    .map((e) => e.title);
+
+  const content = await callWorkersAI(env.AI, now, takenThisMonth);
 
   // Replace the hallucinated Wikimedia URL with a real Wikipedia image.
   const realImage = await fetchWikipediaImage(content.eventTitle, content.wikiUrl);
@@ -181,9 +190,8 @@ async function generateAndStore(env) {
   // Persist the rendered page (no expiry — permanent archive)
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
 
-  // Update the index
-  const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
-  const index = indexRaw ? JSON.parse(indexRaw) : [];
+  // Update the index (reuse the already-loaded existingIndex)
+  const index = [...existingIndex];
 
   // Avoid duplicates
   if (!index.find((e) => e.slug === slug)) {
@@ -215,14 +223,19 @@ async function generateAndStore(env) {
 // Claude API call
 // ---------------------------------------------------------------------------
 
-async function callWorkersAI(ai, date) {
+async function callWorkersAI(ai, date, takenThisMonth = []) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
+
+  const avoidSection =
+    takenThisMonth.length > 0
+      ? `\nThese topics have already been covered this month — do NOT write about any of them:\n${takenThisMonth.map((t) => `- ${t}`).join("\n")}\nChoose a completely different event.\n`
+      : "";
 
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.
 
 Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this date.
-
+${avoidSection}
 The article must be thorough and long — at least 800 words of body content — with multiple sections including eyewitness accounts, aftermath, and a personal editorial analysis of what went right and wrong about the event or the response to it.
 
 Writing style rules:

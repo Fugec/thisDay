@@ -1024,13 +1024,9 @@ async function handleFetchRequest(request, env, ctx) {
 
   // Inject preloaded data for the current day into the HTML
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
-    const initialEventsForClient = eventsData.events.slice(0, 20); // Limit data
-    const initialBirthsForClient = eventsData.births
-      ? eventsData.births.slice(0, 10)
-      : [];
-    const initialDeathsForClient = eventsData.deaths
-      ? eventsData.deaths.slice(0, 10)
-      : [];
+    const initialEventsForClient = eventsData.events;
+    const initialBirthsForClient = eventsData.births || [];
+    const initialDeathsForClient = eventsData.deaths || [];
 
     const preloadedData = {
       events: initialEventsForClient,

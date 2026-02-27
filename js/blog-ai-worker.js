@@ -22,7 +22,8 @@ const CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
-const EVERY_OTHER_DAYS = 2; // Generate every N days
+const EVERY_OTHER_DAYS = 1; // Generate every N days
+const FALLBACK_IMAGE = "https://thisday.info/images/logo.png"; // Used when Wikipedia returns no image
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -182,6 +183,11 @@ async function generateAndStore(env) {
     content.imageUrl = realImage;
     // Wikipedia thumbnails already have attribution baked into the caption field;
     // keep whatever the model wrote for imageCaption so the source stays clear.
+  } else {
+    // Wikipedia returned nothing — use the site logo so the image slot is never broken.
+    content.imageUrl = FALLBACK_IMAGE;
+    content.imageAlt = `${content.eventTitle} — thisDay.info`;
+    content.imageCaption = "Image unavailable. Historical data sourced from Wikipedia.";
   }
 
   const slug = buildSlug(now);
@@ -234,7 +240,9 @@ async function callWorkersAI(ai, date, takenThisMonth = []) {
 
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.
 
-Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this date.
+STRICT DATE REQUIREMENT: You MUST write about an event that occurred on ${monthName} ${day} ONLY. The event must have taken place in the month of ${monthName} on day ${day}. Events from ANY other month or day are strictly forbidden. Before choosing an event, verify it happened on ${monthName} ${day}. If you are not certain an event occurred on ${monthName} ${day}, choose a different event you are confident about.
+
+Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this exact date.
 ${avoidSection}
 The article must be thorough and long — at least 800 words of body content — with multiple sections including eyewitness accounts, aftermath, and a personal editorial analysis of what went right and wrong about the event or the response to it.
 
@@ -245,7 +253,7 @@ Writing style rules:
 Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation — just the JSON.
 
 {
-  "title": "Event Title: Month Day, Year",
+  "title": "Event Name — ${monthName} ${day}, Year",
   "eventTitle": "Short event name",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
@@ -334,11 +342,26 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`No JSON found in model output: ${raw.slice(0, 200)}`);
 
+  let parsed;
   try {
-    return JSON.parse(jsonMatch[0]);
+    parsed = JSON.parse(jsonMatch[0]);
   } catch (e) {
     throw new Error(`JSON parse failed: ${e.message} — Raw: ${raw.slice(0, 300)}`);
   }
+
+  // Enforce that the title always contains the date (Month Day, Year).
+  // The AI sometimes omits it or uses a wrong format.
+  const year = parsed.historicalYear ?? date.getFullYear();
+  const expectedDateSuffix = `${monthName} ${day}, ${year}`;
+  if (!parsed.title || !parsed.title.includes(monthName)) {
+    // Strip any existing trailing date-like pattern and append the correct one
+    const cleanTitle = (parsed.title ?? parsed.eventTitle ?? "Untitled")
+      .replace(/[—:\-]\s*\w+ \d{1,2},\s*\d{4}\s*$/, "")
+      .trim();
+    parsed.title = `${cleanTitle} — ${expectedDateSuffix}`;
+  }
+
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------

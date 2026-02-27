@@ -29,10 +29,10 @@
     { "pattern": "thisday.info/blog/*", "zone_name": "thisday.info" }
   ],
 
-  // Cron trigger — runs every day at 06:00 UTC.
-  // The worker itself decides every other day based on the KV-stored last-run date.
+  // Cron trigger — runs every day at 00:31 UTC (30 min after the main data fetch at 00:01 UTC).
+  // The worker publishes a new post every day based on the KV-stored last-run date.
   "triggers": {
-    "crons": ["0 6 * * *"]
+    "crons": ["31 0 * * *"]
   },
 
   // KV namespace — stores generated posts and the index.

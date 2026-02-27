@@ -23,6 +23,7 @@ const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
 const EVERY_OTHER_DAYS = 1; // Generate every N days
+const FALLBACK_IMAGE = "https://thisday.info/images/logo.png"; // Used when Wikipedia returns no image
 
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
@@ -182,6 +183,11 @@ async function generateAndStore(env) {
     content.imageUrl = realImage;
     // Wikipedia thumbnails already have attribution baked into the caption field;
     // keep whatever the model wrote for imageCaption so the source stays clear.
+  } else {
+    // Wikipedia returned nothing — use the site logo so the image slot is never broken.
+    content.imageUrl = FALLBACK_IMAGE;
+    content.imageAlt = `${content.eventTitle} — thisDay.info`;
+    content.imageCaption = "Image unavailable. Historical data sourced from Wikipedia.";
   }
 
   const slug = buildSlug(now);

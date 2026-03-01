@@ -191,7 +191,7 @@ async function generateAndStore(env) {
   }
 
   const slug = buildSlug(now);
-  const html = buildPostHTML(content, now, slug);
+  const html = buildPostHTML(content, now, slug, existingIndex);
 
   // Persist the rendered page (no expiry â€” permanent archive)
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
@@ -384,7 +384,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation â
  * Builds the full blog post HTML page, matching the structure of existing
  * hand-written posts on thisday.info.
  */
-function buildPostHTML(c, date, slug) {
+function buildPostHTML(c, date, slug, allPosts = []) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
   const publishYear = date.getFullYear();
@@ -495,12 +495,15 @@ function buildPostHTML(c, date, slug) {
     <meta property="og:type" content="article" />
     <meta property="og:url" content="${canonicalUrl}" />
     <meta property="og:image" content="${esc(c.imageUrl)}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="thisDay." />
     <meta property="article:published_time" content="${date.toISOString()}" />
     <meta property="article:modified_time" content="${date.toISOString()}" />
     <meta property="article:section" content="History" />
     <meta property="article:author" content="https://thisday.info/" />
+    ${(c.keywords || "").split(",").map(k => k.trim()).filter(Boolean).slice(0, 6).map(k => `<meta property="article:tag" content="${esc(k)}" />`).join("\n    ")}
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
@@ -801,6 +804,26 @@ ${analysisBadItems}
               Historical data sourced under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.
             </small>
           </div>
+
+          ${(() => {
+            const related = allPosts
+              .filter(p => p.slug !== slug)
+              .sort(() => Math.random() - 0.5)
+              .slice(0, 3);
+            if (related.length === 0) return "";
+            const cards = related.map(p => `
+              <div class="col-md-4">
+                <a href="/blog/${esc(p.slug)}/" class="related-card d-block p-3 rounded text-decoration-none h-100">
+                  <p class="mb-1 fw-semibold" style="color:var(--text-color);font-size:.92rem;line-height:1.35">${esc(p.title)}</p>
+                  <small class="article-meta">${new Date(p.publishedAt).toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</small>
+                </a>
+              </div>`).join("");
+            return `<section class="mt-5">
+            <h3 class="h5 mb-3">You Might Also Like</h3>
+            <div class="row g-3">${cards}
+            </div>
+          </section>`;
+          })()}
 
           <footer class="text-center mt-5 pt-3 border-top">
             <small class="article-meta">

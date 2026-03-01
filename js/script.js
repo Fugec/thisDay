@@ -285,7 +285,7 @@ function renderCarouselItem(container, post, index) {
       <div class="d-flex justify-content-center gap-2">
         <a href="${post.url}" class="btn btn-primary btn-sm"
            ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>Read Full Post</a>
-        <a href="${window.__todayGeneratedUrl || "/generated/" + (new Date().toLocaleString("en-US", {month:"long"}).toLowerCase()) + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
+        <a href="${window.__todayGeneratedUrl || "/generated/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
       </div>
     </div>
   `;
@@ -713,7 +713,6 @@ async function renderCalendar() {
     `;
   }
 }
-
 
 let currentDayAllItems = [];
 let currentActiveFilter = "all";
@@ -2060,16 +2059,31 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
   //   2. AI-generated:  /blog/{day}-{month}-{year}/   (worker slug)
   const results = await Promise.all(
     days.map(async (day) => {
-      const urlCandidates = [
-        {
-          fetchUrl: `/blog/${monthName}/${day}-${year}/index.html`,
-          postUrl: `/blog/${monthName}/${day}-${year}/`,
-        },
-        {
-          fetchUrl: `/blog/${day}-${monthName}-${year}/`,
-          postUrl: `/blog/${day}-${monthName}-${year}/`,
-        },
-      ];
+      // Posts (2026+) use /blog/{day}-{month}-{year}/.
+      // Static posts (pre-2026) use /blog/{month}/{day}-{year}/index.html.
+      // Try the more likely format first to avoid noisy 404s in the console.
+      const urlCandidates =
+        year >= 2026
+          ? [
+              {
+                fetchUrl: `/blog/${day}-${monthName}-${year}/`,
+                postUrl: `/blog/${day}-${monthName}-${year}/`,
+              },
+              {
+                fetchUrl: `/blog/${monthName}/${day}-${year}/index.html`,
+                postUrl: `/blog/${monthName}/${day}-${year}/`,
+              },
+            ]
+          : [
+              {
+                fetchUrl: `/blog/${monthName}/${day}-${year}/index.html`,
+                postUrl: `/blog/${monthName}/${day}-${year}/`,
+              },
+              {
+                fetchUrl: `/blog/${day}-${monthName}-${year}/`,
+                postUrl: `/blog/${day}-${monthName}-${year}/`,
+              },
+            ];
 
       for (const { fetchUrl, postUrl } of urlCandidates) {
         try {

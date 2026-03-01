@@ -115,6 +115,12 @@ function buildItem(post) {
   const postUrl = `${DOMAIN}/blog/${post.slug}/`;
   const pubDate = post.publishedAt ? toRFC2822(post.publishedAt) : "";
 
+  // Build HTML body for content:encoded (inside CDATA — HTML-escape attribute values)
+  const imgHtml = (post.imageUrl && post.imageUrl !== `${DOMAIN}/images/logo.png`)
+    ? `<p><img src="${esc(post.imageUrl)}" alt="${esc(post.title)}" style="max-width:100%;height:auto;"></p>`
+    : "";
+  const contentHtml = `${imgHtml}<p>${esc(post.description)}</p><p><a href="${postUrl}">Read the full article on thisDay.</a></p>`;
+
   return (
     `    <item>\n` +
     `      <title>${esc(post.title)}</title>\n` +
@@ -122,6 +128,7 @@ function buildItem(post) {
     `      <guid isPermaLink="true">${postUrl}</guid>\n` +
     `      <pubDate>${pubDate}</pubDate>\n` +
     `      <description>${esc(post.description)}</description>\n` +
+    `      <content:encoded><![CDATA[${contentHtml}]]></content:encoded>\n` +
     `    </item>`
   );
 }

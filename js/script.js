@@ -282,13 +282,8 @@ function renderCarouselItem(container, post, index) {
     <div class="carousel-caption">
       <h5>${truncatedTitle}</h5>
       <p>${post.excerpt || "Read this blog post about historical events."}</p>
-      <a href="${post.url}" class="btn btn-primary btn-sm"
-         ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>
-         Read Full Post
-      </a>
-      <a href="${window.__todayGeneratedUrl || "/generated/" + (new Date().toLocaleString("en-US", {month:"long"}).toLowerCase()) + "/" + new Date().getDate() + "/"}" class="btn btn-outline-light btn-sm ms-2">
-        Today's Events
-      </a>
+      <a href="${post.url}" class="btn btn-primary btn-sm me-2"
+         ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>Read Full Post</a><a href="${window.__todayGeneratedUrl || "/generated/" + (new Date().toLocaleString("en-US", {month:"long"}).toLowerCase()) + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
     </div>
   `;
   container.appendChild(carouselItem);

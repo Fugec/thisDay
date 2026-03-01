@@ -18,7 +18,7 @@
 // ---------------------------------------------------------------------------
 
 // Cloudflare Workers AI model â€” free tier, no API key needed.
-const CF_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+const CF_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
@@ -257,6 +257,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation â
   "eventTitle": "Short event name",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
+  "historicalDateISO": "YYYY-MM-DD",
   "location": "City, Country",
   "country": "Country",
   "description": "One-sentence meta description under 155 chars",
@@ -334,19 +335,29 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation â
     max_tokens: 4096,
   });
 
-  const raw = (result.response ?? "").trim();
-  // Strip any accidental markdown code fences the model may add
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
-
-  // Extract the first {...} block in case the model adds surrounding text
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error(`No JSON found in model output: ${raw.slice(0, 200)}`);
+  // Handle different response shapes across CF AI models:
+  // - Some models return { response: "string" }
+  // - Chat models return { choices: [{ message: { content: "string" } }] }
+  // - Some models return the parsed JSON object directly
+  const rawValue = result.response ?? result.choices?.[0]?.message?.content ?? result;
 
   let parsed;
-  try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    throw new Error(`JSON parse failed: ${e.message} â€” Raw: ${raw.slice(0, 300)}`);
+  if (rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)) {
+    parsed = rawValue; // Model already returned parsed JSON object
+  } else {
+    const raw = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
+    // Strip any accidental markdown code fences the model may add
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+
+    // Extract the first {...} block in case the model adds surrounding text
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error(`No JSON found in model output: ${raw.slice(0, 200)}`);
+
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      throw new Error(`JSON parse failed: ${e.message} â€” Raw: ${raw.slice(0, 300)}`);
+    }
   }
 
   // Enforce that the title always contains the date (Month Day, Year).
@@ -426,12 +437,16 @@ function buildPostHTML(c, date, slug) {
 
   const readingTime = c.readingTimeMinutes ? `&nbsp;|&nbsp;${esc(String(c.readingTimeMinutes))} min read` : "";
 
+  const publishedDateISO = date.toISOString().split("T")[0];
   const jsonLd = JSON.stringify(
     {
       "@context": "https://schema.org",
       "@type": "Article",
+      mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
       headline: c.title,
-      datePublished: date.toISOString().split("T")[0],
+      datePublished: publishedDateISO,
+      dateModified: publishedDateISO,
+      inLanguage: "en",
       author: { "@type": "Organization", name: "thisDay.info" },
       publisher: {
         "@type": "Organization",
@@ -444,7 +459,7 @@ function buildPostHTML(c, date, slug) {
       about: {
         "@type": "Event",
         name: c.jsonLdName || c.eventTitle,
-        startDate: String(c.historicalYear),
+        startDate: c.historicalDateISO || String(c.historicalYear),
         description: c.jsonLdDescription || c.description,
         location: {
           "@type": "Place",
@@ -478,12 +493,19 @@ function buildPostHTML(c, date, slug) {
     <meta property="og:type" content="article" />
     <meta property="og:url" content="${canonicalUrl}" />
     <meta property="og:image" content="${esc(c.imageUrl)}" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:site_name" content="thisDay." />
+    <meta property="article:published_time" content="${date.toISOString()}" />
+    <meta property="article:modified_time" content="${date.toISOString()}" />
+    <meta property="article:section" content="History" />
+    <meta property="article:author" content="https://thisday.info/" />
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${esc(c.title)}" />
     <meta name="twitter:description" content="${esc(c.twitterDescription || c.description)}" />
     <meta name="twitter:image" content="${esc(c.imageUrl)}" />
+    <meta name="twitter:image:alt" content="${esc(c.imageAlt)}" />
 
     <!-- JSON-LD Schema -->
     <script type="application/ld+json">
@@ -907,6 +929,32 @@ async function buildListingHTML(index) {
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://thisday.info/blog/archive/" />
     <meta property="og:image" content="https://thisday.info/images/logo.png" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:site_name" content="thisDay." />
+
+    <!-- JSON-LD -->
+    <script type="application/ld+json">
+${JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  name: "History Blog | thisDay.",
+  url: "https://thisday.info/blog/archive/",
+  description: "Original articles about historical events published regularly by thisDay.info.",
+  publisher: {
+    "@type": "Organization",
+    name: "thisDay.info",
+    logo: { "@type": "ImageObject", url: "https://thisday.info/images/logo.png" },
+  },
+  hasPart: index.slice(0, 20).map((p) => ({
+    "@type": "Article",
+    name: p.title,
+    url: `https://thisday.info/blog/${p.slug}/`,
+    datePublished: p.publishedAt ? new Date(p.publishedAt).toISOString().split("T")[0] : undefined,
+    description: p.description,
+  })),
+}, null, 2)}
+    </script>
+
     <link rel="icon" href="/images/favicon.ico" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
@@ -1172,7 +1220,7 @@ function htmlResponse(body, status = 200) {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      "Cache-Control": "public, max-age=86400, s-maxage=604800",
       "X-Content-Type-Options": "nosniff",
     },
   });

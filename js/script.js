@@ -2036,8 +2036,72 @@ function initializeCarousel() {
   }
 }
 
+// Fetch 3 random blog posts from the current month that have generated images
+async function fetchBlogPostsForCarousel(monthName, monthIndex) {
+  const FALLBACK_IMG = "https://thisday.info/images/logo.png";
+  const today = new Date();
+  const year = Math.max(2025, today.getFullYear());
+  const currentMonth = today.getMonth();
+  const currentDay = today.getDate();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+
+  // Build list of candidate days
+  const days = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    if (monthIndex === currentMonth && day > currentDay) continue;
+    if (monthIndex > currentMonth) continue;
+    days.push(day);
+  }
+
+  // Fetch all candidates in parallel
+  const results = await Promise.all(
+    days.map(async (day) => {
+      const folder = `${day}-${year}`;
+      try {
+        const response = await fetch(`/blog/${monthName}/${folder}/index.html`);
+        if (!response.ok) return null;
+        const html = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+        const ogImage =
+          doc
+            .querySelector('meta[property="og:image"]')
+            ?.getAttribute("content") || null;
+        if (!ogImage || ogImage === FALLBACK_IMG) return null;
+        const title =
+          doc.querySelector("h1")?.textContent?.trim() ||
+          doc
+            .querySelector('meta[property="og:title"]')
+            ?.getAttribute("content") ||
+          `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`;
+        const excerpt =
+          doc
+            .querySelector('meta[property="og:description"]')
+            ?.getAttribute("content") ||
+          `Discover what happened on ${day} ${monthNames[monthIndex]} ${year}`;
+        return {
+          day,
+          year,
+          title: title.trim(),
+          excerpt: excerpt.trim(),
+          imageUrl: ogImage,
+          backgroundUrl: ogImage,
+          url: `/blog/${monthName}/${folder}/`,
+          isExternal: false,
+        };
+      } catch (e) {
+        return null;
+      }
+    }),
+  );
+
+  const allPosts = results.filter(Boolean);
+  if (allPosts.length === 0) return [];
+  return allPosts.sort(() => Math.random() - 0.5).slice(0, 3);
+}
+
 // Main function to populate carousel
-async function populateCarousel(month, year) {
+async function populateCarousel(month, _year) {
   const carouselInner = document.getElementById("carouselInner");
   const carouselIndicators = document.getElementById("carouselIndicators");
 
@@ -2051,12 +2115,13 @@ async function populateCarousel(month, year) {
   carouselIndicators.innerHTML = "";
 
   try {
-    // Fetch 2 random Wikipedia events
-    const wikipediaEvents = await fetchWikipediaEventsForCarousel();
+    // Fetch 3 daily blog posts from this month with generated images
+    const currentMonthName = monthNames[month].toLowerCase();
+    const blogPosts = await fetchBlogPostsForCarousel(currentMonthName, month);
 
-    if (wikipediaEvents && wikipediaEvents.length > 0) {
-      wikipediaEvents.forEach((event, index) => {
-        renderFullWidthCarouselItem(carouselInner, event, index);
+    if (blogPosts && blogPosts.length > 0) {
+      blogPosts.forEach((post, index) => {
+        renderCarouselItem(carouselInner, post, index);
         renderIndicator(carouselIndicators, index);
       });
 

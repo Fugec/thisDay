@@ -286,6 +286,9 @@ function renderCarouselItem(container, post, index) {
          ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>
          Read Full Post
       </a>
+      <a href="${window.__todayGeneratedUrl || "/generated/" + (new Date().toLocaleString("en-US", {month:"long"}).toLowerCase()) + "/" + new Date().getDate() + "/"}" class="btn btn-outline-light btn-sm ms-2">
+        Today's Events
+      </a>
     </div>
   `;
   container.appendChild(carouselItem);

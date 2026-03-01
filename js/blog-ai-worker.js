@@ -205,6 +205,7 @@ async function generateAndStore(env) {
       slug,
       title: content.title,
       description: content.description,
+      imageUrl: content.imageUrl,
       publishedAt: now.toISOString(),
     });
     // Cap the index at 200 entries
@@ -441,12 +442,13 @@ function buildPostHTML(c, date, slug) {
   const jsonLd = JSON.stringify(
     {
       "@context": "https://schema.org",
-      "@type": "Article",
+      "@type": "NewsArticle",
       mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
       headline: c.title,
       datePublished: publishedDateISO,
       dateModified: publishedDateISO,
       inLanguage: "en",
+      articleSection: "History",
       author: { "@type": "Organization", name: "thisDay.info" },
       publisher: {
         "@type": "Organization",
@@ -510,6 +512,17 @@ function buildPostHTML(c, date, slug) {
     <!-- JSON-LD Schema -->
     <script type="application/ld+json">
 ${jsonLd}
+    </script>
+    <script type="application/ld+json">
+${JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://thisday.info/" },
+    { "@type": "ListItem", "position": 2, "name": "Blog", "item": "https://thisday.info/blog/" },
+    { "@type": "ListItem", "position": 3, "name": c.title, "item": canonicalUrl },
+  ],
+})}
     </script>
 
     <link rel="icon" href="/images/favicon.ico" />
@@ -946,7 +959,7 @@ ${JSON.stringify({
     logo: { "@type": "ImageObject", url: "https://thisday.info/images/logo.png" },
   },
   hasPart: index.slice(0, 20).map((p) => ({
-    "@type": "Article",
+    "@type": "NewsArticle",
     name: p.title,
     url: `https://thisday.info/blog/${p.slug}/`,
     datePublished: p.publishedAt ? new Date(p.publishedAt).toISOString().split("T")[0] : undefined,
@@ -1222,6 +1235,10 @@ function htmlResponse(body, status = 200) {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=86400, s-maxage=604800",
       "X-Content-Type-Options": "nosniff",
+      "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+      "X-Frame-Options": "SAMEORIGIN",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
     },
   });
 }

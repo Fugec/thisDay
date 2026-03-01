@@ -2053,45 +2053,59 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
     days.push(day);
   }
 
-  // Fetch all candidates in parallel
+  // Fetch all candidates in parallel.
+  // Each day tries two URL formats:
+  //   1. Static posts:  /blog/{month}/{day}-{year}/index.html
+  //   2. AI-generated:  /blog/{day}-{month}-{year}/   (worker slug)
   const results = await Promise.all(
     days.map(async (day) => {
-      const folder = `${day}-${year}`;
-      try {
-        const response = await fetch(`/blog/${monthName}/${folder}/index.html`);
-        if (!response.ok) return null;
-        const html = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
-        const ogImage =
-          doc
-            .querySelector('meta[property="og:image"]')
-            ?.getAttribute("content") || null;
-        if (!ogImage || ogImage === FALLBACK_IMG) return null;
-        const title =
-          doc.querySelector("h1")?.textContent?.trim() ||
-          doc
-            .querySelector('meta[property="og:title"]')
-            ?.getAttribute("content") ||
-          `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`;
-        const excerpt =
-          doc
-            .querySelector('meta[property="og:description"]')
-            ?.getAttribute("content") ||
-          `Discover what happened on ${day} ${monthNames[monthIndex]} ${year}`;
-        return {
-          day,
-          year,
-          title: title.trim(),
-          excerpt: excerpt.trim(),
-          imageUrl: ogImage,
-          backgroundUrl: ogImage,
-          url: `/blog/${monthName}/${folder}/`,
-          isExternal: false,
-        };
-      } catch (e) {
-        return null;
+      const urlCandidates = [
+        {
+          fetchUrl: `/blog/${monthName}/${day}-${year}/index.html`,
+          postUrl: `/blog/${monthName}/${day}-${year}/`,
+        },
+        {
+          fetchUrl: `/blog/${day}-${monthName}-${year}/`,
+          postUrl: `/blog/${day}-${monthName}-${year}/`,
+        },
+      ];
+
+      for (const { fetchUrl, postUrl } of urlCandidates) {
+        try {
+          const response = await fetch(fetchUrl);
+          if (!response.ok) continue;
+          const html = await response.text();
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(html, "text/html");
+          const ogImage =
+            doc
+              .querySelector('meta[property="og:image"]')
+              ?.getAttribute("content") || null;
+          if (!ogImage || ogImage === FALLBACK_IMG) continue;
+          const title =
+            doc.querySelector("h1")?.textContent?.trim() ||
+            doc
+              .querySelector('meta[property="og:title"]')
+              ?.getAttribute("content") ||
+            `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`;
+          const excerpt =
+            doc
+              .querySelector('meta[property="og:description"]')
+              ?.getAttribute("content") ||
+            `Discover what happened on ${day} ${monthNames[monthIndex]} ${year}`;
+          return {
+            day,
+            year,
+            title: title.trim(),
+            excerpt: excerpt.trim(),
+            imageUrl: ogImage,
+            backgroundUrl: ogImage,
+            url: postUrl,
+            isExternal: false,
+          };
+        } catch (e) {}
       }
+      return null;
     }),
   );
 

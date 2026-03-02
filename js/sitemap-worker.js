@@ -28,7 +28,6 @@ const STATIC_PAGES = [
   { loc: "/about/",         lastmod: "2026-02-18", changefreq: "monthly", priority: "0.7" },
   { loc: "/contact/",       lastmod: "2026-02-18", changefreq: "monthly", priority: "0.6" },
   { loc: "/blog/",          lastmod: "2026-02-18", changefreq: "weekly",  priority: "0.8" },
-  { loc: "/blog/archive/",  lastmod: "2026-02-18", changefreq: "weekly",  priority: "0.8" },
   { loc: "/privacy-policy/", lastmod: "2026-02-18", changefreq: "yearly", priority: "0.3" },
   { loc: "/terms/",         lastmod: "2026-02-18", changefreq: "yearly",  priority: "0.3" },
 ];

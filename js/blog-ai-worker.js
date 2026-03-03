@@ -50,7 +50,7 @@ export default {
   /**
    * HTTP fetch handler — serves blog pages and the manual trigger endpoint.
    */
-  async fetch(request, env, _ctx) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, "") || "/";
 
@@ -61,12 +61,20 @@ export default {
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
-      try {
-        await generateAndStore(env);
-        return jsonResponse({ status: "ok", message: "Blog post published." });
-      } catch (err) {
-        return jsonResponse({ status: "error", message: String(err) }, 500);
-      }
+      // Run in background via ctx.waitUntil so the 30 s HTTP response timeout
+      // doesn't interrupt large AI inference (same pattern as the cron handler).
+      ctx.waitUntil(
+        generateAndStore(env).catch(async (err) => {
+          console.error(`Blog AI: /blog/publish generation failed — ${err.message}`);
+          const today = todayDateString();
+          await env.BLOG_AI_KV.put(
+            `error:${today}`,
+            `Publish endpoint failed: ${err.message}`,
+            { expirationTtl: 7 * 86_400 },
+          );
+        }),
+      );
+      return jsonResponse({ status: "ok", message: "Blog post generation started." });
     }
 
     // Listing page: /blog/archive
@@ -358,7 +366,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
       },
       { role: "user", content: prompt },
     ],
-    max_tokens: 2048, // Reduced from 4096 to prevent CF Workers AI timeout (30 s wall clock)
+    max_tokens: 4096,
   });
 
   // Handle different response shapes across CF AI models:

@@ -1,0 +1,44 @@
+name: YouTube Auto-Upload
+
+on:
+  # Runs on days 1, 4, 7, 10 … of each month at 02:00 UTC
+  # (~10 videos/month — well within ElevenLabs 10k chars/month free tier)
+  schedule:
+    - cron: '0 2 */3 * *'
+
+  # Allow a manual run from the Actions tab (e.g. to back-fill or re-upload)
+  workflow_dispatch:
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: youtube-upload
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # FFmpeg for video encoding + DejaVu fonts for SVG text rendering
+      - name: Install system dependencies
+        run: sudo apt-get install -y ffmpeg fonts-dejavu-core
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Upload new posts to YouTube
+        run: node index.js
+        env:
+          CF_ACCOUNT_ID:          ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN:           ${{ secrets.CF_API_TOKEN }}
+          CF_KV_NAMESPACE_ID:     ${{ secrets.CF_KV_NAMESPACE_ID }}
+          YOUTUBE_CLIENT_ID:      ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET:  ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN:  ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          ELEVENLABS_API_KEY:     ${{ secrets.ELEVENLABS_API_KEY }}
+          YOUTUBE_PRIVACY:        ${{ secrets.YOUTUBE_PRIVACY }}
+          REUPLOAD_SLUGS:         ${{ secrets.REUPLOAD_SLUGS }}

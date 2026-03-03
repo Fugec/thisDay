@@ -1,0 +1,56 @@
+name: Blog Post Failsafe
+
+# Runs 29 minutes after the blog worker cron (00:31 UTC).
+# Checks if today's post actually exists in KV. If it doesn't (the worker
+# failed all 3 internal retries), this workflow triggers one more attempt
+# via POST /blog/publish.
+#
+# Required GitHub secrets:
+#   CF_ACCOUNT_ID        — Cloudflare account ID
+#   CF_API_TOKEN         — Cloudflare API token (KV read permission)
+#   CF_KV_NAMESPACE_ID   — KV namespace ID for BLOG_AI_KV
+#   PUBLISH_SECRET       — The PUBLISH_SECRET Cloudflare Worker secret
+
+on:
+  schedule:
+    - cron: '0 1 * * *'   # 01:00 UTC — 29 min after blog worker cron at 00:31
+
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  ensure-post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check if today's post exists and trigger if missing
+        run: |
+          # Build today's KV slug: e.g. "3-march-2026"
+          DAY=$(date -u +%-d)
+          MONTH=$(date -u +%B | tr '[:upper:]' '[:lower:]')
+          YEAR=$(date -u +%Y)
+          SLUG="${DAY}-${MONTH}-${YEAR}"
+          echo "Today's expected slug: post:${SLUG}"
+
+          # Check if the post key exists in KV (200 = exists, 404 = missing)
+          KV_URL="https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/post:${SLUG}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+            "$KV_URL")
+          echo "KV status for post:${SLUG} → HTTP $STATUS"
+
+          if [ "$STATUS" = "200" ]; then
+            echo "Post for ${SLUG} already exists — nothing to do."
+          else
+            echo "Post for ${SLUG} is missing — triggering blog worker..."
+            RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+              -X POST https://thisday.info/blog/publish \
+              -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
+            BODY=$(echo "$RESULT" | head -n -1)
+            HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
+            echo "Blog worker response (HTTP $HTTP_STATUS): $BODY"
+            if [ "$HTTP_STATUS" != "200" ]; then
+              echo "::error::Blog post trigger failed with HTTP status $HTTP_STATUS"
+              exit 1
+            fi
+          fi

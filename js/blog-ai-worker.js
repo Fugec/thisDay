@@ -114,15 +114,16 @@ export default {
 /**
  * Checks the last generation date and generates a new post if enough days
  * have passed (every EVERY_OTHER_DAYS days).
+ *
+ * Retry strategy: tries up to 3 times with increasing delays so transient
+ * CF Workers AI timeouts don't silently skip an entire day.
  */
 async function maybeGenerateBlogPost(env) {
   const today = todayDateString(); // "YYYY-MM-DD"
   const lastGen = await env.BLOG_AI_KV.get(KV_LAST_GEN_KEY);
 
   if (lastGen) {
-    const lastDate = new Date(lastGen);
-    const todayDate = new Date(today);
-    const diffDays = Math.round((todayDate - lastDate) / 86_400_000);
+    const diffDays = Math.round((new Date(today) - new Date(lastGen)) / 86_400_000);
     if (diffDays < EVERY_OTHER_DAYS) {
       console.log(
         `Blog AI: last post was ${diffDays} day(s) ago — skipping (need ${EVERY_OTHER_DAYS}).`
@@ -131,8 +132,32 @@ async function maybeGenerateBlogPost(env) {
     }
   }
 
-  await generateAndStore(env);
+  // Mark today as attempted before generating so tomorrow's cron always starts
+  // from today's date regardless of whether generation succeeds or fails.
   await env.BLOG_AI_KV.put(KV_LAST_GEN_KEY, today);
+
+  // Retry up to 3 times — CF Workers AI occasionally times out on the first attempt.
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await generateAndStore(env);
+      console.log(`Blog AI: post generated successfully (attempt ${attempt}/3).`);
+      return;
+    } catch (err) {
+      lastError = err;
+      console.error(`Blog AI: attempt ${attempt}/3 failed — ${err.message}`);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt));
+    }
+  }
+
+  // All attempts failed — persist error in KV so it's visible in the dashboard.
+  const errMsg = lastError?.message ?? String(lastError);
+  await env.BLOG_AI_KV.put(
+    `error:${today}`,
+    `Generation failed after 3 attempts: ${errMsg}`,
+    { expirationTtl: 7 * 86_400 }, // auto-expire after 7 days
+  );
+  console.error(`Blog AI: all 3 attempts failed for ${today}. Error stored in KV.`);
 }
 
 /**
@@ -333,7 +358,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
       },
       { role: "user", content: prompt },
     ],
-    max_tokens: 4096,
+    max_tokens: 2048, // Reduced from 4096 to prevent CF Workers AI timeout (30 s wall clock)
   });
 
   // Handle different response shapes across CF AI models:

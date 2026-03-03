@@ -99,8 +99,31 @@ export default {
     // Two-segment paths like /blog/august/1-2025/ are existing static posts — pass them through.
     const postMatch = path.match(/^\/blog\/([^/]+)$/);
     if (postMatch) {
-      const html = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${postMatch[1]}`);
-      if (html) return htmlResponse(html);
+      const slug = postMatch[1];
+      const [html, ytRaw] = await Promise.all([
+        env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`),
+        env.BLOG_AI_KV.get("youtube:uploaded"),
+      ]);
+      if (html) {
+        const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
+        if (ytEntry?.youtubeId) {
+          const ytIframe = `<!-- YouTube -->
+          <div class="my-4">
+            <iframe
+              width="100%"
+              style="aspect-ratio:9/16;border:none;border-radius:8px"
+              src="https://www.youtube.com/embed/${ytEntry.youtubeId}"
+              title="Watch on YouTube"
+              allowfullscreen
+              loading="lazy"
+            ></iframe>
+          </div>
+
+          <!-- Aftermath -->`;
+          return htmlResponse(html.replace(/<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/, ytIframe));
+        }
+        return htmlResponse(html);
+      }
     }
 
     // Pass through to origin; intercept 404 HTML responses with a helpful page.
@@ -841,8 +864,7 @@ ${analysisBadItems}
           ${(() => {
             const related = allPosts
               .filter(p => p.slug !== slug)
-              .sort(() => Math.random() - 0.5)
-              .slice(0, 3);
+              .slice(0, 3); // already sorted newest-first; today's post is always shown first
             if (related.length === 0) return "";
             const cards = related.map(p => `
               <div class="col-md-4">

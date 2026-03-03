@@ -50,7 +50,7 @@ export default {
   /**
    * HTTP fetch handler — serves blog pages and the manual trigger endpoint.
    */
-  async fetch(request, env, ctx) {
+  async fetch(request, env, _ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, "") || "/";
 
@@ -61,20 +61,12 @@ export default {
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
-      // Run in background via ctx.waitUntil so the 30 s HTTP response timeout
-      // doesn't interrupt large AI inference (same pattern as the cron handler).
-      ctx.waitUntil(
-        generateAndStore(env).catch(async (err) => {
-          console.error(`Blog AI: /blog/publish generation failed — ${err.message}`);
-          const today = todayDateString();
-          await env.BLOG_AI_KV.put(
-            `error:${today}`,
-            `Publish endpoint failed: ${err.message}`,
-            { expirationTtl: 7 * 86_400 },
-          );
-        }),
-      );
-      return jsonResponse({ status: "ok", message: "Blog post generation started." });
+      try {
+        await generateAndStore(env);
+        return jsonResponse({ status: "ok", message: "Blog post published." });
+      } catch (err) {
+        return jsonResponse({ status: "error", message: String(err) }, 500);
+      }
     }
 
     // Listing page: /blog/archive
@@ -233,7 +225,14 @@ async function generateAndStore(env) {
   const index = [...existingIndex];
 
   // Avoid duplicates
-  if (!index.find((e) => e.slug === slug)) {
+  const existingEntry = index.find((e) => e.slug === slug);
+  if (existingEntry) {
+    // Re-generation: update the existing entry in-place
+    existingEntry.title = content.title;
+    existingEntry.description = content.description;
+    existingEntry.imageUrl = content.imageUrl;
+    existingEntry.publishedAt = now.toISOString();
+  } else {
     index.unshift({
       slug,
       title: content.title,
@@ -243,8 +242,8 @@ async function generateAndStore(env) {
     });
     // Cap the index at 200 entries
     if (index.length > 200) index.splice(200);
-    await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
   }
+  await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
 
   // Purge the cached sitemap and RSS feed so they reflect the new post immediately
   // (both workers cache for 1 h — without this, the new post would be invisible
@@ -278,11 +277,12 @@ STRICT DATE REQUIREMENT: You MUST write about an event that occurred on ${monthN
 
 Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this exact date.
 ${avoidSection}
-The article must be thorough and long — at least 800 words of body content — with multiple sections including eyewitness accounts, aftermath, and a personal editorial analysis of what went right and wrong about the event or the response to it.
+Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day}. Cover the context, key actors, eyewitness accounts, aftermath, and a personal editorial analysis.
 
 Writing style rules:
 - Do not use dashes ("-" or "—") inside sentences. Use commas, periods, or rewrite the sentence instead.
 - Write in a natural, human tone. Avoid bullet-point thinking inside paragraphs.
+- Keep each paragraph field to 3 to 4 sentences. Be substantive but concise.
 
 Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation — just the JSON.
 
@@ -302,10 +302,10 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "imageAlt": "Alt text for the image",
   "imageCaption": "Image caption with source",
   "jsonLdName": "Event name",
-  "jsonLdDescription": "Schema.org description one or two sentences",
+  "jsonLdDescription": "Schema.org description, 1 to 2 sentences",
   "jsonLdUrl": "https://en.wikipedia.org/wiki/Article",
   "organizerName": "Key figure or organization",
-  "readingTimeMinutes": 8,
+  "readingTimeMinutes": 6,
   "quickFacts": [
     { "label": "Event", "value": "Full event name" },
     { "label": "Date", "value": "Month Day, Year" },
@@ -320,40 +320,35 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "A third fact that adds color or context to the main story, 1 to 2 sentences."
   ],
   "overviewParagraphs": [
-    "First paragraph: context and background leading up to the event, 4 to 5 sentences.",
-    "Second paragraph: what happened — the main events, key actors, turning points, 4 to 5 sentences.",
-    "Third paragraph: immediate consequences and how people reacted in the moment, 4 to 5 sentences.",
-    "Fourth paragraph: broader context — how this fits into the larger history of the period, 3 to 4 sentences."
+    "Context and background leading up to the event, 3 to 4 sentences.",
+    "What happened: the main events, key actors, and turning points, 3 to 4 sentences.",
+    "Immediate consequences and how people reacted in the moment, 3 to 4 sentences."
   ],
   "eyewitnessOrChronicle": [
-    "First paragraph about contemporary accounts, documents, or eyewitness descriptions of the event, 4 to 5 sentences. Include the name of the source if known.",
-    "Second paragraph with a paraphrased quote or summary of another account, or elaboration on what survivors or observers reported, 3 to 4 sentences.",
-    "Optional third paragraph addressing the reliability of sources — what historians accept, what is disputed, and why, 3 to 4 sentences."
+    "Contemporary accounts or eyewitness descriptions, including the source name if known, 3 to 4 sentences.",
+    "A paraphrased quote or summary of another account, or what survivors reported, 3 to 4 sentences."
   ],
-  "eyewitnessQuote": "A short paraphrased or real quote from a contemporary source about the event, under 200 characters.",
+  "eyewitnessQuote": "A short paraphrased or real quote from a contemporary source, under 200 characters.",
   "eyewitnessQuoteSource": "Name of the source, e.g. 'John Smith, Diary, 1776'",
   "aftermathParagraphs": [
-    "First paragraph about immediate aftermath — what changed physically, politically, or socially in the weeks and months after the event, 4 to 5 sentences.",
-    "Second paragraph about medium-term consequences — reforms, rebuilding, institutional changes, reactions from other nations or groups, 4 to 5 sentences.",
-    "Third paragraph about long-term legacy — how historians view it today, what monuments or traditions commemorate it, and what was ultimately forgotten or ignored, 3 to 4 sentences."
+    "Immediate aftermath: what changed physically, politically, or socially in the weeks after the event, 3 to 4 sentences.",
+    "Long-term legacy: how historians view it today and what monuments or traditions commemorate it, 3 to 4 sentences."
   ],
   "conclusionParagraphs": [
-    "First conclusion paragraph summarizing the event's place in history, 3 to 4 sentences.",
-    "Second conclusion paragraph about its relevance to the modern world, 2 to 3 sentences.",
-    "Third conclusion paragraph with a thought-provoking closing observation, 2 to 3 sentences."
+    "The event's place in history and why it still matters, 3 to 4 sentences.",
+    "A thought-provoking closing observation about what this event reveals about human nature or society, 2 to 3 sentences."
   ],
   "analysisGood": [
-    { "title": "Short label for what went right", "detail": "2 to 3 sentences explaining this positive aspect, who deserves credit, and why it mattered." },
-    { "title": "Another positive aspect", "detail": "2 to 3 sentences of explanation." },
-    { "title": "A third positive aspect", "detail": "2 to 3 sentences of explanation." }
+    { "title": "What went right", "detail": "2 sentences explaining this positive aspect and why it mattered." },
+    { "title": "Another positive aspect", "detail": "2 sentences of explanation." },
+    { "title": "A third positive aspect", "detail": "2 sentences of explanation." }
   ],
   "analysisBad": [
-    { "title": "Short label for what went wrong", "detail": "2 to 3 sentences explaining this failure, who is responsible, and what the consequences were." },
-    { "title": "Another failure or missed opportunity", "detail": "2 to 3 sentences of explanation." },
-    { "title": "A third thing that went wrong", "detail": "2 to 3 sentences of explanation." },
-    { "title": "Optional fourth point about institutional or systemic failure", "detail": "2 to 3 sentences of explanation." }
+    { "title": "What went wrong", "detail": "2 sentences explaining this failure and its consequences." },
+    { "title": "Another failure or missed opportunity", "detail": "2 sentences of explanation." },
+    { "title": "A third thing that went wrong", "detail": "2 sentences of explanation." }
   ],
-  "editorialNote": "A 3 to 4 sentence personal editorial reflection from the thisDay. team — a frank, opinionated observation about what this event reveals about human nature, institutions, or history in general. Write in first-person plural (we think, what strikes us).",
+  "editorialNote": "A 2 to 3 sentence personal editorial reflection from the thisDay. team — a frank, opinionated observation about what this event reveals about human nature or institutions. Write in first-person plural (we think, what strikes us).",
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
   "youtubeSearchQuery": "specific event name year history documentary"
 }`;
@@ -366,7 +361,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
       },
       { role: "user", content: prompt },
     ],
-    max_tokens: 4096,
+    max_tokens: 2048,
   });
 
   // Handle different response shapes across CF AI models:

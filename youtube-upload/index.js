@@ -102,7 +102,8 @@ async function main() {
       console.log(`  ✓ https://youtube.com/shorts/${youtubeId}`);
 
       // Record in KV tracker (overwrites previous entry for re-uploads)
-      await markUploaded(post.slug, youtubeId);
+      const privacy = process.env.YOUTUBE_PRIVACY || 'public';
+      await markUploaded(post.slug, youtubeId, privacy);
 
     } catch (err) {
       console.error(`  ✗ Failed: ${err.message}`);

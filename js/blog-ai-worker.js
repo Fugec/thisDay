@@ -106,7 +106,7 @@ export default {
       ]);
       if (html) {
         const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
-        if (ytEntry?.youtubeId) {
+        if (ytEntry?.youtubeId && ytEntry.privacy !== 'private') {
           const ytIframe = `<!-- YouTube -->
           <div class="my-4">
             <iframe

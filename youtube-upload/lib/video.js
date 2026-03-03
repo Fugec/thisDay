@@ -1,11 +1,11 @@
 /**
  * Generates a YouTube Shorts MP4 (1080x1920) from a blog post.
  *
- * Pipeline:
- *   1. Download the post's Wikipedia image
- *   2. Resize + crop to fill 1080x1920
- *   3. Composite an SVG text overlay (title, description, branding)
- *   4. Encode the static frame into a 45-second MP4 via FFmpeg
+ * Audio mixing:
+ *   narrationPath  — ElevenLabs TTS voiceover, played once at full volume.
+ *   bgMusicPath    — Background music looped for the full 45 s at 15% volume.
+ *   When both are present they are mixed with FFmpeg's amix filter so the
+ *   voice is always clear over the music.
  *
  * Requires: sharp, fluent-ffmpeg, and FFmpeg installed on the system.
  * On Ubuntu (GitHub Actions): sudo apt-get install -y ffmpeg fonts-dejavu-core
@@ -20,7 +20,8 @@ import { join } from 'path';
 const TMP = './tmp';
 const W = 1080;
 const H = 1920;
-const DURATION = 45; // seconds — within YouTube Shorts 60s limit
+const DURATION = 45; // seconds — within YouTube Shorts 60 s limit
+const FPS = 30;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -32,7 +33,7 @@ function escapeXml(str = '') {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+    .replace(/'/g, '&#39;');
 }
 
 function wrapLines(text, maxChars) {
@@ -125,19 +126,22 @@ async function downloadImageBuffer(url) {
  * The caller is responsible for deleting the file after upload.
  *
  * @param {{ slug: string, title: string, description: string, imageUrl: string }} post
- * @returns {Promise<string>} absolute path to the MP4
+ * @param {{
+ *   narrationPath?: string|null,  ElevenLabs TTS audio — played once at 100% volume
+ *   bgMusicPath?:   string|null,  Background music — looped at 15% volume
+ * }} [opts]
+ * @returns {Promise<string>} path to the MP4
  */
-export async function generateVideo(post) {
+export async function generateVideo(post, { narrationPath, bgMusicPath } = {}) {
   mkdirSync(TMP, { recursive: true });
 
-  const { slug, title, description, imageUrl } = post;
-  const framePath = join(TMP, `${slug}_frame.png`);
-  const videoPath = join(TMP, `${slug}.mp4`);
+  const { slug, title, description } = post;
+  const imageUrl   = post.imageUrl || 'https://thisday.info/images/logo.png';
+  const framePath  = join(TMP, `${slug}_frame.png`);
+  const videoPath  = join(TMP, `${slug}.mp4`);
 
-  // 1. Download image
+  // 1. Download + resize Wikipedia image → PNG frame with SVG overlay
   const imgBuffer = await downloadImageBuffer(imageUrl);
-
-  // 2. Resize + composite SVG overlay
   const svgBuffer = Buffer.from(buildSVG(title, description));
 
   await sharp(imgBuffer)
@@ -146,26 +150,75 @@ export async function generateVideo(post) {
     .png()
     .toFile(framePath);
 
-  // 3. Encode static frame → 45-second MP4
+  // 2. Encode PNG frame → 45-second MP4
+  //    Audio strategy:
+  //      narration + music  → amix (narration 100%, music 15%)
+  //      narration only     → narration track, video pads to 45 s silently
+  //      music only         → music looped at full volume for 45 s
+  //      no audio           → silent video
   await new Promise((resolve, reject) => {
-    ffmpeg()
+    const cmd = ffmpeg()
       .input(framePath)
-      .inputOptions(['-loop 1'])
-      .outputOptions([
-        '-c:v libx264',
-        `-t ${DURATION}`,
-        '-pix_fmt yuv420p',
-        '-r 30',
-        '-movflags +faststart',
-      ])
+      .inputOptions(['-loop 1']); // input 0 — image
+
+    const hasNarr  = !!narrationPath;
+    const hasMusic = !!bgMusicPath;
+
+    // Add audio inputs in fixed order: narration=1, music=2 (when both present)
+    if (hasNarr)  cmd.input(narrationPath);                               // input 1
+    if (hasMusic) cmd.input(bgMusicPath).inputOptions(['-stream_loop -1']); // input 1 or 2
+
+    const musicIdx = hasNarr && hasMusic ? 2 : 1; // music input index
+    const narrIdx  = 1;                            // narration always input 1
+
+    const baseOpts = [
+      '-c:v libx264',
+      `-t ${DURATION}`,
+      '-pix_fmt yuv420p',
+      `-r ${FPS}`,
+      '-movflags +faststart',
+    ];
+
+    if (hasNarr && hasMusic) {
+      // Mix: narration at full volume + music at 15% in background
+      // normalize=0 prevents amix from attenuating the narration
+      cmd
+        .complexFilter(
+          `[${musicIdx}:a]volume=0.15[bg];` +
+          `[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`,
+        )
+        .outputOptions([
+          ...baseOpts,
+          '-map 0:v', '-map [a]',
+          '-c:a aac', '-b:a 128k',
+        ]);
+    } else if (hasNarr) {
+      // Narration only — video is 45 s, audio ends when narration ends (rest is silent)
+      cmd.outputOptions([
+        ...baseOpts,
+        '-map 0:v', '-map 1:a',
+        '-c:a aac', '-b:a 128k',
+      ]);
+    } else if (hasMusic) {
+      // Background music only — loop fills the full 45 s
+      cmd.outputOptions([
+        ...baseOpts,
+        '-map 0:v', '-map 1:a',
+        '-c:a aac', '-b:a 128k',
+        '-shortest',
+      ]);
+    } else {
+      // Silent
+      cmd.outputOptions(baseOpts);
+    }
+
+    cmd
       .output(videoPath)
       .on('end', resolve)
       .on('error', reject)
       .run();
   });
 
-  // Clean up the intermediate frame PNG
   try { unlinkSync(framePath); } catch { /* ignore */ }
-
   return videoPath;
 }

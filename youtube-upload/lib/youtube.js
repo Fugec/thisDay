@@ -60,7 +60,8 @@ export async function uploadToYoutube(videoPath, post) {
         defaultAudioLanguage: 'en',
       },
       status: {
-        privacyStatus: 'public',
+        // Default 'public'; set YOUTUBE_PRIVACY=private to upload as draft for review
+        privacyStatus: process.env.YOUTUBE_PRIVACY || 'public',
         selfDeclaredMadeForKids: false,
       },
     },

@@ -5,7 +5,7 @@
  * using text from the post's "Did You Know?" section (newer posts) or
  * "Quick Facts" table (older posts).
  *
- * Voice: Adam — calm, deep, suitable for history documentaries.
+ * Voice: Brian — deep, resonant, comforting.
  * Model: eleven_turbo_v2_5 — lowest character cost on the free plan.
  *
  * Free plan: 10 000 chars/month.
@@ -20,7 +20,7 @@ import { mkdirSync } from 'fs';
 import { join } from 'path';
 
 const ASSETS_DIR = './assets';
-const VOICE_ID   = 'pNInz6obpgDQGcFmaJgB'; // Adam — deep, calm, documentary
+const VOICE_ID   = 'nPczCjzI2devNBz1zQrb'; // Brian — deep, resonant, comforting
 const MODEL_ID   = 'eleven_turbo_v2_5';      // fastest + lowest character cost
 
 /**

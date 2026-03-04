@@ -523,6 +523,7 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl) {
 <meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
 <meta name="twitter:description" content="${escapeHtml(pageDesc)}"/><meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
 <meta name="author" content="thisDay.info"/>
+<meta name="tiktok-developers-site-verification" content="JozSRf8Fhwm0NLEZYDC2EHf9S1OWuZfc"/>
 <script type="application/ld+json">${articleSchema}</script>
 ${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
@@ -718,6 +719,12 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 // --- Main Request Handler (for user requests) ---
 async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
+
+  if (url.pathname === "/tiktokpcqDKR92sLQKX7LxOUslGFutZoNTuqNS.txt") {
+    return new Response("tiktok-developers-site-verification=pcqDKR92sLQKX7LxOUslGFutZoNTuqNS", {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
 
   if (url.pathname === "/llms.txt") {
     const llmsContent = `# Site Summary for Large Language Models...`; // your content

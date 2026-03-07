@@ -4,17 +4,12 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "auth": "node lib/auth-setup.js",
-    "social": "node social-upload.js",
-    "login": "node login.js",
-    "auto": "node auto-social.js"
+    "auth": "node lib/auth-setup.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1003.0",
     "dotenv": "^16.4.7",
     "fluent-ffmpeg": "^2.1.3",
     "googleapis": "^148.0.0",
-    "playwright": "^1.44.0",
     "sharp": "^0.33.5"
   }
 }

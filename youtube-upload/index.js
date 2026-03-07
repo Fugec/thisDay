@@ -28,7 +28,6 @@ import { uploadToYoutube } from './lib/youtube.js';
 import { getUploaded, markUploaded } from './lib/tracker.js';
 import { getMusicPath } from './lib/music.js';
 import { generateNarration, buildNarrationScript } from './lib/elevenlabs.js';
-import { uploadToR2 } from './lib/r2.js';
 
 async function main() {
   // Posts that should be re-uploaded even if already in the tracker
@@ -105,12 +104,6 @@ async function main() {
       // Record in KV tracker (overwrites previous entry for re-uploads)
       const privacy = process.env.YOUTUBE_PRIVACY || 'public';
       await markUploaded(post.slug, youtubeId, privacy);
-
-      // Upload video to R2 so social-upload.js can fetch it later
-      if (process.env.R2_ACCESS_KEY_ID) {
-        console.log('  Uploading to R2...');
-        await uploadToR2(post.slug, videoPath);
-      }
 
     } catch (err) {
       console.error(`  ✗ Failed: ${err.message}`);

@@ -8,6 +8,7 @@
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
+const CF_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 // --- Helper function to fetch daily events from Wikipedia API ---
 async function fetchDailyEvents(date) {
@@ -432,7 +433,7 @@ function workerCommentary(year, text) {
   ];
 }
 
-function generateBlogPostHTML(monthName, day, eventsData, siteUrl) {
+function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFacts = []) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const canonical = `${siteUrl}/generated/${monthName}/${day}/`;
@@ -547,6 +548,10 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
 .commentary{border-left:4px solid #3b82f6;padding:10px 14px;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--mu);margin:18px 0}
 body.dark-theme .commentary{background:rgba(59,130,246,.15)}
+.did-you-know{background:rgba(245,158,11,.07);border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
+body.dark-theme .did-you-know{background:rgba(245,158,11,.13)}
+.did-you-know{background:rgba(245,158,11,.07);border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
+body.dark-theme .did-you-know{background:rgba(245,158,11,.13)}
 .yr{background:#3b82f6;color:#fff;padding:2px 7px;border-radius:4px;font-size:.78rem;font-weight:600;margin-right:6px;white-space:nowrap}
 .ev-row{padding:11px 0;border-bottom:1px solid var(--cbr)}.ev-row:last-child{border-bottom:none}
 .person-row{padding:9px 0;border-bottom:1px solid var(--cbr)}.person-row:last-child{border-bottom:none}
@@ -591,7 +596,7 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     ${featImg ? `<img src="${escapeHtml(featImg)}" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
-    <div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>
+    ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:#f59e0b"></i>Did You Know?</h3><ul>${didYouKnowFacts.map(f => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <table class="table table-sm table-bordered mt-3" style="max-width:480px">
       <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
       <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
@@ -669,7 +674,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   }
 
   // Try KV cache (7-day TTL)
-  const kvKey = `gen-post-v2-${monthName}-${day}`;
+  const kvKey = `gen-post-v3-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -695,8 +700,40 @@ async function handleGeneratedPost(_request, env, ctx, url) {
     if (r.ok) eventsData = await r.json();
   } catch (e) { console.error("Wikipedia API:", e); }
 
+  // Identify featured event and generate AI "Did You Know" facts
+  const featuredEvent = eventsData?.events?.find(e => e.pages?.[0]?.thumbnail?.source) || eventsData?.events?.[0] || null;
+  let didYouKnowFacts = [];
+  if (env.AI && featuredEvent) {
+    try {
+      const eventDesc = `${featuredEvent.year} — ${featuredEvent.text}`;
+      const aiResult = await env.AI.run(CF_AI_MODEL, {
+        messages: [
+          {
+            role: "system",
+            content: "You are a historical facts writer. Always respond with valid JSON only, no markdown, no extra text.",
+          },
+          {
+            role: "user",
+            content: `Write exactly 5 interesting "Did You Know" facts about this historical event: "${eventDesc}"\n\nEach fact must be 2-3 sentences. Make them educational, specific, and directly connected to the event or its broader topic. Avoid restating the event itself as a fact.\n\nReply with ONLY a JSON array of 5 strings. Example:\n["Fact one.", "Fact two.", "Fact three.", "Fact four.", "Fact five."]`,
+          },
+        ],
+        max_tokens: 1024,
+      });
+      const rawValue = aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
+      const raw = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+      const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+      if (arrMatch) {
+        const parsed = JSON.parse(arrMatch[0]);
+        if (Array.isArray(parsed) && parsed.length >= 3) {
+          didYouKnowFacts = parsed.filter(f => typeof f === "string");
+        }
+      }
+    } catch (e) { console.error("AI did-you-know generation failed:", e); }
+  }
+
   const siteUrl = `${url.protocol}//${url.host}`;
-  const html = generateBlogPostHTML(monthName, day, eventsData, siteUrl);
+  const html = generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFacts);
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
   if (env.EVENTS_KV && (eventsData?.events?.length || 0) > 0) {

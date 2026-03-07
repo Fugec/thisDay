@@ -61,20 +61,19 @@ export default {
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
-      // Run in background via ctx.waitUntil so the 30 s HTTP response timeout
-      // doesn't interrupt large AI inference (same pattern as the cron handler).
-      ctx.waitUntil(
-        generateAndStore(env).catch(async (err) => {
-          console.error(`Blog AI: /blog/publish generation failed — ${err.message}`);
-          const today = todayDateString();
-          await env.BLOG_AI_KV.put(
-            `error:${today}`,
-            `Publish endpoint failed: ${err.message}`,
-            { expirationTtl: 7 * 86_400 },
-          );
-        }),
-      );
-      return jsonResponse({ status: "ok", message: "Blog post generation started." });
+      try {
+        await generateAndStore(env);
+        return jsonResponse({ status: "ok", message: "Blog post published." });
+      } catch (err) {
+        console.error(`Blog AI: /blog/publish generation failed — ${err.message}`);
+        const today = todayDateString();
+        await env.BLOG_AI_KV.put(
+          `error:${today}`,
+          `Publish endpoint failed: ${err.message}`,
+          { expirationTtl: 7 * 86_400 },
+        );
+        return jsonResponse({ status: "error", message: err.message }, 500);
+      }
     }
 
     // Listing page: /blog/archive

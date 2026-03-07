@@ -119,3 +119,45 @@ export async function getQuickFacts(slug) {
 
   return rows.length > 0 ? rows : null;
 }
+
+/**
+ * Fetches the live generated page (seo-worker) for a slug and returns post
+ * metadata + Did You Know items. Used as fallback when blog KV has no posts.
+ *
+ * @param {string} slug  e.g. "7-march-2026"
+ * @returns {Promise<{slug,title,description,imageUrl,publishedAt,dykItems}|null>}
+ */
+export async function fetchPageData(slug) {
+  const parts = slug.split('-');
+  if (parts.length < 3) return null;
+  const [day, month] = parts;
+  const url = `https://thisday.info/${month}/${day}/`;
+
+  let html;
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'thisday-uploader/1.0' } });
+    if (!res.ok) return null;
+    html = await res.text();
+  } catch {
+    return null;
+  }
+
+  const h2Match   = html.match(/<h2>([^<]+)<\/h2>/);
+  const metaMatch = html.match(/<meta name="description" content="([^"]+)"/i);
+  const imgMatch  = html.match(/<img src="([^"]+)"[^>]*class="feat-img"/);
+
+  const title       = h2Match   ? decodeEntities(h2Match[1])   : slug;
+  const description = metaMatch ? decodeEntities(metaMatch[1]) : title;
+  const imageUrl    = imgMatch  ? imgMatch[1] : null;
+
+  const dykSection = html.match(/class="did-you-know[^"]*"[\s\S]*?<ul[^>]*>([\s\S]*?)<\/ul>/i);
+  let dykItems = null;
+  if (dykSection) {
+    const items = [...dykSection[1].matchAll(/<li>([^<]+)<\/li>/gi)]
+      .map(m => decodeEntities(m[1].trim()))
+      .filter(Boolean);
+    if (items.length) dykItems = items;
+  }
+
+  return { slug, title, description, imageUrl, publishedAt: new Date().toISOString(), dykItems };
+}

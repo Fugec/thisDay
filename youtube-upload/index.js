@@ -22,7 +22,7 @@
 
 import 'dotenv/config';
 import { unlinkSync } from 'fs';
-import { getPostIndex, getDidYouKnow, getQuickFacts } from './lib/kv.js';
+import { getPostIndex, getDidYouKnow, getQuickFacts, fetchPageData } from './lib/kv.js';
 import { generateVideo } from './lib/video.js';
 import { uploadToYoutube } from './lib/youtube.js';
 import { getUploaded, markUploaded } from './lib/tracker.js';
@@ -42,7 +42,7 @@ async function main() {
   ]);
 
   // Sort newest-first; forced re-uploads always float to the top
-  const pending = posts
+  let pending = posts
     .filter(p => !uploaded[p.slug] || reuploadSlugs.has(p.slug))
     .sort((a, b) => {
       const af = reuploadSlugs.has(a.slug) ? 1 : 0;
@@ -51,6 +51,19 @@ async function main() {
       return new Date(b.publishedAt) - new Date(a.publishedAt);
     })
     .slice(0, 1); // 1 post per run — with every-3-day cron = ~10/month
+
+  // Fallback: when blog KV has no posts, use today's generated page as the source
+  if (!pending.length && !posts.length) {
+    const now = new Date();
+    const MONTHS = ['january','february','march','april','may','june',
+                    'july','august','september','october','november','december'];
+    const todaySlug = `${now.getDate()}-${MONTHS[now.getMonth()]}-${now.getFullYear()}`;
+    if (!uploaded[todaySlug] || reuploadSlugs.has(todaySlug)) {
+      console.log(`  Blog KV empty — fetching today\'s page (${todaySlug})...`);
+      const pagePost = await fetchPageData(todaySlug);
+      if (pagePost) pending = [pagePost];
+    }
+  }
 
   console.log(
     `Posts in KV: ${posts.length} | ` +
@@ -73,17 +86,21 @@ async function main() {
     let narrationPath;
     try {
       // ── ElevenLabs TTS narration ───────────────────────────────────────────
-      // Source text priority: Did You Know bullets → Quick Facts rows → description
-      console.log('  Fetching Did You Know / Quick Facts from KV...');
-      const dykItems   = await getDidYouKnow(post.slug);
-      const quickFacts = dykItems ? null : await getQuickFacts(post.slug);
-      const contentItems = dykItems ?? quickFacts ?? null;
-
+      // Source priority: page DYK (page fallback) → blog KV DYK → Quick Facts → description
+      let contentItems = post.dykItems ?? null;
       if (contentItems) {
-        const source = dykItems ? 'Did You Know' : 'Quick Facts';
-        console.log(`  Using ${source} section (${contentItems.length} items).`);
+        console.log(`  Using Did You Know from page (${contentItems.length} items).`);
       } else {
-        console.log('  No DYK/Quick Facts found — using description as fallback.');
+        console.log('  Fetching Did You Know / Quick Facts from KV...');
+        const kvDyk    = await getDidYouKnow(post.slug);
+        const quickFacts = kvDyk ? null : await getQuickFacts(post.slug);
+        contentItems = kvDyk ?? quickFacts ?? null;
+        if (contentItems) {
+          const source = kvDyk ? 'Did You Know' : 'Quick Facts';
+          console.log(`  Using ${source} section (${contentItems.length} items).`);
+        } else {
+          console.log('  No DYK/Quick Facts found — using description as fallback.');
+        }
       }
 
       const script = buildNarrationScript(post, contentItems);

@@ -338,9 +338,9 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation â
     { "label": "Legacy", "value": "Long-term impact" }
   ],
   "didYouKnowFacts": [
-    "Surprising or lesser-known fact about the event, 1 to 2 sentences.",
-    "Another interesting detail readers might not expect, 1 to 2 sentences.",
-    "A third fact that adds color or context to the main story, 1 to 2 sentences."
+    "Surprising or lesser-known fact specifically about THIS event (the one in the title), 1 to 2 sentences. MUST be about the same event â€” NOT about any other historical event on this date.",
+    "Another interesting detail about THIS SAME event that readers might not expect, 1 to 2 sentences.",
+    "A third fact that adds color or context to THIS SAME main story, 1 to 2 sentences."
   ],
   "overviewParagraphs": [
     "First paragraph: context and background leading up to the event, 4 to 5 sentences.",

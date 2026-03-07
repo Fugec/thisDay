@@ -455,12 +455,16 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl) {
   const ogImg = featured?.pages?.[0]?.thumbnail?.source || `${siteUrl}/images/logo.png`;
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featWiki = featured?.pages?.[0]?.content_urls?.desktop?.page || "";
-  const commentaryParas = featured
-    ? workerCommentary(featured.year, featured.text)
-    : [
-        "Every date in history is someone's entire world.",
-        "What we record as a footnote was, for those living it, the defining moment of their lives. The past was always someone's present.",
-      ];
+  // ── Did You Know — 4 facts from the day's events + notable births ──────────
+  const dykPool = [
+    ...events.filter(e => e !== featured).slice(0, 6),
+    ...births.slice(0, 3).map(b => ({ year: b.year, text: b.text, _isBirth: true })),
+  ];
+  const dykItems = dykPool.slice(0, 4).map(e => {
+    const sentence = e.text.split(".")[0].trim();
+    const prefix = e._isBirth ? `Born in ${e.year}` : `In ${e.year}`;
+    return `<li>${escapeHtml(prefix + ": " + sentence)}.</li>`;
+  }).join("\n");
   const featTitle = featured
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
@@ -554,6 +558,8 @@ body.dark-theme .commentary{background:rgba(59,130,246,.15)}
 .p-thumb{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
 .p-thumb-blank{width:44px;height:44px;border-radius:50%;background:#e2e8f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#6c757d}
 body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
+.did-you-know{background:rgba(59,130,246,.08);border-left:4px solid #3b82f6;border-radius:0 .5rem .5rem 0}
+body.dark-theme .did-you-know{background:rgba(59,130,246,.15)}
 .auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
 body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
 </style></head>
@@ -592,7 +598,7 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     ${featImg ? `<img src="${escapeHtml(featImg)}" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
-    <div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>
+    ${dykItems ? `<div class="did-you-know p-3 rounded mb-3"><strong><i class="bi bi-lightbulb me-1" style="color:#3b82f6"></i>Did You Know?</strong><ul class="mb-0 mt-2">${dykItems}</ul></div>` : ""}
     <table class="table table-sm table-bordered mt-3" style="max-width:480px">
       <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
       <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>

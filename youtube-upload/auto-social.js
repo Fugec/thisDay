@@ -20,8 +20,6 @@ import { listR2Slugs } from './lib/r2-list.js';
 import { downloadFromR2 } from './lib/r2.js';
 import { getPostIndex } from './lib/kv.js';
 import { uploadToTikTok } from './lib/tiktok-browser.js';
-import { uploadToInstagram } from './lib/instagram-browser.js';
-import { uploadToFacebook } from './lib/facebook-browser.js';
 
 const TRACKER_PATH = join('./assets', 'social-posted.json');
 
@@ -77,24 +75,6 @@ async function main() {
         console.log('  TikTok: done.');
       } catch (err) {
         console.error(`  TikTok: FAILED — ${err.message}`);
-        allOk = false;
-      }
-
-      try {
-        console.log('  Uploading to Instagram...');
-        await uploadToInstagram(videoPath, post);
-        console.log('  Instagram: done.');
-      } catch (err) {
-        console.error(`  Instagram: FAILED — ${err.message}`);
-        allOk = false;
-      }
-
-      try {
-        console.log('  Uploading to Facebook...');
-        await uploadToFacebook(videoPath, post);
-        console.log('  Facebook: done.');
-      } catch (err) {
-        console.error(`  Facebook: FAILED — ${err.message}`);
         allOk = false;
       }
 

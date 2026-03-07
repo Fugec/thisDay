@@ -1,17 +1,12 @@
 /**
- * Facebook Reels browser-based uploader (Playwright).
+ * Meta Business Suite uploader (Playwright).
  *
- * Uses the same Meta Business credentials as Instagram.
- * Session cookies are saved to assets/facebook-session.json after first login —
- * subsequent runs skip the login step automatically.
+ * Logs into Facebook, then navigates to Meta Business Suite to create a Reel
+ * that posts simultaneously to both Facebook and Instagram.
  *
  * Env vars (optional — only needed if auto-login is desired):
  *   INSTAGRAM_USERNAME   your Facebook/Meta email (same account as Instagram)
  *   INSTAGRAM_PASSWORD   your Facebook/Meta password
- *
- * Optional:
- *   FACEBOOK_PAGE_URL    your Facebook Page URL (e.g. https://www.facebook.com/thisday.info)
- *                        If set, the Reel is posted on the Page instead of personal profile.
  */
 
 import { chromium } from 'playwright';
@@ -19,11 +14,10 @@ import { existsSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { buildCaption, waitForLoginSuccess } from './browser-utils.js';
 
-const SESSION_PATH  = join('./assets', 'facebook-session.json');
-const REELS_URL     = 'https://www.facebook.com/reels/create';
+const SESSION_PATH = join('./assets', 'facebook-session.json');
 
 /**
- * Uploads a video as a Facebook Reel using browser automation.
+ * Uploads a Reel via Meta Business Suite (posts to Facebook + Instagram).
  *
  * @param {string} videoPath   Absolute or relative path to the MP4 file
  * @param {{ slug: string, title: string, description: string }} post
@@ -52,24 +46,45 @@ export async function uploadToFacebook(videoPath, post) {
   const page = await context.newPage();
 
   try {
-    // ── Login ────────────────────────────────────────────────────────────────
-    console.log('  Facebook: navigating...');
+    // ── Login via Facebook ────────────────────────────────────────────────────
+    console.log('  Meta: navigating to Facebook...');
     await page.goto('https://www.facebook.com/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-    const needsLogin = await page.locator('input[name="email"], input[id="email"]')
-      .isVisible({ timeout: 6_000 }).catch(() => false);
+    const emailInput = page.locator('input[name="email"], input[id="email"]').first();
+    const needsLogin = await emailInput.isVisible({ timeout: 8_000 }).catch(() => false);
 
     if (needsLogin) {
-      const username = process.env.INSTAGRAM_USERNAME; // same Meta account
+      const username = process.env.INSTAGRAM_USERNAME;
       const password = process.env.INSTAGRAM_PASSWORD;
 
       if (username && password) {
-        console.log('  Facebook: auto-logging in with Meta credentials...');
-        await page.locator('input[name="email"], input[id="email"]').first().fill(username);
-        await page.locator('input[name="pass"], input[id="pass"]').first().fill(password);
-        await page.locator('button[name="login"], button[type="submit"]').first().click();
+        console.log('  Meta: filling Facebook credentials...');
+        await emailInput.fill(username);
+        const passInput = page.locator('input[name="pass"], input[id="pass"]').first();
+        await passInput.fill(password);
+        await passInput.press('Enter');
       } else {
-        console.log('  Facebook: please log in manually in the browser window.');
+        console.log('  Meta: please log in manually in the browser window.');
+      }
+
+      // Check for "I'm not a robot" checkbox after login attempt
+      await page.waitForTimeout(3_000);
+      const captchaFrame = page.frameLocator('iframe[src*="recaptcha"], iframe[title*="recaptcha" i], iframe[src*="captcha"]');
+      const robotCheckbox = captchaFrame.locator('#recaptcha-anchor, .recaptcha-checkbox').first();
+      const robotVisible = await robotCheckbox.isVisible({ timeout: 3_000 }).catch(() => false);
+      if (robotVisible) {
+        console.log('  Meta: checking "I\'m not a robot"...');
+        await robotCheckbox.click();
+        await page.waitForTimeout(2_000);
+      } else {
+        // Also try clicking a plain "I'm not a robot" checkbox outside iframe
+        const plainRobot = page.locator('[aria-label*="robot" i], label:has-text("not a robot")').first();
+        const plainVisible = await plainRobot.isVisible({ timeout: 2_000 }).catch(() => false);
+        if (plainVisible) {
+          console.log('  Meta: checking plain "I\'m not a robot"...');
+          await plainRobot.click();
+          await page.waitForTimeout(2_000);
+        }
       }
 
       await waitForLoginSuccess(page, 'Facebook', u =>
@@ -78,95 +93,138 @@ export async function uploadToFacebook(videoPath, post) {
         gmailAddress: process.env.INSTAGRAM_USERNAME,
         gmailPassword: process.env.INSTAGRAM_PASSWORD,
       });
-      console.log('  Facebook: logged in.');
-      // Save session immediately after login so it persists even if upload fails
+      console.log('  Meta: logged in to Facebook.');
       await context.storageState({ path: SESSION_PATH });
-    }
-
-    // ── Navigate to Reel creator ─────────────────────────────────────────────
-    // If a Page URL is configured, post from the Page; otherwise personal profile
-    const pageUrl = process.env.FACEBOOK_PAGE_URL;
-    if (pageUrl) {
-      console.log(`  Facebook: navigating to Page → ${pageUrl}`);
-      await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForTimeout(2_000);
-
-      // Click "Create Reel" from the Page toolbar
-      const createReelBtn = page.locator(
-        'a:has-text("Create Reel"), button:has-text("Create Reel"), ' +
-        '[aria-label="Create Reel"], span:has-text("Reel")'
-      ).first();
-      await createReelBtn.waitFor({ timeout: 15_000 });
-      await createReelBtn.click();
     } else {
-      console.log('  Facebook: navigating to Reels creator...');
-      await page.goto(REELS_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      console.log('  Meta: already logged in (session valid).');
     }
 
-    // ── File upload ──────────────────────────────────────────────────────────
-    console.log('  Facebook: uploading video...');
+    // ── Navigate to the Page and open Meta Business Suite ───────────────────
+    const pageUrl = process.env.FB_PAGE_URL || 'https://www.facebook.com/profile.php?id=61578009082537';
+    console.log(`  Meta: navigating to Page...`);
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
     await page.waitForTimeout(2_000);
+    console.log(`  Meta: on Page → ${page.url()}`);
 
-    // Try file chooser trigger first, fall back to direct input
-    const uploadBtn = page.locator(
-      'button:has-text("Add video"), button:has-text("Upload"), ' +
-      'label:has-text("Add video"), [aria-label*="upload" i], [aria-label*="video" i]'
+    // Click Meta Business Suite link — look by href (links to business.facebook.com)
+    console.log('  Meta: clicking Meta Business Suite...');
+    // First expand sidebar if there's a "See more" button
+    const seeMore = page.locator('span:has-text("See more"), [aria-label*="See more" i]').first();
+    const seeMoreVisible = await seeMore.isVisible({ timeout: 3_000 }).catch(() => false);
+    if (seeMoreVisible) {
+      await seeMore.click({ force: true });
+      await page.waitForTimeout(1_000);
+    }
+    const mbs = page.locator(
+      'a[href*="business.facebook.com"], ' +
+      'a:has-text("Meta Business Suite"), a:has-text("Business Suite"), ' +
+      'a:has-text("Go to Business Suite"), ' +
+      '[aria-label*="Business Suite" i]'
     ).first();
+    const mbsVisible = await mbs.isVisible({ timeout: 8_000 }).catch(() => false);
+    if (mbsVisible) {
+      await mbs.click();
+    } else {
+      // Fallback: navigate directly using existing session cookies
+      console.log('  Meta: MBS link not found on Page — navigating directly to Business Suite...');
+      await page.goto('https://business.facebook.com/latest/home/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    }
+    await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(3_000);
+    console.log(`  Meta: Business Suite URL → ${page.url()}`);
 
+    // If redirected to BS login page, click "Log in with Facebook"
+    if (page.url().includes('loginpage') || page.url().includes('business.facebook.com/login')) {
+      console.log('  Meta: BS login page — clicking Log in with Facebook...');
+      const fbBtn = page.locator(
+        'button:has-text("Facebook"), a:has-text("Facebook"), ' +
+        '[aria-label*="Facebook" i], [data-testid*="facebook" i]'
+      ).first();
+      await fbBtn.waitFor({ timeout: 15_000 });
+      await fbBtn.click();
+      console.log('  Meta: waiting for BS auth (solve CAPTCHA in browser if shown)...');
+      await page.waitForURL(
+        url => !url.href.includes('loginpage') && !url.href.includes('business.facebook.com/login'),
+        { timeout: 300_000 }
+      );
+      await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
+      await page.waitForTimeout(2_000);
+      await context.storageState({ path: SESSION_PATH });
+      console.log(`  Meta: BS authenticated → ${page.url()}`);
+      // Navigate to BS home
+      await page.goto('https://business.facebook.com/latest/home/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
+      await page.waitForTimeout(2_000);
+      console.log(`  Meta: BS home → ${page.url()}`);
+    }
+
+    // ── Click "Create reel" from top menu ────────────────────────────────────
+    console.log('  Meta: clicking Create reel from top menu...');
+    const createReelBtn = page.locator(
+      'button:has-text("Create reel"), a:has-text("Create reel"), ' +
+      'button:has-text("Create Reel"), a:has-text("Create Reel"), ' +
+      '[aria-label*="Create reel" i]'
+    ).first();
+    await createReelBtn.waitFor({ timeout: 20_000 });
+    await createReelBtn.click();
+    await page.waitForTimeout(2_000);
+    console.log(`  Meta: after Create Reel click → ${page.url()}`);
+
+    // ── Add video via Media / "Add video" button ──────────────────────────────
+    console.log('  Meta: clicking Add video in Media section...');
+    const addVideoBtn = page.locator(
+      'button:has-text("Add video"), [aria-label*="Add video" i], ' +
+      'div[role="button"]:has-text("Add video")'
+    ).first();
+    await addVideoBtn.waitFor({ timeout: 15_000 });
     const [fileChooser] = await Promise.all([
       page.waitForEvent('filechooser', { timeout: 20_000 }),
-      uploadBtn.isVisible({ timeout: 5_000 })
-        .then(v => v ? uploadBtn.click() : page.locator('input[type="file"]').first().click())
-        .catch(() => page.locator('input[type="file"]').first().click()),
+      addVideoBtn.click(),
     ]);
     await fileChooser.setFiles(absVideoPath);
+    console.log('  Meta: video file set, waiting for upload...');
 
-    // ── Wait for upload + processing ─────────────────────────────────────────
-    console.log('  Facebook: processing video (may take a minute)...');
-    // Wait for Next / Continue button to appear (signals processing done)
+    // Wait for upload to finish (progress bar disappears or Next/Publish appears)
+    await page.waitForTimeout(5_000);
     await page.locator(
-      'button:has-text("Next"), button:has-text("Continue")'
+      'button:has-text("Publish"), button:has-text("Post"), button:has-text("Share"), button:has-text("Next")'
     ).first().waitFor({ timeout: 180_000 });
-    await page.waitForTimeout(1_500);
 
-    // ── Caption ──────────────────────────────────────────────────────────────
-    console.log('  Facebook: adding caption...');
-    // Facebook Reels description field
-    const captionArea = page.locator(
-      'div[contenteditable="true"][aria-label*="caption" i], ' +
-      'div[contenteditable="true"][aria-label*="description" i], ' +
-      'div[contenteditable="true"][role="textbox"], ' +
-      'textarea[placeholder*="description" i], textarea[placeholder*="caption" i]'
+    // ── Write description in "Text" field ─────────────────────────────────────
+    console.log('  Meta: writing description in Text field...');
+    const textField = page.locator(
+      'textarea[aria-label="Text"], div[aria-label="Text"], ' +
+      'div[contenteditable="true"][aria-label="Text"], ' +
+      'textarea[placeholder*="Write something" i], ' +
+      'div[contenteditable="true"][data-placeholder*="Write" i]'
     ).first();
-
-    const captionVisible = await captionArea.isVisible({ timeout: 10_000 }).catch(() => false);
-    if (captionVisible) {
-      await captionArea.click();
-      await captionArea.fill(buildCaption(post));
+    const textVisible = await textField.isVisible({ timeout: 8_000 }).catch(() => false);
+    if (textVisible) {
+      await textField.click();
+      await textField.fill(buildCaption(post));
     } else {
-      console.warn('  Facebook: caption field not found — you may need to add it manually.');
+      console.warn('  Meta: Text field not found — add description manually if needed.');
     }
 
-    // ── Publish ──────────────────────────────────────────────────────────────
-    console.log('  Facebook: publishing...');
+    // ── Publish ───────────────────────────────────────────────────────────────
+    console.log('  Meta: publishing Reel to Facebook + Instagram...');
     const publishBtn = page.locator(
-      'button:has-text("Publish"), button:has-text("Post"), button:has-text("Share now")'
+      'button:has-text("Publish"), button:has-text("Post"), button:has-text("Share")'
     ).first();
     await publishBtn.waitFor({ timeout: 20_000 });
     await publishBtn.click();
 
-    // Wait for success
-    await page.locator(
-      'text=Your reel is published, text=Reel published, text=posted'
-    ).first().waitFor({ timeout: 120_000 }).catch(() => {
-      console.warn('  Facebook: could not auto-confirm success — check browser for result.');
-    });
+    await page.locator('text=published, text=posted, text=scheduled, text=shared')
+      .first().waitFor({ timeout: 120_000 }).catch(() => {
+        console.warn('  Meta: could not confirm success — check browser for result.');
+      });
 
-    console.log('  Facebook: upload complete.');
+    console.log('  Meta: Reel published to Facebook + Instagram.');
 
   } finally {
     await context.storageState({ path: SESSION_PATH });
-    console.log(`  Facebook: session saved → ${SESSION_PATH}`);
+    console.log(`  Meta: session saved → ${SESSION_PATH}`);
     await browser.close();
   }
 }

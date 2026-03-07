@@ -71,7 +71,7 @@ async function getCodeFromGmail(context, gmailAddress, gmailPassword, platformNa
     if (needsLogin) {
       console.log(`  ${platformName}: logging into Gmail (${gmailAddress})...`);
       await gmailPage.locator('input[type="email"]').fill(gmailAddress);
-      await gmailPage.locator('button:has-text("Next"), #identifierNext').click();
+      await gmailPage.locator('#identifierNext').click();
 
       await gmailPage.locator('input[type="password"]').waitFor({ timeout: 10_000 });
       await gmailPage.locator('input[type="password"]').fill(gmailPassword);

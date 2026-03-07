@@ -9,8 +9,8 @@
  * Model: eleven_turbo_v2_5 — lowest character cost on the free plan.
  *
  * Free plan: 10 000 chars/month.
- * Schedule: 1 video every 2 days ≈ 15 videos/month.
- * Narration capped at 3 bullets → ~500 chars avg → ~7 500 chars/month (within 10k free tier).
+ * Schedule: 1 video every 3 days ≈ 10 videos/month.
+ * Avg narration: ~600 chars → ~6 000 chars/month (well within free tier).
  *
  * Env var required: ELEVENLABS_API_KEY
  */
@@ -40,7 +40,7 @@ export function buildNarrationScript(post, contentItems) {
 
   if (contentItems && contentItems.length > 0) {
     parts.push('Did you know?');
-    contentItems.slice(0, 3).forEach(item => parts.push(item.endsWith('.') ? item : item + '.'));
+    contentItems.forEach(item => parts.push(item.endsWith('.') ? item : item + '.'));
   } else {
     parts.push(post.description + '.');
   }

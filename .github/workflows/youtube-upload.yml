@@ -1,10 +1,10 @@
 name: YouTube Auto-Upload
 
 on:
-  # Runs every other day at 02:00 UTC (~15 videos/month)
-  # Narration capped at 3 bullets (~500 chars each) → ~7 500 chars/month, within 10k free tier
+  # Runs on days 1, 4, 7, 10 … of each month at 02:00 UTC
+  # (~10 videos/month — well within ElevenLabs 10k chars/month free tier)
   schedule:
-    - cron: '0 2 */2 * *'
+    - cron: '0 2 */3 * *'
 
   # Allow a manual run from the Actions tab (e.g. to back-fill or re-upload)
   workflow_dispatch:

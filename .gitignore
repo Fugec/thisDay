@@ -2,7 +2,19 @@
 .secrets
 .env
 .env.*
+.env.local
+.env.production
 *.env
+
+# Browser session files (Playwright saved login state)
+*-session.json
+assets/tiktok-session.json
+assets/instagram-session.json
+
+# OAuth / API credential files
+client_secret*.json
+*credentials*.json
+*.token.json
 
 # Wrangler build artifacts
 .wrangler/

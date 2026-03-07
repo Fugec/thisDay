@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+  <!-- Unique job identifier -->
+  <key>Label</key>
+  <string>info.thisday.social-upload</string>
+
+  <!-- Command to run -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/arminkapetanovic/devilbox/data/www/danas/htdocs/youtube-upload/auto-social.js</string>
+  </array>
+
+  <!-- Working directory (so dotenv finds .env) -->
+  <key>WorkingDirectory</key>
+  <string>/Users/arminkapetanovic/devilbox/data/www/danas/htdocs/youtube-upload</string>
+
+  <!-- Run every 3 hours (10800 seconds) -->
+  <key>StartInterval</key>
+  <integer>10800</integer>
+
+  <!-- Log output -->
+  <key>StandardOutPath</key>
+  <string>/Users/arminkapetanovic/Library/Logs/thisday-social.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/arminkapetanovic/Library/Logs/thisday-social-error.log</string>
+
+  <!-- Start immediately when loaded, not just after first interval -->
+  <key>RunAtLoad</key>
+  <false/>
+
+</dict>
+</plist>

@@ -1,5 +1,22 @@
 node_modules/
 tmp/
+
+# Generated videos and audio
 assets/
+
+# Browser session files (saved login state — never commit)
+*-session.json
+assets/tiktok-session.json
+assets/instagram-session.json
+assets/facebook-session.json
+
+# Environment variables and secrets
 .env
+.env.local
+.env.production
+
+# OAuth / API credential files
 client_secret*.json
+*credentials*.json
+*.token.json
+assets/social-posted.json

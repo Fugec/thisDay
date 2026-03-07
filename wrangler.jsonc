@@ -1,5 +1,8 @@
 {
   "name": "thisday-seo-worker",
   "compatibility_date": "2025-06-27",
-  "main": "js/seo-worker.js"
+  "main": "js/seo-worker.js",
+  "ai": {
+    "binding": "AI"
+  }
 }

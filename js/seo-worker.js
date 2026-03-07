@@ -455,16 +455,12 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl) {
   const ogImg = featured?.pages?.[0]?.thumbnail?.source || `${siteUrl}/images/logo.png`;
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featWiki = featured?.pages?.[0]?.content_urls?.desktop?.page || "";
-  // ── Did You Know — 4 facts from the day's events + notable births ──────────
-  const dykPool = [
-    ...events.filter(e => e !== featured).slice(0, 6),
-    ...births.slice(0, 3).map(b => ({ year: b.year, text: b.text, _isBirth: true })),
-  ];
-  const dykItems = dykPool.slice(0, 4).map(e => {
-    const sentence = e.text.split(".")[0].trim();
-    const prefix = e._isBirth ? `Born in ${e.year}` : `In ${e.year}`;
-    return `<li>${escapeHtml(prefix + ": " + sentence)}.</li>`;
-  }).join("\n");
+  const commentaryParas = featured
+    ? workerCommentary(featured.year, featured.text)
+    : [
+        "Every date in history is someone's entire world.",
+        "What we record as a footnote was, for those living it, the defining moment of their lives. The past was always someone's present.",
+      ];
   const featTitle = featured
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
@@ -560,8 +556,6 @@ body.dark-theme .commentary{background:rgba(59,130,246,.15)}
 body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
 .auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
 body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
-.did-you-know{background:rgba(59,130,246,.08);border-left:4px solid #3b82f6;border-radius:0 .5rem .5rem 0}
-body.dark-theme .did-you-know{background:rgba(59,130,246,.15)}
 </style></head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark">
@@ -598,7 +592,7 @@ body.dark-theme .did-you-know{background:rgba(59,130,246,.15)}
     ${featImg ? `<img src="${escapeHtml(featImg)}" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
-    ${dykItems ? `<div class="did-you-know p-3 rounded mb-3"><strong><i class="bi bi-lightbulb me-1" style="color:#3b82f6"></i>Did You Know?</strong><ul class="mb-0 mt-2">${dykItems}</ul></div>` : ""}
+    <div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>
     <table class="table table-sm table-bordered mt-3" style="max-width:480px">
       <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
       <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
@@ -631,6 +625,8 @@ body.dark-theme .did-you-know{background:rgba(59,130,246,.15)}
 <footer class="footer">
   <div class="container d-flex justify-content-center my-2">
     <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
     <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
     <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
   </div>

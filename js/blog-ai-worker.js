@@ -902,8 +902,16 @@ ${analysisBadItems}
           <i class="bi bi-github h3 text-white"></i>
         </a>
       </div>
-
-
+      <div class="me-2">
+        <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook">
+          <i class="bi bi-facebook h3 text-white"></i>
+        </a>
+      </div>
+      <div class="me-2">
+        <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
+          <i class="bi bi-instagram h3 text-white"></i>
+        </a>
+      </div>
       <div class="me-2">
         <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok">
           <i class="bi bi-tiktok h3 text-white"></i>
@@ -1125,6 +1133,8 @@ ${JSON.stringify({
   <footer class="footer">
     <div class="container d-flex justify-content-center my-2">
       <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
+      <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
+      <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
       <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
       <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
     </div>

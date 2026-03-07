@@ -55,28 +55,16 @@ export async function uploadToInstagram(videoPath, post) {
       .isVisible({ timeout: 6_000 }).catch(() => false);
 
     if (needsLogin) {
-      // Prefer "Log in with Facebook" — accounts are linked via Meta Business
-      const fbLoginBtn = page.locator('button:has-text("Log in with Facebook"), a:has-text("Log in with Facebook")').first();
-      const fbVisible = await fbLoginBtn.isVisible({ timeout: 4_000 }).catch(() => false);
+      const username = process.env.INSTAGRAM_USERNAME;
+      const password = process.env.INSTAGRAM_PASSWORD;
 
-      if (fbVisible) {
-        console.log('  Instagram: logging in with Facebook...');
-        await fbLoginBtn.click();
-        await page.waitForTimeout(3_000);
-        await page.locator('button:has-text("Continue"), button:has-text("OK")').first()
-          .click({ timeout: 8_000 }).catch(() => {});
+      if (username && password) {
+        console.log('  Instagram: auto-logging in with credentials...');
+        await page.locator('input[name="username"]').fill(username);
+        await page.locator('input[name="password"]').fill(password);
+        await page.locator('button[type="submit"]').click();
       } else {
-        const username = process.env.INSTAGRAM_USERNAME;
-        const password = process.env.INSTAGRAM_PASSWORD;
-        if (username && password) {
-          console.log('  Instagram: auto-logging in with credentials...');
-          await page.locator('input[name="username"]').fill(username);
-          const pwInput = page.locator('input[name="password"]').first();
-          await pwInput.fill(password);
-          await pwInput.press('Enter');
-        } else {
-          console.log('  Instagram: please log in manually in the browser window.');
-        }
+        console.log('  Instagram: please log in manually in the browser window.');
       }
 
       await waitForLoginSuccess(page, 'Instagram', u => u.href.includes('/accounts/login'), {
@@ -101,10 +89,9 @@ export async function uploadToInstagram(videoPath, post) {
     await page.waitForTimeout(2_000);
 
     const createBtn = page.locator(
-      '[aria-label="New post"], [aria-label="Create"], svg[aria-label="New post"], svg[aria-label="Create"], a[href="/create/select/"]'
+      '[aria-label="New post"], [aria-label="Create"], svg[aria-label="New post"]'
     ).first();
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await createBtn.waitFor({ timeout: 30_000 });
+    await createBtn.waitFor({ timeout: 20_000 });
     await createBtn.click();
 
     // ── Select "Reel" if the sub-menu appears ────────────────────────────────

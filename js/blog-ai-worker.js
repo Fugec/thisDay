@@ -254,19 +254,23 @@ async function generateAndStore(env) {
   // Update the index (reuse the already-loaded existingIndex)
   const index = [...existingIndex];
 
-  // Avoid duplicates
-  if (!index.find((e) => e.slug === slug)) {
-    index.unshift({
-      slug,
-      title: content.title,
-      description: content.description,
-      imageUrl: content.imageUrl,
-      publishedAt: now.toISOString(),
-    });
-    // Cap the index at 200 entries
-    if (index.length > 200) index.splice(200);
-    await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
+  // Add or update the index entry for this slug
+  const existingIdx = index.findIndex((e) => e.slug === slug);
+  const entry = {
+    slug,
+    title: content.title,
+    description: content.description,
+    imageUrl: content.imageUrl,
+    publishedAt: now.toISOString(),
+  };
+  if (existingIdx !== -1) {
+    index[existingIdx] = entry;
+  } else {
+    index.unshift(entry);
   }
+  // Cap the index at 200 entries
+  if (index.length > 200) index.splice(200);
+  await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
 
   // Purge the cached sitemap and RSS feed so they reflect the new post immediately
   // (both workers cache for 1 h — without this, the new post would be invisible

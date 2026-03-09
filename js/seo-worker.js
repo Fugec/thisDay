@@ -447,8 +447,8 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFac
   const topDeaths = deaths.slice(0, 5);
 
   const pageTitle = featured
-    ? `${mDisplay} ${day} in History: ${featured.text.split(".")[0]} | thisDay.info`
-    : `${mDisplay} ${day} in History | thisDay.info`;
+    ? `What Happened on ${mDisplay} ${day}: ${featured.text.split(".")[0]} | thisDay.info`
+    : `What Happened on ${mDisplay} ${day} in History | thisDay.info`;
   const rawDesc = featured
     ? `Discover what happened on ${mDisplay} ${day} throughout history. In ${featured.year}: ${featured.text.substring(0, 115)}...`
     : `Explore historical events, births, and deaths that occurred on ${mDisplay} ${day} throughout world history.`;
@@ -467,13 +467,60 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFac
     : escapeHtml(`Events on ${mDisplay} ${day}`);
   const today = new Date().toISOString().split("T")[0];
 
+  // Prev / next day navigation
+  const mIdx = mNum - 1;
+  const prevDayNum = day > 1 ? day - 1 : DAYS_IN_MONTH[(mIdx - 1 + 12) % 12];
+  const prevMIdx   = day > 1 ? mIdx : (mIdx - 1 + 12) % 12;
+  const prevMonthName    = MONTHS_ALL[prevMIdx];
+  const prevMonthDisplay = MONTH_DISPLAY_NAMES[prevMIdx + 1];
+  const nextDayNum = day < DAYS_IN_MONTH[mIdx] ? day + 1 : 1;
+  const nextMIdx   = day < DAYS_IN_MONTH[mIdx] ? mIdx : (mIdx + 1) % 12;
+  const nextMonthName    = MONTHS_ALL[nextMIdx];
+  const nextMonthDisplay = MONTH_DISPLAY_NAMES[nextMIdx + 1];
+
+  // FAQ schema for voice search + featured snippets
+  const faqSchema = JSON.stringify({
+    "@context": "https://schema.org", "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": `What happened on ${mDisplay} ${day} in history?`,
+        "acceptedAnswer": { "@type": "Answer", "text": featured
+          ? `On ${mDisplay} ${day}, ${featured.year}: ${featured.text}`
+          : `Explore historical events on thisDay.info for ${mDisplay} ${day}.` },
+      },
+      ...(births.length > 0 ? [{
+        "@type": "Question",
+        "name": `Who was born on ${mDisplay} ${day}?`,
+        "acceptedAnswer": { "@type": "Answer", "text":
+          `Notable people born on ${mDisplay} ${day} include: ${births.slice(0, 3).map(b => b.text.split(",")[0]).join(", ")}.` },
+      }] : []),
+      ...(deaths.length > 0 ? [{
+        "@type": "Question",
+        "name": `Who died on ${mDisplay} ${day}?`,
+        "acceptedAnswer": { "@type": "Answer", "text":
+          `Notable people who died on ${mDisplay} ${day} include: ${deaths.slice(0, 3).map(d => d.text.split(",")[0]).join(", ")}.` },
+      }] : []),
+    ],
+  }).replace(/<\//g, "<\\/");
+
   const articleSchema = JSON.stringify({
-    "@context": "https://schema.org", "@type": "Article",
+    "@context": "https://schema.org", "@type": "NewsArticle",
+    "mainEntityOfPage": { "@type": "WebPage", "@id": canonical },
     "headline": pageTitle, "description": pageDesc, "url": canonical,
     "datePublished": today, "dateModified": today,
-    "author": { "@type": "Organization", "name": "thisDay.info", "url": siteUrl },
-    "publisher": { "@type": "Organization", "name": "thisDay.info", "url": siteUrl },
-    ...(featImg && { "image": featImg }),
+    "articleSection": "History",
+    "inLanguage": "en",
+    "author": {
+      "@type": "Person",
+      "name": "thisDay.info Editorial Team",
+      "url": `${siteUrl}/about/`,
+    },
+    "publisher": {
+      "@type": "Organization", "name": "thisDay.info", "url": siteUrl,
+      "logo": { "@type": "ImageObject", "url": `${siteUrl}/images/logo.png` },
+    },
+    ...(featImg && { "image": { "@type": "ImageObject", "url": featImg } }),
   }).replace(/<\//g, "<\\/");
 
   const eventsSchema = events.length > 0 ? JSON.stringify({
@@ -526,6 +573,7 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFac
 <meta name="author" content="thisDay.info"/>
 <script type="application/ld+json">${articleSchema}</script>
 ${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` : ""}
+<script type="application/ld+json">${faqSchema}</script>
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -588,10 +636,11 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     </ol>
   </nav>
   <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} in History <span class="auto-tag">Auto</span></h1>
-  <p class="text-muted mb-4" style="font-size:.9rem">A thisDay.info historical overview &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  <p class="text-muted mb-1" style="font-size:.9rem">A thisDay.info historical overview &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time></p>
   ${featured ? `
   <div class="card-box">
-    ${featImg ? `<img src="${escapeHtml(featImg)}" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
+    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
     ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:#f59e0b"></i>Did You Know?</h3><ul>${didYouKnowFacts.map(f => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
@@ -618,10 +667,16 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day}</h2>
     ${deathsHtml}
   </div>` : ""}
-  <div class="text-center my-5 pt-3 border-top">
-    <p class="text-muted mb-3">Explore history for any date on the interactive calendar.</p>
-    <a href="/" class="btn btn-primary me-2"><i class="bi bi-calendar3 me-1"></i>Open the Calendar</a>
-    <a href="/blog/" class="btn btn-outline-primary"><i class="bi bi-journal-text me-1"></i>All Blog Posts</a>
+  <div class="my-5 pt-3 border-top">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <a href="/generated/${prevMonthName}/${prevDayNum}/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
+      <a href="/generated/${nextMonthName}/${nextDayNum}/" class="btn btn-outline-secondary btn-sm">${escapeHtml(nextMonthDisplay)} ${nextDayNum}<i class="bi bi-arrow-right ms-1"></i></a>
+    </div>
+    <div class="text-center">
+      <p class="text-muted mb-3">Explore history for any date on the interactive calendar.</p>
+      <a href="/" class="btn btn-primary me-2"><i class="bi bi-calendar3 me-1"></i>Open the Calendar</a>
+      <a href="/blog/" class="btn btn-outline-primary"><i class="bi bi-journal-text me-1"></i>All Blog Posts</a>
+    </div>
   </div>
 </main>
 <footer class="footer">

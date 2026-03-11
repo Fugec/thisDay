@@ -240,7 +240,7 @@ body.dark-theme .form-check-label {
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: nudge 2s infinite;
+  animation: nudge 2s 1;
 }
 
 @keyframes nudge {

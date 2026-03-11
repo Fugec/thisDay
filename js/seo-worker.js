@@ -73,8 +73,14 @@ function extractLocationFromName(text) {
 // --- Image Proxy: resize, cache, and optionally convert Wikipedia images ---
 async function handleImageProxy(_request, url, ctx) {
   const src = url.searchParams.get("src");
-  const width = Math.min(parseInt(url.searchParams.get("w") || "1200", 10), 2000);
-  const quality = Math.min(parseInt(url.searchParams.get("q") || "82", 10), 100);
+  const width = Math.min(
+    parseInt(url.searchParams.get("w") || "1200", 10),
+    2000,
+  );
+  const quality = Math.min(
+    parseInt(url.searchParams.get("q") || "82", 10),
+    100,
+  );
 
   if (!src) return new Response("Missing src parameter", { status: 400 });
 
@@ -83,7 +89,9 @@ async function handleImageProxy(_request, url, ctx) {
     const decoded = decodeURIComponent(src);
     const parsed = new URL(decoded);
     if (!parsed.hostname.endsWith("wikimedia.org")) {
-      return new Response("Forbidden: only Wikimedia images allowed", { status: 403 });
+      return new Response("Forbidden: only Wikimedia images allowed", {
+        status: 403,
+      });
     }
     // Resize by swapping the pixel-width segment in Wikipedia thumbnail paths
     // e.g. /320px-File.jpg  →  /1200px-File.jpg
@@ -138,18 +146,49 @@ async function handleImageProxy(_request, url, ctx) {
 // ─── Auto-Generated Blog Posts ───────────────────────────────────────────────
 
 const MONTH_NUM_MAP = {
-  january:1, february:2, march:3, april:4, may:5, june:6,
-  july:7, august:8, september:9, october:10, november:11, december:12,
+  january: 1,
+  february: 2,
+  march: 3,
+  april: 4,
+  may: 5,
+  june: 6,
+  july: 7,
+  august: 8,
+  september: 9,
+  october: 10,
+  november: 11,
+  december: 12,
 };
 const MONTH_DISPLAY_NAMES = [
-  "","January","February","March","April","May","June",
-  "July","August","September","October","November","December",
+  "",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 const MONTHS_ALL = [
-  "january","february","march","april","may","june",
-  "july","august","september","october","november","december",
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
 ];
-const DAYS_IN_MONTH = [31,29,31,30,31,30,31,31,30,31,30,31]; // Feb=29 to cover all possible dates
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]; // Feb=29 to cover all possible dates
 
 function escapeHtml(s) {
   return String(s || "")
@@ -166,88 +205,146 @@ function workerCommentary(year, text) {
   const y = parseInt(year, 10);
   const t = (text || "").toLowerCase();
 
-  const war  = /war|battle|siege|invasion|conflict|defeat|victory|troops|army|military|combat/.test(t);
-  const sci  = /discover|invent|launch|orbit|experiment|vaccine|gene|atom|microscope|telescope|theory|equation|element|laboratory/.test(t);
-  const pol  = /treaty|signed|declared|constitution|independence|election|revolution|parliament|senate|congress|legislation/.test(t);
-  const expl = /expedition|voyage|navigator|circumnavigat|new world|explorer|coloniz|sailing|landed/.test(t);
-  const dis  = /earthquake|hurricane|typhoon|tsunami|eruption|wildfire|flood|epidemic|plague|famine|disaster|collapsed|shipwreck/.test(t);
-  const art  = /\bfilm\b|novel|painting|symphony|opera|theatre|theater|poem|published|premiered|literary|artist|composer|sculptor|architecture|museum/.test(t);
-  const rel  = /church|cathedral|pope|bishop|crusade|mosque|temple|monastery|reformation|heresy|clergy|saint|protestant|catholic/.test(t);
-  const econ = /bank|stock market|recession|depression|financial crisis|bankruptcy|currency|inflation|trade|tariff|crash|bubble|debt|deficit|gdp|economy|market/.test(t);
-  const sport = /olympic|championship|world cup|tournament|record|gold medal|title|final|super bowl|grand slam|marathon|formula|athlete/.test(t);
+  const war =
+    /war|battle|siege|invasion|conflict|defeat|victory|troops|army|military|combat/.test(
+      t,
+    );
+  const sci =
+    /discover|invent|launch|orbit|experiment|vaccine|gene|atom|microscope|telescope|theory|equation|element|laboratory/.test(
+      t,
+    );
+  const pol =
+    /treaty|signed|declared|constitution|independence|election|revolution|parliament|senate|congress|legislation/.test(
+      t,
+    );
+  const expl =
+    /expedition|voyage|navigator|circumnavigat|new world|explorer|coloniz|sailing|landed/.test(
+      t,
+    );
+  const dis =
+    /earthquake|hurricane|typhoon|tsunami|eruption|wildfire|flood|epidemic|plague|famine|disaster|collapsed|shipwreck/.test(
+      t,
+    );
+  const art =
+    /\bfilm\b|novel|painting|symphony|opera|theatre|theater|poem|published|premiered|literary|artist|composer|sculptor|architecture|museum/.test(
+      t,
+    );
+  const rel =
+    /church|cathedral|pope|bishop|crusade|mosque|temple|monastery|reformation|heresy|clergy|saint|protestant|catholic/.test(
+      t,
+    );
+  const econ =
+    /bank|stock market|recession|depression|financial crisis|bankruptcy|currency|inflation|trade|tariff|crash|bubble|debt|deficit|gdp|economy|market/.test(
+      t,
+    );
+  const sport =
+    /olympic|championship|world cup|tournament|record|gold medal|title|final|super bowl|grand slam|marathon|formula|athlete/.test(
+      t,
+    );
 
   const era =
-    y < 500  ? "ancient"      :
-    y < 1400 ? "medieval"     :
-    y < 1700 ? "early_modern" :
-    y < 1900 ? "modern"       : "contemporary";
+    y < 500
+      ? "ancient"
+      : y < 1400
+        ? "medieval"
+        : y < 1700
+          ? "early_modern"
+          : y < 1900
+            ? "modern"
+            : "contemporary";
 
   if (war) {
     // Sub-categories within war for more connected commentary
-    const isSiege      = /siege|besieg|surrounded|fortif|garrison|blockade|starv/.test(t);
-    const isNaval      = /naval|fleet|ship|sea battle|maritime|admiral|frigate|armada/.test(t);
-    const isLiberation = /liberat|resist|partisan|guerrilla|occupied|underground|freed/.test(t);
-    const isAttrition  = /world war|trench|western front|eastern front|million|casualties|stalemate/.test(t);
-    const isCivilWar   = /civil war|civil conflict|secession|rebel|faction|brother against/.test(t);
-    const isSurrender  = /surrender|capitulat|armistice|ceasefire|truce|ended|concluded|peace/.test(t);
-    const isAerial     = /bombing|air raid|aerial|blitz|airforce|aircraft|bomb|drone|air strike/.test(t);
+    const isSiege =
+      /siege|besieg|surrounded|fortif|garrison|blockade|starv/.test(t);
+    const isNaval =
+      /naval|fleet|ship|sea battle|maritime|admiral|frigate|armada/.test(t);
+    const isLiberation =
+      /liberat|resist|partisan|guerrilla|occupied|underground|freed/.test(t);
+    const isAttrition =
+      /world war|trench|western front|eastern front|million|casualties|stalemate/.test(
+        t,
+      );
+    const isCivilWar =
+      /civil war|civil conflict|secession|rebel|faction|brother against/.test(
+        t,
+      );
+    const isSurrender =
+      /surrender|capitulat|armistice|ceasefire|truce|ended|concluded|peace/.test(
+        t,
+      );
+    const isAerial =
+      /bombing|air raid|aerial|blitz|airforce|aircraft|bomb|drone|air strike/.test(
+        t,
+      );
 
-    if (isSiege) return [
-      "Sieges reduced warfare to its starkest arithmetic: the rate at which defenders consumed supplies versus the patience and resources of those outside the walls. Starvation and disease killed as reliably as any weapon.",
-      "A successful siege required controlling the surrounding territory, maintaining reliable supply lines, and sustaining political will across months or even years. These were rarely guaranteed — many sieges collapsed not through military defeat but through the besieger's own logistical failures.",
-      "For civilians trapped inside, the siege was not a military calculation but a daily question of survival — who controlled the food, who maintained order, and whether the walls could hold long enough for relief to arrive.",
-    ];
-    if (isNaval) return [
-      "Naval power has always been primarily about logistics: the ability to project force, protect trade routes, and deny the same to an opponent. Battles at sea decided not just military outcomes but the economic fate of empires.",
-      "A naval engagement concentrated enormous irreplaceable capital — ships, trained crews, experienced officers — into a few hours of chaotic violence. Fleets built over decades could be destroyed in a single afternoon.",
-      "Control of the sea never guaranteed control of everything, but losing it tended to mean losing most things eventually. Maritime supremacy has consistently translated into commercial and strategic advantage in ways that land power alone could not replicate.",
-    ];
-    if (isLiberation) return [
-      "Resistance movements rarely succeed through armed force alone. The combination of sustained guerrilla action, international pressure, the political delegitimization of the occupying power, and the mounting cost of repression tends to determine outcomes more than any single engagement.",
-      "Occupation reshapes societies in ways that outlast the occupation itself. Identity hardens, collaboration becomes a lasting moral category, and the politics of the post-liberation period are defined by who resisted, who accommodated, and under what circumstances.",
-      "What gets called liberation looks different depending on where you stand. The formal removal of an occupying power rarely resolves the underlying questions of who governs next, on whose behalf, and with what legitimacy.",
-    ];
-    if (isAttrition) return [
-      "Industrial-scale warfare transformed conflict from a contest of tactics and leadership into a problem of production and endurance. The side that could sustain losses longest — in material, in manpower, in political will — tended to prevail, regardless of battlefield skill.",
-      "Mass mobilization reshaped societies as profoundly as the fighting itself. Economies were restructured, gender roles disrupted, political compacts renegotiated. A society that entered a total war rarely emerged with its internal arrangements intact.",
-      "The arithmetic of attrition was visible to everyone in real time, which is what made it so politically corrosive. Governments that could not explain why the losses were worth the gains eventually faced a crisis of legitimacy as dangerous as any military setback.",
-    ];
-    if (isCivilWar) return [
-      "Civil wars are distinguished from other conflicts by who the enemy is: not a foreign power but a neighbour, a former ally, sometimes a family member. That proximity produces a particular kind of violence — intimate, difficult to end, and long-remembered.",
-      "The causes of civil war are almost always multiple and contested. Economic inequality, ethnic or religious divisions, disputed legitimacy, and the collapse of institutions capable of managing disagreement tend to combine rather than act in isolation. Single-cause explanations come later, from the winners.",
-      "Civil wars rarely end cleanly. The formal conclusion of fighting is followed by years of contested reconstruction — who gets to write the history, which grievances are acknowledged, and how the losing side is reintegrated into a shared political life. These questions prove at least as difficult as the war itself.",
-    ];
-    if (isSurrender) return [
-      "Surrenders are often the moment when the real negotiation begins. The terms imposed on the defeated — reparations, territorial loss, political reorganization — shape the next generation's grievances as surely as the fighting shaped this one.",
-      "The decision to stop fighting requires someone with authority to make it and the political standing to enforce it. Armies that refuse to accept the reality of defeat, or governments that collapse before surrender can be formalized, tend to produce prolonged and chaotic aftermaths.",
-      "What the armistice ends is the shooting. What it does not end is the underlying conflict of interests, identities, and claims that produced the war. The durability of any peace depends on how seriously those deeper questions are addressed — a test that many ceasefires fail.",
-    ];
-    if (isAerial) return [
-      "Aerial warfare added a dimension that fundamentally changed what it meant to be a civilian in wartime. The front line disappeared; distance from the fighting no longer offered safety. Cities, factories, and populations became legitimate targets under doctrines that were being improvised in real time.",
-      "Strategic bombing promised to end wars quickly by destroying an enemy's will and capacity to fight from the air. The evidence for its effectiveness has always been contested — civilian populations proved more resilient than theorists predicted, and the economic disruption less decisive than promised.",
-      "The moral framework for aerial warfare has never been fully resolved. The same technology used to deliver humanitarian aid can deliver ordnance. Drones, precision munitions, and autonomous systems have shifted the calculus again, raising questions that the laws of war — written for earlier technologies — struggle to answer.",
-    ];
+    if (isSiege)
+      return [
+        "Sieges reduced warfare to its starkest arithmetic: the rate at which defenders consumed supplies versus the patience and resources of those outside the walls. Starvation and disease killed as reliably as any weapon.",
+        "A successful siege required controlling the surrounding territory, maintaining reliable supply lines, and sustaining political will across months or even years. These were rarely guaranteed — many sieges collapsed not through military defeat but through the besieger's own logistical failures.",
+        "For civilians trapped inside, the siege was not a military calculation but a daily question of survival — who controlled the food, who maintained order, and whether the walls could hold long enough for relief to arrive.",
+      ];
+    if (isNaval)
+      return [
+        "Naval power has always been primarily about logistics: the ability to project force, protect trade routes, and deny the same to an opponent. Battles at sea decided not just military outcomes but the economic fate of empires.",
+        "A naval engagement concentrated enormous irreplaceable capital — ships, trained crews, experienced officers — into a few hours of chaotic violence. Fleets built over decades could be destroyed in a single afternoon.",
+        "Control of the sea never guaranteed control of everything, but losing it tended to mean losing most things eventually. Maritime supremacy has consistently translated into commercial and strategic advantage in ways that land power alone could not replicate.",
+      ];
+    if (isLiberation)
+      return [
+        "Resistance movements rarely succeed through armed force alone. The combination of sustained guerrilla action, international pressure, the political delegitimization of the occupying power, and the mounting cost of repression tends to determine outcomes more than any single engagement.",
+        "Occupation reshapes societies in ways that outlast the occupation itself. Identity hardens, collaboration becomes a lasting moral category, and the politics of the post-liberation period are defined by who resisted, who accommodated, and under what circumstances.",
+        "What gets called liberation looks different depending on where you stand. The formal removal of an occupying power rarely resolves the underlying questions of who governs next, on whose behalf, and with what legitimacy.",
+      ];
+    if (isAttrition)
+      return [
+        "Industrial-scale warfare transformed conflict from a contest of tactics and leadership into a problem of production and endurance. The side that could sustain losses longest — in material, in manpower, in political will — tended to prevail, regardless of battlefield skill.",
+        "Mass mobilization reshaped societies as profoundly as the fighting itself. Economies were restructured, gender roles disrupted, political compacts renegotiated. A society that entered a total war rarely emerged with its internal arrangements intact.",
+        "The arithmetic of attrition was visible to everyone in real time, which is what made it so politically corrosive. Governments that could not explain why the losses were worth the gains eventually faced a crisis of legitimacy as dangerous as any military setback.",
+      ];
+    if (isCivilWar)
+      return [
+        "Civil wars are distinguished from other conflicts by who the enemy is: not a foreign power but a neighbour, a former ally, sometimes a family member. That proximity produces a particular kind of violence — intimate, difficult to end, and long-remembered.",
+        "The causes of civil war are almost always multiple and contested. Economic inequality, ethnic or religious divisions, disputed legitimacy, and the collapse of institutions capable of managing disagreement tend to combine rather than act in isolation. Single-cause explanations come later, from the winners.",
+        "Civil wars rarely end cleanly. The formal conclusion of fighting is followed by years of contested reconstruction — who gets to write the history, which grievances are acknowledged, and how the losing side is reintegrated into a shared political life. These questions prove at least as difficult as the war itself.",
+      ];
+    if (isSurrender)
+      return [
+        "Surrenders are often the moment when the real negotiation begins. The terms imposed on the defeated — reparations, territorial loss, political reorganization — shape the next generation's grievances as surely as the fighting shaped this one.",
+        "The decision to stop fighting requires someone with authority to make it and the political standing to enforce it. Armies that refuse to accept the reality of defeat, or governments that collapse before surrender can be formalized, tend to produce prolonged and chaotic aftermaths.",
+        "What the armistice ends is the shooting. What it does not end is the underlying conflict of interests, identities, and claims that produced the war. The durability of any peace depends on how seriously those deeper questions are addressed — a test that many ceasefires fail.",
+      ];
+    if (isAerial)
+      return [
+        "Aerial warfare added a dimension that fundamentally changed what it meant to be a civilian in wartime. The front line disappeared; distance from the fighting no longer offered safety. Cities, factories, and populations became legitimate targets under doctrines that were being improvised in real time.",
+        "Strategic bombing promised to end wars quickly by destroying an enemy's will and capacity to fight from the air. The evidence for its effectiveness has always been contested — civilian populations proved more resilient than theorists predicted, and the economic disruption less decisive than promised.",
+        "The moral framework for aerial warfare has never been fully resolved. The same technology used to deliver humanitarian aid can deliver ordnance. Drones, precision munitions, and autonomous systems have shifted the calculus again, raising questions that the laws of war — written for earlier technologies — struggle to answer.",
+      ];
 
-    if (era === "ancient") return [
-      "In the ancient world, warfare was the ultimate arbiter of civilization. Kingdoms that had stood for centuries could be erased in a single campaign season — their people absorbed, enslaved, or scattered across unfamiliar lands.",
-      "What the victors recorded as glorious triumph was, for the defeated, the collapse of everything they knew: language, gods, customs, and kinship networks reduced first to memory, then eventually to silence.",
-      "Yet conflict also accelerated exchange. Technologies, crops, religions, and ideas spread fastest along routes carved by armies. War built the ancient world as much as it destroyed it.",
-    ];
-    if (era === "medieval") return [
-      "Medieval warfare was rarely the chivalric contest romanticized in later literature. Sieges could last months, reducing entire populations to starvation; plague followed armies as reliably as supply carts followed generals.",
-      "Feudal loyalty made alliances permanently treacherous. Kings who commanded the battlefield could lose the political war at home — undone by barons whose interests never fully aligned with the crown's ambitions.",
-      "Still, medieval conflicts reshaped Europe's borders so profoundly that their lines echo in national identities today. The map of the modern world was drawn, in large part, by medieval swords.",
-    ];
-    if (era === "early_modern") return [
-      "The introduction of gunpowder fundamentally restructured the calculus of war. Castle walls that had held for centuries became liabilities overnight. The armored knight — product of decades of expensive training — could be felled by a conscript armed with a musket.",
-      "Early modern warfare also began to operate at imperial scale. Conflicts no longer stayed within European borders; they extended across oceans, reshaping the Americas, Africa, and Asia as collateral damage in European quarrels.",
-      "These wars demanded new financial systems, bureaucracies, and supply chains — and in the effort to fund and sustain them, the modern nation-state was essentially invented.",
-    ];
-    if (era === "modern") return [
-      "By the 19th century, industrialization had turned war into a logistical problem as much as a tactical one. Railroads, telegraphs, and mass production allowed armies to field hundreds of thousands — and to sustain those losses across years of grinding attrition.",
-      "The wars of this era carried an ideological weight their predecessors lacked. Nationalism, liberation, imperial expansion — soldiers increasingly fought for abstractions rather than simply for monarchs or wages.",
-      "The human cost was staggering enough to inspire the first serious international attempts at limiting conflict — the Geneva Conventions, the Hague Agreements — though none succeeded in curbing the century's appetite for war.",
-    ];
+    if (era === "ancient")
+      return [
+        "In the ancient world, warfare was the ultimate arbiter of civilization. Kingdoms that had stood for centuries could be erased in a single campaign season — their people absorbed, enslaved, or scattered across unfamiliar lands.",
+        "What the victors recorded as glorious triumph was, for the defeated, the collapse of everything they knew: language, gods, customs, and kinship networks reduced first to memory, then eventually to silence.",
+        "Yet conflict also accelerated exchange. Technologies, crops, religions, and ideas spread fastest along routes carved by armies. War built the ancient world as much as it destroyed it.",
+      ];
+    if (era === "medieval")
+      return [
+        "Medieval warfare was rarely the chivalric contest romanticized in later literature. Sieges could last months, reducing entire populations to starvation; plague followed armies as reliably as supply carts followed generals.",
+        "Feudal loyalty made alliances permanently treacherous. Kings who commanded the battlefield could lose the political war at home — undone by barons whose interests never fully aligned with the crown's ambitions.",
+        "Still, medieval conflicts reshaped Europe's borders so profoundly that their lines echo in national identities today. The map of the modern world was drawn, in large part, by medieval swords.",
+      ];
+    if (era === "early_modern")
+      return [
+        "The introduction of gunpowder fundamentally restructured the calculus of war. Castle walls that had held for centuries became liabilities overnight. The armored knight — product of decades of expensive training — could be felled by a conscript armed with a musket.",
+        "Early modern warfare also began to operate at imperial scale. Conflicts no longer stayed within European borders; they extended across oceans, reshaping the Americas, Africa, and Asia as collateral damage in European quarrels.",
+        "These wars demanded new financial systems, bureaucracies, and supply chains — and in the effort to fund and sustain them, the modern nation-state was essentially invented.",
+      ];
+    if (era === "modern")
+      return [
+        "By the 19th century, industrialization had turned war into a logistical problem as much as a tactical one. Railroads, telegraphs, and mass production allowed armies to field hundreds of thousands — and to sustain those losses across years of grinding attrition.",
+        "The wars of this era carried an ideological weight their predecessors lacked. Nationalism, liberation, imperial expansion — soldiers increasingly fought for abstractions rather than simply for monarchs or wages.",
+        "The human cost was staggering enough to inspire the first serious international attempts at limiting conflict — the Geneva Conventions, the Hague Agreements — though none succeeded in curbing the century's appetite for war.",
+      ];
     return [
       "20th and 21st century conflicts redefined what war means entirely. The industrial-scale destruction of two World Wars gave way to nuclear deterrence, proxy conflicts, and asymmetric warfare — each a different answer to the question of how to fight when total war means mutual annihilation.",
       "Today's wars are fought simultaneously on the ground, in the air, in cyberspace, and across media narratives. Shaping global perception has become as strategically important as seizing territory — sometimes more so.",
@@ -257,65 +354,96 @@ function workerCommentary(year, text) {
 
   if (sci) {
     // Sub-categories within science for more connected commentary
-    const isSpace      = /space|orbit|satellite|rocket|moon|mars|astronaut|cosmonaut|shuttle|spacecraft|launch pad/.test(t);
-    const isMedical    = /vaccine|medicine|disease|cure|surgery|antibiotic|virus|epidemic|dna|gene|genome|transplant/.test(t);
-    const isPhysics    = /atom|nuclear|quantum|relativity|particle|radiation|element|periodic|chemistry|fission|fusion/.test(t);
-    const isComputing  = /computer|software|internet|algorithm|digital|program|data|network|code|processor|artificial intelligence/.test(t);
-    const isAstronomy  = /comet|asteroid|star|planet|galaxy|nebula|eclipse|celestial|constellation|telescope|observatory/.test(t);
-    const isEnv        = /climate|pollution|environment|ecosystem|conservation|species|extinction|carbon|deforestation|ozone/.test(t);
-    const isMath       = /mathemati|theorem|proof|calculus|algebra|geometry|statistics|cipher|equation|formula|number/.test(t);
+    const isSpace =
+      /space|orbit|satellite|rocket|moon|mars|astronaut|cosmonaut|shuttle|spacecraft|launch pad/.test(
+        t,
+      );
+    const isMedical =
+      /vaccine|medicine|disease|cure|surgery|antibiotic|virus|epidemic|dna|gene|genome|transplant/.test(
+        t,
+      );
+    const isPhysics =
+      /atom|nuclear|quantum|relativity|particle|radiation|element|periodic|chemistry|fission|fusion/.test(
+        t,
+      );
+    const isComputing =
+      /computer|software|internet|algorithm|digital|program|data|network|code|processor|artificial intelligence/.test(
+        t,
+      );
+    const isAstronomy =
+      /comet|asteroid|star|planet|galaxy|nebula|eclipse|celestial|constellation|telescope|observatory/.test(
+        t,
+      );
+    const isEnv =
+      /climate|pollution|environment|ecosystem|conservation|species|extinction|carbon|deforestation|ozone/.test(
+        t,
+      );
+    const isMath =
+      /mathemati|theorem|proof|calculus|algebra|geometry|statistics|cipher|equation|formula|number/.test(
+        t,
+      );
 
-    if (isSpace) return [
-      "Space exploration demands solving problems at the absolute edge of what materials, mathematics, and human physiology can withstand. Every successful mission represents the convergence of thousands of engineering decisions, each of which had to be right.",
-      "The political dimensions of space programs have always matched their scientific ones. National prestige, military capability signals, and the projection of technological power drove funding and timelines as forcefully as the pursuit of knowledge.",
-      "What space exploration changed most durably was human self-perception. Seeing Earth from outside it — as a single, fragile object against an indifferent darkness — produced a shift in perspective that no purely terrestrial experience could replicate.",
-    ];
-    if (isMedical) return [
-      "Medical progress rarely arrives as a clean breakthrough. It accumulates through decades of failure, partial understanding, and contested results — punctuated occasionally by discoveries that genuinely restructure everything that came before and after them.",
-      "The gap between what medicine can do and what it actually delivers has always been one of the defining inequalities of every era. A treatment proven effective in one setting may be inaccessible, unaffordable, or contested in another. Discovery and access are separate problems.",
-      "Disease has altered the course of history in ways that armies and diplomacy could not. Pathogens do not respect borders, social hierarchies, or military formations. Understanding this link between medicine and power is inseparable from understanding history itself.",
-    ];
-    if (isPhysics) return [
-      "Discoveries at the fundamental level of physics have a habit of producing consequences that appear only decades later. The theoretical insights of one generation become the technological infrastructure of the next — and the ethical frameworks for managing them typically arrive last.",
-      "Nuclear and quantum physics revealed that the universe operates by rules radically different from everyday experience. This created both extraordinary power and extraordinary conceptual difficulty — a science whose implications even its creators spent years working to understand.",
-      "The institutional structures of modern science — large international collaborations, government-funded research, peer review at scale — were largely built around the demands of physics. In shaping how science is organized, the discipline reshaped the entire enterprise of knowledge-making.",
-    ];
-    if (isComputing) return [
-      "Computing technology accelerated through a feedback loop: each generation of hardware enabled the development of the next, compressing decades of expected progress into years. The pace consistently outran the ability of legal, educational, and social institutions to adapt.",
-      "The internet restructured the fundamental economics of information. When copying and distributing knowledge approaches zero cost, the industries and power structures built on controlling its scarcity face questions they were not designed to answer.",
-      "What computing changed most profoundly was not any specific industry but the underlying assumption about what could be automated, optimized, and quantified. That assumption continues expanding into domains — creativity, judgment, interpersonal trust — that once seemed safely beyond its reach.",
-    ];
-    if (isAstronomy) return [
-      "Astronomy has always occupied an unusual position in the hierarchy of sciences: its objects of study are entirely inaccessible, observable only at a distance measured in light-years, yet the patterns they reveal have structured timekeeping, navigation, and human self-understanding since the earliest civilizations.",
-      "Each step outward in scale — from solar system to galaxy to observable universe — has required revising not just measurements but foundational assumptions about where we are and what we are made of. The universe turned out to be far older, larger, and stranger than anyone's first guess.",
-      "Modern astronomy is fundamentally collaborative in a way few disciplines match. Telescopes span continents; data is shared across borders; discoveries arrive not through individual genius but through networked observation and computation. The romantic image of the lone astronomer at the eyepiece describes almost nothing about how the field actually works.",
-    ];
-    if (isEnv) return [
-      "Environmental history reframes the standard narrative of progress by asking what was lost — ecologically, biologically, climatically — in the process of producing what we typically count as gains. The accounting looks considerably different when the costs are included.",
-      "Ecosystems do not register political borders. A species extinction, an aquifer depleted, a river system dammed — these changes propagate across boundaries in ways that no single government is positioned to fully manage. The mismatch between the scale of environmental problems and the scale of political institutions is one of the central dilemmas of the modern era.",
-      "The pace of environmental change in the industrial period has no precedent in human history and few in geological time. What makes this moment unusual is not that nature is changing — it always has — but that the driver of change is now the cumulative weight of human activity, and the timeline for consequences is measured in decades rather than millennia.",
-    ];
-    if (isMath) return [
-      "Mathematics is unusual among intellectual disciplines in that its results, once proven, do not become obsolete. A theorem established two thousand years ago requires no revision when new evidence arrives — the proof either holds or it doesn't, and if it holds, it holds permanently.",
-      "Mathematical structures discovered in purely abstract contexts have a persistent habit of turning out to describe physical reality with uncanny precision — often decades or centuries after the original work. This relationship between abstract reasoning and the behaviour of the physical world remains philosophically puzzling.",
-      "The history of mathematics is also a history of expanding the concept of number itself: from counting integers to fractions, to irrational and imaginary numbers, to infinities of different sizes. Each expansion felt, to contemporaries, like a violation of common sense — and each eventually became indispensable.",
-    ];
+    if (isSpace)
+      return [
+        "Space exploration demands solving problems at the absolute edge of what materials, mathematics, and human physiology can withstand. Every successful mission represents the convergence of thousands of engineering decisions, each of which had to be right.",
+        "The political dimensions of space programs have always matched their scientific ones. National prestige, military capability signals, and the projection of technological power drove funding and timelines as forcefully as the pursuit of knowledge.",
+        "What space exploration changed most durably was human self-perception. Seeing Earth from outside it — as a single, fragile object against an indifferent darkness — produced a shift in perspective that no purely terrestrial experience could replicate.",
+      ];
+    if (isMedical)
+      return [
+        "Medical progress rarely arrives as a clean breakthrough. It accumulates through decades of failure, partial understanding, and contested results — punctuated occasionally by discoveries that genuinely restructure everything that came before and after them.",
+        "The gap between what medicine can do and what it actually delivers has always been one of the defining inequalities of every era. A treatment proven effective in one setting may be inaccessible, unaffordable, or contested in another. Discovery and access are separate problems.",
+        "Disease has altered the course of history in ways that armies and diplomacy could not. Pathogens do not respect borders, social hierarchies, or military formations. Understanding this link between medicine and power is inseparable from understanding history itself.",
+      ];
+    if (isPhysics)
+      return [
+        "Discoveries at the fundamental level of physics have a habit of producing consequences that appear only decades later. The theoretical insights of one generation become the technological infrastructure of the next — and the ethical frameworks for managing them typically arrive last.",
+        "Nuclear and quantum physics revealed that the universe operates by rules radically different from everyday experience. This created both extraordinary power and extraordinary conceptual difficulty — a science whose implications even its creators spent years working to understand.",
+        "The institutional structures of modern science — large international collaborations, government-funded research, peer review at scale — were largely built around the demands of physics. In shaping how science is organized, the discipline reshaped the entire enterprise of knowledge-making.",
+      ];
+    if (isComputing)
+      return [
+        "Computing technology accelerated through a feedback loop: each generation of hardware enabled the development of the next, compressing decades of expected progress into years. The pace consistently outran the ability of legal, educational, and social institutions to adapt.",
+        "The internet restructured the fundamental economics of information. When copying and distributing knowledge approaches zero cost, the industries and power structures built on controlling its scarcity face questions they were not designed to answer.",
+        "What computing changed most profoundly was not any specific industry but the underlying assumption about what could be automated, optimized, and quantified. That assumption continues expanding into domains — creativity, judgment, interpersonal trust — that once seemed safely beyond its reach.",
+      ];
+    if (isAstronomy)
+      return [
+        "Astronomy has always occupied an unusual position in the hierarchy of sciences: its objects of study are entirely inaccessible, observable only at a distance measured in light-years, yet the patterns they reveal have structured timekeeping, navigation, and human self-understanding since the earliest civilizations.",
+        "Each step outward in scale — from solar system to galaxy to observable universe — has required revising not just measurements but foundational assumptions about where we are and what we are made of. The universe turned out to be far older, larger, and stranger than anyone's first guess.",
+        "Modern astronomy is fundamentally collaborative in a way few disciplines match. Telescopes span continents; data is shared across borders; discoveries arrive not through individual genius but through networked observation and computation. The romantic image of the lone astronomer at the eyepiece describes almost nothing about how the field actually works.",
+      ];
+    if (isEnv)
+      return [
+        "Environmental history reframes the standard narrative of progress by asking what was lost — ecologically, biologically, climatically — in the process of producing what we typically count as gains. The accounting looks considerably different when the costs are included.",
+        "Ecosystems do not register political borders. A species extinction, an aquifer depleted, a river system dammed — these changes propagate across boundaries in ways that no single government is positioned to fully manage. The mismatch between the scale of environmental problems and the scale of political institutions is one of the central dilemmas of the modern era.",
+        "The pace of environmental change in the industrial period has no precedent in human history and few in geological time. What makes this moment unusual is not that nature is changing — it always has — but that the driver of change is now the cumulative weight of human activity, and the timeline for consequences is measured in decades rather than millennia.",
+      ];
+    if (isMath)
+      return [
+        "Mathematics is unusual among intellectual disciplines in that its results, once proven, do not become obsolete. A theorem established two thousand years ago requires no revision when new evidence arrives — the proof either holds or it doesn't, and if it holds, it holds permanently.",
+        "Mathematical structures discovered in purely abstract contexts have a persistent habit of turning out to describe physical reality with uncanny precision — often decades or centuries after the original work. This relationship between abstract reasoning and the behaviour of the physical world remains philosophically puzzling.",
+        "The history of mathematics is also a history of expanding the concept of number itself: from counting integers to fractions, to irrational and imaginary numbers, to infinities of different sizes. Each expansion felt, to contemporaries, like a violation of common sense — and each eventually became indispensable.",
+      ];
 
-    if (era === "ancient" || era === "medieval") return [
-      "In the ancient and medieval world, scientific inquiry was inseparable from philosophy and theology. Observation of the natural world was a form of reading a divine text — each pattern in the stars or in the body a reflection of a larger cosmic order.",
-      "This did not make early scholars incurious. The great minds of antiquity and the Islamic Golden Age made advances in mathematics, astronomy, and medicine that Europe would not surpass for centuries — achieved without the institutional infrastructure we now take for granted.",
-      "What we retrospectively label superstition was often simply the best available framework — a coherent attempt to understand cause and effect with the tools at hand. History remembers the failures. It rarely appreciates how remarkable it was to try at all.",
-    ];
-    if (era === "early_modern") return [
-      "The Scientific Revolution was not a single event but a slow erosion of inherited certainty. Each discovery challenged not just a theory but an entire worldview — and the institutions, both religious and political, that depended on that worldview remaining intact.",
-      "Figures like Galileo, Copernicus, and Newton were not safely distant academics. They were, in their time, radicals — challenging what powerful institutions held to be settled truth, and sometimes paying a serious personal price for doing so.",
-      "The methods they established — observation, hypothesis, experiment, replication — are now so thoroughly embedded in how we think that it is almost impossible to imagine reasoning without them. That is how completely they changed the world.",
-    ];
-    if (era === "modern") return [
-      "The 19th century turned science into an industry. What had been the work of gentlemen-scholars with private means became organized, funded, and institutionalized — universities, peer-reviewed journals, international conferences. Discovery accelerated accordingly.",
-      "The consequences extended far beyond the laboratory. Steam power, electrification, chemistry, and germ theory reshaped daily life faster than any social revolution had managed. A person born in 1800 who lived to 1900 witnessed changes that would have been indistinguishable from magic to their grandparents.",
-      "Science also began to carry new moral weight in this period. Darwinian evolution, in particular, forced a renegotiation between empirical inquiry and religious identity that societies are, in some respects, still working through.",
-    ];
+    if (era === "ancient" || era === "medieval")
+      return [
+        "In the ancient and medieval world, scientific inquiry was inseparable from philosophy and theology. Observation of the natural world was a form of reading a divine text — each pattern in the stars or in the body a reflection of a larger cosmic order.",
+        "This did not make early scholars incurious. The great minds of antiquity and the Islamic Golden Age made advances in mathematics, astronomy, and medicine that Europe would not surpass for centuries — achieved without the institutional infrastructure we now take for granted.",
+        "What we retrospectively label superstition was often simply the best available framework — a coherent attempt to understand cause and effect with the tools at hand. History remembers the failures. It rarely appreciates how remarkable it was to try at all.",
+      ];
+    if (era === "early_modern")
+      return [
+        "The Scientific Revolution was not a single event but a slow erosion of inherited certainty. Each discovery challenged not just a theory but an entire worldview — and the institutions, both religious and political, that depended on that worldview remaining intact.",
+        "Figures like Galileo, Copernicus, and Newton were not safely distant academics. They were, in their time, radicals — challenging what powerful institutions held to be settled truth, and sometimes paying a serious personal price for doing so.",
+        "The methods they established — observation, hypothesis, experiment, replication — are now so thoroughly embedded in how we think that it is almost impossible to imagine reasoning without them. That is how completely they changed the world.",
+      ];
+    if (era === "modern")
+      return [
+        "The 19th century turned science into an industry. What had been the work of gentlemen-scholars with private means became organized, funded, and institutionalized — universities, peer-reviewed journals, international conferences. Discovery accelerated accordingly.",
+        "The consequences extended far beyond the laboratory. Steam power, electrification, chemistry, and germ theory reshaped daily life faster than any social revolution had managed. A person born in 1800 who lived to 1900 witnessed changes that would have been indistinguishable from magic to their grandparents.",
+        "Science also began to carry new moral weight in this period. Darwinian evolution, in particular, forced a renegotiation between empirical inquiry and religious identity that societies are, in some respects, still working through.",
+      ];
     return [
       "Modern scientific progress has outpaced humanity's ability to fully absorb its own implications. In less than a century, we moved from the first powered flight to landing on the Moon — and from discovering the structure of DNA to editing it in living organisms.",
       "This pace creates a particular kind of vertigo. Technologies arrive before the ethical frameworks to govern them. The internet, CRISPR, and artificial intelligence all changed the world before anyone had agreed on the rules of engagement.",
@@ -323,63 +451,86 @@ function workerCommentary(year, text) {
     ];
   }
 
-  if (expl) return [
-    "For those who undertook these journeys, the unknown was not an abstraction — it was literal. Coastlines that ended without warning, prevailing winds that shifted unpredictably, diseases no European immune system had encountered. The odds of safe return were never guaranteed.",
-    "What exploration produced, beyond geographical knowledge, was a catastrophic redistribution of power, population, and disease. Civilizations encountered along the way — many sophisticated in their own right — were transformed, reduced, or erased within generations of first contact.",
-    "We still speak of the 'discovery' of places that had been continuously inhabited for millennia. Revisiting this history honestly means holding two truths simultaneously: the genuine courage these journeys required, and the devastation that followed in their wake.",
-  ];
+  if (expl)
+    return [
+      "For those who undertook these journeys, the unknown was not an abstraction — it was literal. Coastlines that ended without warning, prevailing winds that shifted unpredictably, diseases no European immune system had encountered. The odds of safe return were never guaranteed.",
+      "What exploration produced, beyond geographical knowledge, was a catastrophic redistribution of power, population, and disease. Civilizations encountered along the way — many sophisticated in their own right — were transformed, reduced, or erased within generations of first contact.",
+      "We still speak of the 'discovery' of places that had been continuously inhabited for millennia. Revisiting this history honestly means holding two truths simultaneously: the genuine courage these journeys required, and the devastation that followed in their wake.",
+    ];
 
-  if (dis) return [
-    "Natural disasters operate on geological or meteorological scales entirely indifferent to human plans. Yet their death tolls are shaped as much by social factors — poverty, inequality, political negligence — as by the event itself. The same earthquake kills thousands in one city and dozens in another.",
-    "Catastrophe reveals a society's real priorities with uncomfortable clarity. Which communities get rebuilt first, which are quietly abandoned, who receives compensation and who is forgotten — these decisions expose power structures that official policy rarely acknowledges directly.",
-    "History's great disasters also tend to accelerate reform. Building codes, early warning systems, and emergency response frameworks were largely built in the aftermath of tragedies that revealed how preventable the worst outcomes were. Progress here has almost always been reactive rather than proactive.",
-  ];
+  if (dis)
+    return [
+      "Natural disasters operate on geological or meteorological scales entirely indifferent to human plans. Yet their death tolls are shaped as much by social factors — poverty, inequality, political negligence — as by the event itself. The same earthquake kills thousands in one city and dozens in another.",
+      "Catastrophe reveals a society's real priorities with uncomfortable clarity. Which communities get rebuilt first, which are quietly abandoned, who receives compensation and who is forgotten — these decisions expose power structures that official policy rarely acknowledges directly.",
+      "History's great disasters also tend to accelerate reform. Building codes, early warning systems, and emergency response frameworks were largely built in the aftermath of tragedies that revealed how preventable the worst outcomes were. Progress here has almost always been reactive rather than proactive.",
+    ];
 
-  if (art) return [
-    "Cultural history moves differently from political history. Where political events can be dated to a specific day, artistic movements accumulate gradually — a novel published here, a manifesto there, a performance that contemporary audiences found outrageous and critics a generation later called definitive.",
-    "Art produced in one era is constantly reread by those that follow. Works dismissed as obscene or trivial are restored to the canon; once-celebrated masterworks lose their urgency. The cultural record is perpetually being negotiated and revised by new eyes.",
-    "What tends to endure — across centuries and cultural contexts — is work that captured something true about human experience. Not necessarily the technically perfect or the ideologically correct, but the honest. History has a long memory for authenticity.",
-  ];
+  if (art)
+    return [
+      "Cultural history moves differently from political history. Where political events can be dated to a specific day, artistic movements accumulate gradually — a novel published here, a manifesto there, a performance that contemporary audiences found outrageous and critics a generation later called definitive.",
+      "Art produced in one era is constantly reread by those that follow. Works dismissed as obscene or trivial are restored to the canon; once-celebrated masterworks lose their urgency. The cultural record is perpetually being negotiated and revised by new eyes.",
+      "What tends to endure — across centuries and cultural contexts — is work that captured something true about human experience. Not necessarily the technically perfect or the ideologically correct, but the honest. History has a long memory for authenticity.",
+    ];
 
-  if (rel) return [
-    "Religious history resists easy reduction. Doctrinal disputes that seem, in retrospect, impossibly arcane — precise questions of theology, the authority of a particular text, the correct form of a ritual — were, for those living through them, matters of ultimate consequence, worth dying and killing for.",
-    "Religious institutions have simultaneously served as preservers of knowledge, patrons of the arts, centers of social organization, and engines of oppression. Rarely has any one of these functions entirely eclipsed the others in any tradition, for any sustained period.",
-    "The relationship between faith and secular authority has never been permanently resolved — only temporarily arranged. Every settlement between them eventually produces the conditions for the next renegotiation, and the terms are always contested.",
-  ];
+  if (rel)
+    return [
+      "Religious history resists easy reduction. Doctrinal disputes that seem, in retrospect, impossibly arcane — precise questions of theology, the authority of a particular text, the correct form of a ritual — were, for those living through them, matters of ultimate consequence, worth dying and killing for.",
+      "Religious institutions have simultaneously served as preservers of knowledge, patrons of the arts, centers of social organization, and engines of oppression. Rarely has any one of these functions entirely eclipsed the others in any tradition, for any sustained period.",
+      "The relationship between faith and secular authority has never been permanently resolved — only temporarily arranged. Every settlement between them eventually produces the conditions for the next renegotiation, and the terms are always contested.",
+    ];
 
   if (pol) {
     // Sub-categories within politics so commentary matches the actual event type
-    const isElection     = /election|vote|ballot|elected|campaign|referendum|suffrage|polling/.test(t);
-    const isTreaty       = /treaty|accord|agreement|peace|diplomatic|negotiat|ceasefire|armistice/.test(t);
-    const isRevolution   = /revolution|independence|uprising|coup|overthrow|liberat|rebel|proclaimed/.test(t);
-    const isAssassination = /assassin|murder|killed|shot|executed|impeach/.test(t);
-    const isLegislation  = /constitution|legislation|bill|charter|amendment|decree|enacted|signed into law/.test(t);
+    const isElection =
+      /election|vote|ballot|elected|campaign|referendum|suffrage|polling/.test(
+        t,
+      );
+    const isTreaty =
+      /treaty|accord|agreement|peace|diplomatic|negotiat|ceasefire|armistice/.test(
+        t,
+      );
+    const isRevolution =
+      /revolution|independence|uprising|coup|overthrow|liberat|rebel|proclaimed/.test(
+        t,
+      );
+    const isAssassination = /assassin|murder|killed|shot|executed|impeach/.test(
+      t,
+    );
+    const isLegislation =
+      /constitution|legislation|bill|charter|amendment|decree|enacted|signed into law/.test(
+        t,
+      );
 
-    if (isElection) return [
-      "Elections are democracy's recurring proof of concept — contested, imperfect, and still the most reliable mechanism humanity has produced for transferring power without immediate violence.",
-      "The outcome of any election is shaped by forces that begin years before polling day: demographic shifts, economic anxieties, media narratives, and the accumulated weight of earlier decisions. The ballot box measures a political moment, not just an individual preference.",
-      "History judges elections not only by who won, but by what became possible — or permanently foreclosed — because of them. The full consequences of a particular result are rarely visible on election night.",
-    ];
-    if (isTreaty) return [
-      "Treaties are political documents dressed as resolutions. What they commit to on paper and what they produce in practice are rarely identical — the gap between the two is where much of the subsequent history tends to unfold.",
-      "Every peace agreement encodes the power imbalance of the moment it was signed. Those who negotiated from weakness rarely secured terms that held indefinitely. The seeds of the next conflict are almost always present in the language of the settlement.",
-      "The durability of any treaty depends less on its wording than on whether the conditions that produced the original conflict have genuinely changed — a question that no signature alone can answer.",
-    ];
-    if (isRevolution) return [
-      "Revolutions are rarely as sudden as they appear. The conditions that make them possible — accumulated grievances, weakened institutions, competing claims to legitimacy — build over years before a single event transforms long-standing tension into open rupture.",
-      "Every revolution produces a gap between what it promised and what it delivers. The ideals of the opening phase are typically constrained by the practical pressures of consolidation, when the question shifts from 'what do we want?' to 'how do we hold this together?'",
-      "What makes a revolutionary moment historically decisive is not simply that it changed who held power, but whether it changed the underlying rules by which power could be held, challenged, and transferred. By that measure, the verdict on most revolutions takes generations to reach.",
-    ];
-    if (isAssassination) return [
-      "Political violence aimed at individuals rarely eliminates the ideas those individuals represented. Assassinations tend to accelerate the forces they aimed to stop — converting people into symbols and grievances into movements with longer half-lives than the original.",
-      "The aftermath of a political killing reveals far more about a society than the act itself. How institutions respond, whether successor governments are strengthened or destabilized, and whether the act achieves its intended effect — these are the real historical questions.",
-      "The counterfactual is irresistible but ultimately unanswerable: would history have unfolded differently had the individual survived? More revealing is the question of what conditions made such an outcome possible in the first place.",
-    ];
-    if (isLegislation) return [
-      "Laws are not self-executing. A constitution can articulate rights that exist nowhere in practice; legislation can transform a society or gather dust depending entirely on whether the political will that produced it survives the moment of passage.",
-      "The language of law is always a compromise — an attempt to build a durable framework from competing interests and predictions about the future that will inevitably prove partly wrong. The meaning of any law continues to shift as the circumstances it was written for change.",
-      "Constitutional moments feel more decisive at the time than they often prove to be. What determines their legacy is whether the institutions built around them are strong enough to hold when the document is tested — as it always eventually is.",
-    ];
+    if (isElection)
+      return [
+        "Elections are democracy's recurring proof of concept — contested, imperfect, and still the most reliable mechanism humanity has produced for transferring power without immediate violence.",
+        "The outcome of any election is shaped by forces that begin years before polling day: demographic shifts, economic anxieties, media narratives, and the accumulated weight of earlier decisions. The ballot box measures a political moment, not just an individual preference.",
+        "History judges elections not only by who won, but by what became possible — or permanently foreclosed — because of them. The full consequences of a particular result are rarely visible on election night.",
+      ];
+    if (isTreaty)
+      return [
+        "Treaties are political documents dressed as resolutions. What they commit to on paper and what they produce in practice are rarely identical — the gap between the two is where much of the subsequent history tends to unfold.",
+        "Every peace agreement encodes the power imbalance of the moment it was signed. Those who negotiated from weakness rarely secured terms that held indefinitely. The seeds of the next conflict are almost always present in the language of the settlement.",
+        "The durability of any treaty depends less on its wording than on whether the conditions that produced the original conflict have genuinely changed — a question that no signature alone can answer.",
+      ];
+    if (isRevolution)
+      return [
+        "Revolutions are rarely as sudden as they appear. The conditions that make them possible — accumulated grievances, weakened institutions, competing claims to legitimacy — build over years before a single event transforms long-standing tension into open rupture.",
+        "Every revolution produces a gap between what it promised and what it delivers. The ideals of the opening phase are typically constrained by the practical pressures of consolidation, when the question shifts from 'what do we want?' to 'how do we hold this together?'",
+        "What makes a revolutionary moment historically decisive is not simply that it changed who held power, but whether it changed the underlying rules by which power could be held, challenged, and transferred. By that measure, the verdict on most revolutions takes generations to reach.",
+      ];
+    if (isAssassination)
+      return [
+        "Political violence aimed at individuals rarely eliminates the ideas those individuals represented. Assassinations tend to accelerate the forces they aimed to stop — converting people into symbols and grievances into movements with longer half-lives than the original.",
+        "The aftermath of a political killing reveals far more about a society than the act itself. How institutions respond, whether successor governments are strengthened or destabilized, and whether the act achieves its intended effect — these are the real historical questions.",
+        "The counterfactual is irresistible but ultimately unanswerable: would history have unfolded differently had the individual survived? More revealing is the question of what conditions made such an outcome possible in the first place.",
+      ];
+    if (isLegislation)
+      return [
+        "Laws are not self-executing. A constitution can articulate rights that exist nowhere in practice; legislation can transform a society or gather dust depending entirely on whether the political will that produced it survives the moment of passage.",
+        "The language of law is always a compromise — an attempt to build a durable framework from competing interests and predictions about the future that will inevitably prove partly wrong. The meaning of any law continues to shift as the circumstances it was written for change.",
+        "Constitutional moments feel more decisive at the time than they often prove to be. What determines their legacy is whether the institutions built around them are strong enough to hold when the document is tested — as it always eventually is.",
+      ];
 
     // General political fallback
     return [
@@ -393,39 +544,45 @@ function workerCommentary(year, text) {
     ];
   }
 
-  if (econ) return [
-    "Economic crises have a way of revealing, very quickly, which elements of a financial system were more fragile than they appeared. The mechanisms that work smoothly during expansion — leverage, interconnection, confidence — amplify losses with equal efficiency on the way down.",
-    "Markets are built on expectations about the future, which means they are built on collective psychology as much as on fundamentals. Confidence, once lost, tends to be slow to return and easy to shatter again. The narrative a society tells about its economy matters — sometimes as much as the underlying reality.",
-    "The political consequences of economic crises consistently outlast the crises themselves. Governments that presided over financial collapses rarely survived them with their authority intact. The social strains produced by mass unemployment, lost savings, and deflated expectations tend to find political expression — not always in forms that democratic institutions can easily absorb.",
-  ];
+  if (econ)
+    return [
+      "Economic crises have a way of revealing, very quickly, which elements of a financial system were more fragile than they appeared. The mechanisms that work smoothly during expansion — leverage, interconnection, confidence — amplify losses with equal efficiency on the way down.",
+      "Markets are built on expectations about the future, which means they are built on collective psychology as much as on fundamentals. Confidence, once lost, tends to be slow to return and easy to shatter again. The narrative a society tells about its economy matters — sometimes as much as the underlying reality.",
+      "The political consequences of economic crises consistently outlast the crises themselves. Governments that presided over financial collapses rarely survived them with their authority intact. The social strains produced by mass unemployment, lost savings, and deflated expectations tend to find political expression — not always in forms that democratic institutions can easily absorb.",
+    ];
 
-  if (sport) return [
-    "Sporting achievement exists at the intersection of biological capacity, systematic training, and favorable circumstance — with the last element more consequential than athletic mythologies typically acknowledge. Champions are also products of access: to coaching, facilities, nutrition, and the freedom to specialize.",
-    "Major sporting events have always served purposes beyond competition. They are displays of national prestige, commercial spectacles, diplomatic signals, and platforms for political statements — sometimes all simultaneously. The sport itself is embedded in a context that shapes everything from the schedule to the broadcast rights.",
-    "Records exist to be broken, which is precisely what makes them useful as historical markers. Each time a presumed human limit is surpassed, the achievement recalibrates what the next generation believes is possible — a compounding effect that extends beyond sport into every domain where belief in possibility matters.",
-  ];
+  if (sport)
+    return [
+      "Sporting achievement exists at the intersection of biological capacity, systematic training, and favorable circumstance — with the last element more consequential than athletic mythologies typically acknowledge. Champions are also products of access: to coaching, facilities, nutrition, and the freedom to specialize.",
+      "Major sporting events have always served purposes beyond competition. They are displays of national prestige, commercial spectacles, diplomatic signals, and platforms for political statements — sometimes all simultaneously. The sport itself is embedded in a context that shapes everything from the schedule to the broadcast rights.",
+      "Records exist to be broken, which is precisely what makes them useful as historical markers. Each time a presumed human limit is surpassed, the achievement recalibrates what the next generation believes is possible — a compounding effect that extends beyond sport into every domain where belief in possibility matters.",
+    ];
 
   // Default — era-based
-  if (era === "ancient") return [
-    "Events from the ancient world survive only through fragments — inscriptions, papyri, and secondhand accounts filtered through centuries of copying and interpretation. Every surviving detail was preserved against considerable odds.",
-    "The civilizations that produced these events were far more complex and interconnected than popular imagination typically allows. Trade routes, diplomatic correspondence, and shared mythologies linked the ancient Mediterranean, Middle East, and Asia in ways that are still being mapped.",
-    "What we call ancient history is largely the record of elites and institutions. The daily lives, beliefs, and experiences of ordinary people — the overwhelming majority — remain largely invisible, recoverable only in fragments through archaeology.",
-  ];
-  if (era === "medieval") return [
-    "The medieval world was far more dynamic and interconnected than the 'Dark Ages' label once suggested. Scholarly exchange between Islamic, Jewish, Byzantine, and European traditions kept classical knowledge alive and advanced it significantly.",
-    "Life in the medieval period was shaped by rhythms — liturgical, agricultural, and dynastic — that gave time a different texture than the linear, progress-oriented narrative we tend to impose on it from the outside.",
-    "Medieval people were not primitive versions of us, waiting for modernity to arrive. They were fully formed human beings navigating a specific set of circumstances with intelligence, humor, ambition, and fear — much as we do now.",
-  ];
-  if (era === "early_modern") return [
-    "The early modern period was defined by collisions: of continents, religions, political systems, and ways of understanding the world. Old certainties were crumbling faster than new ones could be built to replace them.",
-    "Print technology, oceanic navigation, and the Reformation all arrived within decades of each other — a convergence of disruptions that transformed European society more rapidly than anything since the fall of Rome.",
-    "People living through this period had no way of knowing they were in a hinge moment of history. They experienced it as confusion, opportunity, and violence in roughly equal measure — which is, perhaps, how most pivotal eras feel from the inside.",
-  ];
-  if (era === "modern") return [
-    "The 19th century compressed centuries of prior change into a matter of decades. Industrial production, mass literacy, global communication, and modern medicine all emerged or transformed so rapidly that contemporaries frequently described feeling unmoored.",
-    "This era also produced the modern concept of progress — the idea that history moves in a direction, that tomorrow will be materially better than today. It was a genuinely new way of relating to time, and it reshaped everything from politics to personal ambition.",
-    "The century's confidence in its own advancement was not entirely misplaced, but it obscured the costs: ecological damage, colonial exploitation, and social displacement that would take the following century to begin reckoning with.",
-  ];
+  if (era === "ancient")
+    return [
+      "Events from the ancient world survive only through fragments — inscriptions, papyri, and secondhand accounts filtered through centuries of copying and interpretation. Every surviving detail was preserved against considerable odds.",
+      "The civilizations that produced these events were far more complex and interconnected than popular imagination typically allows. Trade routes, diplomatic correspondence, and shared mythologies linked the ancient Mediterranean, Middle East, and Asia in ways that are still being mapped.",
+      "What we call ancient history is largely the record of elites and institutions. The daily lives, beliefs, and experiences of ordinary people — the overwhelming majority — remain largely invisible, recoverable only in fragments through archaeology.",
+    ];
+  if (era === "medieval")
+    return [
+      "The medieval world was far more dynamic and interconnected than the 'Dark Ages' label once suggested. Scholarly exchange between Islamic, Jewish, Byzantine, and European traditions kept classical knowledge alive and advanced it significantly.",
+      "Life in the medieval period was shaped by rhythms — liturgical, agricultural, and dynastic — that gave time a different texture than the linear, progress-oriented narrative we tend to impose on it from the outside.",
+      "Medieval people were not primitive versions of us, waiting for modernity to arrive. They were fully formed human beings navigating a specific set of circumstances with intelligence, humor, ambition, and fear — much as we do now.",
+    ];
+  if (era === "early_modern")
+    return [
+      "The early modern period was defined by collisions: of continents, religions, political systems, and ways of understanding the world. Old certainties were crumbling faster than new ones could be built to replace them.",
+      "Print technology, oceanic navigation, and the Reformation all arrived within decades of each other — a convergence of disruptions that transformed European society more rapidly than anything since the fall of Rome.",
+      "People living through this period had no way of knowing they were in a hinge moment of history. They experienced it as confusion, opportunity, and violence in roughly equal measure — which is, perhaps, how most pivotal eras feel from the inside.",
+    ];
+  if (era === "modern")
+    return [
+      "The 19th century compressed centuries of prior change into a matter of decades. Industrial production, mass literacy, global communication, and modern medicine all emerged or transformed so rapidly that contemporaries frequently described feeling unmoored.",
+      "This era also produced the modern concept of progress — the idea that history moves in a direction, that tomorrow will be materially better than today. It was a genuinely new way of relating to time, and it reshaped everything from politics to personal ambition.",
+      "The century's confidence in its own advancement was not entirely misplaced, but it obscured the costs: ecological damage, colonial exploitation, and social displacement that would take the following century to begin reckoning with.",
+    ];
   return [
     "Every event recorded in history represents a decision by someone to consider it worth preserving. The archives of any civilization reveal as much about its values — what it found worth recording — as about what actually occurred.",
     "Much of what happened on any given day was never written down at all. The farmers, merchants, and ordinary people who constituted the overwhelming majority of any era left almost no direct trace. What we call history is largely the record of the exceptional — the violent, the powerful, and the fortunate.",
@@ -433,7 +590,13 @@ function workerCommentary(year, text) {
   ];
 }
 
-function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFacts = []) {
+function generateBlogPostHTML(
+  monthName,
+  day,
+  eventsData,
+  siteUrl,
+  didYouKnowFacts = [],
+) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const canonical = `${siteUrl}/generated/${monthName}/${day}/`;
@@ -441,8 +604,9 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFac
   const births = eventsData?.births || [];
   const deaths = eventsData?.deaths || [];
 
-  const featured = events.find(e => e.pages?.[0]?.thumbnail?.source) || events[0] || null;
-  const others = events.filter(e => e !== featured).slice(0, 8);
+  const featured =
+    events.find((e) => e.pages?.[0]?.thumbnail?.source) || events[0] || null;
+  const others = events.filter((e) => e !== featured).slice(0, 8);
   const topBirths = births.slice(0, 5);
   const topDeaths = deaths.slice(0, 5);
 
@@ -453,8 +617,12 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFac
     ? `Discover what happened on ${mDisplay} ${day} throughout history. In ${featured.year}: ${featured.text.substring(0, 115)}...`
     : `Explore historical events, births, and deaths that occurred on ${mDisplay} ${day} throughout world history.`;
   const pageDesc = rawDesc.substring(0, 155);
-  const ogImg = featured?.pages?.[0]?.thumbnail?.source || `${siteUrl}/images/logo.png`;
-  const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
+  const ogImg =
+    featured?.pages?.[0]?.thumbnail?.source || `${siteUrl}/images/logo.png`;
+  const featImg =
+    featured?.pages?.[0]?.originalimage?.source ||
+    featured?.pages?.[0]?.thumbnail?.source ||
+    null;
   const featWiki = featured?.pages?.[0]?.content_urls?.desktop?.page || "";
   const commentaryParas = featured
     ? workerCommentary(featured.year, featured.text)
@@ -466,100 +634,148 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFac
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
   const today = new Date().toISOString().split("T")[0];
+  const _todayDate = new Date();
+  const todayMonthSlug = MONTHS_ALL[_todayDate.getUTCMonth()];
+  const todayDayNum = _todayDate.getUTCDate();
 
   // Prev / next day navigation
   const mIdx = mNum - 1;
   const prevDayNum = day > 1 ? day - 1 : DAYS_IN_MONTH[(mIdx - 1 + 12) % 12];
-  const prevMIdx   = day > 1 ? mIdx : (mIdx - 1 + 12) % 12;
-  const prevMonthName    = MONTHS_ALL[prevMIdx];
+  const prevMIdx = day > 1 ? mIdx : (mIdx - 1 + 12) % 12;
+  const prevMonthName = MONTHS_ALL[prevMIdx];
   const prevMonthDisplay = MONTH_DISPLAY_NAMES[prevMIdx + 1];
   const nextDayNum = day < DAYS_IN_MONTH[mIdx] ? day + 1 : 1;
-  const nextMIdx   = day < DAYS_IN_MONTH[mIdx] ? mIdx : (mIdx + 1) % 12;
-  const nextMonthName    = MONTHS_ALL[nextMIdx];
+  const nextMIdx = day < DAYS_IN_MONTH[mIdx] ? mIdx : (mIdx + 1) % 12;
+  const nextMonthName = MONTHS_ALL[nextMIdx];
   const nextMonthDisplay = MONTH_DISPLAY_NAMES[nextMIdx + 1];
 
   // FAQ schema for voice search + featured snippets
   const faqSchema = JSON.stringify({
-    "@context": "https://schema.org", "@type": "FAQPage",
-    "mainEntity": [
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: [
       {
         "@type": "Question",
-        "name": `What happened on ${mDisplay} ${day} in history?`,
-        "acceptedAnswer": { "@type": "Answer", "text": featured
-          ? `On ${mDisplay} ${day}, ${featured.year}: ${featured.text}`
-          : `Explore historical events on thisDay.info for ${mDisplay} ${day}.` },
+        name: `What happened on ${mDisplay} ${day} in history?`,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: featured
+            ? `On ${mDisplay} ${day}, ${featured.year}: ${featured.text}`
+            : `Explore historical events on thisDay.info for ${mDisplay} ${day}.`,
+        },
       },
-      ...(births.length > 0 ? [{
-        "@type": "Question",
-        "name": `Who are famous people born on ${mDisplay} ${day}?`,
-        "acceptedAnswer": { "@type": "Answer", "text":
-          `Famous people born on ${mDisplay} ${day} include: ${births.slice(0, 3).map(b => b.text.split(",")[0]).join(", ")}.` },
-      }] : []),
-      ...(deaths.length > 0 ? [{
-        "@type": "Question",
-        "name": `What famous people died on ${mDisplay} ${day}?`,
-        "acceptedAnswer": { "@type": "Answer", "text":
-          `Notable historical figures who died on ${mDisplay} ${day} include: ${deaths.slice(0, 3).map(d => d.text.split(",")[0]).join(", ")}.` },
-      }] : []),
+      ...(births.length > 0
+        ? [
+            {
+              "@type": "Question",
+              name: `Who are famous people born on ${mDisplay} ${day}?`,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: `Famous people born on ${mDisplay} ${day} include: ${births
+                  .slice(0, 3)
+                  .map((b) => b.text.split(",")[0])
+                  .join(", ")}.`,
+              },
+            },
+          ]
+        : []),
+      ...(deaths.length > 0
+        ? [
+            {
+              "@type": "Question",
+              name: `What famous people died on ${mDisplay} ${day}?`,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: `Notable historical figures who died on ${mDisplay} ${day} include: ${deaths
+                  .slice(0, 3)
+                  .map((d) => d.text.split(",")[0])
+                  .join(", ")}.`,
+              },
+            },
+          ]
+        : []),
     ],
   }).replace(/<\//g, "<\\/");
 
   const articleSchema = JSON.stringify({
-    "@context": "https://schema.org", "@type": "NewsArticle",
-    "mainEntityOfPage": { "@type": "WebPage", "@id": canonical },
-    "headline": pageTitle, "description": pageDesc, "url": canonical,
-    "datePublished": today, "dateModified": today,
-    "articleSection": "History",
-    "inLanguage": "en",
-    "author": {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
+    headline: pageTitle,
+    description: pageDesc,
+    url: canonical,
+    datePublished: today,
+    dateModified: today,
+    articleSection: "History",
+    inLanguage: "en",
+    author: {
       "@type": "Person",
-      "name": "thisDay.info Editorial Team",
-      "url": `${siteUrl}/about/`,
+      name: "thisDay.info Editorial Team",
+      url: `${siteUrl}/about/`,
     },
-    "publisher": {
-      "@type": "Organization", "name": "thisDay.info", "url": siteUrl,
-      "logo": { "@type": "ImageObject", "url": `${siteUrl}/images/logo.png` },
+    publisher: {
+      "@type": "Organization",
+      name: "thisDay.info",
+      url: siteUrl,
+      logo: { "@type": "ImageObject", url: `${siteUrl}/images/logo.png` },
     },
-    ...(featImg && { "image": { "@type": "ImageObject", "url": featImg } }),
+    ...(featImg && { image: { "@type": "ImageObject", url: featImg } }),
   }).replace(/<\//g, "<\\/");
 
-  const eventsSchema = events.length > 0 ? JSON.stringify({
-    "@context": "https://schema.org", "@type": "ItemList",
-    "name": `Historical Events on ${mDisplay} ${day}`, "numberOfItems": events.length,
-    "itemListElement": events.slice(0, 5).map((e, i) => ({
-      "@type": "ListItem", "position": i + 1,
-      "item": { "@type": "Event", "name": e.text.substring(0, 100), "description": e.text, "temporalCoverage": String(e.year) },
-    })),
-  }).replace(/<\//g, "<\\/") : null;
+  const eventsSchema =
+    events.length > 0
+      ? JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "ItemList",
+          name: `Historical Events on ${mDisplay} ${day}`,
+          numberOfItems: events.length,
+          itemListElement: events.slice(0, 5).map((e, i) => ({
+            "@type": "ListItem",
+            position: i + 1,
+            item: {
+              "@type": "Event",
+              name: e.text.substring(0, 100),
+              description: e.text,
+              temporalCoverage: String(e.year),
+            },
+          })),
+        }).replace(/<\//g, "<\\/")
+      : null;
 
-  const othersHtml = others.map(e => {
-    const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
-    const th = e.pages?.[0]?.thumbnail?.source || "";
-    return `<div class="ev-row d-flex align-items-start gap-3">
+  const othersHtml = others
+    .map((e) => {
+      const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
+      const th = e.pages?.[0]?.thumbnail?.source || "";
+      return `<div class="ev-row d-flex align-items-start gap-3">
   <div class="flex-grow-1"><span class="yr">${escapeHtml(String(e.year))}</span> ${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
   ${th ? `<img src="${escapeHtml(th)}" alt="" width="44" height="44" style="border-radius:4px;object-fit:cover;flex-shrink:0" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : ""}
 </div>`;
-  }).join("");
+    })
+    .join("");
 
-  const birthsHtml = topBirths.map(b => {
-    const th = b.pages?.[0]?.thumbnail?.source || "";
-    const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
-    const name = escapeHtml(b.text.split(",")[0]);
-    return `<div class="person-row d-flex align-items-center gap-3">
+  const birthsHtml = topBirths
+    .map((b) => {
+      const th = b.pages?.[0]?.thumbnail?.source || "";
+      const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
+      const name = escapeHtml(b.text.split(",")[0]);
+      return `<div class="person-row d-flex align-items-center gap-3">
   ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : '<div class="p-thumb-blank"><i class="bi bi-person"></i></div>'}
   <div><span class="yr">${escapeHtml(String(b.year))}</span> ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.text)}</a>` : escapeHtml(b.text)}</div>
 </div>`;
-  }).join("");
+    })
+    .join("");
 
-  const deathsHtml = topDeaths.map(d => {
-    const th = d.pages?.[0]?.thumbnail?.source || "";
-    const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
-    const name = escapeHtml(d.text.split(",")[0]);
-    return `<div class="person-row d-flex align-items-center gap-3">
+  const deathsHtml = topDeaths
+    .map((d) => {
+      const th = d.pages?.[0]?.thumbnail?.source || "";
+      const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
+      const name = escapeHtml(d.text.split(",")[0]);
+      return `<div class="person-row d-flex align-items-center gap-3">
   ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : '<div class="p-thumb-blank"><i class="bi bi-person"></i></div>'}
   <div><span class="yr" style="background:#6c757d">${escapeHtml(String(d.year))}</span> ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${escapeHtml(d.text)}</a>` : escapeHtml(d.text)}</div>
 </div>`;
-  }).join("");
+    })
+    .join("");
 
   return `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
@@ -623,6 +839,9 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     </div>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
+        <li class="nav-item">
+          <a class="nav-link" href="/generated/${todayMonthSlug}/${todayDayNum}/">Today's Events</a>
+        </li>
         <li class="nav-item d-flex align-items-center">
           <div class="form-check form-switch d-none d-lg-block me-2">
             <input class="form-check-input" type="checkbox" id="tsd" aria-label="Toggle dark mode"/>
@@ -637,19 +856,21 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
-      <li class="breadcrumb-item"><a href="/blog/">Blog</a></li>
+      <li class="breadcrumb-item"><a href="/generated/">On This Day</a></li>
       <li class="breadcrumb-item active">${escapeHtml(mDisplay)} ${day}</li>
     </ol>
   </nav>
-  <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} in History <span class="auto-tag">Auto</span></h1>
+  <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} in History <span class="auto-tag">Made for you</span></h1>
   <p class="text-muted mb-1" style="font-size:.9rem">A thisDay.info historical overview &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time></p>
-  ${featured ? `
+  ${
+    featured
+      ? `
   <div class="card-box">
     ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
-    ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:#f59e0b"></i>Did You Know?</h3><ul>${didYouKnowFacts.map(f => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:#f59e0b"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <table class="table table-sm table-bordered mt-3" style="max-width:480px">
       <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
       <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
@@ -657,7 +878,18 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
       <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
     </table>
     ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right me-1"></i>Full Article on Wikipedia</a>` : ""}
-  </div>` : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+    <div class="d-flex gap-2 mt-3 flex-wrap">${(() => {
+      const shareText = escapeHtml(
+        (didYouKnowFacts[0] || featured.text).slice(0, 120),
+      );
+      const shareUrl = canonical;
+      const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent((didYouKnowFacts[0] || featured.text).slice(0, 120) + " " + canonical)}`;
+      return `<button onclick="if(navigator.share){navigator.share({title:document.title,text:'${shareText}',url:'${shareUrl}'}).catch(()=>{})}else{window.open('${tweetUrl}','_blank')}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-share me-1"></i>Share</button>
+      <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-secondary"><i class="bi bi-twitter-x me-1"></i>Post</a>`;
+    })()}</div>
+  </div>`
+      : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
+  }
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle"
@@ -668,7 +900,9 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
          data-full-width-responsive="true"></ins>
     <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
   </div>
-  ${others.length > 0 ? `
+  ${
+    others.length > 0
+      ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
     ${othersHtml}
@@ -682,17 +916,27 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
          data-ad-format="auto"
          data-full-width-responsive="true"></ins>
     <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
-  </div>` : ""}
-  ${topBirths.length > 0 ? `
+  </div>`
+      : ""
+  }
+  ${
+    topBirths.length > 0
+      ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
     ${birthsHtml}
-  </div>` : ""}
-  ${topDeaths.length > 0 ? `
+  </div>`
+      : ""
+  }
+  ${
+    topDeaths.length > 0
+      ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day}</h2>
     ${deathsHtml}
-  </div>` : ""}
+  </div>`
+      : ""
+  }
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
       <a href="/generated/${prevMonthName}/${prevDayNum}/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
@@ -767,7 +1011,9 @@ async function handleGeneratedPost(_request, env, ctx, url) {
         });
       }
     }
-  } catch (e) { console.error("KV read:", e); }
+  } catch (e) {
+    console.error("KV read:", e);
+  }
 
   // Fetch from Wikipedia /all/ endpoint (returns events + births + deaths)
   const mPad = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
@@ -775,25 +1021,33 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
   let eventsData = { events: [], births: [], deaths: [] };
   try {
-    const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+    const r = await fetch(apiUrl, {
+      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+    });
     if (r.ok) eventsData = await r.json();
-  } catch (e) { console.error("Wikipedia API:", e); }
+  } catch (e) {
+    console.error("Wikipedia API:", e);
+  }
 
   // Identify featured event and generate AI "Did You Know" facts
-  const featuredEvent = eventsData?.events?.find(e => e.pages?.[0]?.thumbnail?.source) || eventsData?.events?.[0] || null;
+  const featuredEvent =
+    eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) ||
+    eventsData?.events?.[0] ||
+    null;
   let didYouKnowFacts = [];
   if (env.AI && featuredEvent) {
     try {
       const eventDesc = `${featuredEvent.year} — ${featuredEvent.text}`;
       const aiTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("AI timeout")), 8000)
+        setTimeout(() => reject(new Error("AI timeout")), 8000),
       );
       const aiResult = await Promise.race([
         env.AI.run(CF_AI_MODEL, {
           messages: [
             {
               role: "system",
-              content: "You are a historical facts writer. Always respond with valid JSON only, no markdown, no extra text.",
+              content:
+                "You are a historical facts writer. Always respond with valid JSON only, no markdown, no extra text.",
             },
             {
               role: "user",
@@ -804,27 +1058,42 @@ async function handleGeneratedPost(_request, env, ctx, url) {
         }),
         aiTimeout,
       ]);
-      const rawValue = aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
-      const raw = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
-      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+      const rawValue =
+        aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
+      const raw = (
+        typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
+      ).trim();
+      const cleaned = raw
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```\s*$/, "")
+        .trim();
       const arrMatch = cleaned.match(/\[[\s\S]*\]/);
       if (arrMatch) {
         const parsed = JSON.parse(arrMatch[0]);
         if (Array.isArray(parsed) && parsed.length >= 3) {
-          didYouKnowFacts = parsed.filter(f => typeof f === "string");
+          didYouKnowFacts = parsed.filter((f) => typeof f === "string");
         }
       }
-    } catch (e) { console.error("AI did-you-know generation failed:", e); }
+    } catch (e) {
+      console.error("AI did-you-know generation failed:", e);
+    }
   }
 
   const siteUrl = `${url.protocol}//${url.host}`;
-  const html = generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFacts);
+  const html = generateBlogPostHTML(
+    monthName,
+    day,
+    eventsData,
+    siteUrl,
+    didYouKnowFacts,
+  );
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
   if (env.EVENTS_KV && (eventsData?.events?.length || 0) > 0) {
     ctx.waitUntil(
-      env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 })
-        .catch(e => console.error("KV write:", e))
+      env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 }).catch(
+        (e) => console.error("KV write:", e),
+      ),
     );
   }
 
@@ -854,7 +1123,9 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   // Wikipedia events proxy — avoids CORS issues from direct browser requests
-  const eventsProxyMatch = url.pathname.match(/^\/api\/events\/(\d{2})\/(\d{2})$/);
+  const eventsProxyMatch = url.pathname.match(
+    /^\/api\/events\/(\d{2})\/(\d{2})$/,
+  );
   if (eventsProxyMatch) {
     const mm = eventsProxyMatch[1];
     const dd = eventsProxyMatch[2];
@@ -874,16 +1145,29 @@ async function handleFetchRequest(request, env, ctx) {
     }
 
     try {
-      const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+      const r = await fetch(apiUrl, {
+        headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+      });
       if (!r.ok) throw new Error(r.statusText);
       const body = await r.text();
-      ctx.waitUntil(workerCache.put(cacheKey, new Response(body, {
-        headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" },
-      })));
+      ctx.waitUntil(
+        workerCache.put(
+          cacheKey,
+          new Response(body, {
+            headers: {
+              "Content-Type": "application/json",
+              "Cache-Control": "public, max-age=86400",
+            },
+          }),
+        ),
+      );
       return new Response(body, { headers: corsHeaders });
     } catch (e) {
       console.error("Events proxy error:", e);
-      return new Response(JSON.stringify({ events: [], births: [], deaths: [] }), { headers: corsHeaders });
+      return new Response(
+        JSON.stringify({ events: [], births: [], deaths: [] }),
+        { headers: corsHeaders },
+      );
     }
   }
 
@@ -1048,7 +1332,7 @@ async function handleFetchRequest(request, env, ctx) {
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
     // Use the first event's Wikipedia thumbnail for social sharing if available
     const firstWithImage = eventsData.events.find(
-      (e) => e.pages?.[0]?.thumbnail?.source
+      (e) => e.pages?.[0]?.thumbnail?.source,
     );
     if (firstWithImage) {
       const rawImgUrl = firstWithImage.pages[0].thumbnail.source;
@@ -1063,15 +1347,18 @@ async function handleFetchRequest(request, env, ctx) {
       .join("; ");
 
     const firstEventText = eventsData.events[0].text;
-    const titleSnippet = firstEventText.length > 65
-      ? firstEventText.substring(0, firstEventText.lastIndexOf(" ", 65)) + "..."
-      : firstEventText;
+    const titleSnippet =
+      firstEventText.length > 65
+        ? firstEventText.substring(0, firstEventText.lastIndexOf(" ", 65)) +
+          "..."
+        : firstEventText;
     dynamicTitle = `On This Day, ${formattedDate}: ${eventsData.events[0].year}, ${titleSnippet} | thisDay.info`;
 
     const rawDesc = `Discover what happened on ${formattedDate}: ${topEvents}. Explore historical events, births, and deaths.`;
-    dynamicDescription = rawDesc.length > 155
-      ? rawDesc.substring(0, rawDesc.lastIndexOf(" ", 155)) + "..."
-      : rawDesc;
+    dynamicDescription =
+      rawDesc.length > 155
+        ? rawDesc.substring(0, rawDesc.lastIndexOf(" ", 155)) + "..."
+        : rawDesc;
 
     // Add relevant keywords from event texts (simple approach)
     const eventKeywords = eventsData.events
@@ -1331,7 +1618,9 @@ async function handleFetchRequest(request, env, ctx) {
                   : undefined;
 
               const wikiUrl =
-                birthItem.pages && birthItem.pages.length > 0 && birthItem.pages[0].content_urls?.desktop?.page
+                birthItem.pages &&
+                birthItem.pages.length > 0 &&
+                birthItem.pages[0].content_urls?.desktop?.page
                   ? birthItem.pages[0].content_urls.desktop.page
                   : ogUrl;
 
@@ -1397,7 +1686,9 @@ async function handleFetchRequest(request, env, ctx) {
                   : undefined;
 
               const wikiUrl =
-                deathItem.pages && deathItem.pages.length > 0 && deathItem.pages[0].content_urls?.desktop?.page
+                deathItem.pages &&
+                deathItem.pages.length > 0 &&
+                deathItem.pages[0].content_urls?.desktop?.page
                   ? deathItem.pages[0].content_urls.desktop.page
                   : ogUrl;
 
@@ -1500,9 +1791,13 @@ async function handleFetchRequest(request, env, ctx) {
               name: `Who was born on ${formattedDate}?`,
               acceptedAnswer: {
                 "@type": "Answer",
-                text: eventsData?.births?.length > 0
-                  ? `Notable people born on ${formattedDate} include: ${eventsData.births.slice(0, 3).map(b => b.text.split(",")[0]).join(", ")}. Browse the full list on thisDay.info.`
-                  : `Explore thisDay.info to discover notable people born on ${formattedDate} throughout history.`,
+                text:
+                  eventsData?.births?.length > 0
+                    ? `Notable people born on ${formattedDate} include: ${eventsData.births
+                        .slice(0, 3)
+                        .map((b) => b.text.split(",")[0])
+                        .join(", ")}. Browse the full list on thisDay.info.`
+                    : `Explore thisDay.info to discover notable people born on ${formattedDate} throughout history.`,
               },
             },
             {
@@ -1542,13 +1837,13 @@ async function handleFetchRequest(request, env, ctx) {
     element(element) {
       element.prepend(
         '<link rel="alternate" type="application/rss+xml" title="thisDay. — On This Day in History" href="https://thisday.info/rss.xml">\n' +
-        '<link rel="preconnect" href="https://fonts.googleapis.com">\n' +
-        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n' +
-        '<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>\n' +
-        '<link rel="dns-prefetch" href="https://api.wikimedia.org">\n' +
-        '<link rel="dns-prefetch" href="https://upload.wikimedia.org">\n' +
-        '<link rel="dns-prefetch" href="https://www.googletagmanager.com">\n' +
-        '<link rel="dns-prefetch" href="https://pagead2.googlesyndication.com">',
+          '<link rel="preconnect" href="https://fonts.googleapis.com">\n' +
+          '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n' +
+          '<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>\n' +
+          '<link rel="dns-prefetch" href="https://api.wikimedia.org">\n' +
+          '<link rel="dns-prefetch" href="https://upload.wikimedia.org">\n' +
+          '<link rel="dns-prefetch" href="https://www.googletagmanager.com">\n' +
+          '<link rel="dns-prefetch" href="https://pagead2.googlesyndication.com">',
         { html: true },
       );
     },
@@ -1574,9 +1869,9 @@ async function handleFetchRequest(request, env, ctx) {
       element(element) {
         element.setInnerContent(
           `<section class="p-4" aria-label="Today's events in history">\n` +
-          `<h2 class="h5 mb-3">On This Day, ${escapeHtml(formattedDate)}</h2>\n` +
-          `<ul class="list-unstyled mb-0">${ssrItems}</ul>\n` +
-          `</section>`,
+            `<h2 class="h5 mb-3">On This Day, ${escapeHtml(formattedDate)}</h2>\n` +
+            `<ul class="list-unstyled mb-0">${ssrItems}</ul>\n` +
+            `</section>`,
           { html: true },
         );
       },
@@ -1661,10 +1956,10 @@ async function handleFetchRequest(request, env, ctx) {
   newResponse.headers.set(
     "Link",
     [
-      '<https://fonts.googleapis.com>; rel=preconnect',
-      '<https://fonts.gstatic.com>; rel=preconnect; crossorigin',
-      '<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin',
-      '<https://api.wikimedia.org>; rel=dns-prefetch',
+      "<https://fonts.googleapis.com>; rel=preconnect",
+      "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
+      "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
+      "<https://api.wikimedia.org>; rel=dns-prefetch",
     ].join(", "),
   );
 
@@ -1684,7 +1979,9 @@ async function handleScheduledEvent(env) {
       await env.EVENTS_KV.put(todayKvKey, JSON.stringify(eventsData), {
         expirationTtl: KV_CACHE_TTL_SECONDS,
       });
-      console.log(`Successfully pre-fetched and stored events for ${isoDateKey} in KV.`);
+      console.log(
+        `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
+      );
     } catch (e) {
       console.error("Failed to put data into KV:", e);
     }

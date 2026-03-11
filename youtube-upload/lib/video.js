@@ -57,25 +57,16 @@ function wrapLines(text, maxChars) {
 // SVG overlay builder
 // ---------------------------------------------------------------------------
 
-function buildSVG(title, description) {
+function buildSVG(title) {
   const titleLines = wrapLines(title, 28).slice(0, 3);
-  const descLines  = wrapLines(description, 42).slice(0, 5);
 
   const titleLineH  = 82;
-  const titleStartY = 1080;
-  const descLineH   = 56;
-  const descStartY  = titleStartY + titleLines.length * titleLineH + 56;
+  const titleStartY = 1100;
 
   const titleSVG = titleLines.map((line, i) => `
     <text x="540" y="${titleStartY + i * titleLineH}"
       font-family="DejaVu Sans,Arial,sans-serif" font-size="68" font-weight="bold"
       fill="white" text-anchor="middle" dominant-baseline="middle"
-    >${escapeXml(line)}</text>`).join('');
-
-  const descSVG = descLines.map((line, i) => `
-    <text x="540" y="${descStartY + i * descLineH}"
-      font-family="DejaVu Sans,Arial,sans-serif" font-size="42"
-      fill="#e2e8f0" text-anchor="middle" dominant-baseline="middle"
     >${escapeXml(line)}</text>`).join('');
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
@@ -96,7 +87,6 @@ function buildSVG(title, description) {
     >ON THIS DAY</text>
 
     ${titleSVG}
-    ${descSVG}
 
     <!-- Branding -->
     <text x="540" y="1868"
@@ -135,14 +125,14 @@ async function downloadImageBuffer(url) {
 export async function generateVideo(post, { narrationPath, bgMusicPath } = {}) {
   mkdirSync(TMP, { recursive: true });
 
-  const { slug, title, description } = post;
+  const { slug, title } = post;
   const imageUrl   = post.imageUrl || 'https://thisday.info/images/logo.png';
   const framePath  = join(TMP, `${slug}_frame.png`);
   const videoPath  = join(TMP, `${slug}.mp4`);
 
   // 1. Download + resize Wikipedia image → PNG frame with SVG overlay
   const imgBuffer = await downloadImageBuffer(imageUrl);
-  const svgBuffer = Buffer.from(buildSVG(title, description));
+  const svgBuffer = Buffer.from(buildSVG(title));
 
   await sharp(imgBuffer)
     .resize(W, H, { fit: 'cover', position: 'center' })

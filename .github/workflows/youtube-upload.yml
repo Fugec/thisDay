@@ -1,10 +1,10 @@
 name: YouTube Auto-Upload
 
 on:
-  # Runs on days 1, 4, 7, 10 … of each month at 02:00 UTC
-  # (~10 videos/month — well within ElevenLabs 10k chars/month free tier)
+  # Runs Sunday, Monday, Wednesday, Friday at 02:00 UTC
+  # (4 videos/week — ~17/month; uses fallback ELEVENLABS_API_KEY_2 if primary hits 10k limit)
   schedule:
-    - cron: '0 2 */3 * *'
+    - cron: '0 2 * * 0,1,3,5'
 
   # Allow a manual run from the Actions tab (e.g. to back-fill or re-upload)
   workflow_dispatch:
@@ -40,5 +40,6 @@ jobs:
           YOUTUBE_CLIENT_SECRET:  ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN:  ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           ELEVENLABS_API_KEY:     ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_API_KEY_2:   ${{ secrets.ELEVENLABS_API_KEY_2 }}
           YOUTUBE_PRIVACY:        ${{ secrets.YOUTUBE_PRIVACY }}
           REUPLOAD_SLUGS:         ${{ secrets.REUPLOAD_SLUGS }}

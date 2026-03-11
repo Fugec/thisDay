@@ -7,7 +7,7 @@
  * Audio:  ElevenLabs TTS narration (from Did You Know / Quick Facts section)
  *         mixed with background music (assets/background.mp3) at 15% volume.
  * Image:  Wikipedia image from the post's imageUrl, or fallback logo.
- * Schedule: 1 video every 3 days via GitHub Actions cron "0 2 * /3 * *"
+ * Schedule: 1 video per run, Sun/Mon/Wed/Fri via GitHub Actions cron "0 2 * * 0,1,3,5" (4/week)
  *
  * Run:        npm start
  * Auth setup: npm run auth   (one-time, to get YOUTUBE_REFRESH_TOKEN)
@@ -50,7 +50,7 @@ async function main() {
       if (bf !== af) return bf - af;
       return new Date(b.publishedAt) - new Date(a.publishedAt);
     })
-    .slice(0, 1); // 1 post per run — with every-3-day cron = ~10/month
+    .slice(0, 1); // 1 post per run — with Sun/Mon/Wed/Fri cron = ~17/month
 
   console.log(
     `Posts in KV: ${posts.length} | ` +

@@ -609,7 +609,10 @@ body.dark-theme .did-you-know{background:rgba(245,158,11,.13)}
 body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
 .auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
 body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
-</style></head>
+.ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:.68rem;font-weight:600;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
+</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+</head>
 <body>
 <nav class="navbar navbar-expand-lg navbar-dark">
   <div class="container-fluid">
@@ -655,10 +658,30 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     </table>
     ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right me-1"></i>Full Article on Wikipedia</a>` : ""}
   </div>` : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  <div class="ad-unit">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle"
+         style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209"
+         data-ad-slot="4828593028"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+    <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+  </div>
   ${others.length > 0 ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
     ${othersHtml}
+  </div>
+  <div class="ad-unit">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle"
+         style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209"
+         data-ad-slot="9477779891"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+    <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
   </div>` : ""}
   ${topBirths.length > 0 ? `
   <div class="card-box">

@@ -2,6 +2,12 @@
   "name": "thisday-seo-worker",
   "compatibility_date": "2025-06-27",
   "main": "js/seo-worker.js",
+  "kv_namespaces": [
+    {
+      "binding": "EVENTS_KV",
+      "id": "39d7ce85d93a49c5bb42ee6f2416b1e0"
+    }
+  ],
   "ai": {
     "binding": "AI"
   }

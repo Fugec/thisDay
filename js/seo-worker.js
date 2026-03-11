@@ -491,15 +491,15 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFac
       },
       ...(births.length > 0 ? [{
         "@type": "Question",
-        "name": `Who was born on ${mDisplay} ${day}?`,
+        "name": `Who are famous people born on ${mDisplay} ${day}?`,
         "acceptedAnswer": { "@type": "Answer", "text":
-          `Notable people born on ${mDisplay} ${day} include: ${births.slice(0, 3).map(b => b.text.split(",")[0]).join(", ")}.` },
+          `Famous people born on ${mDisplay} ${day} include: ${births.slice(0, 3).map(b => b.text.split(",")[0]).join(", ")}.` },
       }] : []),
       ...(deaths.length > 0 ? [{
         "@type": "Question",
-        "name": `Who died on ${mDisplay} ${day}?`,
+        "name": `What famous people died on ${mDisplay} ${day}?`,
         "acceptedAnswer": { "@type": "Answer", "text":
-          `Notable people who died on ${mDisplay} ${day} include: ${deaths.slice(0, 3).map(d => d.text.split(",")[0]).join(", ")}.` },
+          `Notable historical figures who died on ${mDisplay} ${day} include: ${deaths.slice(0, 3).map(d => d.text.split(",")[0]).join(", ")}.` },
       }] : []),
     ],
   }).replace(/<\//g, "<\\/");
@@ -564,7 +564,10 @@ function generateBlogPostHTML(monthName, day, eventsData, siteUrl, didYouKnowFac
   return `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(pageTitle)}</title>
-<link rel="canonical" href="${escapeHtml(canonical)}"/><meta name="robots" content="index, follow"/><meta name="description" content="${escapeHtml(pageDesc)}"/>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<link rel="prev" href="${escapeHtml(`${siteUrl}/generated/${prevMonthName}/${prevDayNum}/`)}"/>
+<link rel="next" href="${escapeHtml(`${siteUrl}/generated/${nextMonthName}/${nextDayNum}/`)}"/>
+<meta name="robots" content="index, follow"/><meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/><meta property="og:description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:type" content="article"/><meta property="og:url" content="${escapeHtml(canonical)}"/>
 <meta property="og:locale" content="en_US"/><meta property="og:image" content="${escapeHtml(ogImg)}"/>
@@ -759,19 +762,25 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   if (env.AI && featuredEvent) {
     try {
       const eventDesc = `${featuredEvent.year} — ${featuredEvent.text}`;
-      const aiResult = await env.AI.run(CF_AI_MODEL, {
-        messages: [
-          {
-            role: "system",
-            content: "You are a historical facts writer. Always respond with valid JSON only, no markdown, no extra text.",
-          },
-          {
-            role: "user",
-            content: `Write exactly 5 interesting "Did You Know" facts about this historical event: "${eventDesc}"\n\nEach fact must be 2-3 sentences. Make them educational, specific, and directly connected to the event or its broader topic. Avoid restating the event itself as a fact.\n\nReply with ONLY a JSON array of 5 strings. Example:\n["Fact one.", "Fact two.", "Fact three.", "Fact four.", "Fact five."]`,
-          },
-        ],
-        max_tokens: 1024,
-      });
+      const aiTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("AI timeout")), 8000)
+      );
+      const aiResult = await Promise.race([
+        env.AI.run(CF_AI_MODEL, {
+          messages: [
+            {
+              role: "system",
+              content: "You are a historical facts writer. Always respond with valid JSON only, no markdown, no extra text.",
+            },
+            {
+              role: "user",
+              content: `Write exactly 5 interesting "Did You Know" facts about this historical event: "${eventDesc}"\n\nEach fact must be 2-3 sentences. Make them educational, specific, and directly connected to the event or its broader topic. Avoid restating the event itself as a fact.\n\nReply with ONLY a JSON array of 5 strings. Example:\n["Fact one.", "Fact two.", "Fact three.", "Fact four.", "Fact five."]`,
+            },
+          ],
+          max_tokens: 1024,
+        }),
+        aiTimeout,
+      ]);
       const rawValue = aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
       const raw = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
       const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
@@ -817,7 +826,7 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   // Image proxy — must be handled before the HTML pass-through guard
-  if (url.pathname === "/img") {
+  if (url.pathname === "/image-proxy" || url.pathname === "/img") {
     return handleImageProxy(request, url, ctx);
   }
 
@@ -1021,7 +1030,7 @@ async function handleFetchRequest(request, env, ctx) {
     if (firstWithImage) {
       const rawImgUrl = firstWithImage.pages[0].thumbnail.source;
       // Route through the image proxy: resizes to 1200px and caches at edge for 30 days
-      ogImageUrl = `/img?src=${encodeURIComponent(rawImgUrl)}&w=1200&q=82`;
+      ogImageUrl = `/image-proxy?src=${encodeURIComponent(rawImgUrl)}&w=1200&q=82`;
     }
 
     // Pick the top 3-5 events for a concise description

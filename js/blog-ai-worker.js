@@ -50,7 +50,7 @@ export default {
   /**
    * HTTP fetch handler â€” serves blog pages and the manual trigger endpoint.
    */
-  async fetch(request, env, ctx) {
+  async fetch(request, env, _ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, "") || "/";
 
@@ -245,6 +245,18 @@ async function generateAndStore(env) {
     content.imageCaption = "Image unavailable. Historical data sourced from Wikipedia.";
   }
 
+  // Ensure meta description meets minimum SEO length (120 chars)
+  if (!content.description || content.description.length < 120) {
+    const loc = content.location ? ` in ${content.location}` : "";
+    content.description = `Discover the story of ${content.eventTitle} on ${content.historicalDate}${loc}. Learn about this pivotal historical event, its causes, immediate aftermath, and lasting legacy.`.substring(0, 155);
+  }
+  if (!content.ogDescription || content.ogDescription.length < 80) {
+    content.ogDescription = content.description.substring(0, 130);
+  }
+  if (!content.twitterDescription || content.twitterDescription.length < 60) {
+    content.twitterDescription = content.description.substring(0, 120);
+  }
+
   const slug = buildSlug(now);
   const html = buildPostHTML(content, now, slug, existingIndex);
 
@@ -320,9 +332,9 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation â
   "historicalDateISO": "YYYY-MM-DD",
   "location": "City, Country",
   "country": "Country",
-  "description": "One-sentence meta description under 155 chars",
-  "ogDescription": "Open Graph description under 130 chars",
-  "twitterDescription": "Twitter description under 120 chars",
+  "description": "Meta description between 120-155 characters. Must be specific, keyword-rich, and describe the event, its date, and significance.",
+  "ogDescription": "Open Graph description between 100-130 characters, engaging and specific.",
+  "twitterDescription": "Twitter description between 90-120 characters, punchy and specific.",
   "keywords": "keyword1, keyword2, keyword3, keyword4, keyword5",
   "imageUrl": "https://upload.wikimedia.org/wikipedia/commons/thumb/example.jpg",
   "imageAlt": "Alt text for the image",
@@ -400,6 +412,9 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation â
   // - Chat models return { choices: [{ message: { content: "string" } }] }
   // - Some models return the parsed JSON object directly
   const rawValue = result.response ?? result.choices?.[0]?.message?.content ?? result;
+  if (!rawValue || (typeof rawValue === "string" && rawValue.trim().length < 100)) {
+    throw new Error(`AI response too short or empty (${String(rawValue).length} chars)`);
+  }
 
   let parsed;
   if (rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)) {
@@ -508,7 +523,7 @@ function buildPostHTML(c, date, slug, allPosts = []) {
       dateModified: publishedDateISO,
       inLanguage: "en",
       articleSection: "History",
-      author: { "@type": "Organization", name: "thisDay.info" },
+      author: { "@type": "Person", name: "thisDay.info Editorial Team", url: "https://thisday.info/about/" },
       publisher: {
         "@type": "Organization",
         name: "thisDay.info",
@@ -574,6 +589,29 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     <!-- JSON-LD Schema -->
     <script type="application/ld+json">
 ${jsonLd}
+    </script>
+    <script type="application/ld+json">
+${JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": `What was ${esc(c.eventTitle)}?`,
+      "acceptedAnswer": { "@type": "Answer", "text": esc(c.jsonLdDescription || c.description) },
+    },
+    {
+      "@type": "Question",
+      "name": `When and where did ${esc(c.eventTitle)} take place?`,
+      "acceptedAnswer": { "@type": "Answer", "text": `${esc(c.eventTitle)} took place on ${esc(c.historicalDate)} in ${esc(c.location)}.` },
+    },
+    {
+      "@type": "Question",
+      "name": `What was the historical significance of ${esc(c.eventTitle)}?`,
+      "acceptedAnswer": { "@type": "Answer", "text": esc((c.quickFacts || []).find(f => f.label === "Significance")?.value || c.description) },
+    },
+  ],
+})}
     </script>
     <script type="application/ld+json">
 ${JSON.stringify({
@@ -758,18 +796,20 @@ ${JSON.stringify({
               <small>
                 Published: ${esc(publishedStr)} &nbsp;|&nbsp;
                 Event Date: ${esc(c.historicalDate)} &nbsp;|&nbsp;
-                thisDay. Editorial Team${readingTime}
+                By <a href="/about/" rel="author" style="color:inherit">thisDay. Editorial Team</a>${readingTime}
               </small>
             </p>
           </header>
 
           <figure class="text-center mb-4">
             <img
-              src="${esc(c.imageUrl)}"
+              src="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800&q=85"
+              srcset="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=400 400w, /image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800 800w"
+              sizes="(max-width:640px) 100vw, 800px"
               class="img-fluid rounded"
               alt="${esc(c.imageAlt)}"
               style="max-height: 400px; object-fit: cover; width: 100%"
-              loading="lazy"
+              loading="eager"
             />
             <figcaption class="article-meta mt-2">
               <small>${esc(c.imageCaption || "Image: Wikimedia Commons")}</small>
@@ -777,7 +817,7 @@ ${JSON.stringify({
           </figure>
 
           <!-- Quick Facts -->
-          <h3 class="mt-4">Quick Facts</h3>
+          <h2 class="mt-4 h3">Quick Facts</h2>
           <table class="table table-bordered">
             <tbody>
 ${quickFactsRows}
@@ -794,13 +834,13 @@ ${didYouKnowItems}
 
           <!-- Overview -->
           <section class="mt-4">
-            <h3>Overview</h3>
+            <h2 class="h3">Overview: ${esc(c.eventTitle)}</h2>
 ${overviewParas}
           </section>
 
           <!-- Eyewitness / Chronicle Accounts -->
           ${eyewitnessParas ? `<section class="mt-5">
-            <h3>Eyewitness &amp; Chronicle Accounts</h3>
+            <h2 class="h3">Eyewitness Accounts of ${esc(c.eventTitle)}</h2>
 ${eyewitnessParas}
 ${eyewitnessQuoteBlock}
           </section>` : ""}
@@ -821,23 +861,23 @@ ${eyewitnessQuoteBlock}
 
           <!-- Aftermath -->
           ${aftermathParas ? `<section class="mt-5">
-            <h3>Aftermath &amp; What Changed</h3>
+            <h2 class="h3">Aftermath of ${esc(c.eventTitle)}</h2>
 ${aftermathParas}
           </section>` : ""}
 
           <!-- Conclusion -->
           <section class="mt-5">
-            <h3>Conclusion</h3>
+            <h2 class="h3">Legacy of ${esc(c.eventTitle)}</h2>
 ${conclusionParas}
           </section>
 
           <!-- Personal Analysis -->
           ${(analysisGoodItems || analysisBadItems) ? `<section class="mt-5">
-            <h3>Our Take: What Went Right &amp; What Went Wrong</h3>
+            <h2 class="h3">Our Take: What Went Right &amp; What Went Wrong</h2>
             <div class="row g-3 mt-1">
               <div class="col-md-6">
                 <div class="analysis-good p-3 rounded h-100">
-                  <h5 style="color:#16a34a">What Went Right</h5>
+                  <h3 style="color:#16a34a">What Went Right</h3>
                   <ul class="mb-0">
 ${analysisGoodItems}
                   </ul>
@@ -845,7 +885,7 @@ ${analysisGoodItems}
               </div>
               <div class="col-md-6">
                 <div class="analysis-bad p-3 rounded h-100">
-                  <h5 style="color:#dc2626">What Went Wrong</h5>
+                  <h3 style="color:#dc2626">What Went Wrong</h3>
                   <ul class="mb-0">
 ${analysisBadItems}
                   </ul>
@@ -865,6 +905,25 @@ ${analysisBadItems}
           </div>
 
           ${(() => {
+            // Cross-link to /generated/ page for the event's month/day
+            if (!c.historicalDateISO) return "";
+            const hd = new Date(c.historicalDateISO + "T12:00:00Z");
+            const hMonthSlug = MONTH_SLUGS[hd.getUTCMonth()];
+            const hDay = hd.getUTCDate();
+            const hMonthDisplay = MONTH_NAMES[hd.getUTCMonth()];
+            return `<div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+              <i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i>
+              <div>
+                <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
+                <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
+                <a href="/generated/${esc(hMonthSlug)}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">
+                  <i class="bi bi-arrow-right me-1"></i>View ${esc(hMonthDisplay)} ${hDay}
+                </a>
+              </div>
+            </div>`;
+          })()}
+
+          ${(() => {
             const related = allPosts
               .filter(p => p.slug !== slug)
               .slice(0, 3); // already sorted newest-first; today's post is always shown first
@@ -877,7 +936,7 @@ ${analysisBadItems}
                 </a>
               </div>`).join("");
             return `<section class="mt-5">
-            <h3 class="h5 mb-3">You Might Also Like</h3>
+            <h2 class="h5 mb-3">You Might Also Like</h2>
             <div class="row g-3">${cards}
             </div>
           </section>`;

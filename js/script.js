@@ -2126,7 +2126,7 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
 
   const allPosts = results.filter(Boolean);
   if (allPosts.length === 0) return [];
-  return allPosts.sort(() => Math.random() - 0.5).slice(0, 3);
+  return allPosts.sort((a, b) => b.day - a.day);
 }
 
 // Main function to populate carousel

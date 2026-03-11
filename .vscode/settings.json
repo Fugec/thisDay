@@ -31,6 +31,9 @@
   },
   // Use to format all files in the folder specified by "includeFolders
   // In the command palette, search for "Command On All Files" and select "Format All Files"
+  "files.associations": {
+    ".secrets": "dotenv"
+  },
   "commandOnAllFiles.commands": {
     "Format All Files": {
       "command": "editor.action.formatDocument",

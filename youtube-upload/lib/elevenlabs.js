@@ -12,7 +12,8 @@
  * Schedule: 1 video every 3 days ≈ 10 videos/month.
  * Avg narration: ~600 chars → ~6 000 chars/month (well within free tier).
  *
- * Env var required: ELEVENLABS_API_KEY
+ * Env vars required: ELEVENLABS_API_KEY (primary), ELEVENLABS_API_KEY_2 (fallback)
+ * Fallback is used automatically when the primary account hits its 10k char/month quota.
  */
 
 import { writeFile } from 'fs/promises';
@@ -57,15 +58,7 @@ export function buildNarrationScript(post, contentItems) {
  * @param {string} script
  * @returns {Promise<string|null>}
  */
-export async function generateNarration(slug, script) {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) return null;
-
-  mkdirSync(ASSETS_DIR, { recursive: true });
-  const outputPath = join(ASSETS_DIR, `${slug}_narration.mp3`);
-
-  console.log(`  TTS: ${script.length} chars — "${script.slice(0, 60)}..."`);
-
+async function callElevenLabs(apiKey, script) {
   const res = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
     {
@@ -87,10 +80,34 @@ export async function generateNarration(slug, script) {
       }),
     },
   );
+  return res;
+}
 
-  if (!res.ok) {
-    const body = await res.text();
-    console.warn(`  ⚠ ElevenLabs error ${res.status}: ${body} — video will have no narration`);
+export async function generateNarration(slug, script) {
+  const apiKey  = process.env.ELEVENLABS_API_KEY;
+  const apiKey2 = process.env.ELEVENLABS_API_KEY_2;
+  if (!apiKey && !apiKey2) return null;
+
+  mkdirSync(ASSETS_DIR, { recursive: true });
+  const outputPath = join(ASSETS_DIR, `${slug}_narration.mp3`);
+
+  console.log(`  TTS: ${script.length} chars — "${script.slice(0, 60)}..."`);
+
+  let res = apiKey ? await callElevenLabs(apiKey, script) : null;
+
+  // Fall back to second account on quota exceeded (429) or missing primary key
+  if ((!res || res.status === 429) && apiKey2) {
+    if (res?.status === 429) {
+      console.warn('  ⚠ ElevenLabs primary quota reached — switching to fallback account');
+    } else {
+      console.log('  Using ElevenLabs fallback account');
+    }
+    res = await callElevenLabs(apiKey2, script);
+  }
+
+  if (!res || !res.ok) {
+    const body = res ? await res.text() : 'no API key available';
+    console.warn(`  ⚠ ElevenLabs error ${res?.status ?? '—'}: ${body} — video will have no narration`);
     return null;
   }
 

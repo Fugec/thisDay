@@ -1009,12 +1009,28 @@
 
       if (!popup || !closeBtn) return;
 
-      // Show popup after 5 seconds (only if not previously closed)
-      setTimeout(() => {
-        if (!localStorage.getItem("supportPopupClosed")) {
-          popup.classList.add("show");
-        }
-      }, 5000);
+      // Show popup at 70% scroll depth (only if not previously closed)
+      // Falls back to 5s timer on short pages where 70% is never reached
+      if (!localStorage.getItem("supportPopupClosed")) {
+        const showPopup = () => popup.classList.add("show");
+
+        const onScroll = () => {
+          const scrolled = window.scrollY + window.innerHeight;
+          const total = document.documentElement.scrollHeight;
+          if (scrolled / total >= 0.7) {
+            window.removeEventListener("scroll", onScroll);
+            clearTimeout(fallbackTimer);
+            showPopup();
+          }
+        };
+
+        const fallbackTimer = setTimeout(() => {
+          window.removeEventListener("scroll", onScroll);
+          showPopup();
+        }, 5000);
+
+        window.addEventListener("scroll", onScroll, { passive: true });
+      }
 
       // Handle close button click
       closeBtn.addEventListener("click", () => {

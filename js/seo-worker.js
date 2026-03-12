@@ -1029,6 +1029,32 @@ const dk=gt('theme')==='dark'||(window.matchMedia?.('(prefers-color-scheme:dark)
 ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
 if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('theme',ds.checked?'dark':'light');if(ms)ms.checked=ds.checked;});
 if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('theme',ms.checked?'dark':'light');if(ds)ds.checked=ms.checked;});
+
+const syncAdUnitVisibility=(ins)=>{
+  if(!ins) return;
+  const unit=ins.closest('.ad-unit');
+  if(!unit) return;
+  const status=ins.getAttribute('data-ad-status');
+  if(status==='unfilled') unit.style.display='none';
+  if(status==='filled') unit.style.display='';
+};
+
+const adObserver=new MutationObserver((mutations)=>{
+  for(const m of mutations){
+    if(m.type==='attributes'&&m.attributeName==='data-ad-status'){
+      syncAdUnitVisibility(m.target);
+    }
+  }
+});
+
+document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{
+  syncAdUnitVisibility(ins);
+  adObserver.observe(ins,{attributes:true,attributeFilter:['data-ad-status']});
+});
+
+setTimeout(()=>{
+  document.querySelectorAll('ins.adsbygoogle').forEach(syncAdUnitVisibility);
+},5000);
 </script>
 </body></html>`;
 }

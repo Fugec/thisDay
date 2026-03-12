@@ -222,7 +222,7 @@ function workerCommentary(year, text) {
       t,
     );
   const dis =
-    /earthquake|hurricane|typhoon|tsunami|eruption|wildfire|flood|epidemic|plague|famine|disaster|collapsed|shipwreck/.test(
+    /earthquake|hurricane|typhoon|tsunami|eruption|wildfire|flood|epidemic|pandemic|plague|famine|disaster|collapsed|shipwreck|covid|coronavirus|quarantine|lockdown|travel ban|public health/.test(
       t,
     );
   const art =
@@ -459,6 +459,17 @@ function workerCommentary(year, text) {
     ];
 
   if (dis)
+    if (
+      /pandemic|covid|coronavirus|quarantine|lockdown|travel ban|public health/.test(
+        t,
+      )
+    )
+      return [
+        "Pandemics are biological events with political consequences. Measures like travel restrictions, quarantine rules, and emergency declarations are not just medical responses — they are state decisions that redistribute risk, responsibility, and economic burden across society.",
+        "Cross-border disease transmission exposes how tightly modern systems are linked. Aviation, trade, and tourism connect economies at high speed, so disruptions in one region quickly become global policy questions rather than local incidents.",
+        "The long-term historical significance of pandemic-era decisions is judged by institutional learning: whether governments improved surveillance, health capacity, and crisis coordination after the immediate emergency passed.",
+      ];
+  if (dis)
     return [
       "Natural disasters operate on geological or meteorological scales entirely indifferent to human plans. Yet their death tolls are shaped as much by social factors — poverty, inequality, political negligence — as by the event itself. The same earthquake kills thousands in one city and dozens in another.",
       "Catastrophe reveals a society's real priorities with uncomfortable clarity. Which communities get rebuilt first, which are quietly abandoned, who receives compensation and who is forgotten — these decisions expose power structures that official policy rarely acknowledges directly.",
@@ -590,6 +601,45 @@ function workerCommentary(year, text) {
   ];
 }
 
+function buildDynamicOverview(featured, events, mDisplay, day) {
+  if (!featured) {
+    return {
+      title: `Overview: ${mDisplay} ${day}`,
+      paragraphs: [
+        `This page gathers key moments recorded for ${mDisplay} ${day}, highlighting how very different events can share the same place on the calendar while reflecting wider changes in politics, science, culture, and daily life.`,
+        `Dates in history are snapshots, not complete stories. Use the events list as a starting point, then follow the cited sources to explore causes, consequences, and competing interpretations in more depth.`,
+      ],
+    };
+  }
+
+  const cleanText = String(featured.text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const firstSentence = (cleanText.split(".")[0] || cleanText).trim();
+  const fullFeaturedLabel = `${featured.year} — ${firstSentence}`;
+
+  const years = (events || [])
+    .map((e) => parseInt(e?.year, 10))
+    .filter((y) => Number.isFinite(y));
+  const earliestYear = years.length ? Math.min(...years) : null;
+  const latestYear = years.length ? Math.max(...years) : null;
+  const spanText =
+    earliestYear !== null && latestYear !== null
+      ? earliestYear === latestYear
+        ? `in ${earliestYear}`
+        : `from ${earliestYear} to ${latestYear}`
+      : "across multiple periods";
+
+  return {
+    title: `Overview: ${fullFeaturedLabel}`,
+    paragraphs: [
+      `In ${featured.year}, ${cleanText}. Framed as part of ${mDisplay} ${day}, this event is best read not as an isolated moment, but as one point in a longer historical chain of decisions, pressures, and consequences.`,
+      `The records for ${mDisplay} ${day} span ${spanText}. Looking across entries on the same date helps reveal recurring patterns: institutions under stress, technological shifts, and turning points that only became fully visible in hindsight.`,
+      `Treat this timeline as a research map. Start with the featured event, compare it with the related entries below, and then follow primary sources to understand what changed immediately and what changed only years later.`,
+    ],
+  };
+}
+
 function generateBlogPostHTML(
   monthName,
   day,
@@ -599,7 +649,7 @@ function generateBlogPostHTML(
 ) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
-  const canonical = `${siteUrl}/generated/${monthName}/${day}/`;
+  const canonical = `${siteUrl}/events/${monthName}/${day}/`;
   const events = eventsData?.events || [];
   const births = eventsData?.births || [];
   const deaths = eventsData?.deaths || [];
@@ -633,6 +683,10 @@ function generateBlogPostHTML(
   const featTitle = featured
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
+  const dynamicOverview = buildDynamicOverview(featured, events, mDisplay, day);
+  const introLine = featured
+    ? `A thisDay.info overview of ${dynamicOverview.title.replace(/^Overview:\s*/, "")}, sourced from Wikipedia`
+    : `A thisDay.info historical overview — sourced from Wikipedia`;
   const today = new Date().toISOString().split("T")[0];
   const _todayDate = new Date();
   const todayMonthSlug = MONTHS_ALL[_todayDate.getUTCMonth()];
@@ -781,8 +835,8 @@ function generateBlogPostHTML(
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(pageTitle)}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
-<link rel="prev" href="${escapeHtml(`${siteUrl}/generated/${prevMonthName}/${prevDayNum}/`)}"/>
-<link rel="next" href="${escapeHtml(`${siteUrl}/generated/${nextMonthName}/${nextDayNum}/`)}"/>
+<link rel="prev" href="${escapeHtml(`${siteUrl}/events/${prevMonthName}/${prevDayNum}/`)}"/>
+<link rel="next" href="${escapeHtml(`${siteUrl}/events/${nextMonthName}/${nextDayNum}/`)}"/>
 <meta name="robots" content="index, follow"/><meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/><meta property="og:description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:type" content="article"/><meta property="og:url" content="${escapeHtml(canonical)}"/>
@@ -800,14 +854,19 @@ ${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` :
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
 <style>
-:root{--pb:#3b82f6;--sb:#fff;--tc:#1e293b;--htc:#fff;--fb:#3b82f6;--ftc:#fff;--lc:#2563eb;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#6c757d}
-body.dark-theme{--pb:#020617;--sb:#1e293b;--tc:#f8fafc;--fb:#020617;--lc:#60a5fa;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#94a3b8}
+:root{--pb:#3b82f6;--sb:#fff;--tc:#1e293b;--htc:#fff;--fb:#3b82f6;--ftc:#fff;--lc:#2563eb;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b}
+body.dark-theme{--pb:#020617;--sb:#1e293b;--tc:#f8fafc;--fb:#020617;--lc:#60a5fa;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#cbd5e1}
 body{font-family:Inter,sans-serif;min-height:100vh;display:flex;flex-direction:column;background:var(--sb);color:var(--tc);transition:background .3s,color .3s}
 .navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
 main{flex:1;padding:20px 0}
 .footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:30px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
 h1,h2,h3,h4{color:var(--tc)}body.dark-theme h1,body.dark-theme h2,body.dark-theme h3,body.dark-theme h4{color:#f8fafc}
 a{color:var(--lc)}a:hover{text-decoration:underline}
+.text-muted{color:var(--mu)!important}
+.breadcrumb-item a{color:var(--lc)}
+.breadcrumb-item.active{color:var(--mu)}
+body.dark-theme .breadcrumb-item a{color:#93c5fd}
+body.dark-theme .breadcrumb-item.active{color:#e2e8f0}
 .form-check-input:checked{background-color:#2563eb!important;border-color:#2563eb!important}
 .form-check-input{background:#e2e8f0;border-color:#e2e8f0}body.dark-theme .form-check-input{background:#334155;border-color:#334155}
 .form-switch .form-check-input{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e")}
@@ -840,7 +899,7 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
         <li class="nav-item">
-          <a class="nav-link" href="/generated/${todayMonthSlug}/${todayDayNum}/">Today's Events</a>
+          <a class="nav-link" href="/events/${todayMonthSlug}/${todayDayNum}/">Today's Events</a>
         </li>
         <li class="nav-item d-flex align-items-center">
           <div class="form-check form-switch d-none d-lg-block me-2">
@@ -856,12 +915,12 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
-      <li class="breadcrumb-item"><a href="/generated/">On This Day</a></li>
-      <li class="breadcrumb-item active">${escapeHtml(mDisplay)} ${day}</li>
+      <li class="breadcrumb-item"><a href="/events/">On This Day</a></li>
+      <li class="breadcrumb-item active" aria-current="page">${escapeHtml(mDisplay)} ${day}</li>
     </ol>
   </nav>
   <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} in History <span class="auto-tag">Made for you</span></h1>
-  <p class="text-muted mb-1" style="font-size:.9rem">A thisDay.info historical overview &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  <p class="text-muted mb-1" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time></p>
   ${
     featured
@@ -879,17 +938,21 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
     </table>
     ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right me-1"></i>Full Article on Wikipedia</a>` : ""}
     <div class="d-flex gap-2 mt-3 flex-wrap">${(() => {
-      const shareText = escapeHtml(
-        (didYouKnowFacts[0] || featured.text).slice(0, 120),
-      );
-      const shareUrl = canonical;
+      const shareText = (didYouKnowFacts[0] || featured.text).slice(0, 120);
+      const shareTextJson = JSON.stringify(shareText);
+      const shareUrlJson = JSON.stringify(canonical);
       const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent((didYouKnowFacts[0] || featured.text).slice(0, 120) + " " + canonical)}`;
-      return `<button onclick="if(navigator.share){navigator.share({title:document.title,text:'${shareText}',url:'${shareUrl}'}).catch(()=>{})}else{window.open('${tweetUrl}','_blank')}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-share me-1"></i>Share</button>
+      return `<button onclick="if(navigator.share){navigator.share({title:document.title,text:${shareTextJson},url:${shareUrlJson}}).catch(()=>{})}else{window.open('${tweetUrl}','_blank')}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-share me-1"></i>Share</button>
       <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-secondary"><i class="bi bi-twitter-x me-1"></i>Post</a>`;
     })()}</div>
   </div>`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
+  ${`
+  <div class="card-box">
+    <h2 class="h4 mb-3"><i class="bi bi-journal-richtext me-2" style="color:#3b82f6"></i>${escapeHtml(dynamicOverview.title)}</h2>
+    ${dynamicOverview.paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join("")}
+  </div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle"
@@ -939,8 +1002,8 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
   }
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <a href="/generated/${prevMonthName}/${prevDayNum}/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
-      <a href="/generated/${nextMonthName}/${nextDayNum}/" class="btn btn-outline-secondary btn-sm">${escapeHtml(nextMonthDisplay)} ${nextDayNum}<i class="bi bi-arrow-right ms-1"></i></a>
+      <a href="/events/${prevMonthName}/${prevDayNum}/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
+      <a href="/events/${nextMonthName}/${nextDayNum}/" class="btn btn-outline-secondary btn-sm">${escapeHtml(nextMonthDisplay)} ${nextDayNum}<i class="bi bi-arrow-right ms-1"></i></a>
     </div>
     <div class="text-center">
       <p class="text-muted mb-3">Explore history for any date on the interactive calendar.</p>
@@ -964,13 +1027,16 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-document.getElementById('yr').textContent=new Date().getFullYear();
+const yrEl=document.getElementById('yr');
+if(yrEl)yrEl.textContent=new Date().getFullYear();
 const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
 const ap=d=>document.body.classList.toggle('dark-theme',d);
-const dk=localStorage.getItem('theme')==='dark'||(window.matchMedia?.('(prefers-color-scheme:dark)').matches&&localStorage.getItem('theme')!=='light');
+const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
+const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
+const dk=gt('theme')==='dark'||(window.matchMedia?.('(prefers-color-scheme:dark)').matches&&gt('theme')!=='light');
 ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
-if(ds)ds.addEventListener('change',()=>{ap(ds.checked);localStorage.setItem('theme',ds.checked?'dark':'light');if(ms)ms.checked=ds.checked;});
-if(ms)ms.addEventListener('change',()=>{ap(ms.checked);localStorage.setItem('theme',ms.checked?'dark':'light');if(ds)ds.checked=ms.checked;});
+if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('theme',ds.checked?'dark':'light');if(ms)ms.checked=ds.checked;});
+if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('theme',ms.checked?'dark':'light');if(ds)ds.checked=ms.checked;});
 </script>
 </body></html>`;
 }
@@ -980,7 +1046,7 @@ function serveGeneratedSitemap(siteUrl) {
   let urls = "";
   for (let m = 0; m < 12; m++) {
     for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
-      urls += `  <url>\n    <loc>${siteUrl}/generated/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.6</priority>\n  </url>\n`;
+      urls += `  <url>\n    <loc>${siteUrl}/events/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.6</priority>\n  </url>\n`;
     }
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
@@ -988,16 +1054,18 @@ function serveGeneratedSitemap(siteUrl) {
 
 async function handleGeneratedPost(_request, env, ctx, url) {
   const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
-  // Expect: ['generated', 'july', '20']
-  if (parts.length < 3) return new Response("Not Found", { status: 404 });
+  // Expect: ['events', 'july', '20']
+  if (parts.length !== 3) return new Response("Not Found", { status: 404 });
   const monthName = parts[1].toLowerCase();
   const day = parseInt(parts[2], 10);
-  if (!MONTH_NUM_MAP[monthName] || isNaN(day) || day < 1 || day > 31) {
+  const monthNum = MONTH_NUM_MAP[monthName];
+  const maxDay = monthNum ? DAYS_IN_MONTH[monthNum - 1] : 0;
+  if (!monthNum || isNaN(day) || day < 1 || day > maxDay) {
     return new Response("Not Found", { status: 404 });
   }
 
   // Try KV cache (7-day TTL)
-  const kvKey = `gen-post-v3-${monthName}-${day}`;
+  const kvKey = `gen-post-v6-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1171,12 +1239,29 @@ async function handleFetchRequest(request, env, ctx) {
     }
   }
 
-  // Auto-generated blog posts — must be before the HTML pass-through guard
+  // Legacy generated URLs -> /events (SEO-friendly permanent redirect)
+  if (url.pathname === "/generated" || url.pathname === "/generated/") {
+    return Response.redirect(`${url.origin}/events/`, 301);
+  }
   if (url.pathname.startsWith("/generated/")) {
+    const targetPath = url.pathname.replace(/^\/generated(?=\/|$)/, "/events");
+    return Response.redirect(`${url.origin}${targetPath}${url.search}`, 301);
+  }
+
+  // /events landing -> today's date page
+  if (url.pathname === "/events" || url.pathname === "/events/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+  }
+
+  // Events pages — must be before the HTML pass-through guard
+  if (url.pathname.startsWith("/events/")) {
     return handleGeneratedPost(request, env, ctx, url);
   }
 
-  // Generated sitemap listing all 366 /generated/ pages
+  // Generated sitemap listing all 366 /events/ pages
   if (url.pathname === "/sitemap-generated.xml") {
     const siteUrl = `${url.protocol}//${url.host}`;
     return new Response(serveGeneratedSitemap(siteUrl), {
@@ -1822,7 +1907,7 @@ async function handleFetchRequest(request, env, ctx) {
         const mn = MONTHS_ALL[today.getMonth()];
         const dd = today.getDate();
         element.append(
-          `<script>window.__todayGeneratedUrl="/generated/${mn}/${dd}/";</script>`,
+          `<script>window.__todayGeneratedUrl="/events/${mn}/${dd}/";</script>`,
           { html: true },
         );
       },

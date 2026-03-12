@@ -285,7 +285,7 @@ function renderCarouselItem(container, post, index) {
       <div class="d-flex justify-content-center gap-2">
         <a href="${post.url}" class="btn btn-primary btn-sm"
            ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>Read Full Post</a>
-        <a href="${window.__todayGeneratedUrl || "/generated/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
+        <a href="${window.__todayGeneratedUrl || "/events/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
       </div>
     </div>
   `;

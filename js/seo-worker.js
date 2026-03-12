@@ -606,8 +606,8 @@ function buildDynamicOverview(featured, events, mDisplay, day) {
     return {
       title: `Overview: ${mDisplay} ${day}`,
       paragraphs: [
-        `This page gathers key moments recorded for ${mDisplay} ${day}, highlighting how very different events can share the same place on the calendar while reflecting wider changes in politics, science, culture, and daily life.`,
-        `Dates in history are snapshots, not complete stories. Use the events list as a starting point, then follow the cited sources to explore causes, consequences, and competing interpretations in more depth.`,
+        `This page gathers key moments connected to ${mDisplay} ${day}, with each entry offering historical context about a specific event, person, or turning point.`,
+        `When no single featured item is available, the timeline still provides a focused view of how this date appears across different eras and topics.`,
       ],
     };
   }
@@ -615,27 +615,17 @@ function buildDynamicOverview(featured, events, mDisplay, day) {
   const cleanText = String(featured.text || "")
     .replace(/\s+/g, " ")
     .trim();
+  const eventStatement = cleanText.replace(/[.\s]+$/, "");
   const firstSentence = (cleanText.split(".")[0] || cleanText).trim();
   const fullFeaturedLabel = `${featured.year} — ${firstSentence}`;
-
-  const years = (events || [])
-    .map((e) => parseInt(e?.year, 10))
-    .filter((y) => Number.isFinite(y));
-  const earliestYear = years.length ? Math.min(...years) : null;
-  const latestYear = years.length ? Math.max(...years) : null;
-  const spanText =
-    earliestYear !== null && latestYear !== null
-      ? earliestYear === latestYear
-        ? `in ${earliestYear}`
-        : `from ${earliestYear} to ${latestYear}`
-      : "across multiple periods";
+  const topical = workerCommentary(featured.year, featured.text);
 
   return {
     title: `Overview: ${fullFeaturedLabel}`,
     paragraphs: [
-      `In ${featured.year}, ${cleanText}. Framed as part of ${mDisplay} ${day}, this event is best read not as an isolated moment, but as one point in a longer historical chain of decisions, pressures, and consequences.`,
-      `The records for ${mDisplay} ${day} span ${spanText}. Looking across entries on the same date helps reveal recurring patterns: institutions under stress, technological shifts, and turning points that only became fully visible in hindsight.`,
-      `Treat this timeline as a research map. Start with the featured event, compare it with the related entries below, and then follow primary sources to understand what changed immediately and what changed only years later.`,
+      `On ${mDisplay} ${day}, ${featured.year}, ${eventStatement}. This moment is most useful when read in its direct context: who acted, what changed, and why it mattered at that time.`,
+      topical[0],
+      topical[1] || topical[0],
     ],
   };
 }
@@ -1070,6 +1060,149 @@ function serveGeneratedSitemap(siteUrl) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
 }
 
+function normalizeDidYouKnowFact(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[-•]\s*/, "")
+    .replace(/^[^.]{2,120}\s+is directly connected to this event\.\s*/i, "")
+    .replace(/\.{2,}/g, ".")
+    .trim();
+}
+
+function pickRelevantWikiTitle(featuredEvent) {
+  const pages = featuredEvent?.pages || [];
+  if (!pages.length) return "";
+  if (pages.length === 1) return pages[0]?.title || "";
+
+  const text = String(featuredEvent?.text || "").toLowerCase();
+  const stop = new Set([
+    "the",
+    "and",
+    "with",
+    "from",
+    "into",
+    "that",
+    "this",
+    "after",
+    "before",
+    "during",
+    "were",
+    "was",
+    "have",
+    "has",
+    "had",
+    "president",
+    "states",
+    "state",
+  ]);
+
+  const tokens = Array.from(
+    new Set(
+      text
+        .split(/[^a-z0-9]+/)
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 5 && !stop.has(t)),
+    ),
+  );
+
+  const genericTitles = new Set([
+    "united states",
+    "europe",
+    "president of the united states",
+  ]);
+
+  let best = pages[0]?.title || "";
+  let bestScore = -1;
+
+  for (const p of pages) {
+    const title = String(p?.title || "");
+    const lower = title.toLowerCase();
+    let score = 0;
+    for (const tok of tokens) {
+      if (lower.includes(tok)) score += 2;
+    }
+    if (/covid|pandemic|emergency|declaration|national/i.test(lower))
+      score += 4;
+    if (genericTitles.has(lower)) score -= 3;
+    if (title.length > 18) score += 0.5;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = title;
+    }
+  }
+
+  return best;
+}
+
+async function fetchWikipediaSummaryByTitle(title) {
+  if (!title) return "";
+  try {
+    const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+    const r = await fetch(summaryUrl, {
+      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+    });
+    if (!r.ok) return "";
+    const data = await r.json();
+    return String(data?.extract || "")
+      .replace(/\s+/g, " ")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+function buildTopicFallbackFacts(
+  featuredEvent,
+  wikiSummary = "",
+  wikiTitle = "",
+) {
+  const year = featuredEvent?.year ? String(featuredEvent.year) : "";
+  const eventText = String(featuredEvent?.text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.\s]+$/, "");
+  const summarySentences = String(wikiSummary || "")
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 40)
+    .filter(
+      (s) =>
+        !/\bis a country\b|\bsovereign state\b|\bprimarily located\b/i.test(s),
+    )
+    .slice(0, 5);
+
+  const facts = [];
+
+  if (eventText) {
+    facts.push(
+      `In ${year}, ${eventText}. This featured entry focuses on the immediate decision and its direct historical impact.`,
+    );
+  }
+
+  const closers = [
+    "This helps explain why the event mattered beyond the initial announcement.",
+    "This clarifies the institutional and public response around the event.",
+    "This shows how the event shaped policy and public communication in the same period.",
+  ];
+
+  let cIdx = 0;
+  for (const sentence of summarySentences) {
+    facts.push(`${sentence} ${closers[cIdx % closers.length]}`);
+    cIdx += 1;
+    if (facts.length >= 5) break;
+  }
+
+  while (facts.length < 5) {
+    facts.push(
+      `${year ? `In ${year}, ` : ""}${eventText || "this historical event"} had consequences that extended beyond the first headline. The key context is the institutions involved, the policy shift, and how the public response evolved afterward.`,
+    );
+  }
+
+  return facts.map(normalizeDidYouKnowFact).slice(0, 5);
+}
+
 async function handleGeneratedPost(_request, env, ctx, url) {
   const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
   // Expect: ['events', 'july', '20']
@@ -1084,7 +1217,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v9-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v13-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1122,9 +1255,20 @@ async function handleGeneratedPost(_request, env, ctx, url) {
     eventsData?.events?.[0] ||
     null;
   let didYouKnowFacts = [];
+  const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
+  const wikiSummary = featuredEvent
+    ? await fetchWikipediaSummaryByTitle(wikiTitle)
+    : "";
+
   if (env.AI && featuredEvent) {
     try {
       const eventDesc = `${featuredEvent.year} — ${featuredEvent.text}`;
+      const contextChunks = [
+        `Featured event: ${eventDesc}`,
+        wikiTitle ? `Wikipedia article title: ${wikiTitle}` : "",
+        wikiSummary ? `Wikipedia summary: ${wikiSummary}` : "",
+      ].filter(Boolean);
+
       const aiTimeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("AI timeout")), 8000),
       );
@@ -1138,7 +1282,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
             },
             {
               role: "user",
-              content: `Write exactly 5 interesting "Did You Know" facts about this historical event: "${eventDesc}"\n\nEach fact must be 2-3 sentences. Make them educational, specific, and directly connected to the event or its broader topic. Avoid restating the event itself as a fact.\n\nReply with ONLY a JSON array of 5 strings. Example:\n["Fact one.", "Fact two.", "Fact three.", "Fact four.", "Fact five."]`,
+              content: `Using ONLY the featured event context below, write exactly 5 "Did You Know" paragraphs connected specifically to this one topic.\n\n${contextChunks.join("\n\n")}\n\nRules:\n- Exactly 5 items\n- Each item must be 2-3 sentences\n- Stay tightly tied to this featured event and its directly related entities\n- Do not include generic history advice, timeline instructions, or broad cross-era commentary\n- Prefer concrete names, institutions, places, and consequences mentioned in the context\n- Output ONLY a JSON array of 5 strings\n\nExample:\n["Fact one.", "Fact two.", "Fact three.", "Fact four.", "Fact five."]`,
             },
           ],
           max_tokens: 1024,
@@ -1158,12 +1302,28 @@ async function handleGeneratedPost(_request, env, ctx, url) {
       if (arrMatch) {
         const parsed = JSON.parse(arrMatch[0]);
         if (Array.isArray(parsed) && parsed.length >= 3) {
-          didYouKnowFacts = parsed.filter((f) => typeof f === "string");
+          didYouKnowFacts = parsed
+            .filter((f) => typeof f === "string")
+            .map(normalizeDidYouKnowFact)
+            .filter(Boolean)
+            .slice(0, 5);
         }
       }
     } catch (e) {
       console.error("AI did-you-know generation failed:", e);
     }
+  }
+
+  if (featuredEvent && didYouKnowFacts.length < 5) {
+    const fallbackFacts = buildTopicFallbackFacts(
+      featuredEvent,
+      wikiSummary,
+      wikiTitle,
+    );
+    didYouKnowFacts = [...didYouKnowFacts, ...fallbackFacts]
+      .map(normalizeDidYouKnowFact)
+      .filter(Boolean)
+      .slice(0, 5);
   }
 
   const siteUrl = "https://thisday.info";

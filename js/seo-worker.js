@@ -937,14 +937,6 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
       <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
     </table>
     ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right me-1"></i>Full Article on Wikipedia</a>` : ""}
-    <div class="d-flex gap-2 mt-3 flex-wrap">${(() => {
-      const shareText = (didYouKnowFacts[0] || featured.text).slice(0, 120);
-      const shareTextJson = JSON.stringify(shareText);
-      const shareUrlJson = JSON.stringify(canonical);
-      const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent((didYouKnowFacts[0] || featured.text).slice(0, 120) + " " + canonical)}`;
-      return `<button onclick="if(navigator.share){navigator.share({title:document.title,text:${shareTextJson},url:${shareUrlJson}}).catch(()=>{})}else{window.open('${tweetUrl}','_blank')}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-share me-1"></i>Share</button>
-      <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-secondary"><i class="bi bi-twitter-x me-1"></i>Post</a>`;
-    })()}</div>
   </div>`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
@@ -1065,7 +1057,8 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   }
 
   // Try KV cache (7-day TTL)
-  const kvKey = `gen-post-v6-${monthName}-${day}`;
+  const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
+  const kvKey = `gen-post-v9-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1147,7 +1140,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
     }
   }
 
-  const siteUrl = `${url.protocol}//${url.host}`;
+  const siteUrl = "https://thisday.info";
   const html = generateBlogPostHTML(
     monthName,
     day,

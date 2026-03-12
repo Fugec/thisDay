@@ -943,7 +943,6 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
          data-ad-slot="4828593028"
          data-ad-format="auto"
          data-full-width-responsive="true"></ins>
-    <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
   </div>
   ${
     others.length > 0
@@ -960,7 +959,6 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
          data-ad-slot="9477779891"
          data-ad-format="auto"
          data-full-width-responsive="true"></ins>
-    <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
   </div>`
       : ""
   }
@@ -1045,6 +1043,23 @@ document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{
 setTimeout(()=>{
   document.querySelectorAll('ins.adsbygoogle').forEach(syncAdUnitVisibility);
 },5000);
+
+const initAds=()=>{
+  // Avoid invalid ad requests on non-approved hosts (e.g. workers.dev previews)
+  if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;
+  document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{
+    if(ins.getAttribute('data-adsbygoogle-status'))return;
+    if((ins.offsetWidth||0)<120)return;
+    try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch{}
+  });
+};
+
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',initAds,{once:true});
+}else{
+  initAds();
+}
+setTimeout(initAds,1200);
 </script>
 </body></html>`;
 }

@@ -44,7 +44,10 @@ function loadSecrets() {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const [key, ...rest] = trimmed.split("=");
-    secrets[key.trim()] = rest.join("=").replace(/^["']|["']$/g, "").trim();
+    secrets[key.trim()] = rest
+      .join("=")
+      .replace(/^["']|["']$/g, "")
+      .trim();
   }
   return secrets;
 }
@@ -54,22 +57,44 @@ const BOT_USER = secrets.WIKIPEDIA_BOT_USERNAME;
 const BOT_PASS = secrets.WIKIPEDIA_BOT_PASSWORD;
 
 if (!BOT_USER || !BOT_PASS) {
-  console.error("Missing WIKIPEDIA_BOT_USERNAME or WIKIPEDIA_BOT_PASSWORD in .secrets");
+  console.error(
+    "Missing WIKIPEDIA_BOT_USERNAME or WIKIPEDIA_BOT_PASSWORD in .secrets",
+  );
   process.exit(1);
 }
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 const MONTH_SLUGS = [
-  "january", "february", "march", "april", "may", "june",
-  "july", "august", "september", "october", "november", "december",
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
 ];
 
 function buildDates() {
@@ -98,27 +123,38 @@ async function apiPost(params) {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "ThisDayBot/1.0 (https://thisday.info; bot account: Fugec@TD)",
+      "User-Agent":
+        "ThisDayBot/1.0 (https://thisday.info; bot account: Fugec@TD)",
       ...(cookieJar ? { Cookie: cookieJar } : {}),
     },
     body,
   });
 
   // Persist session cookies (getSetCookie returns all Set-Cookie headers as array)
-  const setCookies = res.headers.getSetCookie?.() ?? res.headers.get("set-cookie")?.split(/,(?=[^ ])/) ?? [];
+  const setCookies =
+    res.headers.getSetCookie?.() ??
+    res.headers.get("set-cookie")?.split(/,(?=[^ ])/) ??
+    [];
   if (setCookies.length) {
     const incoming = Object.fromEntries(
       setCookies.map((c) => {
         const [pair] = c.split(";");
         const [k, ...v] = pair.split("=");
         return [k.trim(), v.join("=").trim()];
-      })
+      }),
     );
     const existing = Object.fromEntries(
-      cookieJar ? cookieJar.split("; ").map((c) => { const [k, ...v] = c.split("="); return [k, v.join("=")]; }) : []
+      cookieJar
+        ? cookieJar.split("; ").map((c) => {
+            const [k, ...v] = c.split("=");
+            return [k, v.join("=")];
+          })
+        : [],
     );
     const merged = { ...existing, ...incoming };
-    cookieJar = Object.entries(merged).map(([k, v]) => `${k}=${v}`).join("; ");
+    cookieJar = Object.entries(merged)
+      .map(([k, v]) => `${k}=${v}`)
+      .join("; ");
   }
 
   return res.json();
@@ -126,7 +162,11 @@ async function apiPost(params) {
 
 async function login() {
   // Step 1: get login token
-  const tokenRes = await apiPost({ action: "query", meta: "tokens", type: "login" });
+  const tokenRes = await apiPost({
+    action: "query",
+    meta: "tokens",
+    type: "login",
+  });
   const loginToken = tokenRes.query.tokens.logintoken;
 
   // Step 2: log in
@@ -138,7 +178,11 @@ async function login() {
   });
 
   if (loginRes.login.result !== "Success") {
-    console.error("Login failed:", loginRes.login.result, loginRes.login.reason || "");
+    console.error(
+      "Login failed:",
+      loginRes.login.result,
+      loginRes.login.reason || "",
+    );
     process.exit(1);
   }
 
@@ -178,7 +222,10 @@ async function editPage(title, newContent, editToken) {
 
   if (res.edit?.result === "Success") return { ok: true };
   console.error("  API response:", JSON.stringify(res, null, 2));
-  return { ok: false, reason: res.error?.code || res.edit?.result || JSON.stringify(res) };
+  return {
+    ok: false,
+    reason: res.error?.code || res.edit?.result || JSON.stringify(res),
+  };
 }
 
 // ── Link injection ────────────────────────────────────────────────────────────
@@ -230,7 +277,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`Mode: ${DRY_RUN ? "DRY RUN (pass --live to make real edits)" : "LIVE"}`);
+  console.log(
+    `Mode: ${DRY_RUN ? "DRY RUN (pass --live to make real edits)" : "LIVE"}`,
+  );
   console.log("─".repeat(60));
 
   if (!DRY_RUN) await login();
@@ -238,10 +287,12 @@ async function main() {
   const editToken = DRY_RUN ? null : await getEditToken();
   const dates = buildDates();
 
-  let edited = 0, skipped = 0, failed = 0;
+  let edited = 0,
+    skipped = 0,
+    failed = 0;
 
   for (const { title, month, day } of dates) {
-    const url = `${SITE_URL}/generated/${month}/${day}/`;
+    const url = `${SITE_URL}/events/${month}/${day}/`;
     const content = await getPageContent(title);
 
     if (content === null) {
@@ -276,7 +327,9 @@ async function main() {
   }
 
   console.log("─".repeat(60));
-  console.log(`Done. Edited: ${edited}, Skipped: ${skipped}, Failed: ${failed}`);
+  console.log(
+    `Done. Edited: ${edited}, Skipped: ${skipped}, Failed: ${failed}`,
+  );
 }
 
 main().catch((err) => {

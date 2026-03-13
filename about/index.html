@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -10,43 +10,69 @@
       name="description"
       content="Learn about thisDay.info — a free, ad-supported historical events calendar that lets you explore what happened on any day in history. Built with data from Wikipedia."
     />
-    <meta property="og:title" content="About thisDay. | Historical Events Calendar" />
-    <meta property="og:description" content="thisDay.info is a free interactive calendar that brings history to life. Explore events, births, and deaths from any date throughout human history." />
+    <meta
+      property="og:title"
+      content="About thisDay. | Historical Events Calendar"
+    />
+    <meta
+      property="og:description"
+      content="thisDay.info is a free interactive calendar that brings history to life. Explore events, births, and deaths from any date throughout human history."
+    />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://thisday.info/about/" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:image" content="https://thisday.info/images/logo.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="About thisDay. | Historical Events Calendar" />
-    <meta name="twitter:description" content="thisDay.info is a free interactive calendar that brings history to life." />
+    <meta
+      name="twitter:title"
+      content="About thisDay. | Historical Events Calendar"
+    />
+    <meta
+      name="twitter:description"
+      content="thisDay.info is a free interactive calendar that brings history to life."
+    />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
     <meta name="author" content="Armin Kapetanović" />
 
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "AboutPage",
-      "name": "About thisDay.info",
-      "description": "thisDay.info is a free interactive historical events calendar built by Armin Kapetanović. Explore what happened on any day in history.",
-      "url": "https://thisday.info/about/",
-      "isPartOf": {
-        "@type": "WebSite",
-        "name": "thisDay.info",
-        "url": "https://thisday.info/"
-      },
-      "author": {
-        "@type": "Person",
-        "name": "Armin Kapetanović",
-        "email": "kapetanovic.armin@gmail.com"
+      {
+        "@context": "https://schema.org",
+        "@type": "AboutPage",
+        "name": "About thisDay.info",
+        "description": "thisDay.info is a free interactive historical events calendar built by Armin Kapetanović. Explore what happened on any day in history.",
+        "url": "https://thisday.info/about/",
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": "thisDay.info",
+          "url": "https://thisday.info/"
+        },
+        "author": {
+          "@type": "Person",
+          "name": "Armin Kapetanović",
+          "email": "kapetanovic.armin@gmail.com"
+        }
       }
-    }
     </script>
 
     <!-- Favicons -->
     <link rel="icon" href="/images/favicon.ico" type="image/x-icon" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png" />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="/images/apple-touch-icon.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="/images/favicon-32x32.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="/images/favicon-16x16.png"
+    />
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -65,6 +91,7 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
     />
+    <link rel="stylesheet" href="/css/style.css" />
 
     <style>
       /* Light Theme (Default) - Critical Variables */
@@ -102,7 +129,9 @@
         min-height: 100vh;
         display: flex;
         flex-direction: column;
-        transition: background-color 0.3s ease, color 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
         background-color: var(--secondary-bg);
         color: var(--text-color);
       }
@@ -132,7 +161,9 @@
         text-align: center;
         padding: 20px;
         margin-top: 30px;
-        transition: background-color 0.3s ease, color 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
         font-size: 14px;
       }
 
@@ -142,7 +173,12 @@
         transition: color 0.3s ease;
       }
 
-      h1, h2, h3, h4, h5, h6 {
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
         color: var(--text-color);
         transition: color 0.3s ease;
       }
@@ -173,13 +209,17 @@
       .form-check-input {
         background-color: var(--switch-track-off);
         border-color: var(--switch-track-off);
-        transition: background-color 0.3s ease, border-color 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          border-color 0.3s ease;
       }
 
       .form-switch .form-check-input {
         background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
         background-color: var(--switch-thumb-off);
-        transition: background-color 0.3s ease, transform 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          transform 0.3s ease;
       }
 
       .form-switch .form-check-input:checked {
@@ -227,21 +267,23 @@
       }
 
       .feature-card {
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid rgba(0, 0, 0, 0.1);
         border-radius: 10px;
         padding: 24px;
         height: 100%;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        transition:
+          transform 0.2s ease,
+          box-shadow 0.2s ease;
       }
 
       body.dark-theme .feature-card {
-        border-color: rgba(255,255,255,0.1);
+        border-color: rgba(255, 255, 255, 0.1);
         background-color: #1e293b;
       }
 
       .feature-card:hover {
         transform: translateY(-3px);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
       }
 
       .feature-icon {
@@ -288,14 +330,18 @@
         <div class="collapse navbar-collapse" id="navbarNav">
           <ul class="navbar-nav ms-auto">
             <li class="nav-item d-flex align-items-center">
-              <div class="form-check form-switch theme-switch-desktop d-none d-lg-block me-2">
+              <div
+                class="form-check form-switch theme-switch-desktop d-none d-lg-block me-2"
+              >
                 <input
                   class="form-check-input"
                   type="checkbox"
                   id="themeSwitchDesktop"
                   aria-label="Toggle dark mode"
                 />
-                <label class="form-check-label" for="themeSwitchDesktop">Dark Mode</label>
+                <label class="form-check-label" for="themeSwitchDesktop"
+                  >Dark Mode</label
+                >
               </div>
             </li>
           </ul>
@@ -311,18 +357,20 @@
     </div>
 
     <main class="container my-4">
-
       <section class="mb-5">
         <h2 class="mb-3">What is thisDay.info?</h2>
         <p>
-          <strong>thisDay.info</strong> is a free, ad-supported historical events calendar that lets you explore what happened on
-          any day throughout history. Browse wars, scientific discoveries, political milestones, famous births, and notable deaths —
-          all organized by date and drawn from Wikipedia's extensive historical records.
+          <strong>thisDay.info</strong> is a free, ad-supported historical
+          events calendar that lets you explore what happened on any day
+          throughout history. Browse wars, scientific discoveries, political
+          milestones, famous births, and notable deaths — all organized by date
+          and drawn from Wikipedia's extensive historical records.
         </p>
         <p>
-          Whether you're curious about what happened on your birthday, a student looking for historical context, or simply a
-          history enthusiast, thisDay.info makes the past accessible and engaging. No registration required. No paywalls.
-          Just history.
+          Whether you're curious about what happened on your birthday, a student
+          looking for historical context, or simply a history enthusiast,
+          thisDay.info makes the past accessible and engaging. No registration
+          required. No paywalls. Just history.
         </p>
       </section>
 
@@ -333,42 +381,62 @@
             <div class="feature-card">
               <div class="feature-icon"><i class="bi bi-calendar3"></i></div>
               <h5>Browse Any Date</h5>
-              <p class="mb-0">Navigate month by month and click any day to see a full list of events, births, and deaths from throughout history.</p>
+              <p class="mb-0">
+                Navigate month by month and click any day to see a full list of
+                events, births, and deaths from throughout history.
+              </p>
             </div>
           </div>
           <div class="col-md-4">
             <div class="feature-card">
-              <div class="feature-icon"><i class="bi bi-filter-circle"></i></div>
+              <div class="feature-icon">
+                <i class="bi bi-filter-circle"></i>
+              </div>
               <h5>Filter by Category</h5>
-              <p class="mb-0">Narrow events by topic — War &amp; Conflict, Science &amp; Technology, Politics, Arts, and more.</p>
+              <p class="mb-0">
+                Narrow events by topic — War &amp; Conflict, Science &amp;
+                Technology, Politics, Arts, and more.
+              </p>
             </div>
           </div>
           <div class="col-md-4">
             <div class="feature-card">
               <div class="feature-icon"><i class="bi bi-journal-text"></i></div>
               <h5>Read In-Depth Posts</h5>
-              <p class="mb-0">Our blog goes beyond the bullet points, with original articles that place historical events in their broader context.</p>
+              <p class="mb-0">
+                Our blog goes beyond the bullet points, with original articles
+                that place historical events in their broader context.
+              </p>
             </div>
           </div>
           <div class="col-md-4">
             <div class="feature-card">
               <div class="feature-icon"><i class="bi bi-moon-stars"></i></div>
               <h5>Dark Mode</h5>
-              <p class="mb-0">Toggle between light and dark themes for comfortable reading at any time of day.</p>
+              <p class="mb-0">
+                Toggle between light and dark themes for comfortable reading at
+                any time of day.
+              </p>
             </div>
           </div>
           <div class="col-md-4">
             <div class="feature-card">
               <div class="feature-icon"><i class="bi bi-phone"></i></div>
               <h5>Works on Any Device</h5>
-              <p class="mb-0">Fully responsive design that works great on desktops, tablets, and mobile phones. Install it as a PWA for offline access.</p>
+              <p class="mb-0">
+                Fully responsive design that works great on desktops, tablets,
+                and mobile phones. Install it as a PWA for offline access.
+              </p>
             </div>
           </div>
           <div class="col-md-4">
             <div class="feature-card">
               <div class="feature-icon"><i class="bi bi-wikipedia"></i></div>
               <h5>Wikipedia-Powered</h5>
-              <p class="mb-0">All event data is sourced from the Wikimedia Foundation's API, ensuring reliable and well-documented historical records.</p>
+              <p class="mb-0">
+                All event data is sourced from the Wikimedia Foundation's API,
+                ensuring reliable and well-documented historical records.
+              </p>
             </div>
           </div>
         </div>
@@ -378,89 +446,172 @@
         <h2 class="mb-3">Our Data</h2>
         <p>
           All historical event data on thisDay.info is sourced from
-          <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a> via the
-          <a href="https://api.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia REST API</a>.
-          Content is provided under the
-          <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>
-          license. Each event links directly to its Wikipedia article so you can verify facts and explore further.
+          <a
+            href="https://www.wikipedia.org"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Wikipedia</a
+          >
+          via the
+          <a
+            href="https://api.wikimedia.org/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Wikimedia REST API</a
+          >. Content is provided under the
+          <a
+            href="https://creativecommons.org/licenses/by-sa/4.0/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >CC BY-SA 4.0</a
+          >
+          license. Each event links directly to its Wikipedia article so you can
+          verify facts and explore further.
         </p>
         <p>
-          Our original blog posts are written independently and represent our own editorial perspective on historical events.
-          We strive for accuracy but encourage readers to consult primary sources for important decisions.
+          Our original blog posts are written independently and represent our
+          own editorial perspective on historical events. We strive for accuracy
+          but encourage readers to consult primary sources for important
+          decisions.
         </p>
       </section>
 
       <section class="mb-5">
         <h2 class="mb-3">Who Built This?</h2>
         <p>
-          thisDay.info was designed and developed by <strong>Armin Kapetanović</strong>, a developer with a passion for
+          thisDay.info was designed and developed by
+          <strong>Armin Kapetanović</strong>, a developer with a passion for
           making information accessible and beautifully presented on the web.
         </p>
         <p>
           The project is open source and available on
-          <a href="https://github.com/Fugec/thisDay." target="_blank" rel="noopener noreferrer">GitHub</a>.
-          Contributions, bug reports, and feedback are always welcome.
+          <a
+            href="https://github.com/Fugec/thisDay."
+            target="_blank"
+            rel="noopener noreferrer"
+            >GitHub</a
+          >. Contributions, bug reports, and feedback are always welcome.
         </p>
         <p>
-          If you find thisDay.info useful and want to support its continued development,
-          <a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener noreferrer">buy me a coffee</a> —
-          it genuinely helps keep the site running.
+          If you find thisDay.info useful and want to support its continued
+          development,
+          <a
+            href="https://buymeacoffee.com/fugec?new=1"
+            target="_blank"
+            rel="noopener noreferrer"
+            >buy me a coffee</a
+          >
+          — it genuinely helps keep the site running.
         </p>
       </section>
 
       <section class="mb-5">
         <h2 class="mb-3">Get in Touch</h2>
         <p>
-          Have a suggestion, found an error, or just want to say hello?
-          Visit our <a href="/contact/">contact page</a> or reach out directly at
-          <a href="mailto:kapetanovic.armin@gmail.com">kapetanovic.armin@gmail.com</a>.
+          Have a suggestion, found an error, or just want to say hello? Visit
+          our <a href="/contact/">contact page</a> or reach out directly at
+          <a href="mailto:kapetanovic.armin@gmail.com"
+            >kapetanovic.armin@gmail.com</a
+          >.
         </p>
-        <p>You can also follow us on social media for history highlights and new blog posts:</p>
+        <p>
+          You can also follow us on social media for history highlights and new
+          blog posts:
+        </p>
         <div class="d-flex gap-3 mt-2">
-          <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook">
+          <a
+            href="https://www.facebook.com/profile.php?id=61578009082537"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Facebook"
+          >
             <i class="bi bi-facebook fs-3"></i>
           </a>
-          <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
+          <a
+            href="https://www.instagram.com/thisday.info/"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram"
+          >
             <i class="bi bi-instagram fs-3"></i>
           </a>
-          <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok">
+          <a
+            href="https://www.tiktok.com/@this__day"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="TikTok"
+          >
             <i class="bi bi-tiktok fs-3"></i>
           </a>
-          <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
+          <a
+            href="https://www.youtube.com/@thisDay_info/shorts"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="YouTube"
+          >
             <i class="bi bi-youtube fs-3"></i>
           </a>
-          <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+          <a
+            href="https://github.com/Fugec"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub"
+          >
             <i class="bi bi-github fs-3"></i>
           </a>
         </div>
       </section>
-
     </main>
 
     <footer class="footer">
       <div class="container d-flex justify-content-center my-2">
         <div class="me-2">
-          <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
+          <a
+            href="https://github.com/Fugec"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub"
+          >
             <i class="bi bi-github h3 text-white"></i>
           </a>
         </div>
         <div class="me-2">
-          <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook">
+          <a
+            href="https://www.facebook.com/profile.php?id=61578009082537"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Facebook"
+          >
             <i class="bi bi-facebook h3 text-white"></i>
           </a>
         </div>
         <div class="me-2">
-          <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
+          <a
+            href="https://www.instagram.com/thisday.info/"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram"
+          >
             <i class="bi bi-instagram h3 text-white"></i>
           </a>
         </div>
         <div class="me-2">
-          <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok">
+          <a
+            href="https://www.tiktok.com/@this__day"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="TikTok"
+          >
             <i class="bi bi-tiktok h3 text-white"></i>
           </a>
         </div>
         <div class="me-2">
-          <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
+          <a
+            href="https://www.youtube.com/@thisDay_info/shorts"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="YouTube"
+          >
             <i class="bi bi-youtube h3 text-white"></i>
           </a>
         </div>
@@ -469,16 +620,26 @@
       <p>© <span id="currentYear"></span> thisDay. All rights reserved.</p>
       <p>
         Historical data sourced from Wikipedia.org under
-        <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer" title="Creative Commons Attribution-ShareAlike 4.0 International License">CC BY-SA 4.0</a>
-        license. Note: Data is for informational purposes and requires verification.
+        <a
+          href="https://creativecommons.org/licenses/by-sa/4.0/"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Creative Commons Attribution-ShareAlike 4.0 International License"
+          >CC BY-SA 4.0</a
+        >
+        license. Note: Data is for informational purposes and requires
+        verification.
       </p>
       <p>
-        This website is not affiliated with any official historical organization or entity.
-        The content is provided for educational and entertainment purposes only.
+        This website is not affiliated with any official historical organization
+        or entity. The content is provided for educational and entertainment
+        purposes only.
       </p>
-      <p>
-        <a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> |
-        <a href="/about/">About Us</a> |
+      <p class="footer-bottom">
+        <a href="https://buymeacoffee.com/fugec?new=1" target="_blank"
+          >Support This Project</a
+        >
+        | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> |
         <a href="/contact/">Contact</a> |
         <a href="/terms/">Terms and Conditions</a> |
         <a href="/privacy-policy/">Privacy Policy</a>
@@ -487,7 +648,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-      document.getElementById("currentYear").textContent = new Date().getFullYear();
+      document.getElementById("currentYear").textContent =
+        new Date().getFullYear();
 
       const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
       const themeSwitchMobile = document.getElementById("themeSwitchMobile");
@@ -508,41 +670,52 @@
       if (themeSwitchDesktop) {
         themeSwitchDesktop.addEventListener("change", () => {
           applyTheme(themeSwitchDesktop.checked);
-          localStorage.setItem("theme", themeSwitchDesktop.checked ? "dark" : "light");
-          if (themeSwitchMobile) themeSwitchMobile.checked = themeSwitchDesktop.checked;
+          localStorage.setItem(
+            "theme",
+            themeSwitchDesktop.checked ? "dark" : "light",
+          );
+          if (themeSwitchMobile)
+            themeSwitchMobile.checked = themeSwitchDesktop.checked;
         });
       }
       if (themeSwitchMobile) {
         themeSwitchMobile.addEventListener("change", () => {
           applyTheme(themeSwitchMobile.checked);
-          localStorage.setItem("theme", themeSwitchMobile.checked ? "dark" : "light");
-          if (themeSwitchDesktop) themeSwitchDesktop.checked = themeSwitchMobile.checked;
+          localStorage.setItem(
+            "theme",
+            themeSwitchMobile.checked ? "dark" : "light",
+          );
+          if (themeSwitchDesktop)
+            themeSwitchDesktop.checked = themeSwitchMobile.checked;
         });
       }
     </script>
   </body>
-<!-- Google Ads: 60 Seconds on Site -->
-<script>
-(function() {
-  var fired = false;
-  var timer = null;
-  function fireConversion() {
-    if (fired) return;
-    fired = true;
-    gtag('event', 'conversion', {
-      'send_to': 'AW-17262488503/pnJhCPrptfsbELfXsqdA'
-    });
-  }
-  function startTimer() {
-    if (!timer) timer = setTimeout(fireConversion, 60000);
-  }
-  function stopTimer() {
-    if (timer) { clearTimeout(timer); timer = null; }
-  }
-  document.addEventListener('visibilitychange', function() {
-    document.hidden ? stopTimer() : (!fired && startTimer());
-  });
-  if (!document.hidden) startTimer();
-})();
-</script>
+  <!-- Google Ads: 60 Seconds on Site -->
+  <script>
+    (function () {
+      var fired = false;
+      var timer = null;
+      function fireConversion() {
+        if (fired) return;
+        fired = true;
+        gtag("event", "conversion", {
+          send_to: "AW-17262488503/pnJhCPrptfsbELfXsqdA",
+        });
+      }
+      function startTimer() {
+        if (!timer) timer = setTimeout(fireConversion, 60000);
+      }
+      function stopTimer() {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      }
+      document.addEventListener("visibilitychange", function () {
+        document.hidden ? stopTimer() : !fired && startTimer();
+      });
+      if (!document.hidden) startTimer();
+    })();
+  </script>
 </html>

@@ -1826,6 +1826,35 @@ if (currentYearElement) {
   currentYearElement.textContent = new Date().getFullYear();
 }
 
+function normalizeFooterContent() {
+  const footer = document.querySelector("footer.footer");
+  if (!footer) return;
+
+  footer
+    .querySelectorAll('a[aria-label="Pinterest"], a[href*="pinterest.com"]')
+    .forEach((link) => {
+      const wrapper = link.closest(".me-2") || link;
+      wrapper.remove();
+    });
+
+  const footerBottom =
+    footer.querySelector(".footer-bottom") ||
+    footer.querySelector("p:last-of-type");
+
+  if (!footerBottom) return;
+
+  footerBottom.classList.add("footer-bottom");
+  footerBottom.innerHTML =
+    '<a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | ' +
+    '<a href="/blog/">Blog</a> | ' +
+    '<a href="/about/">About Us</a> | ' +
+    '<a href="/contact/">Contact</a> | ' +
+    '<a href="/terms/">Terms and Conditions</a> | ' +
+    '<a href="/privacy-policy/">Privacy Policy</a>';
+}
+
+normalizeFooterContent();
+
 function cleanupCache() {
   const now = Date.now();
   const keysToDelete = [];
@@ -2206,7 +2235,9 @@ async function fetchPostPreviewFromUrl(
           if (wikiRes.ok) {
             const wikiData = await wikiRes.json();
             const wikiImg =
-              wikiData.thumbnail?.source ?? wikiData.originalimage?.source ?? null;
+              wikiData.thumbnail?.source ??
+              wikiData.originalimage?.source ??
+              null;
             if (wikiImg && (await doesImageLoad(wikiImg))) {
               workingImage = wikiImg;
             }
@@ -2280,7 +2311,8 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
           const slugMonthIndex = monthNames.findIndex(
             (m) => m.toLowerCase() === slugMonthName,
           );
-          const postMonthIndex = slugMonthIndex >= 0 ? slugMonthIndex : monthIndex;
+          const postMonthIndex =
+            slugMonthIndex >= 0 ? slugMonthIndex : monthIndex;
 
           fromArchive.push({
             day: parsedDay,

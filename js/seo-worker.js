@@ -788,33 +788,45 @@ function generateBlogPostHTML(
         }).replace(/<\//g, "<\\/")
       : null;
 
-  const quizSchema =
-    quizData?.questions?.length
-      ? JSON.stringify({
-          "@context": "https://schema.org",
-          "@type": "Quiz",
-          name: `${mDisplay} ${day} History Quiz`,
-          description: quizData.topic
-            ? `Think you know what happened on ${mDisplay} ${day}? Take our free 5-question history quiz on ${quizData.topic} and test your knowledge.`
-            : `Test your knowledge of historical events on ${mDisplay} ${day}.`,
-          url: `${siteUrl}/quiz/${monthName}/${day}/`,
-          educationalLevel: "beginner",
-          learningResourceType: "quiz",
-          ...(quizData.topic
-            ? { about: { "@type": "Event", name: quizData.topic, description: quizData.sourceEvent || "" } }
-            : {}),
-          isPartOf: { "@type": "WebPage", url: `${siteUrl}/events/${monthName}/${day}/` },
-          publisher: { "@type": "Organization", name: "thisday.info", url: siteUrl },
-          hasPart: quizData.questions.map((q) => ({
-            "@type": "Question",
-            name: q.q,
-            acceptedAnswer: {
-              "@type": "Answer",
-              text: q.options?.[q.answer] ?? "",
-            },
-          })),
-        }).replace(/<\//g, "<\\/")
-      : null;
+  const quizSchema = quizData?.questions?.length
+    ? JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "Quiz",
+        name: `${mDisplay} ${day} History Quiz`,
+        description: quizData.topic
+          ? `Think you know what happened on ${mDisplay} ${day}? Take our free 5-question history quiz on ${quizData.topic} and test your knowledge.`
+          : `Test your knowledge of historical events on ${mDisplay} ${day}.`,
+        url: `${siteUrl}/quiz/${monthName}/${day}/`,
+        educationalLevel: "beginner",
+        learningResourceType: "quiz",
+        ...(quizData.topic
+          ? {
+              about: {
+                "@type": "Event",
+                name: quizData.topic,
+                description: quizData.sourceEvent || "",
+              },
+            }
+          : {}),
+        isPartOf: {
+          "@type": "WebPage",
+          url: `${siteUrl}/events/${monthName}/${day}/`,
+        },
+        publisher: {
+          "@type": "Organization",
+          name: "thisday.info",
+          url: siteUrl,
+        },
+        hasPart: quizData.questions.map((q) => ({
+          "@type": "Question",
+          name: q.q,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: q.options?.[q.answer] ?? "",
+          },
+        })),
+      }).replace(/<\//g, "<\\/")
+    : null;
 
   const othersHtml = others
     .map((e) => {
@@ -1045,7 +1057,7 @@ body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba
   <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
   <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
   <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
-  <p><a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
+  <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
@@ -1376,11 +1388,19 @@ async function handleGeneratedPost(_request, env, ctx, url) {
       return [];
     })(),
     // --- Quiz async call ---
-    generateQuizForDate(env, monthName, day, eventsData, featuredEvent, wikiSummary),
+    generateQuizForDate(
+      env,
+      monthName,
+      day,
+      eventsData,
+      featuredEvent,
+      wikiSummary,
+    ),
   ]);
 
   didYouKnowFacts = dykResult.status === "fulfilled" ? dykResult.value : [];
-  if (dykResult.status === "rejected") console.error("AI did-you-know generation failed:", dykResult.reason);
+  if (dykResult.status === "rejected")
+    console.error("AI did-you-know generation failed:", dykResult.reason);
 
   if (featuredEvent && didYouKnowFacts.length < 5) {
     const fallbackFacts = buildTopicFallbackFacts(
@@ -1395,11 +1415,14 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   }
 
   const quizData = quizResult.status === "fulfilled" ? quizResult.value : null;
-  if (quizResult.status === "rejected") console.error("Quiz generation failed:", quizResult.reason);
+  if (quizResult.status === "rejected")
+    console.error("Quiz generation failed:", quizResult.reason);
 
   const siteUrl = "https://thisday.info";
   const mDisplayForQuiz = MONTH_DISPLAY_NAMES[monthNum];
-  const quizHtml = quizData ? buildQuizHTML(quizData, mDisplayForQuiz, day) : "";
+  const quizHtml = quizData
+    ? buildQuizHTML(quizData, mDisplayForQuiz, day)
+    : "";
 
   const html = generateBlogPostHTML(
     monthName,
@@ -1443,7 +1466,12 @@ async function handleFetchRequest(request, env, ctx) {
         `Sitemap: ${url.origin}/sitemap-generated.xml`,
         `Sitemap: ${url.origin}/news-sitemap.xml`,
       ].join("\n"),
-      { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400" } },
+      {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "public, max-age=86400",
+        },
+      },
     );
   }
 
@@ -1547,8 +1575,16 @@ async function handleFetchRequest(request, env, ctx) {
     const monthSlug = quizApiMatch[1];
     const day = parseInt(quizApiMatch[2], 10);
     const monthNum = MONTH_NUM_MAP[monthSlug];
-    if (!monthNum || isNaN(day) || day < 1 || day > DAYS_IN_MONTH[monthNum - 1]) {
-      return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "Content-Type": "application/json" } });
+    if (
+      !monthNum ||
+      isNaN(day) ||
+      day < 1 ||
+      day > DAYS_IN_MONTH[monthNum - 1]
+    ) {
+      return new Response(JSON.stringify({ error: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
@@ -1557,13 +1593,22 @@ async function handleFetchRequest(request, env, ctx) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
         return new Response(cached, {
-          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+          },
         });
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
     return new Response(JSON.stringify({ error: "Quiz not yet generated" }), {
       status: 404,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
     });
   }
 
@@ -2389,10 +2434,22 @@ async function handleScheduledEvent(env) {
   try {
     const monthSlug = MONTHS_ALL[today.getUTCMonth()];
     const day = today.getUTCDate();
-    const featuredEvent = eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) || eventsData?.events?.[0] || null;
+    const featuredEvent =
+      eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) ||
+      eventsData?.events?.[0] ||
+      null;
     const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
-    const wikiSummary = wikiTitle ? await fetchWikipediaSummaryByTitle(wikiTitle) : "";
-    await generateQuizForDate(env, monthSlug, day, eventsData, featuredEvent, wikiSummary);
+    const wikiSummary = wikiTitle
+      ? await fetchWikipediaSummaryByTitle(wikiTitle)
+      : "";
+    await generateQuizForDate(
+      env,
+      monthSlug,
+      day,
+      eventsData,
+      featuredEvent,
+      wikiSummary,
+    );
     console.log(`Quiz pre-generated for ${monthSlug}/${day}.`);
   } catch (e) {
     console.error("Quiz pre-generation failed:", e);
@@ -2400,7 +2457,14 @@ async function handleScheduledEvent(env) {
 }
 
 // --- Quiz: Generate quiz for a date using AI ---
-async function generateQuizForDate(env, monthName, day, eventsData, featuredEvent, wikiSummary) {
+async function generateQuizForDate(
+  env,
+  monthName,
+  day,
+  eventsData,
+  featuredEvent,
+  wikiSummary,
+) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
   const kvKey = `quiz:${mm}-${dd}`;
@@ -2417,20 +2481,38 @@ async function generateQuizForDate(env, monthName, day, eventsData, featuredEven
   const births = eventsData?.births || [];
 
   const contextLines = [];
-  if (featuredEvent) contextLines.push(`Featured event: ${featuredEvent.year} — ${featuredEvent.text}`);
-  if (wikiSummary) contextLines.push(`Wikipedia context: ${wikiSummary.substring(0, 300)}`);
-  events.slice(0, 5).forEach((e) => contextLines.push(`Event: ${e.year} — ${e.text.substring(0, 100)}`));
-  births.slice(0, 3).forEach((b) => contextLines.push(`Birth: ${b.year} — ${b.text.substring(0, 80)}`));
+  if (featuredEvent)
+    contextLines.push(
+      `Featured event: ${featuredEvent.year} — ${featuredEvent.text}`,
+    );
+  if (wikiSummary)
+    contextLines.push(`Wikipedia context: ${wikiSummary.substring(0, 300)}`);
+  events
+    .slice(0, 5)
+    .forEach((e) =>
+      contextLines.push(`Event: ${e.year} — ${e.text.substring(0, 100)}`),
+    );
+  births
+    .slice(0, 3)
+    .forEach((b) =>
+      contextLines.push(`Birth: ${b.year} — ${b.text.substring(0, 80)}`),
+    );
 
   let quiz = null;
 
   if (env.AI && contextLines.length > 0) {
     try {
-      const aiTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("AI timeout")), 12000));
+      const aiTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("AI timeout")), 12000),
+      );
       const aiResult = await Promise.race([
         env.AI.run(CF_AI_MODEL, {
           messages: [
-            { role: "system", content: "You are a history quiz creator. Always respond with valid JSON only, no markdown, no extra text." },
+            {
+              role: "system",
+              content:
+                "You are a history quiz creator. Always respond with valid JSON only, no markdown, no extra text.",
+            },
             {
               role: "user",
               content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
@@ -2441,16 +2523,28 @@ async function generateQuizForDate(env, monthName, day, eventsData, featuredEven
         aiTimeout,
       ]);
 
-      const rawValue = aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
-      const raw = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
-      const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+      const rawValue =
+        aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
+      const raw = (
+        typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
+      ).trim();
+      const cleaned = raw
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```\s*$/, "")
+        .trim();
       const objMatch = cleaned.match(/\{[\s\S]*\}/);
       if (objMatch) {
         const parsed = JSON.parse(objMatch[0]);
         if (Array.isArray(parsed?.questions) && parsed.questions.length >= 3) {
           // Validate each question has required fields — drop malformed ones
           const valid = parsed.questions.filter(
-            (q) => q.q && Array.isArray(q.options) && q.options.length === 4 && typeof q.answer === "number" && q.answer >= 0 && q.answer <= 3,
+            (q) =>
+              q.q &&
+              Array.isArray(q.options) &&
+              q.options.length === 4 &&
+              typeof q.answer === "number" &&
+              q.answer >= 0 &&
+              q.answer <= 3,
           );
           if (valid.length >= 3) quiz = { ...parsed, questions: valid };
         }
@@ -2463,7 +2557,9 @@ async function generateQuizForDate(env, monthName, day, eventsData, featuredEven
   if (!quiz) quiz = buildFallbackQuiz(mDisplay, day, eventsData);
 
   try {
-    await env.EVENTS_KV.put(kvKey, JSON.stringify(quiz), { expirationTtl: 24 * 60 * 60 });
+    await env.EVENTS_KV.put(kvKey, JSON.stringify(quiz), {
+      expirationTtl: 24 * 60 * 60,
+    });
   } catch (e) {
     // ignore storage error
   }
@@ -2480,7 +2576,12 @@ function buildFallbackQuiz(mDisplay, day, eventsData) {
     const snippet = e.text.split(".")[0].substring(0, 80);
     questions.push({
       q: `In which year did "${snippet}…" occur on ${mDisplay} ${day}?`,
-      options: [String(yr), String(Math.max(1, yr - 12)), String(yr + 8), String(Math.max(1, yr - 25))],
+      options: [
+        String(yr),
+        String(Math.max(1, yr - 12)),
+        String(yr + 8),
+        String(Math.max(1, yr - 25)),
+      ],
       answer: 0,
     });
   }
@@ -2489,14 +2590,22 @@ function buildFallbackQuiz(mDisplay, day, eventsData) {
     {
       q: `How many days does ${mDisplay} typically have?`,
       options: ["28 or 29", "30", "31", "27"],
-      answer: ["April","June","September","November"].includes(mDisplay) ? 1 : mDisplay === "February" ? 0 : 2,
+      answer: ["April", "June", "September", "November"].includes(mDisplay)
+        ? 1
+        : mDisplay === "February"
+          ? 0
+          : 2,
     },
     {
       q: `${mDisplay} is which month of the year?`,
       options: ["1st–3rd", "4th–6th", "7th–9th", "10th–12th"],
-      answer: [1,2,3].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0) ? 0
-        : [4,5,6].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0) ? 1
-        : [7,8,9].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0) ? 2 : 3,
+      answer: [1, 2, 3].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0)
+        ? 0
+        : [4, 5, 6].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0)
+          ? 1
+          : [7, 8, 9].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0)
+            ? 2
+            : 3,
     },
     {
       q: "Which hemisphere experiences winter in December?",
@@ -2542,13 +2651,17 @@ function buildQuizHTML(quiz, monthDisplay, day) {
         `<p class="tdq-q-text"><strong>${qi + 1}.</strong> ${escapeHtml(String(q.q))}</p>` +
         `<div class="tdq-options">${optsHtml}</div>` +
         `<div class="tdq-feedback" id="tdq-f-${qi}" hidden></div>` +
-        (q.explanation ? `<div class="tdq-explanation" id="tdq-e-${qi}" hidden style="font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">${escapeHtml(String(q.explanation))}</div>` : "") +
+        (q.explanation
+          ? `<div class="tdq-explanation" id="tdq-e-${qi}" hidden style="font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">${escapeHtml(String(q.explanation))}</div>`
+          : "") +
         `</div>`
       );
     })
     .join("");
 
-  const answersJson = JSON.stringify(quiz.questions.map((q) => Number(q.answer)));
+  const answersJson = JSON.stringify(
+    quiz.questions.map((q) => Number(q.answer)),
+  );
 
   return (
     `<div class="card-box" id="tdq-widget">` +
@@ -2606,17 +2719,31 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
   let eventsData = { events: [], births: [], deaths: [] };
   try {
-    const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+    const r = await fetch(apiUrl, {
+      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+    });
     if (r.ok) eventsData = await r.json();
   } catch (e) {
     console.error("Quiz page Wikipedia fetch:", e);
   }
 
-  const featuredEvent = eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) || eventsData?.events?.[0] || null;
+  const featuredEvent =
+    eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) ||
+    eventsData?.events?.[0] ||
+    null;
   const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
-  const wikiSummary = wikiTitle ? await fetchWikipediaSummaryByTitle(wikiTitle) : "";
+  const wikiSummary = wikiTitle
+    ? await fetchWikipediaSummaryByTitle(wikiTitle)
+    : "";
 
-  const quiz = await generateQuizForDate(env, monthSlug, day, eventsData, featuredEvent, wikiSummary);
+  const quiz = await generateQuizForDate(
+    env,
+    monthSlug,
+    day,
+    eventsData,
+    featuredEvent,
+    wikiSummary,
+  );
   const quizHtml = buildQuizHTML(quiz, mDisplay, day);
   const siteUrl = "https://thisday.info";
   const canonical = `${siteUrl}/quiz/${monthSlug}/${day}/`;
@@ -2625,7 +2752,10 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const todayDay = _d.getUTCDate();
 
   const quizPageDesc = quiz?.topic
-    ? `Think you know what happened on ${mDisplay} ${day}? Take our free 5-question history quiz on ${quiz.topic} and test your knowledge of this date's defining events.`.slice(0, 158)
+    ? `Think you know what happened on ${mDisplay} ${day}? Take our free 5-question history quiz on ${quiz.topic} and test your knowledge of this date's defining events.`.slice(
+        0,
+        158,
+      )
     : `Test your knowledge of historical events on ${mDisplay} ${day}. A free 5-question multiple choice quiz covering key events, people, and milestones on this date.`;
 
   const quizPageTitle = quiz?.topic
@@ -2641,12 +2771,27 @@ async function handleQuizPage(_request, env, monthSlug, day) {
         url: canonical,
         educationalLevel: "beginner",
         learningResourceType: "quiz",
-        ...(quiz.topic ? { about: { "@type": "Event", name: quiz.topic, description: quiz.sourceEvent || "" } } : {}),
-        publisher: { "@type": "Organization", name: "thisday.info", url: siteUrl },
+        ...(quiz.topic
+          ? {
+              about: {
+                "@type": "Event",
+                name: quiz.topic,
+                description: quiz.sourceEvent || "",
+              },
+            }
+          : {}),
+        publisher: {
+          "@type": "Organization",
+          name: "thisday.info",
+          url: siteUrl,
+        },
         hasPart: quiz.questions.map((q) => ({
           "@type": "Question",
           name: q.q,
-          acceptedAnswer: { "@type": "Answer", text: q.options?.[q.answer] ?? "" },
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: q.options?.[q.answer] ?? "",
+          },
         })),
       }).replace(/<\//g, "<\\/")
     : null;
@@ -2714,17 +2859,24 @@ body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba
   </nav>
   <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
   <p class="text-muted mb-3" style="font-size:.9rem">Test your knowledge of what happened in history on this date. Based on real Wikipedia events.</p>
-  ${featuredEvent ? `
+  ${
+    featuredEvent
+      ? `
   <div class="card-box mb-4">
     <p class="mb-1" style="font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--mu)">Featured Event</p>
     <p class="mb-1"><span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:700;margin-right:8px">${escapeHtml(String(featuredEvent.year))}</span><strong>${escapeHtml(featuredEvent.text.split(".")[0])}</strong></p>
     ${wikiSummary ? `<p class="mb-0 mt-2" style="font-size:.9rem;color:var(--mu)">${escapeHtml(wikiSummary.substring(0, 280))}…</p>` : ""}
     <p class="mb-0 mt-2" style="font-size:.82rem"><a href="/events/${monthSlug}/${day}/">See all events on ${escapeHtml(mDisplay)} ${day} →</a></p>
-  </div>` : ""}
+  </div>`
+      : ""
+  }
   ${quizHtml}
   <p class="mt-3 text-muted" style="font-size:.85rem"><a href="/events/${monthSlug}/${day}/">← Back to ${escapeHtml(mDisplay)} ${day} Events</a></p>
 </main>
-<footer class="footer"><p>&copy; <span id="yr"></span> thisDay.info &mdash; <a href="/about/">About</a></p></footer>
+<footer class="footer">
+  <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
+  <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
+</footer>
 <script>document.getElementById('yr').textContent=new Date().getFullYear();</script>
 <script>
   const tsd=document.getElementById('tsd');

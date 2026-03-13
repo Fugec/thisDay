@@ -131,7 +131,10 @@ export default {
       }
       return new Response(JSON.stringify({ error: "Quiz not found" }), {
         status: 404,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
       });
     }
 
@@ -279,7 +282,11 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
     const page = Object.values(listData?.query?.pages ?? {})[0];
     const imageFiles = (page?.images ?? [])
       .map((i) => i.title)
-      .filter((t) => /\.(jpe?g|png|webp|gif)$/i.test(t) && !/icon|logo|flag|map|seal|coa/i.test(t));
+      .filter(
+        (t) =>
+          /\.(jpe?g|png|webp|gif)$/i.test(t) &&
+          !/icon|logo|flag|map|seal|coa/i.test(t),
+      );
 
     if (!imageFiles.length) return null;
 
@@ -468,7 +475,9 @@ async function generateAndStore(env) {
   try {
     const quiz = await generateBlogQuiz(env.AI, content, slug);
     if (quiz) {
-      await env.BLOG_AI_KV.put(`quiz:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+      await env.BLOG_AI_KV.put(`quiz:blog:${slug}`, JSON.stringify(quiz), {
+        expirationTtl: 90 * 86_400,
+      });
     }
   } catch (e) {
     console.error("Blog quiz generation failed:", e);
@@ -490,15 +499,23 @@ async function generateBlogQuiz(ai, content, _slug) {
     `Title: ${content.title}`,
     `Event: ${content.eventTitle} on ${content.historicalDate}`,
     `Location: ${content.location}, ${content.country}`,
-    content.description ? `Summary: ${content.description.substring(0, 300)}` : "",
+    content.description
+      ? `Summary: ${content.description.substring(0, 300)}`
+      : "",
     ...(content.keyFacts || []).slice(0, 5).map((f) => `Fact: ${f}`),
   ].filter(Boolean);
 
-  const aiTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error("AI timeout")), 12000));
+  const aiTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("AI timeout")), 12000),
+  );
   const aiResult = await Promise.race([
     ai.run(CF_AI_MODEL, {
       messages: [
-        { role: "system", content: "You are a history quiz creator. Always respond with valid JSON only, no markdown, no extra text." },
+        {
+          role: "system",
+          content:
+            "You are a history quiz creator. Always respond with valid JSON only, no markdown, no extra text.",
+        },
         {
           role: "user",
           content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific and fact-based from the content above\n- Output ONLY valid JSON:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0}]}`,
@@ -509,9 +526,15 @@ async function generateBlogQuiz(ai, content, _slug) {
     aiTimeout,
   ]);
 
-  const rawValue = aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
-  const raw = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const rawValue =
+    aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
+  const raw = (
+    typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
+  ).trim();
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
   const objMatch = cleaned.match(/\{[\s\S]*\}/);
   if (!objMatch) return null;
   let parsed;
@@ -521,7 +544,8 @@ async function generateBlogQuiz(ai, content, _slug) {
     console.error("Blog quiz JSON.parse failed:", parseErr);
     return null;
   }
-  if (!Array.isArray(parsed?.questions) || parsed.questions.length < 3) return null;
+  if (!Array.isArray(parsed?.questions) || parsed.questions.length < 3)
+    return null;
   return parsed;
 }
 
@@ -1318,8 +1342,11 @@ ${analysisBadItems}
     </p>
     <p class="footer-bottom">
       <a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a>
-      | <a href="/terms">Terms and Conditions</a>
-      | <a href="/privacy-policy">Privacy Policy</a>
+      | <a href="/blog/">Blog</a>
+      | <a href="/about/">About Us</a>
+      | <a href="/contact/">Contact</a>
+      | <a href="/terms/">Terms and Conditions</a>
+      | <a href="/privacy-policy/">Privacy Policy</a>
     </p>
   </footer>
 
@@ -1671,7 +1698,7 @@ ${JSON.stringify(
     </div>
     <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
     <p>Historical data sourced from Wikipedia.org. Content is for educational and entertainment purposes only.</p>
-    <p><a href="/terms">Terms and Conditions</a> | <a href="/privacy-policy">Privacy Policy</a></p>
+    <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

@@ -2267,24 +2267,32 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
         const fromArchive = [];
 
         for (const entry of latest) {
-          if (!entry?.slug) continue;
-          const day = Number.parseInt(String(entry.slug).split("-")[0], 10);
+          if (!entry?.slug || !entry?.imageUrl) continue;
+          if (isBlockedCarouselImage(entry.imageUrl)) continue;
+
+          const slugParts = String(entry.slug).split("-");
+          const day = Number.parseInt(slugParts[0], 10);
           const parsedDay = Number.isFinite(day) ? day : today.getDate();
           const parsedYear =
             Number.parseInt(String(entry.publishedAt || "").slice(0, 4), 10) ||
             today.getFullYear();
-
-          const post = await fetchPostPreviewFromUrl(
-            `/blog/${entry.slug}/`,
-            `/blog/${entry.slug}/`,
-            parsedDay,
-            monthIndex,
-            parsedYear,
+          const slugMonthName = slugParts[1]?.toLowerCase() || "";
+          const slugMonthIndex = monthNames.findIndex(
+            (m) => m.toLowerCase() === slugMonthName,
           );
+          const postMonthIndex = slugMonthIndex >= 0 ? slugMonthIndex : monthIndex;
 
-          if (post) {
-            fromArchive.push(post);
-          }
+          fromArchive.push({
+            day: parsedDay,
+            year: parsedYear,
+            monthIndex: postMonthIndex,
+            title: entry.title || `Historical Events - ${parsedDay}`,
+            excerpt: entry.description || "",
+            imageUrl: entry.imageUrl,
+            backgroundUrl: entry.imageUrl,
+            url: `/blog/${entry.slug}/`,
+            isExternal: false,
+          });
 
           if (fromArchive.length >= MAX_CAROUSEL_POSTS) {
             return fromArchive;

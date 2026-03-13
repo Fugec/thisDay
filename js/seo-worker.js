@@ -2193,7 +2193,7 @@ async function handleFetchRequest(request, env, ctx) {
   // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
   const csp =
     `default-src 'none'; ` +
-    `connect-src 'self' https://api.wikimedia.org https://cdn.jsdelivr.net ` +
+    `connect-src 'self' https://api.wikimedia.org https://en.wikipedia.org https://cdn.jsdelivr.net ` +
     `https://www.google-analytics.com https://www.google.com https://www.gstatic.com ` +
     `https://www.googleadservices.com https://pagead2.googlesyndication.com ` +
     `https://*.adtrafficquality.google https://*.doubleclick.net ` +

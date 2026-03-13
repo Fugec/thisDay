@@ -636,6 +636,8 @@ function generateBlogPostHTML(
   eventsData,
   siteUrl,
   didYouKnowFacts = [],
+  quizHtml = "",
+  quizData = null,
 ) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
@@ -786,6 +788,46 @@ function generateBlogPostHTML(
         }).replace(/<\//g, "<\\/")
       : null;
 
+  const quizSchema = quizData?.questions?.length
+    ? JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "Quiz",
+        name: `${mDisplay} ${day} History Quiz`,
+        description: quizData.topic
+          ? `Think you know what happened on ${mDisplay} ${day}? Take our free 5-question history quiz on ${quizData.topic} and test your knowledge.`
+          : `Test your knowledge of historical events on ${mDisplay} ${day}.`,
+        url: `${siteUrl}/quiz/${monthName}/${day}/`,
+        educationalLevel: "beginner",
+        learningResourceType: "quiz",
+        ...(quizData.topic
+          ? {
+              about: {
+                "@type": "Event",
+                name: quizData.topic,
+                description: quizData.sourceEvent || "",
+              },
+            }
+          : {}),
+        isPartOf: {
+          "@type": "WebPage",
+          url: `${siteUrl}/events/${monthName}/${day}/`,
+        },
+        publisher: {
+          "@type": "Organization",
+          name: "thisday.info",
+          url: siteUrl,
+        },
+        hasPart: quizData.questions.map((q) => ({
+          "@type": "Question",
+          name: q.q,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: q.options?.[q.answer] ?? "",
+          },
+        })),
+      }).replace(/<\//g, "<\\/")
+    : null;
+
   const othersHtml = others
     .map((e) => {
       const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
@@ -837,6 +879,7 @@ function generateBlogPostHTML(
 <script type="application/ld+json">${articleSchema}</script>
 ${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` : ""}
 <script type="application/ld+json">${faqSchema}</script>
+${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -875,6 +918,16 @@ body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
 .auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
 body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
 .ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:.68rem;font-weight:600;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
+.tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
+.tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
+.tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+.tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important}
+.tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
+.tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15)}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
+.tdq-feedback{font-size:.85rem;margin-top:5px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
+.tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.2rem}
 </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
@@ -930,6 +983,7 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
   </div>`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
+  ${quizHtml}
   ${`
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-journal-richtext me-2" style="color:#3b82f6"></i>${escapeHtml(dynamicOverview.title)}</h2>
@@ -1003,7 +1057,7 @@ body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
   <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
   <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
   <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
-  <p><a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
+  <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
@@ -1070,6 +1124,7 @@ function serveGeneratedSitemap(siteUrl) {
   for (let m = 0; m < 12; m++) {
     for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
       urls += `  <url>\n    <loc>${siteUrl}/events/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.6</priority>\n  </url>\n`;
+      urls += `  <url>\n    <loc>${siteUrl}/quiz/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
     }
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
@@ -1232,7 +1287,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v13-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v14-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1275,17 +1330,19 @@ async function handleGeneratedPost(_request, env, ctx, url) {
     ? await fetchWikipediaSummaryByTitle(wikiTitle)
     : "";
 
-  if (env.AI && featuredEvent) {
-    try {
+  // Run DYK and quiz generation in parallel to avoid double latency
+  const [dykResult, quizResult] = await Promise.allSettled([
+    // --- DYK async IIFE ---
+    (async () => {
+      if (!env.AI || !featuredEvent) return [];
       const eventDesc = `${featuredEvent.year} — ${featuredEvent.text}`;
       const contextChunks = [
         `Featured event: ${eventDesc}`,
         wikiTitle ? `Wikipedia article title: ${wikiTitle}` : "",
         wikiSummary ? `Wikipedia summary: ${wikiSummary}` : "",
       ].filter(Boolean);
-
       const aiTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("AI timeout")), 8000),
+        setTimeout(() => reject(new Error("AI timeout")), 9000),
       );
       const aiResult = await Promise.race([
         env.AI.run(CF_AI_MODEL, {
@@ -1315,19 +1372,35 @@ async function handleGeneratedPost(_request, env, ctx, url) {
         .trim();
       const arrMatch = cleaned.match(/\[[\s\S]*\]/);
       if (arrMatch) {
-        const parsed = JSON.parse(arrMatch[0]);
-        if (Array.isArray(parsed) && parsed.length >= 3) {
-          didYouKnowFacts = parsed
-            .filter((f) => typeof f === "string")
-            .map(normalizeDidYouKnowFact)
-            .filter(Boolean)
-            .slice(0, 5);
+        try {
+          const parsed = JSON.parse(arrMatch[0]);
+          if (Array.isArray(parsed) && parsed.length >= 3) {
+            return parsed
+              .filter((f) => typeof f === "string")
+              .map(normalizeDidYouKnowFact)
+              .filter(Boolean)
+              .slice(0, 5);
+          }
+        } catch (parseErr) {
+          console.error("DYK JSON.parse failed:", parseErr);
         }
       }
-    } catch (e) {
-      console.error("AI did-you-know generation failed:", e);
-    }
-  }
+      return [];
+    })(),
+    // --- Quiz async call ---
+    generateQuizForDate(
+      env,
+      monthName,
+      day,
+      eventsData,
+      featuredEvent,
+      wikiSummary,
+    ),
+  ]);
+
+  didYouKnowFacts = dykResult.status === "fulfilled" ? dykResult.value : [];
+  if (dykResult.status === "rejected")
+    console.error("AI did-you-know generation failed:", dykResult.reason);
 
   if (featuredEvent && didYouKnowFacts.length < 5) {
     const fallbackFacts = buildTopicFallbackFacts(
@@ -1341,13 +1414,24 @@ async function handleGeneratedPost(_request, env, ctx, url) {
       .slice(0, 5);
   }
 
+  const quizData = quizResult.status === "fulfilled" ? quizResult.value : null;
+  if (quizResult.status === "rejected")
+    console.error("Quiz generation failed:", quizResult.reason);
+
   const siteUrl = "https://thisday.info";
+  const mDisplayForQuiz = MONTH_DISPLAY_NAMES[monthNum];
+  const quizHtml = quizData
+    ? buildQuizHTML(quizData, mDisplayForQuiz, day)
+    : "";
+
   const html = generateBlogPostHTML(
     monthName,
     day,
     eventsData,
     siteUrl,
     didYouKnowFacts,
+    quizHtml,
+    quizData,
   );
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
@@ -1371,6 +1455,25 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 // --- Main Request Handler (for user requests) ---
 async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
+
+  if (url.pathname === "/robots.txt") {
+    return new Response(
+      [
+        "User-agent: *",
+        "Allow: /",
+        "",
+        `Sitemap: ${url.origin}/sitemap.xml`,
+        `Sitemap: ${url.origin}/sitemap-generated.xml`,
+        `Sitemap: ${url.origin}/news-sitemap.xml`,
+      ].join("\n"),
+      {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "public, max-age=86400",
+        },
+      },
+    );
+  }
 
   if (url.pathname === "/llms.txt") {
     const llmsContent = `# Site Summary for Large Language Models...`; // your content
@@ -1448,6 +1551,65 @@ async function handleFetchRequest(request, env, ctx) {
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
     return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+  }
+
+  // /quiz/ or /quiz → today's quiz
+  if (url.pathname === "/quiz" || url.pathname === "/quiz/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return Response.redirect(`${url.origin}/quiz/${mn}/${dd}/`, 302);
+  }
+
+  // Quiz standalone pages: /quiz/{month}/{day}/
+  const quizPageMatch = url.pathname.match(/^\/quiz\/([a-z]+)\/(\d+)\/?$/);
+  if (quizPageMatch) {
+    const monthSlug = quizPageMatch[1];
+    const day = parseInt(quizPageMatch[2], 10);
+    return handleQuizPage(request, env, monthSlug, day);
+  }
+
+  // Quiz API: /api/quiz/{month}/{day} — returns raw JSON
+  const quizApiMatch = url.pathname.match(/^\/api\/quiz\/([a-z]+)\/(\d+)$/);
+  if (quizApiMatch) {
+    const monthSlug = quizApiMatch[1];
+    const day = parseInt(quizApiMatch[2], 10);
+    const monthNum = MONTH_NUM_MAP[monthSlug];
+    if (
+      !monthNum ||
+      isNaN(day) ||
+      day < 1 ||
+      day > DAYS_IN_MONTH[monthNum - 1]
+    ) {
+      return new Response(JSON.stringify({ error: "Not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const mm = String(monthNum).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    const kvKey = `quiz:${mm}-${dd}`;
+    try {
+      const cached = await env.EVENTS_KV.get(kvKey);
+      if (cached) {
+        return new Response(cached, {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+          },
+        });
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    return new Response(JSON.stringify({ error: "Quiz not yet generated" }), {
+      status: 404,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
   }
 
   // Events pages — must be before the HTML pass-through guard
@@ -2267,6 +2429,468 @@ async function handleScheduledEvent(env) {
   } else {
     console.warn("No events data fetched, not updating KV.");
   }
+
+  // Pre-generate today's quiz
+  try {
+    const monthSlug = MONTHS_ALL[today.getUTCMonth()];
+    const day = today.getUTCDate();
+    const featuredEvent =
+      eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) ||
+      eventsData?.events?.[0] ||
+      null;
+    const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
+    const wikiSummary = wikiTitle
+      ? await fetchWikipediaSummaryByTitle(wikiTitle)
+      : "";
+    await generateQuizForDate(
+      env,
+      monthSlug,
+      day,
+      eventsData,
+      featuredEvent,
+      wikiSummary,
+    );
+    console.log(`Quiz pre-generated for ${monthSlug}/${day}.`);
+  } catch (e) {
+    console.error("Quiz pre-generation failed:", e);
+  }
+}
+
+// --- Quiz: Generate quiz for a date using AI ---
+async function generateQuizForDate(
+  env,
+  monthName,
+  day,
+  eventsData,
+  featuredEvent,
+  wikiSummary,
+) {
+  const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  const kvKey = `quiz:${mm}-${dd}`;
+
+  try {
+    const cached = await env.EVENTS_KV.get(kvKey);
+    if (cached) return JSON.parse(cached);
+  } catch (e) {
+    // ignore cache miss errors
+  }
+
+  const mDisplay = MONTH_DISPLAY_NAMES[MONTH_NUM_MAP[monthName]];
+  const events = eventsData?.events || [];
+  const births = eventsData?.births || [];
+
+  const contextLines = [];
+  if (featuredEvent)
+    contextLines.push(
+      `Featured event: ${featuredEvent.year} — ${featuredEvent.text}`,
+    );
+  if (wikiSummary)
+    contextLines.push(`Wikipedia context: ${wikiSummary.substring(0, 300)}`);
+  events
+    .slice(0, 5)
+    .forEach((e) =>
+      contextLines.push(`Event: ${e.year} — ${e.text.substring(0, 100)}`),
+    );
+  births
+    .slice(0, 3)
+    .forEach((b) =>
+      contextLines.push(`Birth: ${b.year} — ${b.text.substring(0, 80)}`),
+    );
+
+  let quiz = null;
+
+  if (env.AI && contextLines.length > 0) {
+    try {
+      const aiTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("AI timeout")), 12000),
+      );
+      const aiResult = await Promise.race([
+        env.AI.run(CF_AI_MODEL, {
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a history quiz creator. Always respond with valid JSON only, no markdown, no extra text.",
+            },
+            {
+              role: "user",
+              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
+            },
+          ],
+          max_tokens: 1500,
+        }),
+        aiTimeout,
+      ]);
+
+      const rawValue =
+        aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
+      const raw = (
+        typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
+      ).trim();
+      const cleaned = raw
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```\s*$/, "")
+        .trim();
+      const objMatch = cleaned.match(/\{[\s\S]*\}/);
+      if (objMatch) {
+        const parsed = JSON.parse(objMatch[0]);
+        if (Array.isArray(parsed?.questions) && parsed.questions.length >= 3) {
+          // Validate each question has required fields — drop malformed ones
+          const valid = parsed.questions.filter(
+            (q) =>
+              q.q &&
+              Array.isArray(q.options) &&
+              q.options.length === 4 &&
+              typeof q.answer === "number" &&
+              q.answer >= 0 &&
+              q.answer <= 3,
+          );
+          if (valid.length >= 3) quiz = { ...parsed, questions: valid };
+        }
+      }
+    } catch (e) {
+      console.error("Quiz AI generation failed:", e);
+    }
+  }
+
+  if (!quiz) quiz = buildFallbackQuiz(mDisplay, day, eventsData);
+
+  try {
+    await env.EVENTS_KV.put(kvKey, JSON.stringify(quiz), {
+      expirationTtl: 24 * 60 * 60,
+    });
+  } catch (e) {
+    // ignore storage error
+  }
+
+  return quiz;
+}
+
+function buildFallbackQuiz(mDisplay, day, eventsData) {
+  const events = (eventsData?.events || []).filter((e) => e.year && e.text);
+  const questions = [];
+
+  for (const e of events.slice(0, 5)) {
+    const yr = Number(e.year);
+    const snippet = e.text.split(".")[0].substring(0, 80);
+    questions.push({
+      q: `In which year did "${snippet}…" occur on ${mDisplay} ${day}?`,
+      options: [
+        String(yr),
+        String(Math.max(1, yr - 12)),
+        String(yr + 8),
+        String(Math.max(1, yr - 25)),
+      ],
+      answer: 0,
+    });
+  }
+
+  const genericPad = [
+    {
+      q: `How many days does ${mDisplay} typically have?`,
+      options: ["28 or 29", "30", "31", "27"],
+      answer: ["April", "June", "September", "November"].includes(mDisplay)
+        ? 1
+        : mDisplay === "February"
+          ? 0
+          : 2,
+    },
+    {
+      q: `${mDisplay} is which month of the year?`,
+      options: ["1st–3rd", "4th–6th", "7th–9th", "10th–12th"],
+      answer: [1, 2, 3].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0)
+        ? 0
+        : [4, 5, 6].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0)
+          ? 1
+          : [7, 8, 9].includes(MONTH_NUM_MAP[mDisplay?.toLowerCase?.()] ?? 0)
+            ? 2
+            : 3,
+    },
+    {
+      q: "Which hemisphere experiences winter in December?",
+      options: ["Northern", "Southern", "Both", "Neither"],
+      answer: 0,
+    },
+    {
+      q: "What does 'A.D.' stand for in historical dates?",
+      options: ["After Death", "Anno Domini", "Ancient Days", "Annual Date"],
+      answer: 1,
+    },
+    {
+      q: "Which calendar system is most widely used for modern historical dating?",
+      options: ["Julian", "Gregorian", "Hebrew", "Islamic"],
+      answer: 1,
+    },
+  ];
+
+  let padIdx = 0;
+  while (questions.length < 5) {
+    questions.push(genericPad[padIdx % genericPad.length]);
+    padIdx++;
+  }
+
+  return { questions: questions.slice(0, 5) };
+}
+
+function buildQuizHTML(quiz, monthDisplay, day) {
+  if (!quiz?.questions?.length) return "";
+
+  const questionsHtml = quiz.questions
+    .map((q, qi) => {
+      const optsHtml = (q.options || [])
+        .map(
+          (opt, oi) =>
+            `<div class="tdq-opt" data-qi="${qi}" data-oi="${oi}" role="radio" aria-checked="false" tabindex="0">` +
+            `<span class="tdq-opt-key">${String.fromCharCode(65 + oi)}</span>${escapeHtml(String(opt))}` +
+            `</div>`,
+        )
+        .join("");
+      return (
+        `<div class="tdq-question" id="tdq-q-${qi}">` +
+        `<p class="tdq-q-text"><strong>${qi + 1}.</strong> ${escapeHtml(String(q.q))}</p>` +
+        `<div class="tdq-options">${optsHtml}</div>` +
+        `<div class="tdq-feedback" id="tdq-f-${qi}" hidden></div>` +
+        (q.explanation
+          ? `<div class="tdq-explanation" id="tdq-e-${qi}" hidden style="font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">${escapeHtml(String(q.explanation))}</div>`
+          : "") +
+        `</div>`
+      );
+    })
+    .join("");
+
+  const answersJson = JSON.stringify(
+    quiz.questions.map((q) => Number(q.answer)),
+  );
+
+  return (
+    `<div class="card-box" id="tdq-widget">` +
+    `<h2 class="h4 mb-3"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge — ${escapeHtml(monthDisplay)} ${day}</h2>` +
+    `<p class="text-muted mb-3" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out. <a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" style="font-size:.85rem;white-space:nowrap">Full quiz page →</a></p>` +
+    `<div id="tdq-questions">${questionsHtml}</div>` +
+    `<button class="btn btn-warning mt-3 px-4" id="tdq-submit-btn">Check Answers</button>` +
+    `<div id="tdq-score" class="mt-3" hidden></div>` +
+    `</div>` +
+    `<script>(function(){` +
+    `var answers=${answersJson};` +
+    `var selected={};` +
+    `document.querySelectorAll('.tdq-opt').forEach(function(opt){` +
+    `opt.addEventListener('click',function(){` +
+    `var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);` +
+    `selected[qi]=oi;` +
+    `document.querySelectorAll('[data-qi="'+qi+'"]').forEach(function(o){o.classList.remove('tdq-opt-selected');o.setAttribute('aria-checked','false');});` +
+    `this.classList.add('tdq-opt-selected');this.setAttribute('aria-checked','true');` +
+    `});` +
+    `});` +
+    `document.getElementById('tdq-submit-btn').addEventListener('click',function(){` +
+    `var score=0;` +
+    `answers.forEach(function(correct,qi){` +
+    `var chosen=selected[qi]!==undefined?selected[qi]:-1;` +
+    `var fb=document.getElementById('tdq-f-'+qi);` +
+    `var opts=document.querySelectorAll('[data-qi="'+qi+'"]');` +
+    `fb.hidden=false;` +
+    `opts.forEach(function(o){o.style.pointerEvents='none';});` +
+    `opts[correct].classList.add('tdq-opt-correct');` +
+    `if(chosen===correct){score++;fb.innerHTML='<span class="tdq-correct">✓ Correct!</span>';}` +
+    `else{if(chosen>=0)opts[chosen].classList.add('tdq-opt-wrong');` +
+    `fb.innerHTML='<span class="tdq-wrong">✗ Incorrect.</span> Correct answer: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
+    `var exp=document.getElementById('tdq-e-'+qi);if(exp)exp.hidden=false;` +
+    `});` +
+    `this.hidden=true;` +
+    `var pct=Math.round(score/answers.length*100);` +
+    `var msg=pct===100?'Perfect score!':pct>=80?'Excellent!':pct>=60?'Good job!':'Keep learning!';` +
+    `var el=document.getElementById('tdq-score');` +
+    `el.hidden=false;` +
+    `el.innerHTML='<div class="tdq-score-box">You scored <span class="tdq-score-num">'+score+'/'+answers.length+'</span> ('+pct+'%) — '+msg+'</div>';` +
+    `});` +
+    `})();</script>`
+  );
+}
+
+async function handleQuizPage(_request, env, monthSlug, day) {
+  const monthNum = MONTH_NUM_MAP[monthSlug];
+  if (!monthNum || isNaN(day) || day < 1 || day > DAYS_IN_MONTH[monthNum - 1]) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  const mDisplay = MONTH_DISPLAY_NAMES[monthNum];
+  const mPad = String(monthNum).padStart(2, "0");
+  const dPad = String(day).padStart(2, "0");
+  const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
+  let eventsData = { events: [], births: [], deaths: [] };
+  try {
+    const r = await fetch(apiUrl, {
+      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+    });
+    if (r.ok) eventsData = await r.json();
+  } catch (e) {
+    console.error("Quiz page Wikipedia fetch:", e);
+  }
+
+  const featuredEvent =
+    eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) ||
+    eventsData?.events?.[0] ||
+    null;
+  const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
+  const wikiSummary = wikiTitle
+    ? await fetchWikipediaSummaryByTitle(wikiTitle)
+    : "";
+
+  const quiz = await generateQuizForDate(
+    env,
+    monthSlug,
+    day,
+    eventsData,
+    featuredEvent,
+    wikiSummary,
+  );
+  const quizHtml = buildQuizHTML(quiz, mDisplay, day);
+  const siteUrl = "https://thisday.info";
+  const canonical = `${siteUrl}/quiz/${monthSlug}/${day}/`;
+  const _d = new Date();
+  const todaySlug = MONTHS_ALL[_d.getUTCMonth()];
+  const todayDay = _d.getUTCDate();
+
+  const quizPageDesc = quiz?.topic
+    ? `Think you know what happened on ${mDisplay} ${day}? Take our free 5-question history quiz on ${quiz.topic} and test your knowledge of this date's defining events.`.slice(
+        0,
+        158,
+      )
+    : `Test your knowledge of historical events on ${mDisplay} ${day}. A free 5-question multiple choice quiz covering key events, people, and milestones on this date.`;
+
+  const quizPageTitle = quiz?.topic
+    ? `${mDisplay} ${day} Quiz: ${quiz.topic} | thisDay.info`
+    : `${mDisplay} ${day} History Quiz — 5 Questions | thisDay.info`;
+
+  const quizPageSchema = quiz?.questions?.length
+    ? JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "Quiz",
+        name: quizPageTitle.replace(" | thisDay.info", ""),
+        description: quizPageDesc,
+        url: canonical,
+        educationalLevel: "beginner",
+        learningResourceType: "quiz",
+        ...(quiz.topic
+          ? {
+              about: {
+                "@type": "Event",
+                name: quiz.topic,
+                description: quiz.sourceEvent || "",
+              },
+            }
+          : {}),
+        publisher: {
+          "@type": "Organization",
+          name: "thisday.info",
+          url: siteUrl,
+        },
+        hasPart: quiz.questions.map((q) => ({
+          "@type": "Question",
+          name: q.q,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: q.options?.[q.answer] ?? "",
+          },
+        })),
+      }).replace(/<\//g, "<\\/")
+    : null;
+
+  const html = `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${escapeHtml(quizPageTitle)}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(quizPageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(quizPageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(quizPageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(quizPageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(quizPageDesc)}"/>
+<meta name="twitter:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
+${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<style>
+:root{--pb:#3b82f6;--sb:#fff;--tc:#1e293b;--htc:#fff;--fb:#3b82f6;--ftc:#fff;--lc:#2563eb;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b}
+body.dark-theme{--pb:#020617;--sb:#1e293b;--tc:#f8fafc;--fb:#020617;--lc:#60a5fa;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#cbd5e1}
+body{font-family:Inter,sans-serif;background:var(--sb);color:var(--tc);min-height:100vh;display:flex;flex-direction:column}
+.navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
+main{flex:1;padding:20px 0}
+.footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:30px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
+.card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
+a{color:var(--lc)}.text-muted{color:var(--mu)!important}
+.tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
+.tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
+.tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+.tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important}
+.tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
+.tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15)}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
+.tdq-feedback{font-size:.85rem;margin-top:5px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
+.tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.2rem}
+</style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">thisDay.</a>
+    <div class="collapse navbar-collapse">
+      <ul class="navbar-nav ms-auto">
+        <li class="nav-item"><a class="nav-link" href="/events/${todaySlug}/${todayDay}/">Today's Events</a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+<main class="container my-4" style="max-width:760px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="/events/${monthSlug}/${day}/">${escapeHtml(mDisplay)} ${day}</a></li>
+      <li class="breadcrumb-item active">Quiz</li>
+    </ol>
+  </nav>
+  <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
+  <p class="text-muted mb-3" style="font-size:.9rem">Test your knowledge of what happened in history on this date. Based on real Wikipedia events.</p>
+  ${
+    featuredEvent
+      ? `
+  <div class="card-box mb-4">
+    <p class="mb-1" style="font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--mu)">Featured Event</p>
+    <p class="mb-1"><span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:700;margin-right:8px">${escapeHtml(String(featuredEvent.year))}</span><strong>${escapeHtml(featuredEvent.text.split(".")[0])}</strong></p>
+    ${wikiSummary ? `<p class="mb-0 mt-2" style="font-size:.9rem;color:var(--mu)">${escapeHtml(wikiSummary.substring(0, 280))}…</p>` : ""}
+    <p class="mb-0 mt-2" style="font-size:.82rem"><a href="/events/${monthSlug}/${day}/">See all events on ${escapeHtml(mDisplay)} ${day} →</a></p>
+  </div>`
+      : ""
+  }
+  ${quizHtml}
+  <p class="mt-3 text-muted" style="font-size:.85rem"><a href="/events/${monthSlug}/${day}/">← Back to ${escapeHtml(mDisplay)} ${day} Events</a></p>
+</main>
+<footer class="footer">
+  <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
+  <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
+</footer>
+<script>document.getElementById('yr').textContent=new Date().getFullYear();</script>
+<script>
+  const tsd=document.getElementById('tsd');
+  const saved=localStorage.getItem('darkTheme');
+  if(saved!=='false')document.body.classList.add('dark-theme');
+</script>
+</body></html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=3600, s-maxage=86400",
+    },
+  });
 }
 
 // --- Worker Entry Point (ES Module Format) ---

@@ -115,6 +115,29 @@ export default {
       });
     }
 
+    // Blog quiz API: /api/blog-quiz/{slug}
+    const blogQuizMatch = path.match(/^\/api\/blog-quiz\/([^/]+)$/);
+    if (blogQuizMatch) {
+      const slug = blogQuizMatch[1];
+      const quizRaw = await env.BLOG_AI_KV.get(`quiz:blog:${slug}`);
+      if (quizRaw) {
+        return new Response(quizRaw, {
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=3600",
+          },
+        });
+      }
+      return new Response(JSON.stringify({ error: "Quiz not found" }), {
+        status: 404,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      });
+    }
+
     // Individual post: /blog/[slug]  (single-segment slugs only — e.g. /blog/20-february-2026)
     // Two-segment paths like /blog/august/1-2025/ are existing static posts — pass them through.
     const postMatch = path.match(/^\/blog\/([^/]+)$/);
@@ -259,7 +282,11 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
     const page = Object.values(listData?.query?.pages ?? {})[0];
     const imageFiles = (page?.images ?? [])
       .map((i) => i.title)
-      .filter((t) => /\.(jpe?g|png|webp|gif)$/i.test(t) && !/icon|logo|flag|map|seal|coa/i.test(t));
+      .filter(
+        (t) =>
+          /\.(jpe?g|png|webp|gif)$/i.test(t) &&
+          !/icon|logo|flag|map|seal|coa/i.test(t),
+      );
 
     if (!imageFiles.length) return null;
 
@@ -444,9 +471,82 @@ async function generateAndStore(env) {
     cache.delete(new Request("https://thisday.info/news-sitemap.xml")),
   ]);
 
+  // Generate and store a quiz for this blog post
+  try {
+    const quiz = await generateBlogQuiz(env.AI, content, slug);
+    if (quiz) {
+      await env.BLOG_AI_KV.put(`quiz:blog:${slug}`, JSON.stringify(quiz), {
+        expirationTtl: 90 * 86_400,
+      });
+    }
+  } catch (e) {
+    console.error("Blog quiz generation failed:", e);
+  }
+
   console.log(
     `Blog: published post "${content.title}" → /blog/archive/${slug}/`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Blog quiz generation
+// ---------------------------------------------------------------------------
+
+async function generateBlogQuiz(ai, content, _slug) {
+  if (!ai) return null;
+
+  const contextLines = [
+    `Title: ${content.title}`,
+    `Event: ${content.eventTitle} on ${content.historicalDate}`,
+    `Location: ${content.location}, ${content.country}`,
+    content.description
+      ? `Summary: ${content.description.substring(0, 300)}`
+      : "",
+    ...(content.keyFacts || []).slice(0, 5).map((f) => `Fact: ${f}`),
+  ].filter(Boolean);
+
+  const aiTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("AI timeout")), 12000),
+  );
+  const aiResult = await Promise.race([
+    ai.run(CF_AI_MODEL, {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a history quiz creator. Always respond with valid JSON only, no markdown, no extra text.",
+        },
+        {
+          role: "user",
+          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific and fact-based from the content above\n- Output ONLY valid JSON:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0}]}`,
+        },
+      ],
+      max_tokens: 1500,
+    }),
+    aiTimeout,
+  ]);
+
+  const rawValue =
+    aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
+  const raw = (
+    typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
+  ).trim();
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
+  const objMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!objMatch) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(objMatch[0]);
+  } catch (parseErr) {
+    console.error("Blog quiz JSON.parse failed:", parseErr);
+    return null;
+  }
+  if (!Array.isArray(parsed?.questions) || parsed.questions.length < 3)
+    return null;
+  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1125,6 +1225,18 @@ ${analysisBadItems}
               : ""
           }
 
+          <!-- Quiz CTA -->
+          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
+            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
+            <div>
+              <strong style="color:var(--text-color)">Test Your Knowledge</strong><br/>
+              <small class="text-muted">Can you answer 5 questions about this event?</small><br/>
+              <button class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+                <i class="bi bi-play-fill me-1"></i>Take the Quiz
+              </button>
+            </div>
+          </div>
+
           <!-- Wikipedia source -->
           <div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);">
             <small class="article-meta">
@@ -1230,8 +1342,11 @@ ${analysisBadItems}
     </p>
     <p class="footer-bottom">
       <a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a>
-      | <a href="/terms">Terms and Conditions</a>
-      | <a href="/privacy-policy">Privacy Policy</a>
+      | <a href="/blog/">Blog</a>
+      | <a href="/about/">About Us</a>
+      | <a href="/contact/">Contact</a>
+      | <a href="/terms/">Terms and Conditions</a>
+      | <a href="/privacy-policy/">Privacy Policy</a>
     </p>
   </footer>
 
@@ -1275,6 +1390,145 @@ ${analysisBadItems}
       document.addEventListener("visibilitychange", () => document.hidden ? stopTimer() : (!fired && startTimer()));
       if (!document.hidden) startTimer();
     })();
+  </script>
+
+  <!-- Quiz popup: load quiz data and show after scroll to bottom -->
+  <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
+  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;padding:24px 20px 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Inter,sans-serif">
+    <button id="tdq-close" aria-label="Close quiz" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1">&times;</button>
+    <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:4px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
+    <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:16px;opacity:.8">You've reached the end — try this quick quiz!</p>
+    <div id="tdq-questions"></div>
+    <button class="btn btn-warning px-4 mt-3" id="tdq-submit-btn" style="display:none">Check Answers</button>
+    <div id="tdq-score" class="mt-3" hidden></div>
+  </div>
+
+  <div id="tdq-sentinel" style="height:1px"></div>
+
+  <style>
+    .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
+    .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
+    .tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+    .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important}
+    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
+    .tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+    body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+    body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
+    .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
+    .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
+    #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important}
+  </style>
+
+  <script>
+  (function () {
+    var slug = "${esc(slug)}";
+    var quizLoaded = false;
+    var selected = {};
+    var answers = [];
+
+    function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+    function openPopup() {
+      document.getElementById("tdq-overlay").style.display = "block";
+      document.getElementById("tdq-popup").style.display = "block";
+      requestAnimationFrame(function() { document.getElementById("tdq-popup").classList.add("tdq-popup-open"); });
+      document.body.style.overflow = "hidden";
+    }
+
+    function closePopup() {
+      var popup = document.getElementById("tdq-popup");
+      popup.classList.remove("tdq-popup-open");
+      setTimeout(function() {
+        popup.style.display = "none";
+        document.getElementById("tdq-overlay").style.display = "none";
+        document.body.style.overflow = "";
+      }, 300);
+    }
+
+    document.getElementById("tdq-close").addEventListener("click", closePopup);
+    document.getElementById("tdq-overlay").addEventListener("click", closePopup);
+
+    function renderQuiz(quiz) {
+      answers = quiz.questions.map(function(q) { return Number(q.answer); });
+      var container = document.getElementById("tdq-questions");
+      container.innerHTML = quiz.questions.map(function(q, qi) {
+        var optsHtml = (q.options || []).map(function(opt, oi) {
+          return '<div class="tdq-opt" data-qi="' + qi + '" data-oi="' + oi + '">' +
+            '<span class="tdq-opt-key">' + String.fromCharCode(65 + oi) + '</span>' + esc(String(opt)) + '</div>';
+        }).join("");
+        var expHtml = q.explanation
+          ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>'
+          : '';
+        return '<div class="tdq-question" id="tdq-q-' + qi + '">' +
+          '<p class="tdq-q-text"><strong>' + (qi + 1) + '.</strong> ' + esc(String(q.q)) + '</p>' +
+          '<div class="tdq-options">' + optsHtml + '</div>' +
+          '<div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' +
+          expHtml +
+          '</div>';
+      }).join("");
+
+      container.querySelectorAll(".tdq-opt").forEach(function(opt) {
+        opt.addEventListener("click", function() {
+          var qi = parseInt(this.dataset.qi), oi = parseInt(this.dataset.oi);
+          selected[qi] = oi;
+          container.querySelectorAll('[data-qi="' + qi + '"]').forEach(function(o) { o.classList.remove("tdq-opt-selected"); });
+          this.classList.add("tdq-opt-selected");
+          var allAnswered = quiz.questions.every(function(_, i) { return selected[i] !== undefined; });
+          document.getElementById("tdq-submit-btn").style.display = allAnswered ? "" : "none";
+        });
+      });
+    }
+
+    document.getElementById("tdq-submit-btn").addEventListener("click", function() {
+      var score = 0;
+      answers.forEach(function(correct, qi) {
+        var chosen = selected[qi] !== undefined ? selected[qi] : -1;
+        var fb = document.getElementById("tdq-f-" + qi);
+        var opts = document.querySelectorAll('[data-qi="' + qi + '"]');
+        fb.hidden = false;
+        opts.forEach(function(o) { o.style.pointerEvents = "none"; });
+        opts[correct].classList.add("tdq-opt-correct");
+        if (chosen === correct) {
+          score++;
+          fb.innerHTML = '<span class="tdq-correct">✓ Correct!</span>';
+        } else {
+          if (chosen >= 0) opts[chosen].classList.add("tdq-opt-wrong");
+          fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>';
+        }
+        var exp = document.getElementById("tdq-e-" + qi);
+        if (exp) exp.hidden = false;
+      });
+      this.hidden = true;
+      var pct = Math.round(score / answers.length * 100);
+      var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
+      var el = document.getElementById("tdq-score");
+      el.hidden = false;
+      el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + '/' + answers.length + '</span> (' + pct + '%) — ' + msg + '</div>';
+    });
+
+    function maybeLoadAndShow() {
+      if (quizLoaded) return;
+      quizLoaded = true;
+      fetch("/api/blog-quiz/" + slug)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(quiz) {
+          if (!quiz || !quiz.questions || quiz.questions.length < 3) return;
+          renderQuiz(quiz);
+          openPopup();
+        })
+        .catch(function() { /* quiz unavailable, silently skip */ });
+    }
+    // Expose so the CTA button in the article body can trigger it
+    window.maybeLoadAndShowQuiz = maybeLoadAndShow;
+
+    if ("IntersectionObserver" in window) {
+      var sentinel = document.getElementById("tdq-sentinel");
+      var obs = new IntersectionObserver(function(entries) {
+        if (entries[0].isIntersecting) { obs.disconnect(); setTimeout(maybeLoadAndShow, 800); }
+      }, { threshold: 1.0 });
+      obs.observe(sentinel);
+    }
+  })();
   </script>
 </html>`;
 }
@@ -1444,7 +1698,7 @@ ${JSON.stringify(
     </div>
     <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
     <p>Historical data sourced from Wikipedia.org. Content is for educational and entertainment purposes only.</p>
-    <p><a href="/terms">Terms and Conditions</a> | <a href="/privacy-policy">Privacy Policy</a></p>
+    <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

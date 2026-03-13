@@ -247,14 +247,42 @@ async function fetchWikipediaEvents(month, day) {
 
 // --- NEW/MODIFIED CAROUSEL AND BLOG POST LOGIC ---
 
+/**
+ * Tries each fallback URL in sequence when a carousel image fails to load.
+ * Covers all common formats (jpg, jpeg, png, webp) and naming variants.
+ */
+function tryCarouselFallbacks(img, fallbacks) {
+  const next = fallbacks.shift();
+  if (!next) {
+    img.onerror = null;
+    return;
+  }
+  img.onerror = () => tryCarouselFallbacks(img, fallbacks);
+  img.src = next;
+}
+
 // Helper function to render a single carousel item
 function renderCarouselItem(container, post, index) {
   const carouselItem = document.createElement("div");
   carouselItem.className = `carousel-item${index === 0 ? " active" : ""}`;
-  const imageUrl =
-    post.imageUrl ||
-    `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
-  const fallbackImageUrl = `https://placehold.co/1200x350/6c757d/ffffff?text=Blog+Post+${post.day}`;
+  const imageUrl = post.imageUrl;
+  const d = post.day;
+  const m = post.monthIndex + 1;
+  const dp = String(d).padStart(2, "0");
+  const mp = String(m).padStart(2, "0");
+  // All local date-based image variants to try on error (jpg, jpeg, png, webp)
+  const carouselFallbacks = JSON.stringify([
+    `/images/blog/${d}.${m}.jpg`,
+    `/images/blog/${d}.${m}.jpeg`,
+    `/images/blog/${d}.${m}.png`,
+    `/images/blog/${d}.${m}.webp`,
+    `/images/blog/${dp}.${mp}.jpg`,
+    `/images/blog/${dp}.${mp}.jpeg`,
+    `/images/blog/${dp}.${mp}.png`,
+    `/images/blog/${dp}.${mp}.webp`,
+    `/images/blog/${m}.${d}.jpg`,
+    `/images/blog/${mp}.${dp}.jpg`,
+  ]);
   const MAX_WORDS = 15;
   let titleContent =
     post.title ||
@@ -273,7 +301,7 @@ function renderCarouselItem(container, post, index) {
       ${dateLabel}
       <div class="carousel-image-container">
         <img src="${imageUrl}" class="d-block w-100" alt="${truncatedTitle}"
-             onerror="this.onerror=null;this.src='${fallbackImageUrl}';"
+             onerror="tryCarouselFallbacks(this, ${carouselFallbacks});"
              ${
                index === 0 ? 'fetchpriority="high"' : 'loading="lazy"'
              } decoding="async" width="1200" height="350">
@@ -2036,97 +2064,296 @@ function initializeCarousel() {
   }
 }
 
+function toAbsoluteUrl(url, baseUrl = window.location.origin) {
+  if (!url || typeof url !== "string") return null;
+  try {
+    return new URL(url, baseUrl).href;
+  } catch {
+    return null;
+  }
+}
+
+function isBlockedCarouselImage(url) {
+  if (!url) return true;
+  const normalized = url.trim().toLowerCase();
+  return (
+    normalized === "https://thisday.info/images/logo.png" ||
+    normalized.endsWith("/images/logo.png") ||
+    normalized.includes("placehold.co")
+  );
+}
+
+async function doesImageLoad(url, timeoutMs = 7000) {
+  if (!url || isBlockedCarouselImage(url)) return false;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const img = new Image();
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }, timeoutMs);
+
+    img.onload = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(true);
+    };
+
+    img.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(false);
+    };
+
+    img.src = url;
+  });
+}
+
+async function findWorkingImage(
+  candidates = [],
+  fallbackImage = null,
+  baseUrl,
+) {
+  const unique = [];
+  const seen = new Set();
+
+  [...candidates, fallbackImage].filter(Boolean).forEach((candidate) => {
+    const absolute = toAbsoluteUrl(candidate, baseUrl);
+    if (!absolute || seen.has(absolute)) return;
+    seen.add(absolute);
+    unique.push(absolute);
+  });
+
+  for (const candidate of unique) {
+    if (await doesImageLoad(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function fetchPostPreviewFromUrl(
+  fetchUrl,
+  postUrl,
+  day,
+  monthIndex,
+  year,
+) {
+  try {
+    const response = await fetch(fetchUrl, { cache: "no-cache" });
+    if (!response.ok) return null;
+
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+
+    const ogImage =
+      doc.querySelector('meta[property="og:image"]')?.getAttribute("content") ||
+      null;
+    const twitterImage =
+      doc
+        .querySelector('meta[name="twitter:image"]')
+        ?.getAttribute("content") || null;
+    const firstFigureImage =
+      doc.querySelector("figure img")?.getAttribute("src") ||
+      doc.querySelector("article img")?.getAttribute("src") ||
+      null;
+
+    // Build local fallback candidates across all common formats
+    const d = day;
+    const m = monthIndex + 1;
+    const dp = String(d).padStart(2, "0");
+    const mp = String(m).padStart(2, "0");
+    const localCandidates = [
+      `/images/blog/${d}.${m}.jpg`,
+      `/images/blog/${d}.${m}.jpeg`,
+      `/images/blog/${d}.${m}.png`,
+      `/images/blog/${d}.${m}.webp`,
+      `/images/blog/${dp}.${mp}.jpg`,
+      `/images/blog/${dp}.${mp}.jpeg`,
+      `/images/blog/${dp}.${mp}.png`,
+      `/images/blog/${dp}.${mp}.webp`,
+      `/images/blog/${m}.${d}.jpg`,
+      `/images/blog/${mp}.${dp}.jpg`,
+    ];
+
+    let workingImage = await findWorkingImage(
+      [ogImage, twitterImage, firstFigureImage, ...localCandidates],
+      null,
+      postUrl,
+    );
+
+    // Last resort: Wikipedia thumbnail by post title
+    if (!workingImage) {
+      const pageTitle =
+        doc.querySelector("h1")?.textContent?.trim() ||
+        doc
+          .querySelector('meta[property="og:title"]')
+          ?.getAttribute("content") ||
+        null;
+      if (pageTitle) {
+        try {
+          const wikiRes = await fetch(
+            `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`,
+            { headers: { Accept: "application/json" } },
+          );
+          if (wikiRes.ok) {
+            const wikiData = await wikiRes.json();
+            const wikiImg =
+              wikiData.thumbnail?.source ?? wikiData.originalimage?.source ?? null;
+            if (wikiImg && (await doesImageLoad(wikiImg))) {
+              workingImage = wikiImg;
+            }
+          }
+        } catch {
+          // ignore — just means no Wikipedia image available
+        }
+      }
+    }
+
+    if (!workingImage) return null;
+
+    const title =
+      doc.querySelector("h1")?.textContent?.trim() ||
+      doc.querySelector('meta[property="og:title"]')?.getAttribute("content") ||
+      doc.querySelector("title")?.textContent?.trim() ||
+      `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`;
+
+    const excerpt =
+      doc
+        .querySelector('meta[property="og:description"]')
+        ?.getAttribute("content") ||
+      doc.querySelector('meta[name="description"]')?.getAttribute("content") ||
+      `Discover what happened on ${day} ${monthNames[monthIndex]} ${year}`;
+
+    return {
+      day,
+      year,
+      monthIndex,
+      title: title.trim(),
+      excerpt: excerpt.trim(),
+      imageUrl: workingImage,
+      backgroundUrl: workingImage,
+      url: postUrl,
+      isExternal: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Fetch 3 random blog posts from the current month that have generated images
 async function fetchBlogPostsForCarousel(monthName, monthIndex) {
-  const FALLBACK_IMG = "https://thisday.info/images/logo.png";
+  const MAX_CAROUSEL_POSTS = 3;
   const today = new Date();
+
+  // Priority 1: latest AI archive posts (across months), but only with working images.
+  try {
+    const archiveResponse = await fetch("/blog/archive.json", {
+      cache: "no-cache",
+      headers: { Accept: "application/json" },
+    });
+
+    if (archiveResponse.ok) {
+      const archive = await archiveResponse.json();
+      if (Array.isArray(archive) && archive.length > 0) {
+        const latest = archive.slice(0, 20);
+        const fromArchive = [];
+
+        for (const entry of latest) {
+          if (!entry?.slug) continue;
+          const day = Number.parseInt(String(entry.slug).split("-")[0], 10);
+          const parsedDay = Number.isFinite(day) ? day : today.getDate();
+          const parsedYear =
+            Number.parseInt(String(entry.publishedAt || "").slice(0, 4), 10) ||
+            today.getFullYear();
+
+          const post = await fetchPostPreviewFromUrl(
+            `/blog/${entry.slug}/`,
+            `/blog/${entry.slug}/`,
+            parsedDay,
+            monthIndex,
+            parsedYear,
+          );
+
+          if (post) {
+            fromArchive.push(post);
+          }
+
+          if (fromArchive.length >= MAX_CAROUSEL_POSTS) {
+            return fromArchive;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Archive post fetch failed for carousel:", e);
+  }
+
+  // Priority 2: current month static/AI URL patterns.
   const year = Math.max(2025, today.getFullYear());
   const currentMonth = today.getMonth();
   const currentDay = today.getDate();
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
 
-  // Build list of candidate days
-  const days = [];
-  for (let day = 1; day <= daysInMonth; day++) {
-    if (monthIndex === currentMonth && day > currentDay) continue;
+  const posts = [];
+  const startDay =
+    monthIndex === currentMonth
+      ? Math.min(currentDay, daysInMonth)
+      : daysInMonth;
+
+  for (let day = startDay; day >= 1; day--) {
     if (monthIndex > currentMonth) continue;
-    days.push(day);
+
+    const urlCandidates =
+      year >= 2026
+        ? [
+            {
+              fetchUrl: `/blog/${day}-${monthName}-${year}/`,
+              postUrl: `/blog/${day}-${monthName}-${year}/`,
+            },
+            {
+              fetchUrl: `/blog/${monthName}/${day}-${year}/index.html`,
+              postUrl: `/blog/${monthName}/${day}-${year}/`,
+            },
+          ]
+        : [
+            {
+              fetchUrl: `/blog/${monthName}/${day}-${year}/index.html`,
+              postUrl: `/blog/${monthName}/${day}-${year}/`,
+            },
+            {
+              fetchUrl: `/blog/${day}-${monthName}-${year}/`,
+              postUrl: `/blog/${day}-${monthName}-${year}/`,
+            },
+          ];
+
+    for (const { fetchUrl, postUrl } of urlCandidates) {
+      const preview = await fetchPostPreviewFromUrl(
+        fetchUrl,
+        postUrl,
+        day,
+        monthIndex,
+        year,
+      );
+      if (preview) {
+        posts.push(preview);
+        break;
+      }
+    }
+
+    if (posts.length >= MAX_CAROUSEL_POSTS) {
+      return posts;
+    }
   }
 
-  // Fetch all candidates in parallel.
-  // Each day tries two URL formats:
-  //   1. Static posts:  /blog/{month}/{day}-{year}/index.html
-  //   2. AI-generated:  /blog/{day}-{month}-{year}/   (worker slug)
-  const results = await Promise.all(
-    days.map(async (day) => {
-      // Posts (2026+) use /blog/{day}-{month}-{year}/.
-      // Static posts (pre-2026) use /blog/{month}/{day}-{year}/index.html.
-      // Try the more likely format first to avoid noisy 404s in the console.
-      const urlCandidates =
-        year >= 2026
-          ? [
-              {
-                fetchUrl: `/blog/${day}-${monthName}-${year}/`,
-                postUrl: `/blog/${day}-${monthName}-${year}/`,
-              },
-              {
-                fetchUrl: `/blog/${monthName}/${day}-${year}/index.html`,
-                postUrl: `/blog/${monthName}/${day}-${year}/`,
-              },
-            ]
-          : [
-              {
-                fetchUrl: `/blog/${monthName}/${day}-${year}/index.html`,
-                postUrl: `/blog/${monthName}/${day}-${year}/`,
-              },
-              {
-                fetchUrl: `/blog/${day}-${monthName}-${year}/`,
-                postUrl: `/blog/${day}-${monthName}-${year}/`,
-              },
-            ];
-
-      for (const { fetchUrl, postUrl } of urlCandidates) {
-        try {
-          const response = await fetch(fetchUrl);
-          if (!response.ok) continue;
-          const html = await response.text();
-          const parser = new DOMParser();
-          const doc = parser.parseFromString(html, "text/html");
-          const ogImage =
-            doc
-              .querySelector('meta[property="og:image"]')
-              ?.getAttribute("content") || null;
-          if (!ogImage || ogImage === FALLBACK_IMG) continue;
-          const title =
-            doc.querySelector("h1")?.textContent?.trim() ||
-            doc
-              .querySelector('meta[property="og:title"]')
-              ?.getAttribute("content") ||
-            `Historical Events - ${day} ${monthNames[monthIndex]} ${year}`;
-          const excerpt =
-            doc
-              .querySelector('meta[property="og:description"]')
-              ?.getAttribute("content") ||
-            `Discover what happened on ${day} ${monthNames[monthIndex]} ${year}`;
-          return {
-            day,
-            year,
-            title: title.trim(),
-            excerpt: excerpt.trim(),
-            imageUrl: ogImage,
-            backgroundUrl: ogImage,
-            url: postUrl,
-            isExternal: false,
-          };
-        } catch (e) {}
-      }
-      return null;
-    }),
-  );
-
-  const allPosts = results.filter(Boolean);
-  if (allPosts.length === 0) return [];
-  return allPosts.sort((a, b) => b.day - a.day);
+  return posts;
 }
 
 // Main function to populate carousel

@@ -1,10 +1,10 @@
 name: YouTube Auto-Upload
 
 on:
-  # Runs Sunday, Monday, Wednesday, Friday at 02:00 UTC
-  # (4 videos/week — ~17/month; uses fallback ELEVENLABS_API_KEY_2 if primary hits 10k limit)
+  # Runs daily at 02:00 UTC so each new post gets a video quickly.
+  # Uses fallback ELEVENLABS_API_KEY_2 if primary hits quota.
   schedule:
-    - cron: '0 2 * * 0,1,3,5'
+    - cron: "0 2 * * *"
 
   # Allow a manual run from the Actions tab (e.g. to back-fill or re-upload)
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       # FFmpeg for video encoding + DejaVu fonts for SVG text rendering
       - name: Install system dependencies
@@ -33,13 +33,16 @@ jobs:
       - name: Upload new posts to YouTube
         run: node index.js
         env:
-          CF_ACCOUNT_ID:          ${{ secrets.CF_ACCOUNT_ID }}
-          CF_API_TOKEN:           ${{ secrets.CF_API_TOKEN }}
-          CF_KV_NAMESPACE_ID:     ${{ secrets.CF_KV_NAMESPACE_ID }}
-          YOUTUBE_CLIENT_ID:      ${{ secrets.YOUTUBE_CLIENT_ID }}
-          YOUTUBE_CLIENT_SECRET:  ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          YOUTUBE_REFRESH_TOKEN:  ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          ELEVENLABS_API_KEY:     ${{ secrets.ELEVENLABS_API_KEY }}
-          ELEVENLABS_API_KEY_2:   ${{ secrets.ELEVENLABS_API_KEY_2 }}
-          YOUTUBE_PRIVACY:        ${{ secrets.YOUTUBE_PRIVACY }}
-          REUPLOAD_SLUGS:         ${{ secrets.REUPLOAD_SLUGS }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_API_KEY_2: ${{ secrets.ELEVENLABS_API_KEY_2 }}
+          YOUTUBE_PRIVACY: ${{ secrets.YOUTUBE_PRIVACY }}
+          REUPLOAD_SLUGS: ${{ secrets.REUPLOAD_SLUGS }}
+          MAX_UPLOADS_PER_RUN: ${{ secrets.MAX_UPLOADS_PER_RUN }}
+          BLOG_WORKER_URL: ${{ secrets.BLOG_WORKER_URL }}
+          PUBLISH_SECRET: ${{ secrets.PUBLISH_SECRET }}

@@ -1,3 +1,7 @@
 {
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "check:blog-images": "node check-blog-images.js",
+    "fix:blog-images": "node check-blog-images.js --fix"
+  }
 }

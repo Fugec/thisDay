@@ -53,13 +53,14 @@ export async function deleteIndexEntry(slug) {
   const posts = await getPostIndex();
   const filtered = posts.filter((p) => p.slug !== slug);
   if (filtered.length === posts.length) return; // slug not found, nothing to do
-  await Promise.all([
-    kvPut('index', JSON.stringify(filtered)),
-    fetch(`${base()}/values/${encodeURIComponent(`post:${slug}`)}`, {
-      method: 'DELETE',
-      headers: authHeader(),
-    }),
-  ]);
+  const deleteRes = await fetch(
+    `${base()}/values/${encodeURIComponent(`post:${slug}`)}`,
+    { method: 'DELETE', headers: authHeader() },
+  );
+  if (!deleteRes.ok && deleteRes.status !== 404) {
+    throw new Error(`KV DELETE "post:${slug}" failed: ${deleteRes.status}`);
+  }
+  await kvPut('index', JSON.stringify(filtered));
 }
 
 export async function updateIndexEntry(slug, updates) {

@@ -23,7 +23,6 @@ const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
 const EVERY_OTHER_DAYS = 1; // Generate every N days
-const FALLBACK_IMAGE = "https://thisday.info/images/logo.png"; // Used when Wikipedia returns no image
 
 const MONTH_NAMES = [
   "January",
@@ -1024,7 +1023,7 @@ ${JSON.stringify({
               alt="${esc(c.imageAlt)}"
               style="max-height: 400px; object-fit: cover; width: 100%"
               loading="eager"
-              onerror="this.onerror=null;this.src='${FALLBACK_IMAGE}';this.removeAttribute('srcset');"
+              onerror="this.onerror=null;this.removeAttribute('srcset');"
             />
             <figcaption class="article-meta mt-2">
               <small>${esc(c.imageCaption || "Image courtesy of Wikimedia Commons.")}</small>

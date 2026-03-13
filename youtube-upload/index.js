@@ -125,7 +125,7 @@ async function main() {
   // Background music — user places assets/background.mp3 once (YouTube Audio Library)
   const bgMusicPath = getMusicPath();
 
-  for (const post of pending) {
+  for (let post of pending) {
     console.log(`\n→ ${post.title}`);
     let videoPath;
     let narrationPath;

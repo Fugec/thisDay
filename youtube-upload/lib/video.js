@@ -31,10 +31,11 @@ async function isWorkingImageUrl(url) {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
     const headers = { 'User-Agent': 'thisday.info-blog/1.0 (https://thisday.info)' };
-    let res = await fetch(url, { method: 'HEAD', redirect: 'follow', headers });
+    const timeout = () => AbortSignal.timeout(7000);
+    let res = await fetch(url, { method: 'HEAD', redirect: 'follow', headers, signal: timeout() });
     // Some CDNs reject HEAD; fall back to GET
     if (res.status === 405 || res.status === 403 || res.status === 501) {
-      res = await fetch(url, { method: 'GET', redirect: 'follow', headers });
+      res = await fetch(url, { method: 'GET', redirect: 'follow', headers, signal: timeout() });
     }
     if (!res.ok) return false;
     const contentType = (res.headers.get('content-type') || '').toLowerCase();

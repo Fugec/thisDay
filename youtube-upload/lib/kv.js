@@ -39,6 +39,38 @@ export async function getPostIndex() {
 }
 
 /**
+ * Updates a single field (e.g. imageUrl) on a post entry in the KV index.
+ * No-op if the slug is not found.
+ *
+ * @param {string} slug
+ * @param {Record<string, unknown>} updates  Fields to merge into the entry.
+ */
+/**
+ * Removes a post entry from the KV index and deletes its HTML key.
+ * Used before triggering a regeneration so the worker starts clean.
+ */
+export async function deleteIndexEntry(slug) {
+  const posts = await getPostIndex();
+  const filtered = posts.filter((p) => p.slug !== slug);
+  if (filtered.length === posts.length) return; // slug not found, nothing to do
+  await Promise.all([
+    kvPut('index', JSON.stringify(filtered)),
+    fetch(`${base()}/values/${encodeURIComponent(`post:${slug}`)}`, {
+      method: 'DELETE',
+      headers: authHeader(),
+    }),
+  ]);
+}
+
+export async function updateIndexEntry(slug, updates) {
+  const posts = await getPostIndex();
+  const idx = posts.findIndex((p) => p.slug === slug);
+  if (idx === -1) return;
+  Object.assign(posts[idx], updates);
+  await kvPut('index', JSON.stringify(posts));
+}
+
+/**
  * Fetches the full HTML content of a post from KV (key: post:{slug}),
  * strips HTML tags and decodes entities, then returns plain text
  * suitable for use as an AI image prompt.

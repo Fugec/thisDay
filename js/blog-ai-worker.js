@@ -26,13 +26,33 @@ const EVERY_OTHER_DAYS = 1; // Generate every N days
 const FALLBACK_IMAGE = "https://thisday.info/images/logo.png"; // Used when Wikipedia returns no image
 
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 const MONTH_SLUGS = [
-  "january", "february", "march", "april", "may", "june",
-  "july", "august", "september", "october", "november", "december",
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
 ];
 
 // ---------------------------------------------------------------------------
@@ -65,7 +85,9 @@ export default {
         await generateAndStore(env);
         return jsonResponse({ status: "ok", message: "Blog post published." });
       } catch (err) {
-        console.error(`Blog AI: /blog/publish generation failed — ${err.message}`);
+        console.error(
+          `Blog AI: /blog/publish generation failed — ${err.message}`,
+        );
         const today = todayDateString();
         await env.BLOG_AI_KV.put(
           `error:${today}`,
@@ -105,7 +127,7 @@ export default {
       ]);
       if (html) {
         const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
-        if (ytEntry?.youtubeId && ytEntry.privacy !== 'private') {
+        if (ytEntry?.youtubeId && ytEntry.privacy !== "private") {
           const ytIframe = `<!-- YouTube -->
           <div class="my-4">
             <iframe
@@ -119,7 +141,12 @@ export default {
           </div>
 
           <!-- Aftermath -->`;
-          return htmlResponse(html.replace(/<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/, ytIframe));
+          return htmlResponse(
+            html.replace(
+              /<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/,
+              ytIframe,
+            ),
+          );
         }
         return htmlResponse(html);
       }
@@ -153,10 +180,12 @@ async function maybeGenerateBlogPost(env) {
   const lastGen = await env.BLOG_AI_KV.get(KV_LAST_GEN_KEY);
 
   if (lastGen) {
-    const diffDays = Math.round((new Date(today) - new Date(lastGen)) / 86_400_000);
+    const diffDays = Math.round(
+      (new Date(today) - new Date(lastGen)) / 86_400_000,
+    );
     if (diffDays < EVERY_OTHER_DAYS) {
       console.log(
-        `Blog AI: last post was ${diffDays} day(s) ago — skipping (need ${EVERY_OTHER_DAYS}).`
+        `Blog AI: last post was ${diffDays} day(s) ago — skipping (need ${EVERY_OTHER_DAYS}).`,
       );
       return;
     }
@@ -171,7 +200,9 @@ async function maybeGenerateBlogPost(env) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       await generateAndStore(env);
-      console.log(`Blog AI: post generated successfully (attempt ${attempt}/3).`);
+      console.log(
+        `Blog AI: post generated successfully (attempt ${attempt}/3).`,
+      );
       return;
     } catch (err) {
       lastError = err;
@@ -187,7 +218,9 @@ async function maybeGenerateBlogPost(env) {
     `Generation failed after 3 attempts: ${errMsg}`,
     { expirationTtl: 7 * 86_400 }, // auto-expire after 7 days
   );
-  console.error(`Blog AI: all 3 attempts failed for ${today}. Error stored in KV.`);
+  console.error(
+    `Blog AI: all 3 attempts failed for ${today}. Error stored in KV.`,
+  );
 }
 
 /**
@@ -203,17 +236,118 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
       if (m) title = decodeURIComponent(m[1].split("#")[0]);
     }
 
-    const apiUrl =
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
-    const res = await fetch(apiUrl, {
-      headers: { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.thumbnail?.source ?? data.originalimage?.source ?? null;
+    const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
+
+    // 1. REST summary — fastest, returns lead/thumbnail image
+    const summaryRes = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
+      { headers: ua },
+    );
+    if (summaryRes.ok) {
+      const d = await summaryRes.json();
+      const img = d.thumbnail?.source ?? d.originalimage?.source ?? null;
+      if (img) return img;
+    }
+
+    // 2. MediaWiki images list + imageinfo — catches infobox images not exposed
+    //    by the REST summary (e.g. non-free images under /wikipedia/en/)
+    const listRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=images&imlimit=10&format=json`,
+      { headers: ua },
+    );
+    if (!listRes.ok) return null;
+    const listData = await listRes.json();
+    const page = Object.values(listData?.query?.pages ?? {})[0];
+    const imageFiles = (page?.images ?? [])
+      .map((i) => i.title)
+      .filter((t) => /\.(jpe?g|png|webp|gif)$/i.test(t) && !/icon|logo|flag|map|seal|coa/i.test(t));
+
+    if (!imageFiles.length) return null;
+
+    const infoRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(imageFiles[0])}&prop=imageinfo&iiprop=url&format=json`,
+      { headers: ua },
+    );
+    if (!infoRes.ok) return null;
+    const infoData = await infoRes.json();
+    const infoPage = Object.values(infoData?.query?.pages ?? {})[0];
+    return infoPage?.imageinfo?.[0]?.url ?? null;
   } catch {
     return null;
   }
+}
+
+async function isWorkingImageUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+      return false;
+
+    const headers = {
+      "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)",
+    };
+
+    // HEAD is cheap when supported.
+    let res = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      headers,
+    });
+
+    // Some CDNs disallow HEAD. Fallback to GET in that case.
+    if (res.status === 405 || res.status === 403 || res.status === 501) {
+      res = await fetch(url, {
+        method: "GET",
+        redirect: "follow",
+        headers,
+      });
+    }
+
+    if (!res.ok) return false;
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    return contentType.startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
+async function resolveWorkingImageForContent(content) {
+  const candidates = [];
+
+  if (content?.imageUrl) candidates.push(content.imageUrl);
+
+  const wikiImage = await fetchWikipediaImage(
+    content?.eventTitle,
+    content?.wikiUrl,
+  );
+  if (wikiImage) candidates.push(wikiImage);
+
+  // Try wikipedia URL title variant as a backup (decoded slug can differ from eventTitle).
+  if (content?.wikiUrl) {
+    try {
+      const parsed = new URL(content.wikiUrl);
+      const slug = parsed.pathname.split("/wiki/")[1];
+      if (slug) {
+        const slugTitle = decodeURIComponent(slug.split("#")[0]).replace(
+          /_/g,
+          " ",
+        );
+        const slugImage = await fetchWikipediaImage(slugTitle, null);
+        if (slugImage) candidates.push(slugImage);
+      }
+    } catch {
+      // ignore malformed URL
+    }
+  }
+
+  const uniqueCandidates = [...new Set(candidates.filter(Boolean))];
+
+  for (const candidate of uniqueCandidates) {
+    if (await isWorkingImageUrl(candidate)) return candidate;
+  }
+
+  return null;
 }
 
 /**
@@ -230,25 +364,42 @@ async function generateAndStore(env) {
     .filter((e) => e.publishedAt && e.publishedAt.startsWith(thisMonthPrefix))
     .map((e) => e.title);
 
-  const content = await callWorkersAI(env.AI, now, takenThisMonth);
+  let content = await callWorkersAI(env.AI, now, takenThisMonth);
 
-  // Replace the hallucinated Wikimedia URL with a real Wikipedia image.
-  const realImage = await fetchWikipediaImage(content.eventTitle, content.wikiUrl);
-  if (realImage) {
-    content.imageUrl = realImage;
-    // Wikipedia thumbnails already have attribution baked into the caption field;
-    // keep whatever the model wrote for imageCaption so the source stays clear.
-  } else {
-    // Wikipedia returned nothing — use the site logo so the image slot is never broken.
-    content.imageUrl = FALLBACK_IMAGE;
-    content.imageAlt = `${content.eventTitle} — thisDay.info`;
-    content.imageCaption = "Image unavailable. Historical data sourced from Wikipedia.";
+  // Validate image URLs and fetch alternatives if broken.
+  // If no working image is found, regenerate once with a different topic.
+  const MAX_CONTENT_ATTEMPTS = 2;
+  for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
+    const workingImage = await resolveWorkingImageForContent(content);
+    if (workingImage) {
+      content.imageUrl = workingImage;
+      break;
+    }
+
+    if (attempt < MAX_CONTENT_ATTEMPTS) {
+      const avoid = [...takenThisMonth, content.title].filter(Boolean);
+      console.warn(
+        `Blog AI: no valid image for \"${content.title}\". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+      );
+      content = await callWorkersAI(env.AI, now, avoid);
+      continue;
+    }
+
+    // No working image found after all attempts — throw so the caller retries
+    // with a different topic rather than publishing with a logo background.
+    throw new Error(
+      `No working image for "${content.title}" after ${MAX_CONTENT_ATTEMPTS} attempts.`,
+    );
   }
 
   // Ensure meta description meets minimum SEO length (120 chars)
   if (!content.description || content.description.length < 120) {
     const loc = content.location ? ` in ${content.location}` : "";
-    content.description = `Discover the story of ${content.eventTitle} on ${content.historicalDate}${loc}. Learn about this pivotal historical event, its causes, immediate aftermath, and lasting legacy.`.substring(0, 155);
+    content.description =
+      `Discover the story of ${content.eventTitle} on ${content.historicalDate}${loc}. Learn about this pivotal historical event, its causes, immediate aftermath, and lasting legacy.`.substring(
+        0,
+        155,
+      );
   }
   if (!content.ogDescription || content.ogDescription.length < 80) {
     content.ogDescription = content.description.substring(0, 130);
@@ -294,7 +445,9 @@ async function generateAndStore(env) {
     cache.delete(new Request("https://thisday.info/news-sitemap.xml")),
   ]);
 
-  console.log(`Blog: published post "${content.title}" → /blog/archive/${slug}/`);
+  console.log(
+    `Blog: published post "${content.title}" → /blog/archive/${slug}/`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +553,8 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     messages: [
       {
         role: "system",
-        content: "You are a historical content writer. Always respond with valid JSON only, no markdown, no extra text.",
+        content:
+          "You are a historical content writer. Always respond with valid JSON only, no markdown, no extra text.",
       },
       { role: "user", content: prompt },
     ],
@@ -411,27 +565,41 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   // - Some models return { response: "string" }
   // - Chat models return { choices: [{ message: { content: "string" } }] }
   // - Some models return the parsed JSON object directly
-  const rawValue = result.response ?? result.choices?.[0]?.message?.content ?? result;
-  if (!rawValue || (typeof rawValue === "string" && rawValue.trim().length < 100)) {
-    throw new Error(`AI response too short or empty (${String(rawValue).length} chars)`);
+  const rawValue =
+    result.response ?? result.choices?.[0]?.message?.content ?? result;
+  if (
+    !rawValue ||
+    (typeof rawValue === "string" && rawValue.trim().length < 100)
+  ) {
+    throw new Error(
+      `AI response too short or empty (${String(rawValue).length} chars)`,
+    );
   }
 
   let parsed;
   if (rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)) {
     parsed = rawValue; // Model already returned parsed JSON object
   } else {
-    const raw = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
+    const raw = (
+      typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
+    ).trim();
     // Strip any accidental markdown code fences the model may add
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim();
 
     // Extract the first {...} block in case the model adds surrounding text
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error(`No JSON found in model output: ${raw.slice(0, 200)}`);
+    if (!jsonMatch)
+      throw new Error(`No JSON found in model output: ${raw.slice(0, 200)}`);
 
     try {
       parsed = JSON.parse(jsonMatch[0]);
     } catch (e) {
-      throw new Error(`JSON parse failed: ${e.message} — Raw: ${raw.slice(0, 300)}`);
+      throw new Error(
+        `JSON parse failed: ${e.message} — Raw: ${raw.slice(0, 300)}`,
+      );
     }
   }
 
@@ -466,7 +634,10 @@ function buildPostHTML(c, date, slug, allPosts = []) {
   const publishedStr = `${monthName} ${day}, ${publishYear}`;
 
   const quickFactsRows = (c.quickFacts || [])
-    .map((f) => `              <tr><th scope="row">${esc(f.label)}</th><td>${esc(f.value)}</td></tr>`)
+    .map(
+      (f) =>
+        `              <tr><th scope="row">${esc(f.label)}</th><td>${esc(f.value)}</td></tr>`,
+    )
     .join("\n");
 
   const didYouKnowItems = (c.didYouKnowFacts || [])
@@ -481,7 +652,7 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
 
-  const eyewitnessQuoteBlock = (c.eyewitnessQuote)
+  const eyewitnessQuoteBlock = c.eyewitnessQuote
     ? `          <blockquote class="historical-quote mt-3">
             <p>"${esc(c.eyewitnessQuote)}"</p>
             <footer class="article-meta">${esc(c.eyewitnessQuoteSource || "Contemporary source")}</footer>
@@ -497,11 +668,17 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     .join("\n");
 
   const analysisGoodItems = (c.analysisGood || [])
-    .map((item) => `                    <li class="mb-2"><strong>${esc(item.title)}:</strong> ${esc(item.detail)}</li>`)
+    .map(
+      (item) =>
+        `                    <li class="mb-2"><strong>${esc(item.title)}:</strong> ${esc(item.detail)}</li>`,
+    )
     .join("\n");
 
   const analysisBadItems = (c.analysisBad || [])
-    .map((item) => `                    <li class="mb-2"><strong>${esc(item.title)}:</strong> ${esc(item.detail)}</li>`)
+    .map(
+      (item) =>
+        `                    <li class="mb-2"><strong>${esc(item.title)}:</strong> ${esc(item.detail)}</li>`,
+    )
     .join("\n");
 
   const editorialNote = c.editorialNote
@@ -510,7 +687,9 @@ function buildPostHTML(c, date, slug, allPosts = []) {
           </p>`
     : "";
 
-  const readingTime = c.readingTimeMinutes ? `&nbsp;|&nbsp;${esc(String(c.readingTimeMinutes))} min read` : "";
+  const readingTime = c.readingTimeMinutes
+    ? `&nbsp;|&nbsp;${esc(String(c.readingTimeMinutes))} min read`
+    : "";
 
   const publishedDateISO = date.toISOString().split("T")[0];
   const jsonLd = JSON.stringify(
@@ -523,11 +702,18 @@ function buildPostHTML(c, date, slug, allPosts = []) {
       dateModified: publishedDateISO,
       inLanguage: "en",
       articleSection: "History",
-      author: { "@type": "Person", name: "thisDay.info Editorial Team", url: "https://thisday.info/about/" },
+      author: {
+        "@type": "Person",
+        name: "thisDay.info Editorial Team",
+        url: "https://thisday.info/about/",
+      },
       publisher: {
         "@type": "Organization",
         name: "thisDay.info",
-        logo: { "@type": "ImageObject", url: "https://thisday.info/images/logo.png" },
+        logo: {
+          "@type": "ImageObject",
+          url: "https://thisday.info/images/logo.png",
+        },
       },
       description: c.jsonLdDescription || c.description,
       image: c.imageUrl,
@@ -548,7 +734,7 @@ function buildPostHTML(c, date, slug, allPosts = []) {
       },
     },
     null,
-    2
+    2,
   );
 
   return `<!DOCTYPE html>
@@ -577,7 +763,13 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     <meta property="article:modified_time" content="${date.toISOString()}" />
     <meta property="article:section" content="History" />
     <meta property="article:author" content="https://thisday.info/" />
-    ${(c.keywords || "").split(",").map(k => k.trim()).filter(Boolean).slice(0, 6).map(k => `<meta property="article:tag" content="${esc(k)}" />`).join("\n    ")}
+    ${(c.keywords || "")
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean)
+      .slice(0, 6)
+      .map((k) => `<meta property="article:tag" content="${esc(k)}" />`)
+      .join("\n    ")}
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
@@ -594,21 +786,33 @@ ${jsonLd}
 ${JSON.stringify({
   "@context": "https://schema.org",
   "@type": "FAQPage",
-  "mainEntity": [
+  mainEntity: [
     {
       "@type": "Question",
-      "name": `What was ${esc(c.eventTitle)}?`,
-      "acceptedAnswer": { "@type": "Answer", "text": esc(c.jsonLdDescription || c.description) },
+      name: `What was ${esc(c.eventTitle)}?`,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: esc(c.jsonLdDescription || c.description),
+      },
     },
     {
       "@type": "Question",
-      "name": `When and where did ${esc(c.eventTitle)} take place?`,
-      "acceptedAnswer": { "@type": "Answer", "text": `${esc(c.eventTitle)} took place on ${esc(c.historicalDate)} in ${esc(c.location)}.` },
+      name: `When and where did ${esc(c.eventTitle)} take place?`,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: `${esc(c.eventTitle)} took place on ${esc(c.historicalDate)} in ${esc(c.location)}.`,
+      },
     },
     {
       "@type": "Question",
-      "name": `What was the historical significance of ${esc(c.eventTitle)}?`,
-      "acceptedAnswer": { "@type": "Answer", "text": esc((c.quickFacts || []).find(f => f.label === "Significance")?.value || c.description) },
+      name: `What was the historical significance of ${esc(c.eventTitle)}?`,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: esc(
+          (c.quickFacts || []).find((f) => f.label === "Significance")?.value ||
+            c.description,
+        ),
+      },
     },
   ],
 })}
@@ -617,10 +821,20 @@ ${JSON.stringify({
 ${JSON.stringify({
   "@context": "https://schema.org",
   "@type": "BreadcrumbList",
-  "itemListElement": [
-    { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://thisday.info/" },
-    { "@type": "ListItem", "position": 2, "name": "Blog", "item": "https://thisday.info/blog/" },
-    { "@type": "ListItem", "position": 3, "name": c.title, "item": canonicalUrl },
+  itemListElement: [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "Home",
+      item: "https://thisday.info/",
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: "Blog",
+      item: "https://thisday.info/blog/",
+    },
+    { "@type": "ListItem", position: 3, name: c.title, item: canonicalUrl },
   ],
 })}
     </script>
@@ -810,9 +1024,10 @@ ${JSON.stringify({
               alt="${esc(c.imageAlt)}"
               style="max-height: 400px; object-fit: cover; width: 100%"
               loading="eager"
+              onerror="this.onerror=null;this.src='${FALLBACK_IMAGE}';this.removeAttribute('srcset');"
             />
             <figcaption class="article-meta mt-2">
-              <small>${esc(c.imageCaption || "Image: Wikimedia Commons")}</small>
+              <small>${esc(c.imageCaption || "Image courtesy of Wikimedia Commons.")}</small>
             </figcaption>
           </figure>
 
@@ -825,12 +1040,16 @@ ${quickFactsRows}
           </table>
 
           <!-- Did You Know -->
-          ${didYouKnowItems ? `<div class="did-you-know p-3 rounded mb-4">
+          ${
+            didYouKnowItems
+              ? `<div class="did-you-know p-3 rounded mb-4">
             <strong>Did You Know?</strong>
             <ul class="mb-0 mt-2">
 ${didYouKnowItems}
             </ul>
-          </div>` : ""}
+          </div>`
+              : ""
+          }
 
           <!-- Overview -->
           <section class="mt-4">
@@ -839,11 +1058,15 @@ ${overviewParas}
           </section>
 
           <!-- Eyewitness / Chronicle Accounts -->
-          ${eyewitnessParas ? `<section class="mt-5">
+          ${
+            eyewitnessParas
+              ? `<section class="mt-5">
             <h2 class="h3">Eyewitness Accounts of ${esc(c.eventTitle)}</h2>
 ${eyewitnessParas}
 ${eyewitnessQuoteBlock}
-          </section>` : ""}
+          </section>`
+              : ""
+          }
 
           <!-- YouTube -->
           <div class="my-4 p-4 rounded" style="background:#ff0000;color:#fff;">
@@ -860,10 +1083,14 @@ ${eyewitnessQuoteBlock}
           </div>
 
           <!-- Aftermath -->
-          ${aftermathParas ? `<section class="mt-5">
+          ${
+            aftermathParas
+              ? `<section class="mt-5">
             <h2 class="h3">Aftermath of ${esc(c.eventTitle)}</h2>
 ${aftermathParas}
-          </section>` : ""}
+          </section>`
+              : ""
+          }
 
           <!-- Conclusion -->
           <section class="mt-5">
@@ -872,7 +1099,9 @@ ${conclusionParas}
           </section>
 
           <!-- Personal Analysis -->
-          ${(analysisGoodItems || analysisBadItems) ? `<section class="mt-5">
+          ${
+            analysisGoodItems || analysisBadItems
+              ? `<section class="mt-5">
             <h2 class="h3">Our Take: What Went Right &amp; What Went Wrong</h2>
             <div class="row g-3 mt-1">
               <div class="col-md-6">
@@ -893,7 +1122,9 @@ ${analysisBadItems}
               </div>
             </div>
             ${editorialNote}
-          </section>` : ""}
+          </section>`
+              : ""
+          }
 
           <!-- Wikipedia source -->
           <div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);">
@@ -924,17 +1155,19 @@ ${analysisBadItems}
           })()}
 
           ${(() => {
-            const related = allPosts
-              .filter(p => p.slug !== slug)
-              .slice(0, 3); // already sorted newest-first; today's post is always shown first
+            const related = allPosts.filter((p) => p.slug !== slug).slice(0, 3); // already sorted newest-first; today's post is always shown first
             if (related.length === 0) return "";
-            const cards = related.map(p => `
+            const cards = related
+              .map(
+                (p) => `
               <div class="col-md-4">
                 <a href="/blog/${esc(p.slug)}/" class="related-card d-block p-3 rounded text-decoration-none h-100">
                   <p class="mb-1 fw-semibold" style="color:var(--text-color);font-size:.92rem;line-height:1.35">${esc(p.title)}</p>
-                  <small class="article-meta">${new Date(p.publishedAt).toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</small>
+                  <small class="article-meta">${new Date(p.publishedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</small>
                 </a>
-              </div>`).join("");
+              </div>`,
+              )
+              .join("");
             return `<section class="mt-5">
             <h2 class="h5 mb-3">You Might Also Like</h2>
             <div class="row g-3">${cards}
@@ -1087,25 +1320,35 @@ async function buildListingHTML(index) {
 
     <!-- JSON-LD -->
     <script type="application/ld+json">
-${JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "CollectionPage",
-  name: "History Blog | thisDay.",
-  url: "https://thisday.info/blog/archive/",
-  description: "Original articles about historical events published regularly by thisDay.info.",
-  publisher: {
-    "@type": "Organization",
-    name: "thisDay.info",
-    logo: { "@type": "ImageObject", url: "https://thisday.info/images/logo.png" },
+${JSON.stringify(
+  {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: "History Blog | thisDay.",
+    url: "https://thisday.info/blog/archive/",
+    description:
+      "Original articles about historical events published regularly by thisDay.info.",
+    publisher: {
+      "@type": "Organization",
+      name: "thisDay.info",
+      logo: {
+        "@type": "ImageObject",
+        url: "https://thisday.info/images/logo.png",
+      },
+    },
+    hasPart: index.slice(0, 20).map((p) => ({
+      "@type": "NewsArticle",
+      name: p.title,
+      url: `https://thisday.info/blog/${p.slug}/`,
+      datePublished: p.publishedAt
+        ? new Date(p.publishedAt).toISOString().split("T")[0]
+        : undefined,
+      description: p.description,
+    })),
   },
-  hasPart: index.slice(0, 20).map((p) => ({
-    "@type": "NewsArticle",
-    name: p.title,
-    url: `https://thisday.info/blog/${p.slug}/`,
-    datePublished: p.publishedAt ? new Date(p.publishedAt).toISOString().split("T")[0] : undefined,
-    description: p.description,
-  })),
-}, null, 2)}
+  null,
+  2,
+)}
     </script>
 
     <link rel="icon" href="/images/favicon.ico" />
@@ -1236,7 +1479,6 @@ async function serveListing(env) {
   return htmlResponse(html);
 }
 
-
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
@@ -1263,16 +1505,21 @@ async function serve404(env) {
     // Suggestions are optional — don't let a KV failure block the 404 page.
   }
 
-  const suggestions = recentPosts.length > 0
-    ? `<h5 class="mt-5 mb-3 fw-semibold">Recent Articles</h5>
+  const suggestions =
+    recentPosts.length > 0
+      ? `<h5 class="mt-5 mb-3 fw-semibold">Recent Articles</h5>
         <div class="list-group">
-          ${recentPosts.map((p) => `
+          ${recentPosts
+            .map(
+              (p) => `
           <a href="/blog/${esc(p.slug)}/" class="list-group-item list-group-item-action py-3">
             <div class="fw-semibold">${esc(p.title)}</div>
             <div class="small text-muted mt-1">${esc(p.description)}</div>
-          </a>`).join("")}
+          </a>`,
+            )
+            .join("")}
         </div>`
-    : "";
+      : "";
 
   const year = new Date().getFullYear();
 
@@ -1375,10 +1622,12 @@ function htmlResponse(body, status = 200) {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=86400, s-maxage=604800",
       "X-Content-Type-Options": "nosniff",
-      "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+      "Strict-Transport-Security":
+        "max-age=31536000; includeSubDomains; preload",
       "X-Frame-Options": "SAMEORIGIN",
       "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+      "Permissions-Policy":
+        "camera=(), microphone=(), geolocation=(), payment=()",
     },
   });
 }

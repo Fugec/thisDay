@@ -20,6 +20,137 @@ import { join } from 'path';
 const TMP = './tmp';
 const W = 1080;
 const H = 1920;
+
+// ---------------------------------------------------------------------------
+// Image validation & resolution
+// ---------------------------------------------------------------------------
+
+async function isWorkingImageUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    const headers = { 'User-Agent': 'thisday.info-blog/1.0 (https://thisday.info)' };
+    let res = await fetch(url, { method: 'HEAD', redirect: 'follow', headers });
+    // Some CDNs reject HEAD; fall back to GET
+    if (res.status === 405 || res.status === 403 || res.status === 501) {
+      res = await fetch(url, { method: 'GET', redirect: 'follow', headers });
+    }
+    if (!res.ok) return false;
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    return contentType.startsWith('image/');
+  } catch {
+    return false;
+  }
+}
+
+async function fetchWikipediaImage(title) {
+  if (!title) return null;
+  const ua = { 'User-Agent': 'thisday.info-blog/1.0 (https://thisday.info)' };
+  try {
+    // 1. REST summary — fastest, returns lead/thumbnail image
+    const summaryRes = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
+      { headers: ua },
+    );
+    if (summaryRes.ok) {
+      const d = await summaryRes.json();
+      const img = d.thumbnail?.source ?? d.originalimage?.source ?? null;
+      if (img) return img;
+    }
+
+    // 2. MediaWiki images list + imageinfo — catches infobox images not exposed
+    //    by the REST summary (e.g. non-free images under /wikipedia/en/)
+    const listRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=images&imlimit=10&format=json`,
+      { headers: ua },
+    );
+    if (!listRes.ok) return null;
+    const listData = await listRes.json();
+    const page = Object.values(listData?.query?.pages ?? {})[0];
+    const imageFiles = (page?.images ?? [])
+      .map((i) => i.title)
+      .filter((t) => /\.(jpe?g|png|webp|gif)$/i.test(t) && !/icon|logo|flag|map|seal|coa/i.test(t));
+
+    if (!imageFiles.length) return null;
+
+    // Resolve the first usable file to its direct URL
+    const infoRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(imageFiles[0])}&prop=imageinfo&iiprop=url&format=json`,
+      { headers: ua },
+    );
+    if (!infoRes.ok) return null;
+    const infoData = await infoRes.json();
+    const infoPage = Object.values(infoData?.query?.pages ?? {})[0];
+    return infoPage?.imageinfo?.[0]?.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** URLs that must never be used as a video background image. */
+function isPlaceholderImage(url) {
+  if (!url) return true;
+  const n = url.trim().toLowerCase();
+  return (
+    n.includes('/images/logo.png') ||
+    n.includes('placehold.co') ||
+    n.includes('placeholder')
+  );
+}
+
+/**
+ * Pre-checks post.imageUrl. If missing, broken, or a placeholder/logo,
+ * searches Wikipedia for a real replacement image.
+ * Returns { imageUrl, wasReplaced } on success; throws IMAGE_UNAVAILABLE if
+ * no working image is found (caller should skip the post).
+ *
+ * @param {{ slug: string, title: string, imageUrl?: string }} post
+ * @returns {Promise<{ imageUrl: string, wasReplaced: boolean }>}
+ */
+export async function resolvePostImage(post) {
+  const original = post.imageUrl || null;
+
+  // 1. Stored imageUrl is a real, reachable image (not a placeholder/logo)
+  if (original && !isPlaceholderImage(original) && await isWorkingImageUrl(original)) {
+    return { imageUrl: original, wasReplaced: false };
+  }
+
+  if (original && isPlaceholderImage(original)) {
+    console.warn(`  ⚠ Image is a placeholder/logo — searching for real image: ${original}`);
+  } else if (original) {
+    console.warn(`  ⚠ Image broken or unreachable: ${original}`);
+  } else {
+    console.warn(`  ⚠ No imageUrl stored for "${post.title}"`);
+  }
+
+  // 2. Try Wikipedia thumbnail with two queries:
+  //    a) full title (date intact)
+  //    b) event name only — everything before the " - " date separator
+  //       e.g. "The Founding of Kappa Alpha Society - March 13, 1825" → "The Founding of Kappa Alpha Society"
+  // Strip "The [Verb] of [The]" prefix for the core-subject query
+  const verbPrefixRe = /^(The\s+)?(Founding|Birth|Death|Discovery|Invention|Signing|Formation|Establishment|Battle|Siege|Launch|Liberation|Revolution|Treaty|Election|Inauguration|Coronation|Assassination)\s+(of\s+)?(the\s+)?/i;
+  const beforeDate = post.title.split(/\s*[-–—]\s+(?=[A-Z][a-z]+ \d)/)[0].trim();
+  const coreSubject = beforeDate.replace(verbPrefixRe, '').trim();
+
+  const wikiQueries = [
+    post.title,           // 1. full title (date + year intact)
+    beforeDate,           // 2. event name, date stripped
+    coreSubject,          // 3. core subject, prefix + date stripped  (e.g. "Kappa Alpha Society")
+  ].filter((q, i, arr) => q && arr.indexOf(q) === i); // deduplicate
+
+  for (const query of wikiQueries) {
+    const wikiImage = await fetchWikipediaImage(query);
+    if (wikiImage && await isWorkingImageUrl(wikiImage)) {
+      console.log(`  ↺ Wikipedia replacement found (query: "${query}"): ${wikiImage}`);
+      return { imageUrl: wikiImage, wasReplaced: true };
+    }
+  }
+
+  // 3. No working image — throw so the caller skips this post rather than
+  //    uploading a video with no meaningful background.
+  throw new Error(`IMAGE_UNAVAILABLE: no working image found for "${post.title}" (original: ${original ?? 'none'})`);
+}
 const DURATION = 45; // seconds — within YouTube Shorts 60 s limit
 const FPS = 30;
 
@@ -126,7 +257,8 @@ export async function generateVideo(post, { narrationPath, bgMusicPath } = {}) {
   mkdirSync(TMP, { recursive: true });
 
   const { slug, title } = post;
-  const imageUrl   = post.imageUrl || 'https://thisday.info/images/logo.png';
+  const imageUrl   = post.imageUrl; // must be pre-validated by resolvePostImage()
+  if (!imageUrl) throw new Error(`generateVideo called without a validated imageUrl for "${slug}"`);
   const framePath  = join(TMP, `${slug}_frame.png`);
   const videoPath  = join(TMP, `${slug}.mp4`);
 

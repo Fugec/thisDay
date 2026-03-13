@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "auth": "node lib/auth-setup.js"
+    "auth": "node lib/auth-setup.js",
+    "diagnose": "node diagnose.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

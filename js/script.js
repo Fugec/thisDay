@@ -1578,8 +1578,8 @@ function renderFilteredItems(itemsToRender) {
                         <p class="mb-1">${specialEmphasis}${
                           event.description
                         }</p>
-                        <p class="mb-2 fst-italic text-muted" style="font-size:0.82rem; border-left: 3px solid #3b82f6; padding-left: 8px;">
-                          <i class="bi bi-chat-quote me-1" style="color:#3b82f6;"></i>${commentary}
+                        <p class="mb-2 fst-italic event-commentary">
+                          <i class="bi bi-chat-quote me-1 event-commentary-icon"></i>${commentary}
                         </p>
                         ${
                           event.sourceUrl

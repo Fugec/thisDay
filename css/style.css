@@ -545,3 +545,23 @@ article iframe {
   border: 0;
   border-radius: var(--site-radius);
 }
+
+.event-commentary {
+  font-size: 0.82rem;
+  border-left: 3px solid #3b82f6;
+  padding-left: 8px;
+  color: #334155;
+}
+
+body.dark-theme .event-commentary {
+  color: #cbd5e1;
+  border-left-color: #60a5fa;
+}
+
+.event-commentary-icon {
+  color: #3b82f6;
+}
+
+body.dark-theme .event-commentary-icon {
+  color: #60a5fa;
+}

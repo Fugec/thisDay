@@ -675,10 +675,9 @@ function generateBlogPostHTML(
   const featTitle = featured
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
-  const dynamicOverview = buildDynamicOverview(featured, events, mDisplay, day);
   const introLine = featured
-    ? `A thisDay.info overview of ${dynamicOverview.title.replace(/^Overview:\s*/, "")}, sourced from Wikipedia`
-    : `A thisDay.info historical overview — sourced from Wikipedia`;
+    ? `A thisDay.info historical digest for ${mDisplay} ${day}, sourced from Wikipedia`
+    : `A thisDay.info historical digest, sourced from Wikipedia`;
   const today = new Date().toISOString().split("T")[0];
   const _todayDate = new Date();
   const todayMonthSlug = MONTHS_ALL[_todayDate.getUTCMonth()];
@@ -984,11 +983,6 @@ body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
   ${quizHtml}
-  ${`
-  <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-journal-richtext me-2" style="color:#3b82f6"></i>${escapeHtml(dynamicOverview.title)}</h2>
-    ${dynamicOverview.paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join("")}
-  </div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle"
@@ -1287,7 +1281,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v14-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v15-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2471,7 +2465,22 @@ async function generateQuizForDate(
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
-    if (cached) return JSON.parse(cached);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      const hasTruncatedFallbackQuestion = Array.isArray(parsed?.questions)
+        ? parsed.questions.some((q) => {
+            const text = String(q?.q || "");
+            return (
+              /^In which year did\s+"/i.test(text) &&
+              (text.includes("…") || /\.\.\./.test(text))
+            );
+          })
+        : false;
+
+      if (!hasTruncatedFallbackQuestion) {
+        return parsed;
+      }
+    }
   } catch (e) {
     // ignore cache miss errors
   }
@@ -2573,9 +2582,12 @@ function buildFallbackQuiz(mDisplay, day, eventsData) {
 
   for (const e of events.slice(0, 5)) {
     const yr = Number(e.year);
-    const snippet = e.text.split(".")[0].substring(0, 80);
+    const fullEventText = String(e.text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/[.\s]+$/, "");
     questions.push({
-      q: `In which year did "${snippet}…" occur on ${mDisplay} ${day}?`,
+      q: `In which year did "${fullEventText}" occur on ${mDisplay} ${day}?`,
       options: [
         String(yr),
         String(Math.max(1, yr - 12)),

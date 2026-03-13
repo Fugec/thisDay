@@ -37,6 +37,43 @@ const monthNames = [
   "December",
 ];
 
+function injectAdBlockRecoveryScript() {
+  const existing = document.querySelector(
+    'script[src^="https://fundingchoicesmessages.google.com/i/pub-8565025017387209"]',
+  );
+  if (existing) return;
+
+  const loadScript = () => {
+    const script = document.createElement("script");
+    script.async = true;
+    script.src =
+      "https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1";
+    document.body.appendChild(script);
+
+    (function signalGooglefcPresent() {
+      if (!window.frames["googlefcPresent"]) {
+        if (document.body) {
+          const iframe = document.createElement("iframe");
+          iframe.style.cssText =
+            "width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;";
+          iframe.name = "googlefcPresent";
+          document.body.appendChild(iframe);
+        } else {
+          setTimeout(signalGooglefcPresent, 0);
+        }
+      }
+    })();
+  };
+
+  if (document.body) {
+    loadScript();
+  } else {
+    document.addEventListener("DOMContentLoaded", loadScript, { once: true });
+  }
+}
+
+injectAdBlockRecoveryScript();
+
 // Rate limiting variables
 let requestCount = 0;
 const MAX_REQUESTS_PER_SECOND = 10;

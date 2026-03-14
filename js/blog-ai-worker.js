@@ -142,7 +142,7 @@ export default {
           const content = await buildRichContent(entry, entry.slug);
           const quiz = await generateBlogQuiz(env.AI, content, entry.slug);
           if (quiz) {
-            await env.BLOG_AI_KV.put(`quiz:blog:${entry.slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+            await env.BLOG_AI_KV.put(`quiz-v2:blog:${entry.slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
             results.push({ slug: entry.slug, status: "generated", questions: quiz.questions.length });
           } else {
             results.push({ slug: entry.slug, status: "ai_failed" });
@@ -160,7 +160,7 @@ export default {
     const blogQuizMatch = path.match(/^\/blog\/quiz\/([^/]+)$/);
     if (blogQuizMatch) {
       const slug = blogQuizMatch[1];
-      const quizRaw = await env.BLOG_AI_KV.get(`quiz:blog:${slug}`);
+      const quizRaw = await env.BLOG_AI_KV.get(`quiz-v2:blog:${slug}`);
       if (quizRaw) {
         return new Response(quizRaw, {
           headers: {
@@ -179,7 +179,7 @@ export default {
           const content = await buildRichContent(entry, slug);
           const quiz = await generateBlogQuiz(env.AI, content, slug);
           if (quiz) {
-            await env.BLOG_AI_KV.put(`quiz:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+            await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
             return new Response(JSON.stringify(quiz), {
               headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
             });
@@ -729,7 +729,7 @@ async function generateAndStore(env) {
   try {
     const quiz = await generateBlogQuiz(env.AI, content, slug);
     if (quiz) {
-      await env.BLOG_AI_KV.put(`quiz:blog:${slug}`, JSON.stringify(quiz), {
+      await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), {
         expirationTtl: 90 * 86_400,
       });
     }
@@ -764,7 +764,7 @@ async function extractRichContext(slug) {
     // Article paragraphs from <p> tags inside the article (skip very short ones)
     const paras = [...html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
       .map(([, v]) => v.replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim())
-      .filter(s => s.length > 80 && s.length < 600);
+      .filter(s => s.length > 80 && s.length < 750);
     ctx.paragraphs = paras.slice(0, 6);
     return ctx;
   } catch (e) {
@@ -812,7 +812,7 @@ async function generateBlogQuiz(ai, content, _slug) {
     `Event: ${content.eventTitle} on ${content.historicalDate}`,
     (content.location || content.country) ? `Location: ${[content.location, content.country].filter(Boolean).join(", ")}` : "",
     content.description ? `Summary: ${content.description.replace(/Published:.*?min read\s*/s, "").substring(0, 400)}` : "",
-    ...(content.keyFacts || []).slice(0, 8).map((f) => `Fact: ${f}`),
+    ...(content.keyFacts || []).slice(0, 15).map((f) => `Fact: ${f}`),
   ].filter(Boolean);
 
   const aiTimeout = new Promise((_, reject) =>
@@ -828,7 +828,7 @@ async function generateBlogQuiz(ai, content, _slug) {
         },
         {
           role: "user",
-          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Prioritize questions about causes, consequences, key figures, and surprising details from the Fact lines\n- Each question must include a short "explanation" field (1-2 sentences) explaining why the answer is correct\n- Output ONLY valid JSON:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
+          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, no more no less\n- Each question has exactly 4 options (never fewer, never more)\n- Exactly one correct answer per question (0-based index in "answer", must be 0, 1, 2, or 3)\n- Question types must vary: include at least one each of Who, What, Why/How, When/Where\n- Questions must progress: 1 easy recall, 2 medium analysis, 2 challenging synthesis\n- Draw from ALL Fact lines — do not repeat the same topic twice\n- Wrong options must be plausible but clearly incorrect; no trick questions\n- Each question must include a short "explanation" field (1-2 sentences) explaining why the answer is correct\n- All strings must be non-empty and longer than 5 characters\n- Output ONLY valid JSON, no markdown:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
         },
       ],
       max_tokens: 1500,
@@ -854,9 +854,16 @@ async function generateBlogQuiz(ai, content, _slug) {
     console.error("Blog quiz JSON.parse failed:", parseErr);
     return null;
   }
-  if (!Array.isArray(parsed?.questions) || parsed.questions.length < 3)
-    return null;
-  return parsed;
+  if (!Array.isArray(parsed?.questions) || parsed.questions.length !== 5) return null;
+  const valid = parsed.questions.filter(q =>
+    q.q && typeof q.q === "string" && q.q.trim().length > 10 &&
+    Array.isArray(q.options) && q.options.length === 4 &&
+    q.options.every(o => typeof o === "string" && o.trim().length > 2) &&
+    Number.isInteger(q.answer) && q.answer >= 0 && q.answer <= 3 &&
+    q.explanation && typeof q.explanation === "string" && q.explanation.trim().length > 8
+  );
+  if (valid.length !== 5) return null;
+  return { ...parsed, questions: valid };
 }
 
 // ---------------------------------------------------------------------------

@@ -1608,7 +1608,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v3:${mm}-${dd}`;
+    const kvKey = `quiz-v4:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2445,7 +2445,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v3:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v4:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2499,7 +2499,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v3:${mm}-${dd}`;
+  const kvKey = `quiz-v4:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2531,16 +2531,16 @@ async function generateQuizForDate(
 
   const contextLines = [];
   if (featuredEvent)
-    contextLines.push(`Featured event: ${featuredEvent.year} — ${featuredEvent.text}`);
+    contextLines.push(`Featured event: ${featuredEvent.text}`);
   if (wikiSummary)
     contextLines.push(`Wikipedia context: ${wikiSummary.substring(0, 300)}`);
   indexedEvents.forEach((e, i) =>
-    contextLines.push(`Event[${i}]: ${e.year} — ${e.text.substring(0, 120)}`),
+    contextLines.push(`Event[${i}]: ${e.text.substring(0, 150)}`),
   );
   births
     .slice(0, 3)
     .forEach((b) =>
-      contextLines.push(`Birth: ${b.year} — ${b.text.substring(0, 80)}`),
+      contextLines.push(`Birth: ${b.text.substring(0, 100)}`),
     );
 
   let quiz = null;
@@ -2560,7 +2560,7 @@ async function generateQuizForDate(
             },
             {
               role: "user",
-              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, one per event in order: Question 1 MUST be about Event[0], Question 2 about Event[1], Question 3 about Event[2], Question 4 about Event[3], Question 5 about Event[4]\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
+              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, one per event in order: Question 1 MUST be about Event[0], Question 2 about Event[1], Question 3 about Event[2], Question 4 about Event[3], Question 5 about Event[4]\n- QUESTION TYPE REQUIREMENTS — each question must use a DIFFERENT type:\n  Q1: Who was involved or what specifically happened (Who/What)\n  Q2: Where or in which country/region did it occur (Where/Geography)\n  Q3: Why did it happen or what caused it (Why/Cause)\n  Q4: How did it unfold or what method/means was used (How/Detail)\n  Q5: What were the consequences or historical significance (Consequence/Impact)\n- ABSOLUTELY FORBIDDEN: Never ask "In which year", "What year", "When did", "In what year", "What century", or ANY question about dates or time periods — the year is already visible to the user\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer", must be 0, 1, 2, or 3)\n- Wrong options must be plausible but clearly incorrect — no trick questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
             },
           ],
           max_tokens: 1500,
@@ -2977,7 +2977,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v3:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v4:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);

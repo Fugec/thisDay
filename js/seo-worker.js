@@ -3049,6 +3049,20 @@ async function handleQuizPage(_request, env, monthSlug, day) {
       }).replace(/<\//g, "<\\/")
     : null;
 
+  const ogImg = featuredEvent?.pages?.[0]?.thumbnail?.source
+    ? escapeHtml(featuredEvent.pages[0].thumbnail.source)
+    : `${siteUrl}/images/logo.png`;
+
+  const breadcrumbSchema = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: siteUrl },
+      { "@type": "ListItem", position: 2, name: `${mDisplay} ${day}`, item: `${siteUrl}/events/${monthSlug}/${day}/` },
+      { "@type": "ListItem", position: 3, name: "Quiz", item: canonical },
+    ],
+  }).replace(/<\//g, "<\\/");
+
   const html = `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(quizPageTitle)}</title>
@@ -3059,17 +3073,19 @@ async function handleQuizPage(_request, env, monthSlug, day) {
 <meta property="og:description" content="${escapeHtml(quizPageDesc)}"/>
 <meta property="og:type" content="website"/>
 <meta property="og:url" content="${escapeHtml(canonical)}"/>
-<meta property="og:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
+<meta property="og:image" content="${ogImg}"/>
 <meta name="twitter:card" content="summary_large_image"/>
 <meta name="twitter:title" content="${escapeHtml(quizPageTitle)}"/>
 <meta name="twitter:description" content="${escapeHtml(quizPageDesc)}"/>
-<meta name="twitter:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
-${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
+<meta name="twitter:image" content="${ogImg}"/>
+${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}<\/script>` : ""}
+<script type="application/ld+json">${breadcrumbSchema}<\/script>
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 <style>
 :root{--pb:#3b82f6;--sb:#f5f0e8;--tc:#1a1a1a;--htc:#fff;--fb:#1e293b;--ftc:#fff;--lc:#c0440a;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b;--badge:#c0440a}
 body.dark-theme{--pb:#020617;--sb:#0f172a;--tc:#f1f5f9;--fb:#020617;--lc:#f97316;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#94a3b8;--badge:#f97316}
@@ -3153,12 +3169,23 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
 </style>
 </head>
 <body>
+<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
 <nav class="navbar navbar-expand-lg navbar-dark">
   <div class="container-fluid">
     <a class="navbar-brand" href="/">thisDay.</a>
+    <div class="form-check form-switch d-lg-none me-2">
+      <input class="form-check-input" type="checkbox" id="tsm" aria-label="Toggle dark mode"/>
+      <label class="form-check-label" for="tsm"><i class="bi bi-brightness-high-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
+    </div>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
         <li class="nav-item"><a class="nav-link" href="/events/${todaySlug}/${todayDay}/">Today's Events</a></li>
+        <li class="nav-item d-flex align-items-center">
+          <div class="form-check form-switch d-none d-lg-block me-2">
+            <input class="form-check-input" type="checkbox" id="tsd" aria-label="Toggle dark mode"/>
+            <label class="form-check-label" for="tsd" style="color:#fff">Dark Mode</label>
+          </div>
+        </li>
       </ul>
     </div>
   </div>
@@ -3179,17 +3206,34 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
 </main>
 <footer class="footer">
+  <div class="container d-flex justify-content-center my-2">
+    <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
+  </div>
   <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
+  <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
+  <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
   <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
 </footer>
-<script>document.getElementById('yr').textContent=new Date().getFullYear();</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-  const tsd=document.getElementById('tsd');
-  const saved=localStorage.getItem('darkTheme');
-  if(saved!=='false')document.body.classList.add('dark-theme');
+const yrEl=document.getElementById('yr');
+if(yrEl)yrEl.textContent=new Date().getFullYear();
+const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
+const ap=d=>document.body.classList.toggle('dark-theme',d);
+const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
+const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
+const dk=gt('darkTheme')!=='false';
+ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
+if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
+if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
 </script>
 <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
 <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
+<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
 </body></html>`;
 
   return new Response(html, {

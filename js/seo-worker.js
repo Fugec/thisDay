@@ -1084,10 +1084,10 @@ const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
 const ap=d=>document.body.classList.toggle('dark-theme',d);
 const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
 const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
-const dk=gt('theme')==='dark'||(window.matchMedia?.('(prefers-color-scheme:dark)').matches&&gt('theme')!=='light');
+const dk=gt('darkTheme')!=='false';
 ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
-if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('theme',ds.checked?'dark':'light');if(ms)ms.checked=ds.checked;});
-if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('theme',ms.checked?'dark':'light');if(ds)ds.checked=ms.checked;});
+if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
+if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
 
 const syncAdUnitVisibility=(ins)=>{
   if(!ins) return;

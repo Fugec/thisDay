@@ -347,7 +347,7 @@ function renderCarouselItem(container, post, index) {
     </div>
     <div class="carousel-caption">
       <h5>${truncatedTitle}</h5>
-      <p>${post.excerpt || "Read this blog post about historical events."}</p>
+      <p>${(post.excerpt || "Read this blog post about historical events.").split(". ")[0].replace(/\.$/, "") + "."}</p>
       <div class="d-flex justify-content-center gap-2">
         <a href="${post.url}" class="btn btn-primary btn-sm"
            ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>Read Full Post</a>

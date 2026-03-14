@@ -115,6 +115,40 @@ export default {
       });
     }
 
+    // Admin: preload all missing quizzes — POST /blog/preload-quizzes
+    if (path === "/blog/preload-quizzes" && request.method === "POST") {
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const results = [];
+      for (const entry of index) {
+        const existing = await env.BLOG_AI_KV.get(`quiz:blog:${entry.slug}`);
+        if (existing) { results.push({ slug: entry.slug, status: "cached" }); continue; }
+        try {
+          const titleParts = (entry.title || entry.slug).split(" - ");
+          const content = {
+            title: entry.title || entry.slug,
+            eventTitle: titleParts[0] || entry.title || entry.slug,
+            historicalDate: titleParts[1] || "",
+            location: "", country: "",
+            description: entry.description || entry.title || "",
+            keyFacts: [],
+          };
+          const quiz = await generateBlogQuiz(env.AI, content, entry.slug);
+          if (quiz) {
+            await env.BLOG_AI_KV.put(`quiz:blog:${entry.slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+            results.push({ slug: entry.slug, status: "generated", questions: quiz.questions.length });
+          } else {
+            results.push({ slug: entry.slug, status: "ai_failed" });
+          }
+        } catch (e) {
+          results.push({ slug: entry.slug, status: "error", msg: e.message });
+        }
+      }
+      return new Response(JSON.stringify({ results }, null, 2), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     // Blog quiz API: /blog/quiz/{slug}
     const blogQuizMatch = path.match(/^\/blog\/quiz\/([^/]+)$/);
     if (blogQuizMatch) {
@@ -316,10 +350,46 @@ export default {
     }
   })();
   <\/script>`;
-          const quizAnchor = patchedHtml.includes('You Might Also Like')
-            ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
-            : "</article>";
-          patchedHtml = patchedHtml.replace(quizAnchor, quizCta + "\n          " + quizAnchor);
+          // Build "Explore in History" section from slug (e.g. "1-march-2026" → March 1)
+          let exploreHtml = "";
+          const slugParts = slug.match(/^(\d+)-([a-z]+)-\d+$/i);
+          if (slugParts) {
+            const hDay = parseInt(slugParts[1], 10);
+            const hMonthSlug = slugParts[2].toLowerCase();
+            const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+            const monthSlugs = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+            const mIdx = monthSlugs.indexOf(hMonthSlug);
+            const hMonthDisplay = mIdx >= 0 ? monthNames[mIdx].charAt(0).toUpperCase() + monthNames[mIdx].slice(1) : hMonthSlug;
+            exploreHtml = `
+          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+            <i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i>
+            <div>
+              <strong>Explore ${hMonthDisplay} ${hDay} in History</strong><br/>
+              <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
+              <a href="/generated/${hMonthSlug}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">
+                <i class="bi bi-arrow-right me-1"></i>View ${hMonthDisplay} ${hDay}
+              </a>
+            </div>
+          </div>`;
+          }
+          // Inject quiz before Wikipedia source box (matching March 14 template order)
+          const wikiAnchor = '<div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08)';
+          if (patchedHtml.includes(wikiAnchor)) {
+            // Insert quiz before Wikipedia box, then inject Explore section after Wikipedia box
+            patchedHtml = patchedHtml.replace(wikiAnchor, quizCta + "\n          " + wikiAnchor);
+            if (exploreHtml && !patchedHtml.includes("/generated/")) {
+              // Inject Explore section after the Wikipedia box (before You Might Also Like or </article>)
+              const afterWikiAnchor = patchedHtml.includes('You Might Also Like')
+                ? '<section class="mt-5">'
+                : "</article>";
+              patchedHtml = patchedHtml.replace(afterWikiAnchor, exploreHtml + "\n          " + afterWikiAnchor);
+            }
+          } else {
+            const quizAnchor = patchedHtml.includes('You Might Also Like')
+              ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
+              : "</article>";
+            patchedHtml = patchedHtml.replace(quizAnchor, quizCta + "\n          " + quizAnchor);
+          }
           const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
@@ -695,7 +765,7 @@ async function generateBlogQuiz(ai, content, _slug) {
   ].filter(Boolean);
 
   const aiTimeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("AI timeout")), 12000),
+    setTimeout(() => reject(new Error("AI timeout")), 25000),
   );
   const aiResult = await Promise.race([
     ai.run(CF_AI_MODEL, {

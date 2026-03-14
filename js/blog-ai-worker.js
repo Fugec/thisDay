@@ -539,7 +539,7 @@ async function generateBlogQuiz(ai, content, _slug) {
         },
         {
           role: "user",
-          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific and fact-based from the content above\n- Output ONLY valid JSON:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0}]}`,
+          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific and fact-based from the content above\n- Each question must include a short "explanation" field (1-2 sentences) that tells the reader WHY the answer is correct, reinforcing what they just read\n- Output ONLY valid JSON:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
         },
       ],
       max_tokens: 1500,
@@ -1429,10 +1429,12 @@ ${analysisBadItems}
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
   <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;padding:24px 20px 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Inter,sans-serif">
     <button id="tdq-close" aria-label="Close quiz" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1">&times;</button>
-    <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:4px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
-    <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:16px;opacity:.8">You've reached the end — try this quick quiz!</p>
+    <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px"></div>
+    <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
+    <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
+    <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:#f59e0b;margin-bottom:16px">0 of 5 answered</div>
     <div id="tdq-questions"></div>
-    <button class="site-btn site-btn-primary mt-3" id="tdq-submit-btn" style="display:none">Check Answers</button>
+    <button class="btn btn-warning mt-3" id="tdq-submit-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
     <div id="tdq-score" class="mt-3" hidden></div>
   </div>
 

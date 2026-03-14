@@ -264,7 +264,7 @@ export default {
   </style>
   <script>
   (function () {
-    var slug = "${slug}";
+    var slug = "${esc(slug)}";
     var quizLoaded = false;
     var selected = {};
     var answers = [];
@@ -317,6 +317,7 @@ export default {
         var opts = document.querySelectorAll('[data-qi="' + qi + '"]');
         fb.hidden = false;
         opts.forEach(function(o) { o.style.pointerEvents = "none"; });
+        if (correct < 0 || correct >= opts.length) { fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span>'; return; }
         opts[correct].classList.add("tdq-opt-correct");
         if (chosen === correct) { score++; fb.innerHTML = '<span class="tdq-correct">✓ Correct!</span>'; }
         else { if (chosen >= 0) opts[chosen].classList.add("tdq-opt-wrong"); fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>'; }
@@ -1816,6 +1817,7 @@ ${analysisBadItems}
         var opts = document.querySelectorAll('[data-qi="' + qi + '"]');
         fb.hidden = false;
         opts.forEach(function(o) { o.style.pointerEvents = "none"; });
+        if (correct < 0 || correct >= opts.length) { fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span>'; return; }
         opts[correct].classList.add("tdq-opt-correct");
         if (chosen === correct) {
           score++;

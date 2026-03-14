@@ -2476,6 +2476,16 @@ async function handleScheduledEvent(env) {
       topEventsPre,
     );
     console.log(`Quiz pre-generated for ${monthSlug}/${day}.`);
+
+    // Also cache events data under per-date key for quiz page fast-path
+    const mNum = String(MONTH_NUM_MAP[monthSlug]).padStart(2, "0");
+    const dNum = String(day).padStart(2, "0");
+    await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), {
+      expirationTtl: 7 * 24 * 60 * 60,
+    });
+    // Invalidate stale full-page cache so next visit renders fresh HTML
+    await env.EVENTS_KV.delete(`quiz-page-v1:${mNum}-${dNum}`);
+    console.log(`Events data cached and page cache invalidated for ${monthSlug}/${day}.`);
   } catch (e) {
     console.error("Quiz pre-generation failed:", e);
   }
@@ -2968,15 +2978,61 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const mDisplay = MONTH_DISPLAY_NAMES[monthNum];
   const mPad = String(monthNum).padStart(2, "0");
   const dPad = String(day).padStart(2, "0");
-  const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
+
+  // --- Full-page HTML cache (fastest path) ---
+  const pageHtmlKey = `quiz-page-v1:${mPad}-${dPad}`;
+  if (env.EVENTS_KV) {
+    try {
+      const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
+      if (cachedHtml) {
+        return new Response(cachedHtml, {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=3600",
+            "X-Cache": "HIT",
+          },
+        });
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  // --- Events data: try KV first (cron stores today's; we also store per date below) ---
+  const eventsKvKey = `events-data:${mPad}-${dPad}`;
+  const todayIso = new Date().toISOString().split("T")[0];
+  const todayEventsKey = `today-events-${todayIso}`;
   let eventsData = { events: [], births: [], deaths: [] };
-  try {
-    const r = await fetch(apiUrl, {
-      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
-    });
-    if (r.ok) eventsData = await r.json();
-  } catch (e) {
-    console.error("Quiz page Wikipedia fetch:", e);
+  let eventsFromKv = false;
+  if (env.EVENTS_KV) {
+    try {
+      // For today's date, also try the cron-stored key
+      const kvData = await env.EVENTS_KV.get(eventsKvKey, { type: "json" }) ||
+        (mPad === String(MONTH_NUM_MAP[MONTHS_ALL[new Date().getUTCMonth()]]).padStart(2, "0") &&
+         dPad === String(new Date().getUTCDate()).padStart(2, "0")
+          ? await env.EVENTS_KV.get(todayEventsKey, { type: "json" })
+          : null);
+      if (kvData?.events?.length) {
+        eventsData = kvData;
+        eventsFromKv = true;
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  if (!eventsFromKv) {
+    const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
+    try {
+      const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+      if (r.ok) {
+        eventsData = await r.json();
+        // Cache events data for future quiz page visits
+        if (env.EVENTS_KV && eventsData?.events?.length) {
+          env.EVENTS_KV.put(eventsKvKey, JSON.stringify(eventsData), {
+            expirationTtl: 7 * 24 * 60 * 60, // 7 days
+          }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.error("Quiz page Wikipedia fetch:", e);
+    }
   }
 
   const featuredEvent =
@@ -3248,10 +3304,16 @@ if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.
 <script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
 </body></html>`;
 
+  // Cache the full rendered page HTML in KV (fire-and-forget, non-blocking)
+  if (env.EVENTS_KV) {
+    env.EVENTS_KV.put(pageHtmlKey, html, { expirationTtl: 24 * 60 * 60 }).catch(() => {});
+  }
+
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      "X-Cache": "MISS",
     },
   });
 }

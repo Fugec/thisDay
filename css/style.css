@@ -30,6 +30,10 @@ div#carouselIndicators {
   margin-top: -20px;
 }
 
+button#carouselPauseBtn {
+  display: none !important;
+}
+
 /* button.carousel-control-next {
   display: none;
 }
@@ -254,8 +258,12 @@ body.dark-theme .form-check-label {
 
 @media (prefers-reduced-motion: reduce) {
   .chatbot-toggle,
-  .chatbot-toggle.nudge-once { animation: none; }
-  .word { animation: none; }
+  .chatbot-toggle.nudge-once {
+    animation: none;
+  }
+  .word {
+    animation: none;
+  }
 }
 
 @keyframes nudge {

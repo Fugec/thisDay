@@ -1608,7 +1608,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v5:${mm}-${dd}`;
+    const kvKey = `quiz-v6:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2445,7 +2445,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v5:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v6:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2499,7 +2499,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v5:${mm}-${dd}`;
+  const kvKey = `quiz-v6:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2560,7 +2560,7 @@ async function generateQuizForDate(
             },
             {
               role: "user",
-              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, one per event in order: Question 1 MUST be about Event[0], Question 2 about Event[1], Question 3 about Event[2], Question 4 about Event[3], Question 5 about Event[4]\n- QUESTION TYPE REQUIREMENTS — each question must use a DIFFERENT type:\n  Q1: Who was involved or what specifically happened (Who/What)\n  Q2: Where or in which country/region did it occur (Where/Geography)\n  Q3: Why did it happen or what caused it (Why/Cause)\n  Q4: How did it unfold or what method/means was used (How/Detail)\n  Q5: What were the consequences or historical significance (Consequence/Impact)\n- ABSOLUTELY FORBIDDEN: Never ask "In which year", "What year", "When did", "In what year", "What century", or ANY question about dates or time periods — the year is already visible to the user\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer", must be 0, 1, 2, or 3)\n- Wrong options must be plausible but clearly incorrect — no trick questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
+              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nThe user can already READ the following event descriptions on screen — treat these as VISIBLE TO USER:\n${contextLines.join("\n")}\n\n#1 RULE — NO VISIBLE ANSWERS: Every question's correct answer must require knowledge that is NOT stated in the event description above. If a user can answer by reading the event text, the question is INVALID.\n\nGood question types (answer requires historical knowledge beyond the description):\n- What caused this event / what triggered it\n- What happened as a direct consequence or aftermath\n- Who was the key leader, commander, or decision-maker involved\n- What was the death toll, scale, or magnitude\n- What agreement, treaty, or legislation resulted\n- What country or organization was directly responsible\n- What prior event led to this one\n\nFORBIDDEN question types (answer visible in event text or trivially known):\n- Where did it happen (location often in the title)\n- In which year / what year / when (year is shown on screen)\n- What is the name of the event (it's in the title)\n\nRules:\n- Exactly 5 questions, one per event: Q1 about Event[0], Q2 about Event[1], Q3 about Event[2], Q4 about Event[3], Q5 about Event[4]\n- Each question has exactly 4 options\n- Exactly one correct answer (0-based index "answer", must be 0–3)\n- All 4 options must be plausible — wrong options should be real historical alternatives, not obvious nonsense\n- Each question needs an "explanation" (1-2 sentences) stating why the answer is correct\n- "topic" = 5 words or fewer naming the event\n- "sourceEvent" = full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why correct."}]}`,
             },
           ],
           max_tokens: 1500,
@@ -2779,16 +2779,14 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     const imgSrc = ev?.pages?.[0]?.thumbnail?.source || "";
     const imgAlt = ev?.pages?.[0]?.title || "";
     const evYear = ev?.year ? String(ev.year) : "";
-    const evText = ev?.text ? escapeHtml(ev.text.split(".")[0].substring(0, 120)) : "";
     const wikiUrl = ev?.pages?.[0]?.content_urls?.desktop?.page || "";
 
     const imgHtml = imgSrc
       ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
       : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
 
-    const evContextHtml = evText
-      ? `<p class="qsc-event-text">${evText}${wikiUrl ? ` <a href="${escapeHtml(wikiUrl)}" target="_blank" rel="noopener" class="qsc-wiki-link" title="Read on Wikipedia"><i class="bi bi-box-arrow-up-right"></i></a>` : ""}</p>`
-      : "";
+    const readMoreUrl = wikiUrl || `/events/${escapeHtml(monthSlug)}/${day}/`;
+    const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${wikiUrl ? "_blank" : "_self"}" rel="noopener" class="qsc-read-more-btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
 
     const optsHtml = (q.options || []).map((opt, oi) =>
       `<div class="tdq-opt qsc-opt" data-qi="${qi}" data-oi="${oi}" role="radio" aria-checked="false" tabindex="0">` +
@@ -2803,10 +2801,10 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     return `<div class="qsc-slide${qi === 0 ? " qsc-active" : ""}" data-slide="${qi}" id="qsc-slide-${qi}">` +
       imgHtml +
       `<div class="qsc-slide-body">` +
-      evContextHtml +
       `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:#f59e0b"></i>Question ${qi + 1} of ${total}</div>` +
       `<p class="tdq-q-text qsc-q-text">${escapeHtml(String(q.q))}</p>` +
       `<div class="tdq-options qsc-opts-wrap">${optsHtml}</div>` +
+      readMoreHtml +
       `<div class="tdq-feedback qsc-feedback" id="tdq-f-${qi}" hidden></div>` +
       expHtml +
       `<button class="qsc-next-btn" data-slide="${qi}" hidden>` +
@@ -2977,7 +2975,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v5:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v6:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -3190,8 +3188,8 @@ body.dark-theme #qsc-wrapper{box-shadow:0 4px 24px rgba(0,0,0,.4)}
 /* Slide body */
 .qsc-slide-body{padding:18px 20px 22px}
 @media(min-width:600px){.qsc-slide-body{padding:22px 28px 28px}}
-.qsc-event-text{font-size:.88rem;color:var(--mu);margin-bottom:14px;line-height:1.5;border-left:3px solid var(--badge);padding-left:10px}
-.qsc-wiki-link{color:var(--mu);font-size:.8rem;opacity:.7;text-decoration:none}.qsc-wiki-link:hover{opacity:1}
+.qsc-read-more-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 14px;padding:6px 14px;border:1.5px solid rgba(59,130,246,.35);border-radius:20px;font-size:.8rem;font-weight:500;color:#3b82f6;text-decoration:none;transition:all .2s;background:rgba(59,130,246,.06)}
+.qsc-read-more-btn:hover{background:rgba(59,130,246,.14);border-color:#3b82f6;color:#2563eb;text-decoration:none}
 .qsc-q-label{display:inline-flex;align-items:center;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--badge);margin-bottom:10px}
 .qsc-q-text{font-size:1.05rem;font-weight:700;color:var(--tc);margin-bottom:14px;line-height:1.45}
 .qsc-opts-wrap{display:flex;flex-direction:column;gap:9px}

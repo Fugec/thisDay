@@ -585,3 +585,28 @@ body.dark-theme .event-commentary {
 body.dark-theme .event-commentary-icon {
   color: #60a5fa;
 }
+
+/* Quiz CTA Strip */
+.quiz-cta-strip {
+  background: rgba(245, 158, 11, 0.07);
+  border-top: 1px solid rgba(245, 158, 11, 0.2);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+}
+body.dark-theme .quiz-cta-strip {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+.quiz-cta-strip strong {
+  font-size: 1rem;
+  color: var(--bs-body-color);
+}
+body.dark-theme .quiz-cta-strip strong {
+  color: #f8fafc;
+}
+.quiz-cta-strip .quiz-cta-sub {
+  font-size: 0.82rem;
+  color: #6c757d;
+}
+body.dark-theme .quiz-cta-strip .quiz-cta-sub {
+  color: #cbd5e1;
+}

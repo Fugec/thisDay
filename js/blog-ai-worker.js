@@ -128,30 +128,31 @@ export default {
       return new Response(JSON.stringify({ keyFactsCount: content.keyFacts?.length, keyFacts, description: content.description?.substring(0, 200) }, null, 2), { headers: { "Content-Type": "application/json" } });
     }
 
-    // Admin: regenerate all quizzes with rich context — POST /blog/preload-quizzes?offset=0&limit=5
+    // Admin: regenerate quizzes in parallel — POST /blog/preload-quizzes?offset=0&limit=8&force=false
     if (path === "/blog/preload-quizzes" && request.method === "POST") {
       const params = new URL(request.url).searchParams;
       const offset = parseInt(params.get("offset") || "0", 10);
-      const limit = parseInt(params.get("limit") || "5", 10);
+      const limit = Math.min(parseInt(params.get("limit") || "8", 10), 15);
+      const force = params.get("force") === "true";
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
       const index = indexRaw ? JSON.parse(indexRaw) : [];
       const batch = index.slice(offset, offset + limit);
-      const results = [];
-      for (const entry of batch) {
-        try {
-          const content = await buildRichContent(entry, entry.slug);
-          const quiz = await generateBlogQuiz(env.AI, content, entry.slug);
-          if (quiz) {
-            await env.BLOG_AI_KV.put(`quiz-v2:blog:${entry.slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
-            results.push({ slug: entry.slug, status: "generated", questions: quiz.questions.length });
-          } else {
-            results.push({ slug: entry.slug, status: "ai_failed" });
-          }
-        } catch (e) {
-          results.push({ slug: entry.slug, status: "error", msg: e.message });
+      const results = await Promise.allSettled(batch.map(async (entry) => {
+        const kvKey = `quiz-v2:blog:${entry.slug}`;
+        if (!force) {
+          const existing = await env.BLOG_AI_KV.get(kvKey);
+          if (existing) return { slug: entry.slug, status: "skipped" };
         }
-      }
-      return new Response(JSON.stringify({ results }, null, 2), {
+        const content = await buildRichContent(entry, entry.slug);
+        const quiz = await generateBlogQuiz(env.AI, content, entry.slug);
+        if (quiz) {
+          await env.BLOG_AI_KV.put(kvKey, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+          return { slug: entry.slug, status: "generated", questions: quiz.questions.length };
+        }
+        return { slug: entry.slug, status: "ai_failed" };
+      }));
+      const out = results.map(r => r.status === "fulfilled" ? r.value : { slug: "?", status: "error", msg: r.reason?.message });
+      return new Response(JSON.stringify({ total: index.length, offset, batch: batch.length, results: out }, null, 2), {
         headers: { "Content-Type": "application/json" },
       });
     }

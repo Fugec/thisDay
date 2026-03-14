@@ -129,12 +129,39 @@ export default {
           },
         });
       }
+      // Quiz not in KV — generate on-demand from index entry
+      try {
+        const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+        const index = indexRaw ? JSON.parse(indexRaw) : [];
+        const entry = index.find((p) => p.slug === slug);
+        if (entry && env.AI) {
+          // Try to split "Event Name - Month Day, Year" from the title
+          const titleParts = (entry.title || slug).split(" - ");
+          const eventTitle = titleParts[0] || entry.title || slug;
+          const historicalDate = titleParts[1] || "";
+          const content = {
+            title: entry.title || slug,
+            eventTitle,
+            historicalDate,
+            location: "",
+            country: "",
+            description: entry.description || entry.title || "",
+            keyFacts: [],
+          };
+          const quiz = await generateBlogQuiz(env.AI, content, slug);
+          if (quiz) {
+            await env.BLOG_AI_KV.put(`quiz:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+            return new Response(JSON.stringify(quiz), {
+              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
+            });
+          }
+        }
+      } catch (e) {
+        console.error("On-demand quiz generation failed:", e);
+      }
       return new Response(JSON.stringify({ error: "Quiz not found" }), {
         status: 404,
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
       });
     }
 
@@ -158,6 +185,11 @@ export default {
         // Patch old site-btn-primary submit button back to btn-warning
         patchedHtml = patchedHtml
           .replaceAll('class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"', 'class="btn btn-warning mt-3" id="tdq-submit-btn"');
+        // Patch image caption — replace any AI-generated caption with correct Wikimedia attribution
+        patchedHtml = patchedHtml.replace(
+          /<figcaption class="article-meta mt-2">\s*<small>(?!Image courtesy of)[\s\S]*?<\/small>\s*<\/figcaption>/,
+          '<figcaption class="article-meta mt-2"><small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small></figcaption>'
+        );
         // Inject quiz CTA + popup for old posts that don't have it
         if (!patchedHtml.includes("tdq-cta-btn")) {
           const quizCta = `
@@ -284,7 +316,10 @@ export default {
     }
   })();
   <\/script>`;
-          patchedHtml = patchedHtml.replace("</article>", quizCta + "\n        </article>");
+          const quizAnchor = patchedHtml.includes('You Might Also Like')
+            ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
+            : "</article>";
+          patchedHtml = patchedHtml.replace(quizAnchor, quizCta + "\n          " + quizAnchor);
           const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
@@ -652,7 +687,7 @@ async function generateBlogQuiz(ai, content, _slug) {
   const contextLines = [
     `Title: ${content.title}`,
     `Event: ${content.eventTitle} on ${content.historicalDate}`,
-    `Location: ${content.location}, ${content.country}`,
+    (content.location || content.country) ? `Location: ${[content.location, content.country].filter(Boolean).join(", ")}` : "",
     content.description
       ? `Summary: ${content.description.substring(0, 300)}`
       : "",
@@ -1390,18 +1425,6 @@ ${analysisBadItems}
               : ""
           }
 
-          <!-- Quiz CTA -->
-          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
-            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
-            <div>
-              <strong style="color:var(--text-color)">Test Your Knowledge</strong><br/>
-              <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
-                <i class="bi bi-play-fill me-1"></i>Take the Quiz
-              </button>
-            </div>
-          </div>
-
           <!-- Wikipedia source -->
           <div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);">
             <small class="article-meta">
@@ -1444,7 +1467,18 @@ ${analysisBadItems}
               </div>`,
               )
               .join("");
-            return `<section class="mt-5">
+            return `<!-- Quiz CTA -->
+          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
+            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
+            <div>
+              <strong style="color:var(--text-color)">Test Your Knowledge</strong><br/>
+              <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
+              <button class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+                <i class="bi bi-play-fill me-1"></i>Take the Quiz
+              </button>
+            </div>
+          </div>
+          <section class="mt-5">
             <h2 class="h5 mb-3">You Might Also Like</h2>
             <div class="row g-3">${cards}
             </div>

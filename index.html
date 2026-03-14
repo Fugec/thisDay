@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <!-- thisDay. is an interactive web application that allows users to explore significant historical events for any day of the year. It features a calendar view, daily highlights carousel, dark mode, and responsive design. Data is sourced from Wikipedia and presented for educational and entertainment purposes.-->
@@ -33,7 +33,10 @@
     <meta property="og:locale" content="en_US" />
     <meta property="og:image" content="https://thisday.info/images/logo.png" />
     <meta property="og:image:type" content="image/png" />
-    <meta property="og:image:alt" content="thisDay. — What Happened on This Day in History" />
+    <meta
+      property="og:image:alt"
+      content="thisDay. — What Happened on This Day in History"
+    />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="author" content="Armin Kapetanović" />
@@ -54,34 +57,34 @@
     <meta name="twitter:creator" content="@thisday_info" />
 
     <script type="application/ld+json">
-    [
-      {
-        "@context": "https://schema.org",
-        "@type": "WebSite",
-        "name": "thisDay.",
-        "url": "https://thisday.info/",
-        "description": "Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history.",
-        "potentialAction": {
-          "@type": "SearchAction",
-          "target": "https://thisday.info/?date={date}",
-          "query-input": "required name=date"
+      [
+        {
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          "name": "thisDay.",
+          "url": "https://thisday.info/",
+          "description": "Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history.",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://thisday.info/?date={date}",
+            "query-input": "required name=date"
+          }
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "thisDay.info",
+          "url": "https://thisday.info/",
+          "logo": "https://thisday.info/images/logo.png",
+          "sameAs": [
+            "https://github.com/Fugec",
+            "https://www.facebook.com/profile.php?id=61578009082537",
+            "https://www.instagram.com/thisday.info/",
+            "https://www.tiktok.com/@this__day",
+            "https://www.youtube.com/@thisDay_info/shorts"
+          ]
         }
-      },
-      {
-        "@context": "https://schema.org",
-        "@type": "Organization",
-        "name": "thisDay.info",
-        "url": "https://thisday.info/",
-        "logo": "https://thisday.info/images/logo.png",
-        "sameAs": [
-          "https://github.com/Fugec",
-          "https://www.facebook.com/profile.php?id=61578009082537",
-          "https://www.instagram.com/thisday.info/",
-          "https://www.tiktok.com/@this__day",
-          "https://www.youtube.com/@thisDay_info/shorts"
-        ]
-      }
-    ]
+      ]
     </script>
 
     <link rel="alternate" hreflang="en" href="https://thisday.info/" />
@@ -123,7 +126,7 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
       media="print"
-      onload="this.media='all'"
+      onload="this.media = 'all'"
     />
     <noscript
       ><link
@@ -257,7 +260,9 @@
         min-height: 100vh;
         display: flex;
         flex-direction: column;
-        transition: background-color 0.3s ease, color 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
       }
 
       .navbar {
@@ -364,13 +369,17 @@
       .form-check-input {
         background-color: var(--switch-track-off);
         border-color: var(--switch-track-off);
-        transition: background-color 0.3s ease, border-color 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          border-color 0.3s ease;
       }
 
       .form-switch .form-check-input {
         background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
         background-color: var(--switch-thumb-off); /* Unchecked thumb color */
-        transition: background-color 0.3s ease, transform 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          transform 0.3s ease;
       }
 
       .form-switch .form-check-input:checked {
@@ -415,7 +424,9 @@
       .btn-outline-primary {
         color: #6f787f;
         border-color: #e2e8f0;
-        transition: color 0.3s ease, background-color 0.3s ease,
+        transition:
+          color 0.3s ease,
+          background-color 0.3s ease,
           border-color 0.3s ease;
         background: #fff;
       }
@@ -445,7 +456,9 @@
         justify-content: center;
         align-items: center;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        transition: background-color 0.3s ease, border-color 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          border-color 0.3s ease;
       }
 
       .day-card .spinner-border {
@@ -499,7 +512,9 @@
         text-align: center;
         padding: 20px 0;
         margin-top: 30px;
-        transition: background-color 0.3s ease, color 0.3s ease;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
         padding: 20px;
       }
 
@@ -513,7 +528,9 @@
         background-color: var(--modal-bg);
         color: var(--modal-text-color);
         border: 1px solid var(--card-border);
-        transition: background-color 0.3s ease, color 0.3s ease,
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease,
           border-color 0.3s ease;
       }
 
@@ -539,7 +556,9 @@
         filter: var(--bs-btn-close-white, invert(0)) grayscale(100%)
           brightness(var(--close-btn-brightness, 1));
         opacity: 0.7;
-        transition: filter 0.3s ease, opacity 0.3s ease;
+        transition:
+          filter 0.3s ease,
+          opacity 0.3s ease;
       }
 
       .dark-theme .btn-close {
@@ -679,7 +698,7 @@
       rel="stylesheet"
       href="css/style.css"
       media="print"
-      onload="this.media='all'"
+      onload="this.media = 'all'"
     />
     <noscript><link rel="stylesheet" href="css/style.css" /></noscript>
 
@@ -721,7 +740,12 @@
   </head>
 
   <body>
-    <a href="#calendarGrid" class="visually-hidden-focusable position-absolute top-0 start-0 p-2 bg-primary text-white fw-semibold" style="z-index:9999;border-radius:0 0 6px 0">Skip to calendar</a>
+    <a
+      href="#calendarGrid"
+      class="visually-hidden-focusable position-absolute top-0 start-0 p-2 bg-primary text-white fw-semibold"
+      style="z-index: 9999; border-radius: 0 0 6px 0"
+      >Skip to calendar</a
+    >
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
       <div class="container-fluid">
         <a class="navbar-brand" href="/">thisDay.</a>
@@ -807,7 +831,20 @@
           type="button"
           aria-label="Pause carousel"
           aria-pressed="false"
-          style="position:absolute;bottom:10px;right:10px;z-index:10;background:rgba(0,0,0,0.45);border:none;color:#fff;border-radius:6px;padding:4px 8px;font-size:0.8rem;cursor:pointer;display:none"
+          style="
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.45);
+            border: none;
+            color: #fff;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            display: none !important;
+          "
         >
           <i class="bi bi-pause-fill" aria-hidden="true"></i>
         </button>
@@ -816,44 +853,64 @@
 
     <div class="quiz-cta-strip py-3">
       <div class="container d-flex gap-3">
-
         <!-- Events Quiz -->
         <div class="quiz-cta-col">
           <div class="d-flex align-items-center gap-2 mb-2">
-            <i class="bi bi-calendar-event-fill" style="font-size:1.6rem;color:#f59e0b;flex-shrink:0" aria-hidden="true"></i>
+            <i
+              class="bi bi-calendar-event-fill"
+              style="font-size: 1.6rem; color: #f59e0b; flex-shrink: 0"
+              aria-hidden="true"
+            ></i>
             <div>
               <strong>Today's Events Quiz</strong>
-              <div class="quiz-cta-sub">5 questions on today's historical events</div>
+              <div class="quiz-cta-sub">
+                5 questions on today's historical events
+              </div>
             </div>
           </div>
-          <a href="/quiz/" class="btn btn-warning btn-sm fw-semibold w-100">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+          <a href="/quiz/" class="btn btn-warning btn-sm fw-semibold w-100"
+            >Take the Quiz <i class="bi bi-arrow-right ms-1"></i
+          ></a>
         </div>
 
-        <div class="vr" style="opacity:.25"></div>
+        <div class="vr" style="opacity: 0.25"></div>
 
         <!-- Blog Article Quiz -->
         <div class="quiz-cta-col">
           <div class="d-flex align-items-center gap-2 mb-2">
-            <i class="bi bi-journal-text" style="font-size:1.6rem;color:#60a5fa;flex-shrink:0" aria-hidden="true"></i>
+            <i
+              class="bi bi-journal-text"
+              style="font-size: 1.6rem; color: #60a5fa; flex-shrink: 0"
+              aria-hidden="true"
+            ></i>
             <div>
               <strong>Latest Article Quiz</strong>
               <div class="quiz-cta-sub">Read it. Quiz yourself at the end.</div>
             </div>
           </div>
-          <a id="blog-quiz-btn" href="/blog/archive/" class="btn btn-outline-primary btn-sm fw-semibold w-100">Read &amp; Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+          <a
+            id="blog-quiz-btn"
+            href="/blog/archive/"
+            class="btn btn-outline-primary btn-sm fw-semibold w-100"
+            >Read &amp; Quiz <i class="bi bi-arrow-right ms-1"></i
+          ></a>
         </div>
-
       </div>
     </div>
     <script>
-    (function(){
-      var btn=document.getElementById('blog-quiz-btn');
-      if(!btn)return;
-      fetch('/blog/archive.json')
-        .then(function(r){return r.ok?r.json():null;})
-        .then(function(d){if(d&&d.length&&d[0].slug)btn.href='/blog/'+d[0].slug+'/#quiz';})
-        .catch(function(){});
-    })();
+      (function () {
+        var btn = document.getElementById("blog-quiz-btn");
+        if (!btn) return;
+        fetch("/blog/archive.json")
+          .then(function (r) {
+            return r.ok ? r.json() : null;
+          })
+          .then(function (d) {
+            if (d && d.length && d[0].slug)
+              btn.href = "/blog/" + d[0].slug + "/#quiz";
+          })
+          .catch(function () {});
+      })();
     </script>
 
     <main class="container my-2">
@@ -861,12 +918,20 @@
         <div
           class="month-navigation mb-2 d-flex justify-content-between align-items-center"
         >
-          <button class="btn btn-outline-primary px-3" id="prevMonthBtn" aria-label="Previous month">
+          <button
+            class="btn btn-outline-primary px-3"
+            id="prevMonthBtn"
+            aria-label="Previous month"
+          >
             <i class="bi bi-chevron-left" aria-hidden="true"></i>
             <span class="d-none d-sm-inline ms-1">Prev</span>
           </button>
           <h2 id="currentMonthYear" class="mb-0"></h2>
-          <button class="btn btn-outline-primary px-3" id="nextMonthBtn" aria-label="Next month">
+          <button
+            class="btn btn-outline-primary px-3"
+            id="nextMonthBtn"
+            aria-label="Next month"
+          >
             <span class="d-none d-sm-inline me-1">Next</span>
             <i class="bi bi-chevron-right" aria-hidden="true"></i>
           </button>
@@ -960,8 +1025,7 @@
         <a href="https://buymeacoffee.com/fugec?new=1" target="_blank">
           Support This Project</a
         >
-        | <a href="/blog/">Blog</a> |
-        <a href="/about/">About Us</a> |
+        | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> |
         <a href="/contact/">Contact</a> |
         <a href="/terms/">Terms and Conditions</a> |
         <a href="/privacy-policy/">Privacy Policy</a>
@@ -1007,7 +1071,11 @@
       <p>
         thisday.info uses cookies to ensure you get the best experience. By
         continuing to use the site, you agree to our use of cookies.
-        <a href="/privacy-policy/" style="color:#fff;text-decoration:underline;white-space:nowrap">Learn more</a>.
+        <a
+          href="/privacy-policy/"
+          style="color: #fff; text-decoration: underline; white-space: nowrap"
+          >Learn more</a
+        >.
       </p>
       <button id="acceptCookies" class="btn btn-primary btn-sm">OK</button>
     </div>
@@ -1029,24 +1097,36 @@
               bsCarousel.pause();
               pauseBtn.setAttribute("aria-pressed", "true");
               pauseBtn.setAttribute("aria-label", "Play carousel");
-              pauseBtn.innerHTML = '<i class="bi bi-play-fill" aria-hidden="true"></i>';
+              pauseBtn.innerHTML =
+                '<i class="bi bi-play-fill" aria-hidden="true"></i>';
             } else {
               bsCarousel.cycle();
               pauseBtn.setAttribute("aria-pressed", "false");
               pauseBtn.setAttribute("aria-label", "Pause carousel");
-              pauseBtn.innerHTML = '<i class="bi bi-pause-fill" aria-hidden="true"></i>';
+              pauseBtn.innerHTML =
+                '<i class="bi bi-pause-fill" aria-hidden="true"></i>';
             }
           };
 
-          carouselEl.addEventListener("mouseenter", () => { if (!isPaused) bsCarousel.pause(); });
-          carouselEl.addEventListener("mouseleave", () => { if (!isPaused) bsCarousel.cycle(); });
-          carouselEl.addEventListener("focusin",    () => { if (!isPaused) bsCarousel.pause(); });
-          carouselEl.addEventListener("focusout",   () => { if (!isPaused) bsCarousel.cycle(); });
+          carouselEl.addEventListener("mouseenter", () => {
+            if (!isPaused) bsCarousel.pause();
+          });
+          carouselEl.addEventListener("mouseleave", () => {
+            if (!isPaused) bsCarousel.cycle();
+          });
+          carouselEl.addEventListener("focusin", () => {
+            if (!isPaused) bsCarousel.pause();
+          });
+          carouselEl.addEventListener("focusout", () => {
+            if (!isPaused) bsCarousel.cycle();
+          });
           pauseBtn.addEventListener("click", () => setPaused(!isPaused));
 
           // Show pause button once carousel is visible
           const carouselObserver = new IntersectionObserver((entries) => {
-            entries.forEach(e => { pauseBtn.style.display = e.isIntersecting ? "block" : "none"; });
+            entries.forEach((e) => {
+              pauseBtn.style.display = e.isIntersecting ? "block" : "none";
+            });
           });
           carouselObserver.observe(carouselEl);
         }
@@ -1145,28 +1225,31 @@
       });
     }
   </script>
-<!-- Google Ads: 60 Seconds on Site -->
-<script>
-(function() {
-  var fired = false;
-  var timer = null;
-  function fireConversion() {
-    if (fired) return;
-    fired = true;
-    gtag('event', 'conversion', {
-      'send_to': 'AW-17262488503/pnJhCPrptfsbELfXsqdA'
-    });
-  }
-  function startTimer() {
-    if (!timer) timer = setTimeout(fireConversion, 60000);
-  }
-  function stopTimer() {
-    if (timer) { clearTimeout(timer); timer = null; }
-  }
-  document.addEventListener('visibilitychange', function() {
-    document.hidden ? stopTimer() : (!fired && startTimer());
-  });
-  if (!document.hidden) startTimer();
-})();
-</script>
+  <!-- Google Ads: 60 Seconds on Site -->
+  <script>
+    (function () {
+      var fired = false;
+      var timer = null;
+      function fireConversion() {
+        if (fired) return;
+        fired = true;
+        gtag("event", "conversion", {
+          send_to: "AW-17262488503/pnJhCPrptfsbELfXsqdA",
+        });
+      }
+      function startTimer() {
+        if (!timer) timer = setTimeout(fireConversion, 60000);
+      }
+      function stopTimer() {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      }
+      document.addEventListener("visibilitychange", function () {
+        document.hidden ? stopTimer() : !fired && startTimer();
+      });
+      if (!document.hidden) startTimer();
+    })();
+  </script>
 </html>

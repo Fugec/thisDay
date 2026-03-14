@@ -1608,7 +1608,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v4:${mm}-${dd}`;
+    const kvKey = `quiz-v5:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2445,7 +2445,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v4:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v5:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2499,7 +2499,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v4:${mm}-${dd}`;
+  const kvKey = `quiz-v5:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2533,7 +2533,7 @@ async function generateQuizForDate(
   if (featuredEvent)
     contextLines.push(`Featured event: ${featuredEvent.text}`);
   if (wikiSummary)
-    contextLines.push(`Wikipedia context: ${wikiSummary.substring(0, 300)}`);
+    contextLines.push(`Wikipedia context: ${wikiSummary.replace(/\b(1[0-9]{3}|20[0-2][0-9])\b/g, "").substring(0, 300)}`);
   indexedEvents.forEach((e, i) =>
     contextLines.push(`Event[${i}]: ${e.text.substring(0, 150)}`),
   );
@@ -2977,7 +2977,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v4:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v5:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -2985,7 +2985,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
         return new Response(cachedHtml, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "public, max-age=3600, s-maxage=86400",
+            "Cache-Control": "public, max-age=1800, s-maxage=3600",
             "X-Cache": "HIT",
           },
         });

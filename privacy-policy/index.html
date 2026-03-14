@@ -591,10 +591,10 @@
 
       // Sync switches and apply theme on load
       const isDark =
-        localStorage.getItem("theme") === "dark" ||
+        localStorage.getItem("darkTheme") !== "false" ||
         (window.matchMedia &&
           window.matchMedia("(prefers-color-scheme: dark)").matches &&
-          localStorage.getItem("theme") !== "light");
+          localStorage.getItem("darkTheme") !== "false");
       applyTheme(isDark);
       if (themeSwitchDesktop) themeSwitchDesktop.checked = isDark;
       if (themeSwitchMobile) themeSwitchMobile.checked = isDark;

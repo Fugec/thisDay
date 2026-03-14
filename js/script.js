@@ -1773,8 +1773,8 @@ async function showEventDetails(
   lastActiveCard?.setAttribute("aria-expanded", "true");
 }
 
-function setTheme(theme) {
-  if (theme === "dark") {
+function setTheme(isDark) {
+  if (isDark) {
     body.classList.add("dark-theme");
     if (themeSwitchMobile) themeSwitchMobile.checked = true;
     if (themeSwitchDesktop) themeSwitchDesktop.checked = true;
@@ -1788,7 +1788,7 @@ function setTheme(theme) {
     if (themeSwitchDesktop && themeSwitchDesktop.nextElementSibling) {
       themeSwitchDesktop.nextElementSibling.textContent = "Light Mode";
     }
-    localStorage.setItem("theme", "dark");
+    localStorage.setItem("darkTheme", "true");
   } else {
     body.classList.remove("dark-theme");
     if (themeSwitchMobile) themeSwitchMobile.checked = false;
@@ -1803,14 +1803,14 @@ function setTheme(theme) {
     if (themeSwitchDesktop && themeSwitchDesktop.nextElementSibling) {
       themeSwitchDesktop.nextElementSibling.textContent = "Dark Mode";
     }
-    localStorage.setItem("theme", "light");
+    localStorage.setItem("darkTheme", "false");
   }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    const savedTheme = localStorage.getItem("theme") || "dark";
-    setTheme(savedTheme);
+    const savedTheme = localStorage.getItem("darkTheme");
+    setTheme(savedTheme !== "false"); // default: dark
     await renderCalendar();
   } catch (error) {
     console.error("Error initializing application:", error);
@@ -1829,13 +1829,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 if (themeSwitchMobile) {
   themeSwitchMobile.addEventListener("change", () => {
-    setTheme(themeSwitchMobile.checked ? "dark" : "light");
+    setTheme(themeSwitchMobile.checked);
   });
 }
 
 if (themeSwitchDesktop) {
   themeSwitchDesktop.addEventListener("change", () => {
-    setTheme(themeSwitchDesktop.checked ? "dark" : "light");
+    setTheme(themeSwitchDesktop.checked);
   });
 }
 

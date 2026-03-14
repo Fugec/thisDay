@@ -150,6 +150,10 @@ export default {
       if (html) {
         // Patch old quiz API path in already-stored HTML
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
+        // Patch old btn-warning buttons to site-btn-primary
+        patchedHtml = patchedHtml
+          .replaceAll('class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"', 'class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"')
+          .replaceAll('class="btn btn-warning px-4 mt-3" id="tdq-submit-btn"', 'class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"');
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
           const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}body.dark-theme #read-progress{background:#60a5fa}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.site-btn-primary{border-color:#3b82f6;color:#2563eb}.site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}</style>`;
@@ -1425,7 +1429,7 @@ ${analysisBadItems}
     <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:4px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
     <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:16px;opacity:.8">You've reached the end — try this quick quiz!</p>
     <div id="tdq-questions"></div>
-    <button class="btn btn-warning px-4 mt-3" id="tdq-submit-btn" style="display:none">Check Answers</button>
+    <button class="site-btn site-btn-primary mt-3" id="tdq-submit-btn" style="display:none">Check Answers</button>
     <div id="tdq-score" class="mt-3" hidden></div>
   </div>
 
@@ -1691,6 +1695,7 @@ ${JSON.stringify(
       .month-header { font-size: 1.3rem; font-weight: 700; color: #3b82f6 !important; border-bottom: 2px solid rgba(59,130,246,0.3); padding-bottom: 6px; margin-bottom: 14px; }
     </style>
   </head>
+  <body>
 
   <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
     <div class="container-fluid">
@@ -1758,6 +1763,7 @@ ${JSON.stringify(
       if (tm) tm.addEventListener("change",  (e) => setTheme(e.target.checked));
     });
   </script>
+</body>
 </html>`;
 }
 

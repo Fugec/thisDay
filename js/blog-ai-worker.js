@@ -725,9 +725,11 @@ async function generateAndStore(env) {
     cache.delete(new Request("https://thisday.info/news-sitemap.xml")),
   ]);
 
-  // Generate and store a quiz for this blog post
+  // Generate and store a quiz for this blog post using rich context from the live post HTML
   try {
-    const quiz = await generateBlogQuiz(env.AI, content, slug);
+    const richContent = await buildRichContent({ title: content.title, description: content.description || "" }, slug);
+    const enrichedContent = { ...content, ...richContent };
+    const quiz = await generateBlogQuiz(env.AI, enrichedContent, slug);
     if (quiz) {
       await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), {
         expirationTtl: 90 * 86_400,

@@ -69,7 +69,7 @@ export default {
   /**
    * HTTP fetch handler — serves blog pages and the manual trigger endpoint.
    */
-  async fetch(request, env, _ctx) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, "") || "/";
 
@@ -424,6 +424,22 @@ export default {
             ),
           );
         }
+        // Pre-warm quiz in background so it's ready before the user clicks "Take the Quiz"
+        ctx.waitUntil((async () => {
+          const cached = await env.BLOG_AI_KV.get(`quiz-v2:blog:${slug}`);
+          if (!cached && env.AI) {
+            try {
+              const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+              const index = indexRaw ? JSON.parse(indexRaw) : [];
+              const entry = index.find(p => p.slug === slug);
+              if (entry) {
+                const richContent = await buildRichContent(entry, slug);
+                const quiz = await generateBlogQuiz(env.AI, richContent, slug);
+                if (quiz) await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+              }
+            } catch (e) { console.error("Quiz pre-warm failed:", e); }
+          }
+        })());
         return htmlResponse(patchedHtml);
       }
     }

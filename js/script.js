@@ -17,6 +17,7 @@ const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
 const body = document.body;
 
 let currentDate = new Date();
+let lastActiveCard = null;
 
 const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000;
 const LOCAL_STORAGE_CACHE_KEY = "wikipediaEventCache";
@@ -717,7 +718,7 @@ async function renderCalendar() {
     dayCard.setAttribute("role", "button");
     dayCard.setAttribute("tabindex", "0");
     dayCard.setAttribute("aria-label", `Events for ${i} ${monthNames[month]}`);
-    dayCard.setAttribute("aria-pressed", "false");
+    dayCard.setAttribute("aria-expanded", "false");
     dayCard.classList.add("needs-load");
     dayCard.addEventListener("click", async () => {
       if (
@@ -728,6 +729,7 @@ async function renderCalendar() {
         dayCard.classList.remove("needs-load");
       }
       if (dayCard.eventsData) {
+        lastActiveCard = dayCard;
         showEventDetails(
           parseInt(dayCard.getAttribute("data-day"), 10),
           month + 1,
@@ -1641,7 +1643,7 @@ function renderFilteredItems(itemsToRender) {
                         <div class="modal-thumbnail-container ms-3">
                             <img src="${event.thumbnailUrl}" class="rounded"
                                 style="width: 40px; height: 40px; object-fit: cover;"
-                                alt="Event thumbnail" onerror="this.style.display='none'">
+                                alt="${event.title ? event.title.substring(0, 80) : ''}" onerror="this.style.display='none'">
                         </div>
                         `
                         : ""
@@ -1654,6 +1656,8 @@ function renderFilteredItems(itemsToRender) {
 }
 
 function applyFilter() {
+  const modalBody = document.getElementById("modalBodyContent");
+  const prevScroll = modalBody ? modalBody.scrollTop : 0;
   const filteredItems = currentDayAllItems.filter((item) => {
     if (currentActiveFilter === "all") {
       return true;
@@ -1663,6 +1667,7 @@ function applyFilter() {
       .includes(currentActiveFilter);
   });
   renderFilteredItems(filteredItems);
+  if (modalBody) modalBody.scrollTop = prevScroll;
 }
 
 async function showEventDetails(
@@ -1753,12 +1758,19 @@ async function showEventDetails(
     console.error("Error loading event details:", error);
     modalBodyContent.innerHTML = `
       <div class="alert alert-danger" role="alert">
-        <h5><i class="bi bi-exclamation-circle"></i> Loading Error</h5>
-        <p>Unable to load events for this day. Please check your internet connection and try again.</p>
+        <h5><i class="bi bi-exclamation-circle me-1"></i>Loading Error</h5>
+        <p class="mb-2">Unable to load events for this day. Please check your internet connection.</p>
+        <button class="btn btn-sm btn-outline-danger" id="retryEventsBtn">
+          <i class="bi bi-arrow-clockwise me-1"></i>Try again
+        </button>
       </div>
     `;
+    document.getElementById("retryEventsBtn")?.addEventListener("click", () => {
+      showEventDetails(day, month, year, null);
+    });
   }
   eventDetailModal.show();
+  lastActiveCard?.setAttribute("aria-expanded", "true");
 }
 
 function setTheme(theme) {
@@ -1972,6 +1984,8 @@ if (eventDetailModalElement) {
     });
   eventDetailModalElement.addEventListener("hidden.bs.modal", function () {
     currentActiveFilter = "all";
+    lastActiveCard?.setAttribute("aria-expanded", "false");
+    lastActiveCard = null;
   });
 }
 

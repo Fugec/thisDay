@@ -551,6 +551,7 @@ function initializeChatbot() {
 
     if (chatbotOpen) {
       chatbotInput.focus();
+      localStorage.setItem("chatbotUsed", "1");
     }
   });
 

@@ -301,7 +301,7 @@
         padding: 10px;
       }
 
-      .text-muted {
+      .carousel-header .text-muted {
         color: #fff !important;
       }
 
@@ -439,17 +439,13 @@
         border-radius: var(--border-radius);
         padding: 15px;
         text-align: center;
-        min-height: 120px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        transition: background-color 0.3s ease, border-color 0.3s ease;
         min-height: 100px;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition: background-color 0.3s ease, border-color 0.3s ease;
       }
 
       .day-card .spinner-border {
@@ -725,6 +721,7 @@
   </head>
 
   <body>
+    <a href="#calendarGrid" class="visually-hidden-focusable position-absolute top-0 start-0 p-2 bg-primary text-white fw-semibold" style="z-index:9999;border-radius:0 0 6px 0">Skip to calendar</a>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
       <div class="container-fluid">
         <a class="navbar-brand" href="/">thisDay.</a>
@@ -805,6 +802,15 @@
           <span class="carousel-control-next-icon" aria-hidden="true"></span>
           <span class="visually-hidden">Next</span>
         </button>
+        <button
+          id="carouselPauseBtn"
+          type="button"
+          aria-label="Pause carousel"
+          aria-pressed="false"
+          style="position:absolute;bottom:10px;right:10px;z-index:10;background:rgba(0,0,0,0.45);border:none;color:#fff;border-radius:6px;padding:4px 8px;font-size:0.8rem;cursor:pointer;display:none"
+        >
+          <i class="bi bi-pause-fill" aria-hidden="true"></i>
+        </button>
       </div>
     </header>
 
@@ -813,12 +819,14 @@
         <div
           class="month-navigation mb-2 d-flex justify-content-between align-items-center"
         >
-          <button class="btn btn-outline-primary px-3" id="prevMonthBtn">
-            <
+          <button class="btn btn-outline-primary px-3" id="prevMonthBtn" aria-label="Previous month">
+            <i class="bi bi-chevron-left" aria-hidden="true"></i>
+            <span class="d-none d-sm-inline ms-1">Prev</span>
           </button>
           <h2 id="currentMonthYear" class="mb-0"></h2>
-          <button class="btn btn-outline-primary px-3" id="nextMonthBtn">
-            >
+          <button class="btn btn-outline-primary px-3" id="nextMonthBtn" aria-label="Next month">
+            <span class="d-none d-sm-inline me-1">Next</span>
+            <i class="bi bi-chevron-right" aria-hidden="true"></i>
           </button>
         </div>
       </div>
@@ -957,6 +965,7 @@
       <p>
         thisday.info uses cookies to ensure you get the best experience. By
         continuing to use the site, you agree to our use of cookies.
+        <a href="/privacy-policy/" style="color:#fff;text-decoration:underline;white-space:nowrap">Learn more</a>.
       </p>
       <button id="acceptCookies" class="btn btn-primary btn-sm">OK</button>
     </div>
@@ -965,6 +974,51 @@
     <script src="js/script.js"></script>
     <script>
       document.addEventListener("DOMContentLoaded", () => {
+        // --- Carousel: pause-on-hover + pause/play button (WCAG 2.2.2) ---
+        const carouselEl = document.getElementById("historicalCarousel");
+        const pauseBtn = document.getElementById("carouselPauseBtn");
+        if (carouselEl && pauseBtn) {
+          let isPaused = false;
+          const bsCarousel = bootstrap.Carousel.getOrCreateInstance(carouselEl);
+
+          const setPaused = (paused) => {
+            isPaused = paused;
+            if (paused) {
+              bsCarousel.pause();
+              pauseBtn.setAttribute("aria-pressed", "true");
+              pauseBtn.setAttribute("aria-label", "Play carousel");
+              pauseBtn.innerHTML = '<i class="bi bi-play-fill" aria-hidden="true"></i>';
+            } else {
+              bsCarousel.cycle();
+              pauseBtn.setAttribute("aria-pressed", "false");
+              pauseBtn.setAttribute("aria-label", "Pause carousel");
+              pauseBtn.innerHTML = '<i class="bi bi-pause-fill" aria-hidden="true"></i>';
+            }
+          };
+
+          carouselEl.addEventListener("mouseenter", () => { if (!isPaused) bsCarousel.pause(); });
+          carouselEl.addEventListener("mouseleave", () => { if (!isPaused) bsCarousel.cycle(); });
+          carouselEl.addEventListener("focusin",    () => { if (!isPaused) bsCarousel.pause(); });
+          carouselEl.addEventListener("focusout",   () => { if (!isPaused) bsCarousel.cycle(); });
+          pauseBtn.addEventListener("click", () => setPaused(!isPaused));
+
+          // Show pause button once carousel is visible
+          const carouselObserver = new IntersectionObserver((entries) => {
+            entries.forEach(e => { pauseBtn.style.display = e.isIntersecting ? "block" : "none"; });
+          });
+          carouselObserver.observe(carouselEl);
+        }
+
+        // --- Chatbot nudge: fire once after 3s, only if never interacted, respect reduced-motion ---
+        const chatbotToggle = document.querySelector(".chatbot-toggle");
+        if (
+          chatbotToggle &&
+          !localStorage.getItem("chatbotUsed") &&
+          !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ) {
+          setTimeout(() => chatbotToggle.classList.add("nudge-once"), 3000);
+        }
+
         const cookieBanner = document.getElementById("cookieBanner");
         const acceptCookiesBtn = document.getElementById("acceptCookies");
         const COOKIE_ACCEPTED_KEY = "cookieBannerAccepted";

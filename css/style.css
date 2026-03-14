@@ -28,7 +28,6 @@ body.dark-theme {
 div#carouselIndicators {
   position: relative;
   margin-top: -20px;
-  display: none; /* Hide indicators */
 }
 
 /* button.carousel-control-next {
@@ -169,7 +168,7 @@ button.carousel-control-prev {
 }
 
 button.btn.btn-sm.btn-outline-primary.filter-btn {
-  font-size: 16px;
+  font-size: 0.875rem;
 }
 
 /* --- Highlighting for Active Filter Button --- */
@@ -219,7 +218,14 @@ body.dark-theme .form-check-label {
 }
 
 #eventFilterContainer .filter-btn {
-  width: calc(50% - 0.25rem);
+  flex: 1 1 calc(50% - 0.25rem);
+}
+
+@media (min-width: 576px) {
+  #eventFilterContainer .filter-btn {
+    flex: 0 0 auto;
+    min-width: 110px;
+  }
 }
 
 .chatbot-toggle {
@@ -240,7 +246,16 @@ body.dark-theme .form-check-label {
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: nudge 2s 1;
+}
+
+.chatbot-toggle.nudge-once {
+  animation: nudge 0.6s ease-in-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatbot-toggle,
+  .chatbot-toggle.nudge-once { animation: none; }
+  .word { animation: none; }
 }
 
 @keyframes nudge {
@@ -454,6 +469,11 @@ body.dark-theme .form-check-label {
 }
 
 @media (max-width: 768px) {
+  #carouselPauseBtn {
+    left: 10px;
+    right: auto;
+  }
+
   .chatbot-modal {
     bottom: 90px;
     right: 10px;
@@ -492,7 +512,7 @@ a.btn.btn-primary.btn-sm {
   --site-radius: 12px;
   --site-shadow-sm: 0 4px 14px rgba(15, 23, 42, 0.08);
   --site-shadow-md: 0 8px 28px rgba(15, 23, 42, 0.12);
-  --site-focus-ring: 0 0 0 0.2rem rgba(59, 130, 246, 0.25);
+  --site-focus-ring: 0 0 0 0.2rem rgba(59, 130, 246, 0.6);
 }
 
 body.dark-theme {

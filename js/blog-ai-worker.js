@@ -234,115 +234,72 @@ export default {
             </div>
           </div>`;
           const quizBlock = `
-  <!-- Quiz popup -->
+  <!-- Quiz popup: carousel format -->
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
-  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;padding:24px 20px 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Inter,sans-serif">
-    <button id="tdq-close" aria-label="Close quiz" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1">&times;</button>
-    <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px"></div>
-    <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
-    <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
-    <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:#f59e0b;margin-bottom:16px">0 of 5 answered</div>
-    <div id="tdq-questions"></div>
-    <button class="btn btn-warning mt-3" id="tdq-submit-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
-    <div id="tdq-score" class="mt-3" hidden></div>
+  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Inter,sans-serif;padding:0">
+    <button id="tdq-close" aria-label="Close quiz" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1;z-index:10">&times;</button>
+    <div style="padding:16px 20px 4px;text-align:center">
+      <div style="height:4px;background:var(--card-border,#e2e8f0);border-radius:3px;overflow:hidden;margin-bottom:10px"><div id="tdq-bar" style="height:100%;background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:3px;transition:width .4s ease;width:0%"></div></div>
+      <div id="tdq-dots" style="display:flex;justify-content:center;gap:8px;margin-bottom:6px"></div>
+      <p id="tdq-prog-lbl" style="font-size:.78rem;color:var(--text-muted,#6c757d);margin:0">Question 1 of 5</p>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 14px 4px">
+      <button id="tdq-prev" style="display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:7px;background:transparent;font-size:.8rem;font-weight:500;color:var(--text-color,#374151);cursor:pointer" disabled><i class="bi bi-arrow-left"></i> Back</button>
+      <span id="tdq-hint" style="font-size:.78rem;color:var(--text-muted,#6c757d);font-style:italic">Select an answer to continue</span>
+    </div>
+    <div id="tdq-wrapper"></div>
   </div>
   <div id="tdq-sentinel" style="height:1px"></div>
   <style>
-    .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
-    .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
+    .tdq-slide{display:none}.tdq-slide.tdq-active{display:block;animation:tdqIn .25s ease}@keyframes tdqIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .tdq-img-wrap{position:relative;width:100%;height:190px;overflow:hidden;background:#1e293b}.tdq-event-img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s ease}.tdq-slide.tdq-active .tdq-event-img{transform:scale(1.02)}
+    .tdq-img-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.65) 0%,rgba(0,0,0,.1) 60%,transparent 100%)}.tdq-yr-pill{position:absolute;bottom:12px;left:14px;background:#f59e0b;color:#fff;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:700;letter-spacing:.04em}
+    .tdq-sbody{padding:14px 16px 20px}.tdq-qlbl{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#f59e0b;margin-bottom:8px}
+    .tdq-qtext{font-size:1rem;font-weight:700;color:var(--text-color,#1e293b);margin-bottom:12px;line-height:1.45}
+    .tdq-opts{display:flex;flex-direction:column;gap:7px}
+    .tdq-opt{display:flex;align-items:center;gap:9px;padding:9px 13px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
     .tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
-    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
+    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
     .tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
     body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
     body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
     body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
-    .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
+    .tdq-feedback{font-size:.83rem;margin-top:5px;font-weight:600}.tdq-correct{color:#10b981}.tdq-wrong{color:#ef4444}
+    .tdq-exp{font-size:.82rem;margin-top:7px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0;color:var(--text-color,#1e293b);line-height:1.5}body.dark-theme .tdq-exp{background:rgba(59,130,246,.15);color:#e2e8f0}
+    .tdq-next-btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin-top:14px;padding:11px;background:#f59e0b;color:#fff;border:none;border-radius:9px;font-size:.9rem;font-weight:600;cursor:pointer;transition:background .15s;animation:tdqIn .25s ease}.tdq-next-btn:hover{background:#d97706}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
+    .tdq-dot{width:11px;height:11px;border-radius:50%;border:none;background:var(--card-border,#e2e8f0);cursor:pointer;padding:0;transition:all .2s;outline:none}.tdq-dot.tdq-dot-active{background:#3b82f6;transform:scale(1.25)}.tdq-dot.tdq-dot-done{background:#10b981}.tdq-dot.tdq-dot-wrong{background:#ef4444}
     #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important}
     .tdq-cta-sub{color:#6c757d}body.dark-theme .tdq-cta-sub{color:#fff}
   </style>
   <script>
   (function () {
     var slug = "${slug}";
+    var postImg = (document.querySelector("figure img") || {}).src || "";
+    var postYear = "";
+    document.querySelectorAll(".table.table-bordered td").forEach(function(td){if(/^\d{4}$/.test(td.textContent.trim()))postYear=td.textContent.trim();});
     var quizLoaded = false;
-    var selected = {};
     var answers = [];
-    function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
-    function openPopup() {
-      document.getElementById("tdq-overlay").style.display = "block";
-      document.getElementById("tdq-popup").style.display = "block";
-      requestAnimationFrame(function() { document.getElementById("tdq-popup").classList.add("tdq-popup-open"); });
-      document.body.style.overflow = "hidden";
-    }
-    function closePopup() {
-      var popup = document.getElementById("tdq-popup");
-      popup.classList.remove("tdq-popup-open");
-      setTimeout(function() { popup.style.display = "none"; document.getElementById("tdq-overlay").style.display = "none"; document.body.style.overflow = ""; }, 300);
-    }
-    document.getElementById("tdq-close").addEventListener("click", closePopup);
-    document.getElementById("tdq-overlay").addEventListener("click", closePopup);
-    function renderQuiz(quiz) {
-      answers = quiz.questions.map(function(q) { return Number(q.answer); });
-      var total = quiz.questions.length;
-      var topicEl = document.getElementById("tdq-topic");
-      if (topicEl) { var h1 = document.querySelector("h1"); if (h1) topicEl.textContent = "Quiz: " + h1.textContent.trim(); }
-      var container = document.getElementById("tdq-questions");
-      container.innerHTML = quiz.questions.map(function(q, qi) {
-        var optsHtml = (q.options || []).map(function(opt, oi) {
-          return '<div class="tdq-opt" data-qi="' + qi + '" data-oi="' + oi + '"><span class="tdq-opt-key">' + String.fromCharCode(65 + oi) + '</span>' + esc(String(opt)) + '</div>';
-        }).join("");
-        var expHtml = q.explanation ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>' : '';
-        return '<div class="tdq-question" id="tdq-q-' + qi + '"><p class="tdq-q-text"><strong>' + (qi + 1) + '.</strong> ' + esc(String(q.q)) + '</p><div class="tdq-options">' + optsHtml + '</div><div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' + expHtml + '</div>';
-      }).join("");
-      container.querySelectorAll(".tdq-opt").forEach(function(opt) {
-        opt.addEventListener("click", function() {
-          var qi = parseInt(this.dataset.qi), oi = parseInt(this.dataset.oi);
-          selected[qi] = oi;
-          container.querySelectorAll('[data-qi="' + qi + '"]').forEach(function(o) { o.classList.remove("tdq-opt-selected"); });
-          this.classList.add("tdq-opt-selected");
-          var answered = Object.keys(selected).length;
-          var progEl = document.getElementById("tdq-progress");
-          if (progEl) progEl.textContent = answered + " of " + total + " answered";
-          var allAnswered = quiz.questions.every(function(_, i) { return selected[i] !== undefined; });
-          document.getElementById("tdq-submit-btn").style.display = allAnswered ? "" : "none";
-        });
-      });
-    }
-    document.getElementById("tdq-submit-btn").addEventListener("click", function() {
-      var score = 0;
-      answers.forEach(function(correct, qi) {
-        var chosen = selected[qi] !== undefined ? selected[qi] : -1;
-        var fb = document.getElementById("tdq-f-" + qi);
-        var opts = document.querySelectorAll('[data-qi="' + qi + '"]');
-        fb.hidden = false;
-        opts.forEach(function(o) { o.style.pointerEvents = "none"; });
-        opts[correct].classList.add("tdq-opt-correct");
-        if (chosen === correct) { score++; fb.innerHTML = '<span class="tdq-correct">✓ Correct!</span>'; }
-        else { if (chosen >= 0) opts[chosen].classList.add("tdq-opt-wrong"); fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>'; }
-        var exp = document.getElementById("tdq-e-" + qi); if (exp) exp.hidden = false;
-      });
-      this.hidden = true;
-      var pct = Math.round(score / answers.length * 100);
-      var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
-      var el = document.getElementById("tdq-score");
-      el.hidden = false;
-      el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + '/' + answers.length + '</span> (' + pct + '%) — ' + msg + '</div>';
-    });
-    function maybeLoadAndShow() {
-      if (quizLoaded) return; quizLoaded = true;
-      fetch("/blog/quiz/" + slug)
-        .then(function(r) { return r.ok ? r.json() : null; })
-        .then(function(quiz) { if (!quiz || !quiz.questions || quiz.questions.length < 3) return; renderQuiz(quiz); openPopup(); })
-        .catch(function() {});
-    }
-    window.maybeLoadAndShowQuiz = maybeLoadAndShow;
-    if (window.location.hash === "#quiz") { setTimeout(maybeLoadAndShow, 600); }
-    if ("IntersectionObserver" in window) {
-      var sentinel = document.getElementById("tdq-sentinel");
-      var obs = new IntersectionObserver(function(entries) { if (entries[0].isIntersecting) { obs.disconnect(); setTimeout(maybeLoadAndShow, 800); } }, { threshold: 1.0 });
-      obs.observe(sentinel);
-    }
+    var selected = {};
+    var results = {};
+    var score = 0;
+    var cur = 0;
+    var total = 0;
+    function escHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+    function openPopup(){document.getElementById("tdq-overlay").style.display="block";document.getElementById("tdq-popup").style.display="block";requestAnimationFrame(function(){document.getElementById("tdq-popup").classList.add("tdq-popup-open");});document.body.style.overflow="hidden";}
+    function closePopup(){var p=document.getElementById("tdq-popup");p.classList.remove("tdq-popup-open");setTimeout(function(){p.style.display="none";document.getElementById("tdq-overlay").style.display="none";document.body.style.overflow="";},300);}
+    document.getElementById("tdq-close").addEventListener("click",closePopup);
+    document.getElementById("tdq-overlay").addEventListener("click",closePopup);
+    function showSlide(n){document.querySelectorAll(".tdq-slide").forEach(function(s){s.classList.remove("tdq-active");});var s=document.getElementById("tdq-slide-"+n);if(s)s.classList.add("tdq-active");cur=n;updateProgress(n);document.getElementById("tdq-prev").disabled=(n===0);}
+    function updateProgress(n){var pct=Math.round((n/total)*100);document.getElementById("tdq-bar").style.width=pct+"%";var lbl=document.getElementById("tdq-prog-lbl");if(n<total){lbl.textContent="Question "+(n+1)+" of "+total;}else{lbl.textContent="Quiz complete!";document.getElementById("tdq-bar").style.width="100%";}document.querySelectorAll(".tdq-dot").forEach(function(d,i){d.classList.remove("tdq-dot-active","tdq-dot-done","tdq-dot-wrong");if(i===n)d.classList.add("tdq-dot-active");else if(results[i]===true)d.classList.add("tdq-dot-done");else if(results[i]===false)d.classList.add("tdq-dot-wrong");});}
+    function evaluate(qi){var chosen=selected[qi]!==undefined?selected[qi]:-1;var correct=answers[qi];var opts=document.querySelectorAll('[data-qi="'+qi+'"]');var fb=document.getElementById("tdq-f-"+qi);var exp=document.getElementById("tdq-e-"+qi);opts.forEach(function(o){o.style.pointerEvents="none";});opts[correct].classList.add("tdq-opt-correct");if(chosen===correct){score++;results[qi]=true;fb.innerHTML='<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';}else{results[qi]=false;if(chosen>=0&&opts[chosen])opts[chosen].classList.add("tdq-opt-wrong");fb.innerHTML='<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}fb.hidden=false;if(exp)exp.hidden=false;var nb=document.querySelector('.tdq-next-btn[data-slide="'+qi+'"]');if(nb)nb.hidden=false;document.getElementById("tdq-hint").textContent="";updateProgress(cur);}
+    function showFinal(){var pct=Math.round(score/total*100);var msg=pct===100?"Perfect score!":pct>=80?"Excellent!":pct>=60?"Good job!":"Keep learning!";document.getElementById("tdq-score-num").textContent=score+"/"+total;document.getElementById("tdq-msg").textContent=msg;var rev="";for(var i=0;i<total;i++){var ok=results[i];rev+='<div style="display:flex;align-items:center;gap:8px;padding:9px 13px;font-size:.88rem;border-bottom:1px solid var(--card-border,#e2e8f0)"><span class="'+(ok?"tdq-correct":"tdq-wrong")+'">'+(ok?'<i class="bi bi-check-circle-fill"></i>':'<i class="bi bi-x-circle-fill"></i>')+'</span><span>Q'+(i+1)+': '+(ok?'Correct':'Incorrect')+'</span></div>';}document.getElementById("tdq-review").innerHTML=rev;}
+    function renderQuiz(quiz){total=Math.min(quiz.questions.length,5);answers=quiz.questions.slice(0,total).map(function(q){return Number(q.answer);});selected={};results={};score=0;cur=0;var dotsHtml="";for(var i=0;i<total;i++){dotsHtml+='<button class="tdq-dot'+(i===0?" tdq-dot-active":"")+'" data-dot="'+i+'" aria-label="Question '+(i+1)+'"></button>';}document.getElementById("tdq-dots").innerHTML=dotsHtml;var slidesHtml="";for(var qi=0;qi<total;qi++){var q=quiz.questions[qi];var optsHtml=(q.options||[]).map(function(opt,oi){return'<div class="tdq-opt" data-qi="'+qi+'" data-oi="'+oi+'" role="radio" aria-checked="false"><span class="tdq-opt-key">'+String.fromCharCode(65+oi)+'</span>'+escHtml(String(opt))+'</div>';}).join("");var expHtml=q.explanation?'<div class="tdq-exp" id="tdq-e-'+qi+'" hidden>'+escHtml(String(q.explanation))+'</div>':"";var imgHtml=postImg?'<div class="tdq-img-wrap"><img src="'+postImg+'" class="tdq-event-img" loading="'+(qi===0?"eager":"lazy")+'" /><div class="tdq-img-overlay"></div>'+(postYear?'<span class="tdq-yr-pill">'+escHtml(postYear)+'</span>':'')+'</div>':"";slidesHtml+='<div class="tdq-slide'+(qi===0?" tdq-active":"")+'" data-slide="'+qi+'" id="tdq-slide-'+qi+'">'+imgHtml+'<div class="tdq-sbody"><div class="tdq-qlbl"><i class="bi bi-patch-question-fill"></i>Question '+(qi+1)+' of '+total+'</div><p class="tdq-qtext">'+escHtml(String(q.q))+'</p><div class="tdq-opts">'+optsHtml+'</div><div class="tdq-feedback" id="tdq-f-'+qi+'" hidden></div>'+expHtml+'<button class="tdq-next-btn" data-slide="'+qi+'" hidden>'+(qi<total-1?'Next Question <i class="bi bi-arrow-right"></i>':'See Results <i class="bi bi-trophy-fill"></i>')+'</button></div></div>';}slidesHtml+='<div class="tdq-slide" data-slide="'+total+'" id="tdq-slide-'+total+'"><div style="padding:28px 20px;text-align:center"><i class="bi bi-trophy-fill" style="font-size:3rem;color:#f59e0b;display:block;margin-bottom:14px"></i><div class="tdq-score-box" style="text-align:left;margin-bottom:16px">You scored <span class="tdq-score-num" id="tdq-score-num">0/'+total+'</span> \u2014 <span id="tdq-msg">Keep learning!</span></div><div id="tdq-review" style="text-align:left;border:1px solid var(--card-border,#e2e8f0);border-radius:8px;overflow:hidden;margin-bottom:16px"></div><button onclick="(function(){var p=document.getElementById(\'tdq-popup\');p.classList.remove(\'tdq-popup-open\');setTimeout(function(){p.style.display=\'none\';document.getElementById(\'tdq-overlay\').style.display=\'none\';document.body.style.overflow=\'\';},300);})()" style="display:inline-flex;align-items:center;gap:7px;padding:10px 20px;background:var(--card-border,#e2e8f0);border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;color:var(--text-color,#1e293b)">Close</button></div></div>';document.getElementById("tdq-wrapper").innerHTML=slidesHtml;document.querySelectorAll("#tdq-wrapper .tdq-opt").forEach(function(opt){opt.addEventListener("click",function(){var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);if(results[qi]!==undefined)return;selected[qi]=oi;document.querySelectorAll('[data-qi="'+qi+'"]').forEach(function(o){o.classList.remove("tdq-opt-selected");o.setAttribute("aria-checked","false");});this.classList.add("tdq-opt-selected");this.setAttribute("aria-checked","true");setTimeout(function(){evaluate(qi);},280);});});document.querySelectorAll("#tdq-wrapper .tdq-next-btn").forEach(function(btn){btn.addEventListener("click",function(){var next=parseInt(this.dataset.slide)+1;showSlide(next);if(next===total)showFinal();document.getElementById("tdq-hint").textContent=next<total?"Select an answer to continue":"";});});document.getElementById("tdq-dots").querySelectorAll(".tdq-dot").forEach(function(d){d.addEventListener("click",function(){var i=parseInt(this.dataset.dot);if(results[i]!==undefined||i<cur)showSlide(i);});});document.getElementById("tdq-prev").addEventListener("click",function(){if(cur>0)showSlide(cur-1);});showSlide(0);}
+    function maybeLoadAndShow(){if(quizLoaded)return;quizLoaded=true;fetch("/blog/quiz/"+slug).then(function(r){return r.ok?r.json():null;}).then(function(quiz){if(!quiz||!quiz.questions||quiz.questions.length<3)return;renderQuiz(quiz);openPopup();}).catch(function(){});}
+    window.maybeLoadAndShowQuiz=maybeLoadAndShow;
+    if(window.location.hash==="#quiz"){setTimeout(maybeLoadAndShow,600);}
+    if("IntersectionObserver" in window){var sentinel=document.getElementById("tdq-sentinel");var obs=new IntersectionObserver(function(entries){if(entries[0].isIntersecting){obs.disconnect();setTimeout(maybeLoadAndShow,800);}},{threshold:1.0});obs.observe(sentinel);}
   })();
   <\/script>`;
           // Build "Explore in History" section from slug (e.g. "1-march-2026" → March 1)
@@ -1712,44 +1669,63 @@ ${analysisBadItems}
     })();
   </script>
 
-  <!-- Quiz popup: load quiz data and show after scroll to bottom -->
+  <!-- Quiz popup: carousel format -->
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
-  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;padding:24px 20px 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Inter,sans-serif">
-    <button id="tdq-close" aria-label="Close quiz" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1">&times;</button>
-    <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px"></div>
-    <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
-    <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
-    <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:#f59e0b;margin-bottom:16px">0 of 5 answered</div>
-    <div id="tdq-questions"></div>
-    <button class="btn btn-warning mt-3" id="tdq-submit-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
-    <div id="tdq-score" class="mt-3" hidden></div>
+  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Inter,sans-serif;padding:0">
+    <button id="tdq-close" aria-label="Close quiz" style="position:absolute;top:12px;right:16px;background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1;z-index:10">&times;</button>
+    <div style="padding:16px 20px 4px;text-align:center">
+      <div style="height:4px;background:var(--card-border,#e2e8f0);border-radius:3px;overflow:hidden;margin-bottom:10px"><div id="tdq-bar" style="height:100%;background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:3px;transition:width .4s ease;width:0%"></div></div>
+      <div id="tdq-dots" style="display:flex;justify-content:center;gap:8px;margin-bottom:6px"></div>
+      <p id="tdq-prog-lbl" style="font-size:.78rem;color:var(--text-muted,#6c757d);margin:0">Question 1 of 5</p>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 14px 4px">
+      <button id="tdq-prev" style="display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:7px;background:transparent;font-size:.8rem;font-weight:500;color:var(--text-color,#374151);cursor:pointer" disabled><i class="bi bi-arrow-left"></i> Back</button>
+      <span id="tdq-hint" style="font-size:.78rem;color:var(--text-muted,#6c757d);font-style:italic">Select an answer to continue</span>
+    </div>
+    <div id="tdq-wrapper"></div>
   </div>
 
   <div id="tdq-sentinel" style="height:1px"></div>
 
   <style>
-    .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
-    .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
+    .tdq-slide{display:none}.tdq-slide.tdq-active{display:block;animation:tdqIn .25s ease}@keyframes tdqIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .tdq-img-wrap{position:relative;width:100%;height:190px;overflow:hidden;background:#1e293b}.tdq-event-img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s ease}.tdq-slide.tdq-active .tdq-event-img{transform:scale(1.02)}
+    .tdq-img-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.65) 0%,rgba(0,0,0,.1) 60%,transparent 100%)}.tdq-yr-pill{position:absolute;bottom:12px;left:14px;background:#f59e0b;color:#fff;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:700;letter-spacing:.04em}
+    .tdq-sbody{padding:14px 16px 20px}.tdq-qlbl{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#f59e0b;margin-bottom:8px}
+    .tdq-qtext{font-size:1rem;font-weight:700;color:var(--text-color,#1e293b);margin-bottom:12px;line-height:1.45}
+    .tdq-opts{display:flex;flex-direction:column;gap:7px}
+    .tdq-opt{display:flex;align-items:center;gap:9px;padding:9px 13px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
     .tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
-    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
+    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
     .tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
     body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
     body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
     body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
-    .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
+    .tdq-feedback{font-size:.83rem;margin-top:5px;font-weight:600}.tdq-correct{color:#10b981}.tdq-wrong{color:#ef4444}
+    .tdq-exp{font-size:.82rem;margin-top:7px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0;color:var(--text-color,#1e293b);line-height:1.5}body.dark-theme .tdq-exp{background:rgba(59,130,246,.15);color:#e2e8f0}
+    .tdq-next-btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin-top:14px;padding:11px;background:#f59e0b;color:#fff;border:none;border-radius:9px;font-size:.9rem;font-weight:600;cursor:pointer;transition:background .15s;animation:tdqIn .25s ease}.tdq-next-btn:hover{background:#d97706}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
+    .tdq-dot{width:11px;height:11px;border-radius:50%;border:none;background:var(--card-border,#e2e8f0);cursor:pointer;padding:0;transition:all .2s;outline:none}.tdq-dot.tdq-dot-active{background:#3b82f6;transform:scale(1.25)}.tdq-dot.tdq-dot-done{background:#10b981}.tdq-dot.tdq-dot-wrong{background:#ef4444}
     #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important}
+    .tdq-cta-sub{color:#6c757d}body.dark-theme .tdq-cta-sub{color:#fff}
   </style>
 
   <script>
   (function () {
     var slug = "${esc(slug)}";
+    var postImgRaw = "${esc(c.imageUrl)}";
+    var postYear = "${esc(String(c.historicalYear || ''))}";
+    var postImg = postImgRaw ? "/image-proxy?src=" + encodeURIComponent(postImgRaw) + "&w=800&q=85" : "";
     var quizLoaded = false;
-    var selected = {};
     var answers = [];
+    var selected = {};
+    var results = {};
+    var score = 0;
+    var cur = 0;
+    var total = 0;
 
-    function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+    function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
     function openPopup() {
       document.getElementById("tdq-overlay").style.display = "block";
@@ -1761,79 +1737,145 @@ ${analysisBadItems}
     function closePopup() {
       var popup = document.getElementById("tdq-popup");
       popup.classList.remove("tdq-popup-open");
-      setTimeout(function() {
-        popup.style.display = "none";
-        document.getElementById("tdq-overlay").style.display = "none";
-        document.body.style.overflow = "";
-      }, 300);
+      setTimeout(function() { popup.style.display = "none"; document.getElementById("tdq-overlay").style.display = "none"; document.body.style.overflow = ""; }, 300);
     }
 
     document.getElementById("tdq-close").addEventListener("click", closePopup);
     document.getElementById("tdq-overlay").addEventListener("click", closePopup);
 
-    function renderQuiz(quiz) {
-      answers = quiz.questions.map(function(q) { return Number(q.answer); });
-      var total = quiz.questions.length;
-      var topicEl = document.getElementById("tdq-topic");
-      if (topicEl) { var h1 = document.querySelector("h1"); if (h1) topicEl.textContent = "Quiz: " + h1.textContent.trim(); }
-      var container = document.getElementById("tdq-questions");
-      container.innerHTML = quiz.questions.map(function(q, qi) {
-        var optsHtml = (q.options || []).map(function(opt, oi) {
-          return '<div class="tdq-opt" data-qi="' + qi + '" data-oi="' + oi + '">' +
-            '<span class="tdq-opt-key">' + String.fromCharCode(65 + oi) + '</span>' + esc(String(opt)) + '</div>';
-        }).join("");
-        var expHtml = q.explanation
-          ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>'
-          : '';
-        return '<div class="tdq-question" id="tdq-q-' + qi + '">' +
-          '<p class="tdq-q-text"><strong>' + (qi + 1) + '.</strong> ' + esc(String(q.q)) + '</p>' +
-          '<div class="tdq-options">' + optsHtml + '</div>' +
-          '<div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' +
-          expHtml +
-          '</div>';
-      }).join("");
+    function showSlide(n) {
+      document.querySelectorAll(".tdq-slide").forEach(function(s){s.classList.remove("tdq-active");});
+      var s = document.getElementById("tdq-slide-" + n);
+      if (s) s.classList.add("tdq-active");
+      cur = n;
+      updateProgress(n);
+      document.getElementById("tdq-prev").disabled = (n === 0);
+    }
 
-      container.querySelectorAll(".tdq-opt").forEach(function(opt) {
-        opt.addEventListener("click", function() {
-          var qi = parseInt(this.dataset.qi), oi = parseInt(this.dataset.oi);
-          selected[qi] = oi;
-          container.querySelectorAll('[data-qi="' + qi + '"]').forEach(function(o) { o.classList.remove("tdq-opt-selected"); });
-          this.classList.add("tdq-opt-selected");
-          var answered = Object.keys(selected).length;
-          var progEl = document.getElementById("tdq-progress");
-          if (progEl) progEl.textContent = answered + " of " + total + " answered";
-          var allAnswered = quiz.questions.every(function(_, i) { return selected[i] !== undefined; });
-          document.getElementById("tdq-submit-btn").style.display = allAnswered ? "" : "none";
-        });
+    function updateProgress(n) {
+      var pct = Math.round((n / total) * 100);
+      document.getElementById("tdq-bar").style.width = pct + "%";
+      var lbl = document.getElementById("tdq-prog-lbl");
+      if (n < total) { lbl.textContent = "Question " + (n + 1) + " of " + total; }
+      else { lbl.textContent = "Quiz complete!"; document.getElementById("tdq-bar").style.width = "100%"; }
+      document.querySelectorAll(".tdq-dot").forEach(function(d, i) {
+        d.classList.remove("tdq-dot-active","tdq-dot-done","tdq-dot-wrong");
+        if (i === n) d.classList.add("tdq-dot-active");
+        else if (results[i] === true) d.classList.add("tdq-dot-done");
+        else if (results[i] === false) d.classList.add("tdq-dot-wrong");
       });
     }
 
-    document.getElementById("tdq-submit-btn").addEventListener("click", function() {
-      var score = 0;
-      answers.forEach(function(correct, qi) {
-        var chosen = selected[qi] !== undefined ? selected[qi] : -1;
-        var fb = document.getElementById("tdq-f-" + qi);
-        var opts = document.querySelectorAll('[data-qi="' + qi + '"]');
-        fb.hidden = false;
-        opts.forEach(function(o) { o.style.pointerEvents = "none"; });
-        opts[correct].classList.add("tdq-opt-correct");
-        if (chosen === correct) {
-          score++;
-          fb.innerHTML = '<span class="tdq-correct">✓ Correct!</span>';
-        } else {
-          if (chosen >= 0) opts[chosen].classList.add("tdq-opt-wrong");
-          fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>';
-        }
-        var exp = document.getElementById("tdq-e-" + qi);
-        if (exp) exp.hidden = false;
-      });
-      this.hidden = true;
-      var pct = Math.round(score / answers.length * 100);
+    function evaluate(qi) {
+      var chosen = selected[qi] !== undefined ? selected[qi] : -1;
+      var correct = answers[qi];
+      var opts = document.querySelectorAll('[data-qi="' + qi + '"]');
+      var fb = document.getElementById("tdq-f-" + qi);
+      var exp = document.getElementById("tdq-e-" + qi);
+      opts.forEach(function(o){o.style.pointerEvents="none";});
+      opts[correct].classList.add("tdq-opt-correct");
+      if (chosen === correct) {
+        score++; results[qi] = true;
+        fb.innerHTML = '<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';
+      } else {
+        results[qi] = false;
+        if (chosen >= 0 && opts[chosen]) opts[chosen].classList.add("tdq-opt-wrong");
+        fb.innerHTML = '<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>';
+      }
+      fb.hidden = false;
+      if (exp) exp.hidden = false;
+      var nb = document.querySelector('.tdq-next-btn[data-slide="' + qi + '"]');
+      if (nb) nb.hidden = false;
+      document.getElementById("tdq-hint").textContent = "";
+      updateProgress(cur);
+    }
+
+    function showFinal() {
+      var pct = Math.round(score / total * 100);
       var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
-      var el = document.getElementById("tdq-score");
-      el.hidden = false;
-      el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + '/' + answers.length + '</span> (' + pct + '%) — ' + msg + '</div>';
-    });
+      document.getElementById("tdq-score-num").textContent = score + "/" + total;
+      document.getElementById("tdq-msg").textContent = msg;
+      var rev = "";
+      for (var i = 0; i < total; i++) {
+        var ok = results[i];
+        rev += '<div style="display:flex;align-items:center;gap:8px;padding:9px 13px;font-size:.88rem;border-bottom:1px solid var(--card-border,#e2e8f0)">' +
+          '<span class="' + (ok ? "tdq-correct" : "tdq-wrong") + '">' + (ok ? '<i class="bi bi-check-circle-fill"></i>' : '<i class="bi bi-x-circle-fill"></i>') + '</span>' +
+          '<span>Q' + (i + 1) + ': ' + (ok ? 'Correct' : 'Incorrect') + '</span></div>';
+      }
+      document.getElementById("tdq-review").innerHTML = rev;
+    }
+
+    function renderQuiz(quiz) {
+      total = Math.min(quiz.questions.length, 5);
+      answers = quiz.questions.slice(0, total).map(function(q) { return Number(q.answer); });
+      selected = {}; results = {}; score = 0; cur = 0;
+      var dotsHtml = "";
+      for (var i = 0; i < total; i++) {
+        dotsHtml += '<button class="tdq-dot' + (i === 0 ? " tdq-dot-active" : "") + '" data-dot="' + i + '" aria-label="Question ' + (i + 1) + '"></button>';
+      }
+      document.getElementById("tdq-dots").innerHTML = dotsHtml;
+      var slidesHtml = "";
+      for (var qi = 0; qi < total; qi++) {
+        var q = quiz.questions[qi];
+        var optsHtml = (q.options || []).map(function(opt, oi) {
+          return '<div class="tdq-opt" data-qi="' + qi + '" data-oi="' + oi + '" role="radio" aria-checked="false">' +
+            '<span class="tdq-opt-key">' + String.fromCharCode(65 + oi) + '</span>' + escHtml(String(opt)) + '</div>';
+        }).join("");
+        var expHtml = q.explanation ? '<div class="tdq-exp" id="tdq-e-' + qi + '" hidden>' + escHtml(String(q.explanation)) + '</div>' : '';
+        var imgHtml = postImg
+          ? '<div class="tdq-img-wrap"><img src="' + postImg + '" class="tdq-event-img" loading="' + (qi === 0 ? "eager" : "lazy") + '" /><div class="tdq-img-overlay"></div>' +
+            (postYear ? '<span class="tdq-yr-pill">' + escHtml(postYear) + '</span>' : '') + '</div>'
+          : '';
+        slidesHtml +=
+          '<div class="tdq-slide' + (qi === 0 ? ' tdq-active' : '') + '" data-slide="' + qi + '" id="tdq-slide-' + qi + '">' +
+          imgHtml +
+          '<div class="tdq-sbody">' +
+          '<div class="tdq-qlbl"><i class="bi bi-patch-question-fill"></i>Question ' + (qi + 1) + ' of ' + total + '</div>' +
+          '<p class="tdq-qtext">' + escHtml(String(q.q)) + '</p>' +
+          '<div class="tdq-opts">' + optsHtml + '</div>' +
+          '<div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' +
+          expHtml +
+          '<button class="tdq-next-btn" data-slide="' + qi + '" hidden>' +
+          (qi < total - 1 ? 'Next Question <i class="bi bi-arrow-right"></i>' : 'See Results <i class="bi bi-trophy-fill"></i>') +
+          '</button></div></div>';
+      }
+      slidesHtml +=
+        '<div class="tdq-slide" data-slide="' + total + '" id="tdq-slide-' + total + '">' +
+        '<div style="padding:28px 20px;text-align:center">' +
+        '<i class="bi bi-trophy-fill" style="font-size:3rem;color:#f59e0b;display:block;margin-bottom:14px"></i>' +
+        '<div class="tdq-score-box" style="text-align:left;margin-bottom:16px">You scored <span class="tdq-score-num" id="tdq-score-num">0/' + total + '</span> \u2014 <span id="tdq-msg">Keep learning!</span></div>' +
+        '<div id="tdq-review" style="text-align:left;border:1px solid var(--card-border,#e2e8f0);border-radius:8px;overflow:hidden;margin-bottom:16px"></div>' +
+        '<button onclick="(function(){var p=document.getElementById(\'tdq-popup\');p.classList.remove(\'tdq-popup-open\');setTimeout(function(){p.style.display=\'none\';document.getElementById(\'tdq-overlay\').style.display=\'none\';document.body.style.overflow=\'\';},300);})()" style="display:inline-flex;align-items:center;gap:7px;padding:10px 20px;background:var(--card-border,#e2e8f0);border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;color:var(--text-color,#1e293b)">Close</button>' +
+        '</div></div>';
+      document.getElementById("tdq-wrapper").innerHTML = slidesHtml;
+      document.querySelectorAll("#tdq-wrapper .tdq-opt").forEach(function(opt) {
+        opt.addEventListener("click", function() {
+          var qi = parseInt(this.dataset.qi), oi = parseInt(this.dataset.oi);
+          if (results[qi] !== undefined) return;
+          selected[qi] = oi;
+          document.querySelectorAll('[data-qi="' + qi + '"]').forEach(function(o){o.classList.remove("tdq-opt-selected");o.setAttribute("aria-checked","false");});
+          this.classList.add("tdq-opt-selected");
+          this.setAttribute("aria-checked","true");
+          setTimeout(function(){evaluate(qi);}, 280);
+        });
+      });
+      document.querySelectorAll("#tdq-wrapper .tdq-next-btn").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+          var next = parseInt(this.dataset.slide) + 1;
+          showSlide(next);
+          if (next === total) showFinal();
+          document.getElementById("tdq-hint").textContent = next < total ? "Select an answer to continue" : "";
+        });
+      });
+      document.getElementById("tdq-dots").querySelectorAll(".tdq-dot").forEach(function(d) {
+        d.addEventListener("click", function() {
+          var i = parseInt(this.dataset.dot);
+          if (results[i] !== undefined || i < cur) showSlide(i);
+        });
+      });
+      document.getElementById("tdq-prev").addEventListener("click", function() { if (cur > 0) showSlide(cur - 1); });
+      showSlide(0);
+    }
 
     function maybeLoadAndShow() {
       if (quizLoaded) return;
@@ -1845,12 +1887,10 @@ ${analysisBadItems}
           renderQuiz(quiz);
           openPopup();
         })
-        .catch(function() { /* quiz unavailable, silently skip */ });
+        .catch(function() {});
     }
-    // Expose so the CTA button in the article body can trigger it
     window.maybeLoadAndShowQuiz = maybeLoadAndShow;
 
-    // Auto-open if deep-linked with #quiz hash
     if (window.location.hash === "#quiz") {
       setTimeout(maybeLoadAndShow, 600);
     }

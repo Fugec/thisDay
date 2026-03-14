@@ -115,24 +115,31 @@ export default {
       });
     }
 
-    // Admin: preload all missing quizzes — POST /blog/preload-quizzes
-    if (path === "/blog/preload-quizzes" && request.method === "POST") {
+    // Debug: show what facts would be sent to AI for a slug — GET /blog/quiz-debug/{slug}
+    const quizDebugMatch = path.match(/^\/blog\/quiz-debug\/([^/]+)$/);
+    if (quizDebugMatch) {
+      const slug = quizDebugMatch[1];
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
       const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const entry = index.find((p) => p.slug === slug);
+      if (!entry) return new Response("not found", { status: 404 });
+      const content = await buildRichContent(entry, slug);
+      const keyFacts = (content.keyFacts || []).slice(0, 5);
+      return new Response(JSON.stringify({ keyFactsCount: content.keyFacts?.length, keyFacts, description: content.description?.substring(0, 200) }, null, 2), { headers: { "Content-Type": "application/json" } });
+    }
+
+    // Admin: regenerate all quizzes with rich context — POST /blog/preload-quizzes?offset=0&limit=5
+    if (path === "/blog/preload-quizzes" && request.method === "POST") {
+      const params = new URL(request.url).searchParams;
+      const offset = parseInt(params.get("offset") || "0", 10);
+      const limit = parseInt(params.get("limit") || "5", 10);
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const batch = index.slice(offset, offset + limit);
       const results = [];
-      for (const entry of index) {
-        const existing = await env.BLOG_AI_KV.get(`quiz:blog:${entry.slug}`);
-        if (existing) { results.push({ slug: entry.slug, status: "cached" }); continue; }
+      for (const entry of batch) {
         try {
-          const titleParts = (entry.title || entry.slug).split(" - ");
-          const content = {
-            title: entry.title || entry.slug,
-            eventTitle: titleParts[0] || entry.title || entry.slug,
-            historicalDate: titleParts[1] || "",
-            location: "", country: "",
-            description: entry.description || entry.title || "",
-            keyFacts: [],
-          };
+          const content = await buildRichContent(entry, entry.slug);
           const quiz = await generateBlogQuiz(env.AI, content, entry.slug);
           if (quiz) {
             await env.BLOG_AI_KV.put(`quiz:blog:${entry.slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
@@ -159,29 +166,17 @@ export default {
           headers: {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "public, max-age=86400, s-maxage=0",
           },
         });
       }
-      // Quiz not in KV — generate on-demand from index entry
+      // Quiz not in KV — generate on-demand using rich content from the post HTML
       try {
         const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
         const index = indexRaw ? JSON.parse(indexRaw) : [];
         const entry = index.find((p) => p.slug === slug);
         if (entry && env.AI) {
-          // Try to split "Event Name - Month Day, Year" from the title
-          const titleParts = (entry.title || slug).split(" - ");
-          const eventTitle = titleParts[0] || entry.title || slug;
-          const historicalDate = titleParts[1] || "";
-          const content = {
-            title: entry.title || slug,
-            eventTitle,
-            historicalDate,
-            location: "",
-            country: "",
-            description: entry.description || entry.title || "",
-            keyFacts: [],
-          };
+          const content = await buildRichContent(entry, slug);
           const quiz = await generateBlogQuiz(env.AI, content, slug);
           if (quiz) {
             await env.BLOG_AI_KV.put(`quiz:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
@@ -751,6 +746,64 @@ async function generateAndStore(env) {
 // Blog quiz generation
 // ---------------------------------------------------------------------------
 
+// Fetch a blog post's HTML and extract rich context for quiz generation
+async function extractRichContext(slug) {
+  try {
+    const res = await fetch(`https://thisday.info/blog/${slug}`, { headers: { "User-Agent": "thisday-quiz-bot/1.0" } });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const ctx = {};
+    // Quick facts table: <th>…</th> … <td>…</td>
+    const factRows = [...html.matchAll(/<th[^>]*>([\s\S]*?)<\/th>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/gi)];
+    ctx.quickFacts = factRows.map(([, k, v]) => `${k.replace(/<[^>]+>/g,"").trim()}: ${v.replace(/<[^>]+>/g,"").trim()}`).filter(Boolean);
+    // Did You Know + analysis list items — grab informative <li> items (>40 chars)
+    const liItems = [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+      .map(([, v]) => v.replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim())
+      .filter(s => s.length > 40 && s.length < 400);
+    ctx.facts = liItems.slice(0, 12);
+    // Article paragraphs from <p> tags inside the article (skip very short ones)
+    const paras = [...html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+      .map(([, v]) => v.replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim())
+      .filter(s => s.length > 80 && s.length < 600);
+    ctx.paragraphs = paras.slice(0, 6);
+    return ctx;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Build a rich content object for quiz generation from index entry + parsed HTML
+async function buildRichContent(entry, slug) {
+  const titleParts = (entry.title || slug).split(" - ");
+  const base = {
+    title: entry.title || slug,
+    eventTitle: titleParts[0] || entry.title || slug,
+    historicalDate: titleParts[1] || "",
+    location: "",
+    country: "",
+    description: entry.description || entry.title || "",
+    keyFacts: [],
+  };
+  const rich = await extractRichContext(slug);
+  if (rich) {
+    if (rich.quickFacts?.length) {
+      const locFact = rich.quickFacts.find(f => /^Location:/i.test(f));
+      if (locFact) {
+        const parts = locFact.replace(/^Location:\s*/i,"").split(",").map(s=>s.trim());
+        base.location = parts[0] || "";
+        base.country = parts[1] || "";
+      }
+      // Put rich Did You Know / analysis facts FIRST — they produce better questions
+      // Quick facts (date, name) go last so the AI focuses on the interesting content
+      base.keyFacts = [...(rich.facts || []), ...rich.quickFacts].slice(0, 15);
+    } else if (rich.facts?.length) {
+      base.keyFacts = rich.facts.slice(0, 15);
+    }
+    if (rich.paragraphs?.length) base.description = rich.paragraphs.slice(0, 3).join(" ").substring(0, 800);
+  }
+  return base;
+}
+
 async function generateBlogQuiz(ai, content, _slug) {
   if (!ai) return null;
 
@@ -758,10 +811,8 @@ async function generateBlogQuiz(ai, content, _slug) {
     `Title: ${content.title}`,
     `Event: ${content.eventTitle} on ${content.historicalDate}`,
     (content.location || content.country) ? `Location: ${[content.location, content.country].filter(Boolean).join(", ")}` : "",
-    content.description
-      ? `Summary: ${content.description.substring(0, 300)}`
-      : "",
-    ...(content.keyFacts || []).slice(0, 5).map((f) => `Fact: ${f}`),
+    content.description ? `Summary: ${content.description.replace(/Published:.*?min read\s*/s, "").substring(0, 400)}` : "",
+    ...(content.keyFacts || []).slice(0, 8).map((f) => `Fact: ${f}`),
   ].filter(Boolean);
 
   const aiTimeout = new Promise((_, reject) =>
@@ -777,7 +828,7 @@ async function generateBlogQuiz(ai, content, _slug) {
         },
         {
           role: "user",
-          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific and fact-based from the content above\n- Each question must include a short "explanation" field (1-2 sentences) that tells the reader WHY the answer is correct, reinforcing what they just read\n- Output ONLY valid JSON:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
+          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Prioritize questions about causes, consequences, key figures, and surprising details from the Fact lines\n- Each question must include a short "explanation" field (1-2 sentences) explaining why the answer is correct\n- Output ONLY valid JSON:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
         },
       ],
       max_tokens: 1500,

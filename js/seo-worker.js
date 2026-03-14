@@ -2707,7 +2707,7 @@ function buildQuizHTML(quiz, monthDisplay, day) {
     `<p class="text-muted mb-2" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out.</p>` +
     `<a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" class="site-btn mb-3"><i class="bi bi-list-check"></i>Full quiz page</a>` +
     `<div id="tdq-questions">${questionsHtml}</div>` +
-    `<button class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"><i class="bi bi-check2-circle"></i>Check Answers</button>` +
+    `<button class="btn btn-warning mt-3" id="tdq-submit-btn"><i class="bi bi-check2-circle"></i>Check Answers</button>` +
     `<div id="tdq-score" class="mt-3" hidden></div>` +
     `</div>` +
     `<script>(function(){` +
@@ -2742,6 +2742,209 @@ function buildQuizHTML(quiz, monthDisplay, day) {
     `el.hidden=false;` +
     `el.innerHTML='<div class="tdq-score-box">You scored <span class="tdq-score-num">'+score+'/'+answers.length+'</span> ('+pct+'%) — '+msg+'</div>';` +
     `});` +
+    `})();</script>`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Carousel quiz page builder — one event + one question per slide
+// ---------------------------------------------------------------------------
+function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, nextMonthSlug, nextDay) {
+  if (!quiz?.questions?.length) return "<p class='text-muted'>Quiz unavailable for this date.</p>";
+
+  const answers = quiz.questions.map((q) => Number(q.answer));
+  const answersJson = JSON.stringify(answers);
+  const total = Math.min(quiz.questions.length, 5);
+
+  // Build slides — one per question
+  const slidesHtml = quiz.questions.slice(0, total).map((q, qi) => {
+    const ev = topEvents[qi] || topEvents[0] || null;
+    const imgSrc = ev?.pages?.[0]?.thumbnail?.source || "";
+    const imgAlt = ev?.pages?.[0]?.title || "";
+    const evYear = ev?.year ? String(ev.year) : "";
+    const evText = ev?.text ? escapeHtml(ev.text.split(".")[0].substring(0, 120)) : "";
+    const wikiUrl = ev?.pages?.[0]?.content_urls?.desktop?.page || "";
+
+    const imgHtml = imgSrc
+      ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
+      : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
+
+    const evContextHtml = evText
+      ? `<p class="qsc-event-text">${evText}${wikiUrl ? ` <a href="${escapeHtml(wikiUrl)}" target="_blank" rel="noopener" class="qsc-wiki-link" title="Read on Wikipedia"><i class="bi bi-box-arrow-up-right"></i></a>` : ""}</p>`
+      : "";
+
+    const optsHtml = (q.options || []).map((opt, oi) =>
+      `<div class="tdq-opt qsc-opt" data-qi="${qi}" data-oi="${oi}" role="radio" aria-checked="false" tabindex="0">` +
+      `<span class="tdq-opt-key">${String.fromCharCode(65 + oi)}</span>${escapeHtml(String(opt))}` +
+      `</div>`
+    ).join("");
+
+    const expHtml = q.explanation
+      ? `<div class="tdq-explanation qsc-explanation" id="tdq-e-${qi}" hidden>${escapeHtml(String(q.explanation))}</div>`
+      : "";
+
+    return `<div class="qsc-slide${qi === 0 ? " qsc-active" : ""}" data-slide="${qi}" id="qsc-slide-${qi}">` +
+      imgHtml +
+      `<div class="qsc-slide-body">` +
+      evContextHtml +
+      `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:#f59e0b"></i>Question ${qi + 1} of ${total}</div>` +
+      `<p class="tdq-q-text qsc-q-text">${escapeHtml(String(q.q))}</p>` +
+      `<div class="tdq-options qsc-opts-wrap">${optsHtml}</div>` +
+      `<div class="tdq-feedback qsc-feedback" id="tdq-f-${qi}" hidden></div>` +
+      expHtml +
+      `<button class="qsc-next-btn" data-slide="${qi}" hidden>` +
+      (qi < total - 1 ? `Next Question <i class="bi bi-arrow-right"></i>` : `See Results <i class="bi bi-trophy-fill"></i>`) +
+      `</button>` +
+      `</div></div>`;
+  }).join("");
+
+  // Final score slide
+  const nextLink = nextMonthSlug && nextDay
+    ? `<a href="/quiz/${escapeHtml(nextMonthSlug)}/${nextDay}/" class="qsc-cta-btn qsc-cta-primary"><i class="bi bi-arrow-right-circle"></i>Next Day's Quiz</a>`
+    : "";
+  const scoreSlide =
+    `<div class="qsc-slide qsc-final-slide" data-slide="${total}" id="qsc-slide-${total}">` +
+    `<div class="qsc-final-body">` +
+    `<div class="qsc-trophy-wrap"><i class="bi bi-trophy-fill qsc-trophy-icon"></i></div>` +
+    `<div class="tdq-score-box qsc-final-score" id="qsc-final-score">` +
+    `You scored <span class="tdq-score-num" id="qsc-score-num">0/${total}</span> — <span id="qsc-msg">Keep learning!</span>` +
+    `</div>` +
+    `<div class="qsc-review-list" id="qsc-review-list"></div>` +
+    `<div class="qsc-cta-row">` +
+    `<a href="/events/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn"><i class="bi bi-calendar-event"></i>See All Events</a>` +
+    `<a href="/blog/" class="qsc-cta-btn"><i class="bi bi-journal-text"></i>Read the Blog</a>` +
+    nextLink +
+    `</div></div></div>`;
+
+  // Progress dots
+  const dotsHtml = Array.from({ length: total }, (_, i) =>
+    `<button class="qsc-dot${i === 0 ? " qsc-dot-active" : ""}" data-dot="${i}" aria-label="Question ${i + 1}" title="Q${i + 1}"></button>`
+  ).join("");
+
+  return (
+    // Progress bar + dots
+    `<div class="qsc-progress-wrap">` +
+    `<div class="qsc-progress-track"><div class="qsc-progress-fill" id="qsc-bar" style="width:0%"></div></div>` +
+    `<div class="qsc-dots-row">${dotsHtml}</div>` +
+    `<p class="qsc-progress-label" id="qsc-progress-label">Question 1 of ${total}</p>` +
+    `</div>` +
+    // Back button
+    `<div class="qsc-nav-row">` +
+    `<button id="qsc-prev" class="qsc-back-btn" disabled><i class="bi bi-arrow-left"></i> Back</button>` +
+    `<span class="qsc-hint" id="qsc-hint">Select an answer to continue</span>` +
+    `</div>` +
+    // Carousel
+    `<div id="qsc-wrapper">${slidesHtml}${scoreSlide}</div>` +
+    // Inline script
+    `<script>(function(){` +
+    `var answers=${answersJson};` +
+    `var total=${total};` +
+    `var cur=0;` +
+    `var selected={};` +
+    `var results={};` +
+    `var score=0;` +
+    // Show slide
+    `function showSlide(n){` +
+    `document.querySelectorAll('.qsc-slide').forEach(function(s){s.classList.remove('qsc-active');});` +
+    `var s=document.getElementById('qsc-slide-'+n);if(s)s.classList.add('qsc-active');` +
+    `cur=n;updateProgress(n);` +
+    `document.getElementById('qsc-prev').disabled=(n===0);` +
+    `}` +
+    // Update progress
+    `function updateProgress(n){` +
+    `var pct=Math.round((n/total)*100);` +
+    `document.getElementById('qsc-bar').style.width=pct+'%';` +
+    `var lbl=document.getElementById('qsc-progress-label');` +
+    `if(n<total){lbl.textContent='Question '+(n+1)+' of '+total;}else{lbl.textContent='Quiz complete!';document.getElementById('qsc-bar').style.width='100%';}` +
+    `document.querySelectorAll('.qsc-dot').forEach(function(d,i){` +
+    `d.classList.remove('qsc-dot-active','qsc-dot-done','qsc-dot-wrong');` +
+    `if(i===n)d.classList.add('qsc-dot-active');` +
+    `else if(results[i]===true)d.classList.add('qsc-dot-done');` +
+    `else if(results[i]===false)d.classList.add('qsc-dot-wrong');` +
+    `});` +
+    `}` +
+    // Handle option click
+    `document.querySelectorAll('.qsc-opt').forEach(function(opt){` +
+    `opt.addEventListener('click',function(){` +
+    `var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);` +
+    `if(selected[qi]!==undefined)return;` +
+    `selected[qi]=oi;` +
+    `document.querySelectorAll('[data-qi="'+qi+'"]').forEach(function(o){o.classList.remove('tdq-opt-selected');o.setAttribute('aria-checked','false');});` +
+    `this.classList.add('tdq-opt-selected');this.setAttribute('aria-checked','true');` +
+    `setTimeout(function(){evaluate(qi);},280);` +
+    `});` +
+    `});` +
+    // Evaluate answer
+    `function evaluate(qi){` +
+    `var chosen=selected[qi];var correct=answers[qi];` +
+    `var opts=document.querySelectorAll('[data-qi="'+qi+'"]');` +
+    `var fb=document.getElementById('tdq-f-'+qi);` +
+    `var exp=document.getElementById('tdq-e-'+qi);` +
+    `opts.forEach(function(o){o.style.pointerEvents='none';});` +
+    `opts[correct].classList.add('tdq-opt-correct');` +
+    `if(chosen===correct){score++;results[qi]=true;fb.innerHTML='<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';}` +
+    `else{results[qi]=false;if(chosen>=0&&opts[chosen])opts[chosen].classList.add('tdq-opt-wrong');fb.innerHTML='<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
+    `fb.hidden=false;if(exp)exp.hidden=false;` +
+    `var nb=document.querySelector('.qsc-next-btn[data-slide="'+qi+'"]');if(nb)nb.hidden=false;` +
+    `document.getElementById('qsc-hint').textContent='';` +
+    `updateProgress(cur);` +
+    `}` +
+    // Next buttons
+    `document.querySelectorAll('.qsc-next-btn').forEach(function(btn){` +
+    `btn.addEventListener('click',function(){` +
+    `var next=parseInt(this.dataset.slide)+1;` +
+    `showSlide(next);` +
+    `if(next===total)showFinal();` +
+    `document.getElementById('qsc-hint').textContent=next<total?'Select an answer to continue':'';` +
+    `});` +
+    `});` +
+    // Dot nav
+    `document.querySelectorAll('.qsc-dot').forEach(function(d){` +
+    `d.addEventListener('click',function(){` +
+    `var i=parseInt(this.dataset.dot);` +
+    `if(results[i]!==undefined||i<cur)showSlide(i);` +
+    `});` +
+    `});` +
+    // Back button
+    `document.getElementById('qsc-prev').addEventListener('click',function(){if(cur>0)showSlide(cur-1);});` +
+    // Touch swipe
+    `var tx=0;` +
+    `var wrap=document.getElementById('qsc-wrapper');` +
+    `wrap.addEventListener('touchstart',function(e){tx=e.touches[0].clientX;},{passive:true});` +
+    `wrap.addEventListener('touchend',function(e){` +
+    `var dx=e.changedTouches[0].clientX-tx;` +
+    `if(dx<-40&&results[cur]!==undefined){var nb=document.querySelector('.qsc-next-btn[data-slide="'+cur+'"]');if(nb)nb.click();}` +
+    `if(dx>40&&cur>0)showSlide(cur-1);` +
+    `},{passive:true});` +
+    // Final score
+    `function showFinal(){` +
+    `var pct=Math.round((score/total)*100);` +
+    `var msg=pct===100?'Perfect score! \uD83C\uDF89':pct>=80?'Excellent work!':pct>=60?'Good job!':'Keep exploring!';` +
+    `document.getElementById('qsc-score-num').textContent=score+'/'+total;` +
+    `document.getElementById('qsc-msg').textContent=msg;` +
+    `var rev='';` +
+    `for(var i=0;i<total;i++){var ok=results[i];rev+='<div class="qsc-rev-item"><span class="'+(ok?'tdq-correct':'tdq-wrong')+'">'+(ok?'<i class=\"bi bi-check-circle-fill\"></i>':'<i class=\"bi bi-x-circle-fill\"></i>')+'</span><span>Q'+(i+1)+': '+(ok?'Correct':'Incorrect')+'</span></div>';}` +
+    `document.getElementById('qsc-review-list').innerHTML=rev;` +
+    `if(pct>=60)confetti();` +
+    `}` +
+    // Confetti
+    `function confetti(){` +
+    `var c=document.createElement('canvas');` +
+    `c.style='position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999';` +
+    `document.body.appendChild(c);` +
+    `c.width=innerWidth;c.height=innerHeight;` +
+    `var ctx=c.getContext('2d');` +
+    `var cols=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];` +
+    `var pts=[];` +
+    `for(var i=0;i<90;i++)pts.push({x:Math.random()*c.width,y:Math.random()*-c.height*.6,r:3+Math.random()*6,` +
+    `col:cols[i%cols.length],vx:(Math.random()-.5)*4,vy:3+Math.random()*5,a:1,rot:Math.random()*360,rv:(Math.random()-.5)*8});` +
+    `var fr=0;` +
+    `function draw(){ctx.clearRect(0,0,c.width,c.height);` +
+    `pts.forEach(function(p){ctx.save();ctx.globalAlpha=p.a;ctx.fillStyle=p.col;ctx.translate(p.x,p.y);ctx.rotate(p.rot*Math.PI/180);ctx.fillRect(-p.r/2,-p.r/2,p.r,p.r);ctx.restore();` +
+    `p.x+=p.vx;p.y+=p.vy;p.rot+=p.rv;p.a-=.011;});` +
+    `fr++;if(fr<130)requestAnimationFrame(draw);else c.remove();}` +
+    `requestAnimationFrame(draw);}` +
+    `showSlide(0);` +
     `})();</script>`
   );
 }
@@ -2783,7 +2986,18 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     featuredEvent,
     wikiSummary,
   );
-  const quizHtml = buildQuizHTML(quiz, mDisplay, day);
+  // Gather top events with images for carousel slides
+  const topEvents = [];
+  const evAll = eventsData?.events || [];
+  for (const e of evAll) { if (e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
+  for (const e of evAll) { if (!e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
+
+  // Next day for CTA
+  const _nd = new Date(Date.UTC(new Date().getUTCFullYear(), MONTH_NUM_MAP[monthSlug] - 1, day + 1));
+  const nextMonthSlug = MONTHS_ALL[_nd.getUTCMonth()];
+  const nextDay = _nd.getUTCDate();
+
+  const carouselHtml = buildCarouselQuizHTML(quiz, topEvents, mDisplay, day, monthSlug, nextMonthSlug, nextDay);
   const siteUrl = "https://thisday.info";
   const canonical = `${siteUrl}/quiz/${monthSlug}/${day}/`;
   const _d = new Date();
@@ -2857,29 +3071,85 @@ ${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
 <style>
-:root{--pb:#3b82f6;--sb:#fff;--tc:#1e293b;--htc:#fff;--fb:#3b82f6;--ftc:#fff;--lc:#2563eb;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b}
-body.dark-theme{--pb:#020617;--sb:#1e293b;--tc:#f8fafc;--fb:#020617;--lc:#60a5fa;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#cbd5e1}
+:root{--pb:#3b82f6;--sb:#f5f0e8;--tc:#1a1a1a;--htc:#fff;--fb:#1e293b;--ftc:#fff;--lc:#c0440a;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b;--badge:#c0440a}
+body.dark-theme{--pb:#020617;--sb:#0f172a;--tc:#f1f5f9;--fb:#020617;--lc:#f97316;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#94a3b8;--badge:#f97316}
 body{font-family:Inter,sans-serif;background:var(--sb);color:var(--tc);min-height:100vh;display:flex;flex-direction:column}
 .navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
-main{flex:1;padding:20px 0}
-.footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:30px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
-.footer .container.d-flex.justify-content-center.my-2{gap:20px}
-.card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
+main{flex:1;padding:28px 0}
+.footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:40px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
 a{color:var(--lc)}.text-muted{color:var(--mu)!important}
-.tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
-.tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
-.tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+/* Base quiz option styles shared with events page */
+.tdq-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.92rem;transition:background .15s,border-color .15s,transform .1s;user-select:none;background:var(--cb)}
+.tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.06);transform:translateX(2px)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
 .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
-.tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
+.tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
 .tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
-body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15)}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);background:rgba(255,255,255,.04)}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
 body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
 body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}
 body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
-.tdq-explanation{font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0;color:var(--tc)}
-body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-color:#60a5fa;color:#e2e8f0}
-.tdq-feedback{font-size:.85rem;margin-top:5px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
-.tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.2rem}
+.tdq-explanation{font-size:.85rem;margin-top:8px;padding:10px 14px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 8px 8px 0;color:var(--tc);line-height:1.5}
+body.dark-theme .tdq-explanation{background:rgba(59,130,246,.15);border-left-color:#60a5fa;color:#e2e8f0}
+.tdq-feedback{font-size:.88rem;margin-top:6px;font-weight:600}.tdq-correct{color:#10b981}.tdq-wrong{color:#ef4444}
+.tdq-score-box{font-size:1.05rem;font-weight:600;padding:14px 18px;background:rgba(245,158,11,.1);border-radius:10px;border-left:4px solid #f59e0b;text-align:left}.tdq-score-num{color:#f59e0b;font-size:1.3rem}
+/* === Carousel quiz layout === */
+/* Progress */
+.qsc-progress-wrap{text-align:center;margin-bottom:20px}
+.qsc-progress-track{height:5px;background:var(--cbr);border-radius:3px;overflow:hidden;margin-bottom:12px}
+.qsc-progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:3px;transition:width .4s ease}
+.qsc-dots-row{display:flex;justify-content:center;gap:10px;margin-bottom:8px}
+.qsc-dot{width:12px;height:12px;border-radius:50%;border:none;background:var(--cbr);cursor:pointer;padding:0;transition:all .2s;outline:none}
+.qsc-dot:hover{background:#94a3b8}.qsc-dot.qsc-dot-active{background:#3b82f6;transform:scale(1.3)}.qsc-dot.qsc-dot-done{background:#10b981}.qsc-dot.qsc-dot-wrong{background:#ef4444}
+.qsc-progress-label{font-size:.82rem;color:var(--mu);margin:0}
+/* Nav row */
+.qsc-nav-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.qsc-back-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;font-size:.85rem;font-weight:500;color:var(--tc);cursor:pointer;transition:all .15s}
+.qsc-back-btn:hover:not(:disabled){border-color:#3b82f6;color:#3b82f6}.qsc-back-btn:disabled{opacity:.35;cursor:default}
+.qsc-hint{font-size:.82rem;color:var(--mu);font-style:italic}
+/* Carousel wrapper */
+#qsc-wrapper{border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.12);background:var(--cb);margin-bottom:24px}
+body.dark-theme #qsc-wrapper{box-shadow:0 4px 24px rgba(0,0,0,.4)}
+/* Slides */
+.qsc-slide{display:none;animation:qscIn .3s ease}
+.qsc-slide.qsc-active{display:block}
+@keyframes qscIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+/* Image area */
+.qsc-img-wrap{position:relative;width:100%;height:220px;overflow:hidden;background:#1e293b}
+@media(min-width:600px){.qsc-img-wrap{height:280px}}
+.qsc-event-img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s ease}
+.qsc-slide.qsc-active .qsc-event-img{transform:scale(1.02)}
+.qsc-img-placeholder{background:linear-gradient(135deg,#1e3a5f 0%,#2d1b69 100%)}
+.qsc-img-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.7) 0%,rgba(0,0,0,.1) 60%,transparent 100%)}
+.qsc-year-pill{position:absolute;bottom:14px;left:16px;background:var(--badge);color:#fff;padding:4px 12px;border-radius:20px;font-size:.8rem;font-weight:700;letter-spacing:.04em}
+/* Slide body */
+.qsc-slide-body{padding:18px 20px 22px}
+@media(min-width:600px){.qsc-slide-body{padding:22px 28px 28px}}
+.qsc-event-text{font-size:.88rem;color:var(--mu);margin-bottom:14px;line-height:1.5;border-left:3px solid var(--badge);padding-left:10px}
+.qsc-wiki-link{color:var(--mu);font-size:.8rem;opacity:.7;text-decoration:none}.qsc-wiki-link:hover{opacity:1}
+.qsc-q-label{display:inline-flex;align-items:center;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--badge);margin-bottom:10px}
+.qsc-q-text{font-size:1.05rem;font-weight:700;color:var(--tc);margin-bottom:14px;line-height:1.45}
+.qsc-opts-wrap{display:flex;flex-direction:column;gap:9px}
+/* Next button */
+.qsc-next-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:12px;background:var(--badge);color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;animation:qscIn .25s ease}
+.qsc-next-btn:hover{background:#a03508;transform:translateY(-1px)}
+body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:hover{background:#ea6c0a}
+/* Final score slide */
+.qsc-final-slide .qsc-final-body{padding:32px 24px;text-align:center}
+.qsc-trophy-wrap{margin-bottom:18px}
+.qsc-trophy-icon{font-size:3.5rem;color:#f59e0b;animation:qscPop .5s cubic-bezier(.34,1.56,.64,1)}
+@keyframes qscPop{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+.qsc-final-score{font-size:1.1rem;font-weight:600;text-align:left;margin-bottom:18px}
+.qsc-review-list{text-align:left;border:1px solid var(--cbr);border-radius:10px;overflow:hidden;margin-bottom:22px}
+.qsc-rev-item{display:flex;align-items:center;gap:10px;padding:10px 14px;font-size:.9rem;border-bottom:1px solid var(--cbr)}.qsc-rev-item:last-child{border-bottom:none}
+.qsc-cta-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.qsc-cta-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:8px;font-size:.9rem;font-weight:600;text-decoration:none;border:1.5px solid var(--cbr);color:var(--tc);background:var(--cb);transition:all .15s}
+.qsc-cta-btn:hover{border-color:#3b82f6;color:#3b82f6;transform:translateY(-1px)}
+.qsc-cta-primary{background:var(--badge);color:#fff!important;border-color:var(--badge)}
+.qsc-cta-primary:hover{background:#a03508;border-color:#a03508;color:#fff!important}
+/* Page header */
+.qsc-page-header{text-align:center;padding:8px 0 24px;border-bottom:1px solid var(--cbr);margin-bottom:28px}
+.qsc-page-header h1{font-size:1.7rem;font-weight:800;color:var(--tc);margin-bottom:6px}
+.qsc-page-header p{color:var(--mu);font-size:.95rem;margin:0}
 </style>
 </head>
 <body>
@@ -2893,7 +3163,7 @@ body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-col
     </div>
   </div>
 </nav>
-<main class="container my-4" style="max-width:760px">
+<main class="container my-4" style="max-width:720px">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -2901,21 +3171,12 @@ body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-col
       <li class="breadcrumb-item active">Quiz</li>
     </ol>
   </nav>
-  <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
-  <p class="text-muted mb-3" style="font-size:.9rem">Test your knowledge of what happened in history on this date. Based on real Wikipedia events.</p>
-  ${
-    featuredEvent
-      ? `
-  <div class="card-box mb-4">
-    <p class="mb-1" style="font-size:.8rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--mu)">Featured Event</p>
-    <p class="mb-1"><span style="background:#3b82f6;color:#fff;padding:2px 8px;border-radius:4px;font-size:.8rem;font-weight:700;margin-right:8px">${escapeHtml(String(featuredEvent.year))}</span><strong>${escapeHtml(featuredEvent.text.split(".")[0])}</strong></p>
-    ${wikiSummary ? `<p class="mb-0 mt-2" style="font-size:.9rem;color:var(--mu)">${escapeHtml(wikiSummary.substring(0, 280))}…</p>` : ""}
-    <p class="mb-0 mt-2" style="font-size:.82rem"><a href="/events/${monthSlug}/${day}/">See all events on ${escapeHtml(mDisplay)} ${day} →</a></p>
-  </div>`
-      : ""
-  }
-  ${quizHtml}
-  <p class="mt-3 text-muted" style="font-size:.85rem"><a href="/events/${monthSlug}/${day}/">← Back to ${escapeHtml(mDisplay)} ${day} Events</a></p>
+  <div class="qsc-page-header">
+    <h1><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
+    <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
+  </div>
+  ${carouselHtml}
+  <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
 </main>
 <footer class="footer">
   <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>

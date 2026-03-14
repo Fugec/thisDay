@@ -815,6 +815,13 @@ async function generateBlogQuiz(ai, content, _slug) {
     ...(content.keyFacts || []).slice(0, 15).map((f) => `Fact: ${f}`),
   ].filter(Boolean);
 
+  // Require at least 2 fact/summary lines — without context the AI generates trivial questions
+  const factLines = contextLines.filter(l => l.startsWith("Fact:") || l.startsWith("Summary:"));
+  if (factLines.length < 2) {
+    console.error(`Blog quiz: insufficient context for "${content.title}" (${contextLines.length} lines, ${factLines.length} facts) — skipping AI call`);
+    return null;
+  }
+
   const aiTimeout = new Promise((_, reject) =>
     setTimeout(() => reject(new Error("AI timeout")), 25000),
   );

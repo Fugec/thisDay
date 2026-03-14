@@ -19,7 +19,7 @@
 
 // Cloudflare Workers AI model — free tier, no API key needed.
 const CF_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
-const KV_POST_PREFIX = "post:";
+const KV_POST_PREFIX = "post-v2:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
 const EVERY_OTHER_DAYS = 1; // Generate every N days

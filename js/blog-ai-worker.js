@@ -1064,9 +1064,12 @@ ${JSON.stringify({
       }
       .theme-switch-desktop label { color: var(--header-text-color); }
       .theme-switch-mobile label i { color: var(--header-text-color); font-size: 1.2rem; margin-left: 0.5rem; }
+      #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}
+      body.dark-theme #read-progress{background:#60a5fa}
     </style>
   </head>
 
+  <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
   <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
     <div class="container-fluid">
       <a class="navbar-brand" href="/">thisDay.</a>
@@ -1528,6 +1531,19 @@ ${analysisBadItems}
       }, { threshold: 1.0 });
       obs.observe(sentinel);
     }
+  })();
+  </script>
+  <script>
+  (function(){
+    var bar=document.getElementById('read-progress');
+    if(!bar)return;
+    document.addEventListener('scroll',function(){
+      var doc=document.documentElement;
+      var total=doc.scrollHeight-doc.clientHeight;
+      var pct=total>0?Math.round((doc.scrollTop/total)*100):0;
+      bar.style.width=pct+'%';
+      bar.setAttribute('aria-valuenow',pct);
+    },{passive:true});
   })();
   </script>
 </html>`;

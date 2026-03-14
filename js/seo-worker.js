@@ -959,7 +959,7 @@ body.dark-theme #read-progress{background:#60a5fa}
     <a class="navbar-brand" href="/">thisDay.</a>
     <div class="form-check form-switch d-lg-none me-2">
       <input class="form-check-input" type="checkbox" id="tsm" aria-label="Toggle dark mode"/>
-      <label class="form-check-label" for="tsm"><i class="bi bi-moon-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
+      <label class="form-check-label" for="tsm"><i class="bi bi-brightness-high-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
     </div>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">

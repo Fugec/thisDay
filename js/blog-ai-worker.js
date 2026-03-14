@@ -152,11 +152,12 @@ export default {
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
         // Patch old btn-warning buttons to site-btn-primary
         patchedHtml = patchedHtml
-          .replaceAll('class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"', 'class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"')
-          .replaceAll('class="btn btn-warning px-4 mt-3" id="tdq-submit-btn"', 'class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"');
+          .replaceAll('class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"', 'class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"')
+          .replaceAll('class="btn btn-warning px-4 mt-3" id="tdq-submit-btn"', 'class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"')
+          .replaceAll('class="text-muted">Can you answer', 'class="tdq-cta-sub">Can you answer');
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
-          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}body.dark-theme #read-progress{background:#60a5fa}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.site-btn-primary{border-color:#3b82f6;color:#2563eb}.site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}</style>`;
+          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}body.dark-theme #read-progress{background:#60a5fa}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.site-btn-primary{border-color:#3b82f6;color:#2563eb}.site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}.tdq-cta-sub{color:#6c757d}body.dark-theme .tdq-cta-sub{color:#fff}</style>`;
           const progressHtml = `<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>`;
           const progressJs = `<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();<\/script>`;
           patchedHtml = patchedHtml
@@ -1092,6 +1093,8 @@ ${JSON.stringify({
       .site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}
       body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}
       body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}
+      .tdq-cta-sub{color:#6c757d}
+      body.dark-theme .tdq-cta-sub{color:#fff}
     </style>
   </head>
   <body>
@@ -1260,8 +1263,8 @@ ${analysisBadItems}
             <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
             <div>
               <strong style="color:var(--text-color)">Test Your Knowledge</strong><br/>
-              <small class="text-muted">Can you answer 5 questions about this event?</small><br/>
-              <button class="site-btn site-btn-primary mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+              <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
+              <button class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
                 <i class="bi bi-play-fill me-1"></i>Take the Quiz
               </button>
             </div>

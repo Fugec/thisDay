@@ -2780,7 +2780,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
   // Blog post mode: same image + link for all slides
   const blogImgSrc = blogEntry?.imageUrl || "";
   const blogTitle = blogEntry?.title || "";
-  const blogUrl = blogEntry ? `/blog/archive/${blogEntry.slug}/` : "";
+  const blogUrl = blogEntry ? `/blog/${blogEntry.slug}/` : "";
 
   // Build slides — one per question
   const slidesHtml = quiz.questions.slice(0, total).map((q, qi) => {

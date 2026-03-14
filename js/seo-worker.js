@@ -3025,9 +3025,11 @@ async function handleQuizPage(_request, env, monthSlug, day) {
         eventsData = await r.json();
         // Cache events data for future quiz page visits
         if (env.EVENTS_KV && eventsData?.events?.length) {
-          env.EVENTS_KV.put(eventsKvKey, JSON.stringify(eventsData), {
-            expirationTtl: 7 * 24 * 60 * 60, // 7 days
-          }).catch(() => {});
+          try {
+            await env.EVENTS_KV.put(eventsKvKey, JSON.stringify(eventsData), {
+              expirationTtl: 7 * 24 * 60 * 60, // 7 days
+            });
+          } catch (_) { /* non-fatal */ }
         }
       }
     } catch (e) {
@@ -3304,9 +3306,11 @@ if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.
 <script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
 </body></html>`;
 
-  // Cache the full rendered page HTML in KV (fire-and-forget, non-blocking)
+  // Cache the full rendered page HTML in KV
   if (env.EVENTS_KV) {
-    env.EVENTS_KV.put(pageHtmlKey, html, { expirationTtl: 24 * 60 * 60 }).catch(() => {});
+    try {
+      await env.EVENTS_KV.put(pageHtmlKey, html, { expirationTtl: 24 * 60 * 60 });
+    } catch (_) { /* non-fatal */ }
   }
 
   return new Response(html, {

@@ -693,10 +693,7 @@ async function generateAndStore(env) {
   if (!content.description || content.description.length < 120) {
     const loc = content.location ? ` in ${content.location}` : "";
     content.description =
-      `Discover the story of ${content.eventTitle} on ${content.historicalDate}${loc}. Learn about this pivotal historical event, its causes, immediate aftermath, and lasting legacy.`.substring(
-        0,
-        155,
-      );
+      `Discover the story of ${content.eventTitle} on ${content.historicalDate}${loc}.`.substring(0, 155);
   }
   if (!content.ogDescription || content.ogDescription.length < 80) {
     content.ogDescription = content.description.substring(0, 130);

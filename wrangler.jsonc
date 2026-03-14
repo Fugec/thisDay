@@ -1,6 +1,6 @@
 {
   "name": "thisday-seo-worker",
-  "compatibility_date": "2025-06-27",
+  "compatibility_date": "2026-03-14",
   "main": "js/seo-worker.js",
   "kv_namespaces": [
     {

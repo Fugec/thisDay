@@ -17,7 +17,7 @@
   //        curl -X POST https://thisday.info/blog/publish
 
   "name": "thisday-blog-ai-worker",
-  "compatibility_date": "2025-06-27",
+  "compatibility_date": "2026-03-14",
   "main": "js/blog-ai-worker.js",
 
   // Routes — this worker handles:

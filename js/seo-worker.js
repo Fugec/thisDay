@@ -2604,7 +2604,7 @@ async function generateQuizForDate(
     }
   }
 
-  if (!quiz) quiz = buildFallbackQuiz(mDisplay, day, eventsData);
+  if (!quiz) quiz = buildFallbackQuiz(mDisplay, day, eventsData, indexedEvents);
 
   try {
     await env.EVENTS_KV.put(kvKey, JSON.stringify(quiz), {
@@ -2617,8 +2617,10 @@ async function generateQuizForDate(
   return quiz;
 }
 
-function buildFallbackQuiz(mDisplay, day, eventsData) {
-  const events = (eventsData?.events || []).filter((e) => e.year && e.text);
+function buildFallbackQuiz(mDisplay, day, eventsData, orderedEvents = []) {
+  // Use orderedEvents (topEvents order = same as carousel) when available, else fall back to raw Wikipedia order
+  const source = orderedEvents.length > 0 ? orderedEvents : (eventsData?.events || []);
+  const events = source.filter((e) => e.year && e.text);
   const questions = [];
 
   for (const e of events.slice(0, 5)) {

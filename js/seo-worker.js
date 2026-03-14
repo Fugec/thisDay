@@ -2777,22 +2777,6 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
 
   // Build slides — one per question
   const slidesHtml = quiz.questions.slice(0, total).map((q, qi) => {
-    const evIdx = (q.eventIndex !== undefined && q.eventIndex >= 0 && q.eventIndex < topEvents.length) ? q.eventIndex : qi;
-    const ev = topEvents[evIdx] || topEvents[qi] || topEvents[0] || null;
-    const imgSrc = ev?.pages?.[0]?.thumbnail?.source || "";
-    const imgAlt = ev?.pages?.[0]?.title || "";
-    const evYear = ev?.year ? String(ev.year) : "";
-    const evText = ev?.text ? escapeHtml(ev.text.split(".")[0].substring(0, 120)) : "";
-    const wikiUrl = ev?.pages?.[0]?.content_urls?.desktop?.page || "";
-
-    const imgHtml = imgSrc
-      ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
-      : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
-
-    const evContextHtml = evText
-      ? `<p class="qsc-event-text">${evText}${wikiUrl ? ` <a href="${escapeHtml(wikiUrl)}" target="_blank" rel="noopener" class="qsc-wiki-link" title="Read on Wikipedia"><i class="bi bi-box-arrow-up-right"></i></a>` : ""}</p>`
-      : "";
-
     const optsHtml = (q.options || []).map((opt, oi) =>
       `<div class="tdq-opt qsc-opt" data-qi="${qi}" data-oi="${oi}" role="radio" aria-checked="false" tabindex="0">` +
       `<span class="tdq-opt-key">${String.fromCharCode(65 + oi)}</span>${escapeHtml(String(opt))}` +
@@ -2804,9 +2788,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
       : "";
 
     return `<div class="qsc-slide${qi === 0 ? " qsc-active" : ""}" data-slide="${qi}" id="qsc-slide-${qi}">` +
-      imgHtml +
       `<div class="qsc-slide-body">` +
-      evContextHtml +
       `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:#f59e0b"></i>Question ${qi + 1} of ${total}</div>` +
       `<p class="tdq-q-text qsc-q-text">${escapeHtml(String(q.q))}</p>` +
       `<div class="tdq-options qsc-opts-wrap">${optsHtml}</div>` +

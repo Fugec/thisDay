@@ -1554,6 +1554,11 @@ ${analysisBadItems}
     // Expose so the CTA button in the article body can trigger it
     window.maybeLoadAndShowQuiz = maybeLoadAndShow;
 
+    // Auto-open if deep-linked with #quiz hash
+    if (window.location.hash === "#quiz") {
+      setTimeout(maybeLoadAndShow, 600);
+    }
+
     if ("IntersectionObserver" in window) {
       var sentinel = document.getElementById("tdq-sentinel");
       var obs = new IntersectionObserver(function(entries) {

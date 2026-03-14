@@ -610,3 +610,7 @@ body.dark-theme .quiz-cta-strip strong {
 body.dark-theme .quiz-cta-strip .quiz-cta-sub {
   color: #cbd5e1;
 }
+.quiz-cta-col {
+  flex: 1;
+  min-width: 0;
+}

@@ -621,4 +621,11 @@ body.dark-theme .quiz-cta-strip .quiz-cta-sub {
 .quiz-cta-col {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.quiz-cta-col .btn {
+  padding: 10px 16px;
+  font-size: 0.875rem;
 }

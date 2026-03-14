@@ -1608,7 +1608,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v2:${mm}-${dd}`;
+    const kvKey = `quiz-v3:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2445,7 +2445,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v2:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v3:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2499,7 +2499,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v2:${mm}-${dd}`;
+  const kvKey = `quiz-v3:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2560,7 +2560,7 @@ async function generateQuizForDate(
             },
             {
               role: "user",
-              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- "eventIndex" is the index of the Event[N] this question is about (0-4); use 0 if unsure\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"eventIndex":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
+              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, one per event in order: Question 1 MUST be about Event[0], Question 2 about Event[1], Question 3 about Event[2], Question 4 about Event[3], Question 5 about Event[4]\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
             },
           ],
           max_tokens: 1500,
@@ -2768,8 +2768,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
 
   // Build slides — one per question
   const slidesHtml = quiz.questions.slice(0, total).map((q, qi) => {
-    const evIdx = (q.eventIndex !== undefined && q.eventIndex >= 0 && q.eventIndex < topEvents.length) ? q.eventIndex : qi;
-    const ev = topEvents[evIdx] || topEvents[0] || null;
+    const ev = topEvents[qi] || topEvents[0] || null;
     const imgSrc = ev?.pages?.[0]?.thumbnail?.source || "";
     const imgAlt = ev?.pages?.[0]?.title || "";
     const evYear = ev?.year ? String(ev.year) : "";
@@ -2971,7 +2970,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v2:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v3:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -3114,12 +3113,16 @@ async function handleQuizPage(_request, env, monthSlug, day) {
 <meta name="twitter:title" content="${escapeHtml(quizPageTitle)}"/>
 <meta name="twitter:description" content="${escapeHtml(quizPageDesc)}"/>
 <meta name="twitter:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
+<meta property="og:locale" content="en_US"/>
+<meta name="author" content="thisDay.info"/>
 ${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 <style>
 :root{--pb:#3b82f6;--sb:#f5f0e8;--tc:#1a1a1a;--htc:#fff;--fb:#1e293b;--ftc:#fff;--lc:#c0440a;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b;--badge:#c0440a}
 body.dark-theme{--pb:#020617;--sb:#0f172a;--tc:#f1f5f9;--fb:#020617;--lc:#f97316;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#94a3b8;--badge:#f97316}
@@ -3127,7 +3130,13 @@ body{font-family:Inter,sans-serif;background:var(--sb);color:var(--tc);min-heigh
 .navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
 main{flex:1;padding:28px 0}
 .footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:40px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
+.footer .container.d-flex.justify-content-center.my-2{gap:20px}
 a{color:var(--lc)}.text-muted{color:var(--mu)!important}
+.breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--mu)}
+body.dark-theme .breadcrumb-item a{color:#93c5fd}body.dark-theme .breadcrumb-item.active{color:#e2e8f0}
+.form-check-input:checked{background-color:#2563eb!important;border-color:#2563eb!important}
+.form-check-input{background:#e2e8f0;border-color:#e2e8f0}body.dark-theme .form-check-input{background:#334155;border-color:#334155}
+.form-switch .form-check-input{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e")}
 /* Base quiz option styles shared with events page */
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.92rem;transition:background .15s,border-color .15s,transform .1s;user-select:none;background:var(--cb)}
 .tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.06);transform:translateX(2px)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
@@ -3206,9 +3215,19 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
 <nav class="navbar navbar-expand-lg navbar-dark">
   <div class="container-fluid">
     <a class="navbar-brand" href="/">thisDay.</a>
+    <div class="form-check form-switch d-lg-none me-2">
+      <input class="form-check-input" type="checkbox" id="tsm" aria-label="Toggle dark mode"/>
+      <label class="form-check-label" for="tsm"><i class="bi bi-brightness-high-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
+    </div>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
         <li class="nav-item"><a class="nav-link" href="/events/${todaySlug}/${todayDay}/">Today's Events</a></li>
+        <li class="nav-item d-flex align-items-center">
+          <div class="form-check form-switch d-none d-lg-block me-2">
+            <input class="form-check-input" type="checkbox" id="tsd" aria-label="Toggle dark mode"/>
+            <label class="form-check-label" for="tsd" style="color:#fff">Dark Mode</label>
+          </div>
+        </li>
       </ul>
     </div>
   </div>
@@ -3229,15 +3248,31 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
 </main>
 <footer class="footer">
+  <div class="container d-flex justify-content-center my-2">
+    <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
+    <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
+  </div>
   <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
+  <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
+  <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
   <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
 </footer>
-<script>document.getElementById('yr').textContent=new Date().getFullYear();</script>
 <script>
-  const tsd=document.getElementById('tsd');
-  const saved=localStorage.getItem('darkTheme');
-  if(saved!=='false')document.body.classList.add('dark-theme');
+const yrEl=document.getElementById('yr');
+if(yrEl)yrEl.textContent=new Date().getFullYear();
+const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
+const ap=d=>document.body.classList.toggle('dark-theme',d);
+const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
+const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
+const dk=gt('darkTheme')!=='false';
+ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
+if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
+if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
 </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
 <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
 </body></html>`;

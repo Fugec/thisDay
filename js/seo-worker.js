@@ -1608,7 +1608,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v6:${mm}-${dd}`;
+    const kvKey = `quiz-v7:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2445,7 +2445,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v6:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v7:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2499,7 +2499,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v6:${mm}-${dd}`;
+  const kvKey = `quiz-v7:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2596,7 +2596,13 @@ async function generateQuizForDate(
               q.explanation &&
               String(q.explanation).length > 8,
           );
-          if (valid.length === eventCount) quiz = { ...parsed, questions: valid };
+          if (valid.length === eventCount) {
+            // Hard filter: reject the entire quiz if ANY question asks about a year/date
+            // — the AI ignores prompt instructions, so we enforce this deterministically
+            const yearPattern = /\b(in which year|what year|when did|which year|what century|what decade|in \d{3,4}|since \d{3,4})\b/i;
+            const hasYearQuestion = valid.some(q => yearPattern.test(String(q.q)));
+            if (!hasYearQuestion) quiz = { ...parsed, questions: valid };
+          }
         }
       }
     } catch (e) {
@@ -2623,22 +2629,20 @@ function buildFallbackQuiz(mDisplay, day, eventsData, orderedEvents = []) {
   const events = source.filter((e) => e.year && e.text);
   const questions = [];
 
-  for (const e of events.slice(0, 5)) {
-    const yr = Number(e.year);
-    const fullEventText = String(e.text || "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(/[.\s]+$/, "");
-    questions.push({
-      q: `In which year did "${fullEventText}" occur on ${mDisplay} ${day}?`,
-      options: [
-        String(yr),
-        String(Math.max(1, yr - 12)),
-        String(yr + 8),
-        String(Math.max(1, yr - 25)),
-      ],
-      answer: 0,
-    });
+  // Fallback question templates that don't require knowing the year
+  const fallbackTemplates = [
+    (text) => ({ q: `Which of the following best describes what happened on ${mDisplay} ${day}?`, opts: [text, "A royal coronation ceremony", "A scientific moon landing", "A major peace treaty signing"], ans: 0 }),
+    (text) => ({ q: `On ${mDisplay} ${day}, a notable event occurred. Which description matches it?`, opts: ["A volcanic eruption in Iceland", text, "The founding of the United Nations", "A major earthquake in Japan"], ans: 1 }),
+    (text) => ({ q: `Which event took place on ${mDisplay} ${day} in history?`, opts: ["Discovery of penicillin", "Fall of the Berlin Wall", text, "First commercial flight"], ans: 2 }),
+    (text) => ({ q: `Historians remember ${mDisplay} ${day} for which of the following?`, opts: ["First Moon walk by astronauts", "Signing of the Magna Carta", "Launch of the first satellite", text], ans: 3 }),
+    (text) => ({ q: `What significant event is recorded on ${mDisplay} ${day}?`, opts: ["Opening of the Suez Canal", text, "End of World War I", "First transatlantic telegraph cable"], ans: 1 }),
+  ];
+
+  for (let i = 0; i < Math.min(events.slice(0, 5).length, fallbackTemplates.length); i++) {
+    const e = events[i];
+    const shortText = String(e.text || "").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "").substring(0, 80);
+    const tmpl = fallbackTemplates[i](shortText);
+    questions.push({ q: tmpl.q, options: tmpl.opts, answer: tmpl.ans });
   }
 
   const genericPad = [
@@ -2975,7 +2979,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v6:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v7:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);

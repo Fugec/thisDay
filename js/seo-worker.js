@@ -2440,6 +2440,12 @@ async function handleScheduledEvent(env) {
       await env.EVENTS_KV.put(todayKvKey, JSON.stringify(eventsData), {
         expirationTtl: KV_CACHE_TTL_SECONDS,
       });
+      // Also store under the per-date key used by the quiz page fast-path
+      const mNum = String(today.getUTCMonth() + 1).padStart(2, "0");
+      const dNum = String(today.getUTCDate()).padStart(2, "0");
+      await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
+      // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
+      await env.EVENTS_KV.delete(`quiz-page-v1:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2462,10 +2468,10 @@ async function handleScheduledEvent(env) {
     const wikiSummary = wikiTitle
       ? await fetchWikipediaSummaryByTitle(wikiTitle)
       : "";
-    const evAll = eventsData?.events || [];
-    const topEventsPre = [];
-    for (const e of evAll) { if (e.pages?.[0]?.thumbnail?.source && topEventsPre.length < 5) topEventsPre.push(e); }
-    for (const e of evAll) { if (!e.pages?.[0]?.thumbnail?.source && topEventsPre.length < 5) topEventsPre.push(e); }
+    const cronTopEvents = [];
+    const cronEvAll = eventsData?.events || [];
+    for (const e of cronEvAll) { if (e.pages?.[0]?.thumbnail?.source && cronTopEvents.length < 5) cronTopEvents.push(e); }
+    for (const e of cronEvAll) { if (!e.pages?.[0]?.thumbnail?.source && cronTopEvents.length < 5) cronTopEvents.push(e); }
     await generateQuizForDate(
       env,
       monthSlug,
@@ -2473,19 +2479,9 @@ async function handleScheduledEvent(env) {
       eventsData,
       featuredEvent,
       wikiSummary,
-      topEventsPre,
+      cronTopEvents,
     );
     console.log(`Quiz pre-generated for ${monthSlug}/${day}.`);
-
-    // Also cache events data under per-date key for quiz page fast-path
-    const mNum = String(MONTH_NUM_MAP[monthSlug]).padStart(2, "0");
-    const dNum = String(day).padStart(2, "0");
-    await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), {
-      expirationTtl: 7 * 24 * 60 * 60,
-    });
-    // Invalidate stale full-page cache so next visit renders fresh HTML
-    await env.EVENTS_KV.delete(`quiz-page-v1:${mNum}-${dNum}`);
-    console.log(`Events data cached and page cache invalidated for ${monthSlug}/${day}.`);
   } catch (e) {
     console.error("Quiz pre-generation failed:", e);
   }
@@ -2509,18 +2505,17 @@ async function generateQuizForDate(
     const cached = await env.EVENTS_KV.get(kvKey);
     if (cached) {
       const parsed = JSON.parse(cached);
-      const questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
-      const hasTruncatedFallbackQuestion = questions.some((q) => {
-        const text = String(q?.q || "");
-        return (
-          /^In which year did\s+"/i.test(text) &&
-          (text.includes("…") || /\.\.\./.test(text))
-        );
-      });
-      // Also force regeneration if cached questions lack eventIndex (image-question link)
-      const missingEventIndex = topEvents.length > 0 && questions.some((q) => q.eventIndex === undefined);
+      const hasTruncatedFallbackQuestion = Array.isArray(parsed?.questions)
+        ? parsed.questions.some((q) => {
+            const text = String(q?.q || "");
+            return (
+              /^In which year did\s+"/i.test(text) &&
+              (text.includes("…") || /\.\.\./.test(text))
+            );
+          })
+        : false;
 
-      if (!hasTruncatedFallbackQuestion && !missingEventIndex) {
+      if (!hasTruncatedFallbackQuestion) {
         return parsed;
       }
     }
@@ -2531,21 +2526,17 @@ async function generateQuizForDate(
   const mDisplay = MONTH_DISPLAY_NAMES[MONTH_NUM_MAP[monthName]];
   const births = eventsData?.births || [];
 
-  // Use topEvents if provided (image-prioritised order), else fall back to raw events
-  const eventsForContext = topEvents.length >= 5
-    ? topEvents
-    : (eventsData?.events || []).slice(0, 5);
+  // Use topEvents if provided (same order as carousel slides), else fall back to raw events
+  const indexedEvents = topEvents.length > 0 ? topEvents : (eventsData?.events || []).slice(0, 5);
 
   const contextLines = [];
   if (featuredEvent)
     contextLines.push(`Featured event: ${featuredEvent.year} — ${featuredEvent.text}`);
   if (wikiSummary)
     contextLines.push(`Wikipedia context: ${wikiSummary.substring(0, 300)}`);
-  eventsForContext
-    .slice(0, 5)
-    .forEach((e, i) =>
-      contextLines.push(`Event[${i}]: ${e.year} — ${e.text.substring(0, 120)}`),
-    );
+  indexedEvents.forEach((e, i) =>
+    contextLines.push(`Event[${i}]: ${e.year} — ${e.text.substring(0, 120)}`),
+  );
   births
     .slice(0, 3)
     .forEach((b) =>
@@ -2569,7 +2560,7 @@ async function generateQuizForDate(
             },
             {
               role: "user",
-              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext (events are indexed 0-${eventsForContext.slice(0, 5).length - 1}):\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions — one question per Event[index] above\n- Each question MUST set "eventIndex" to the Event index (0-4) it is about\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the most significant event\n- "sourceEvent" is the full text of the featured event\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"eventIndex":0,"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
+              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- "eventIndex" is the index of the Event[N] this question is about (0-4); use 0 if unsure\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"eventIndex":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
             },
           ],
           max_tokens: 1500,
@@ -2777,6 +2768,22 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
 
   // Build slides — one per question
   const slidesHtml = quiz.questions.slice(0, total).map((q, qi) => {
+    const evIdx = (q.eventIndex !== undefined && q.eventIndex >= 0 && q.eventIndex < topEvents.length) ? q.eventIndex : qi;
+    const ev = topEvents[evIdx] || topEvents[0] || null;
+    const imgSrc = ev?.pages?.[0]?.thumbnail?.source || "";
+    const imgAlt = ev?.pages?.[0]?.title || "";
+    const evYear = ev?.year ? String(ev.year) : "";
+    const evText = ev?.text ? escapeHtml(ev.text.split(".")[0].substring(0, 120)) : "";
+    const wikiUrl = ev?.pages?.[0]?.content_urls?.desktop?.page || "";
+
+    const imgHtml = imgSrc
+      ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
+      : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
+
+    const evContextHtml = evText
+      ? `<p class="qsc-event-text">${evText}${wikiUrl ? ` <a href="${escapeHtml(wikiUrl)}" target="_blank" rel="noopener" class="qsc-wiki-link" title="Read on Wikipedia"><i class="bi bi-box-arrow-up-right"></i></a>` : ""}</p>`
+      : "";
+
     const optsHtml = (q.options || []).map((opt, oi) =>
       `<div class="tdq-opt qsc-opt" data-qi="${qi}" data-oi="${oi}" role="radio" aria-checked="false" tabindex="0">` +
       `<span class="tdq-opt-key">${String.fromCharCode(65 + oi)}</span>${escapeHtml(String(opt))}` +
@@ -2788,7 +2795,9 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
       : "";
 
     return `<div class="qsc-slide${qi === 0 ? " qsc-active" : ""}" data-slide="${qi}" id="qsc-slide-${qi}">` +
+      imgHtml +
       `<div class="qsc-slide-body">` +
+      evContextHtml +
       `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:#f59e0b"></i>Question ${qi + 1} of ${total}</div>` +
       `<p class="tdq-q-text qsc-q-text">${escapeHtml(String(q.q))}</p>` +
       `<div class="tdq-options qsc-opts-wrap">${optsHtml}</div>` +
@@ -2961,7 +2970,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const mPad = String(monthNum).padStart(2, "0");
   const dPad = String(day).padStart(2, "0");
 
-  // --- Full-page HTML cache (fastest path) ---
+  // Full-page HTML cache (set by cron or previous visit)
   const pageHtmlKey = `quiz-page-v1:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
@@ -2970,7 +2979,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
         return new Response(cachedHtml, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "public, max-age=3600",
+            "Cache-Control": "public, max-age=3600, s-maxage=86400",
             "X-Cache": "HIT",
           },
         });
@@ -2978,7 +2987,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     } catch (_) { /* ignore */ }
   }
 
-  // --- Events data: try KV first (cron stores today's; we also store per date below) ---
+  // Events data: try KV first, fall back to Wikipedia API
   const eventsKvKey = `events-data:${mPad}-${dPad}`;
   const todayIso = new Date().toISOString().split("T")[0];
   const todayEventsKey = `today-events-${todayIso}`;
@@ -2986,32 +2995,21 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   let eventsFromKv = false;
   if (env.EVENTS_KV) {
     try {
-      // For today's date, also try the cron-stored key
+      const isToday = mPad === String(MONTH_NUM_MAP[MONTHS_ALL[new Date().getUTCMonth()]]).padStart(2, "0") &&
+                      dPad === String(new Date().getUTCDate()).padStart(2, "0");
       const kvData = await env.EVENTS_KV.get(eventsKvKey, { type: "json" }) ||
-        (mPad === String(MONTH_NUM_MAP[MONTHS_ALL[new Date().getUTCMonth()]]).padStart(2, "0") &&
-         dPad === String(new Date().getUTCDate()).padStart(2, "0")
-          ? await env.EVENTS_KV.get(todayEventsKey, { type: "json" })
-          : null);
-      if (kvData?.events?.length) {
-        eventsData = kvData;
-        eventsFromKv = true;
-      }
+        (isToday ? await env.EVENTS_KV.get(todayEventsKey, { type: "json" }) : null);
+      if (kvData?.events?.length) { eventsData = kvData; eventsFromKv = true; }
     } catch (_) { /* ignore */ }
   }
-
   if (!eventsFromKv) {
     const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
     try {
       const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
       if (r.ok) {
         eventsData = await r.json();
-        // Cache events data for future quiz page visits
         if (env.EVENTS_KV && eventsData?.events?.length) {
-          try {
-            await env.EVENTS_KV.put(eventsKvKey, JSON.stringify(eventsData), {
-              expirationTtl: 7 * 24 * 60 * 60, // 7 days
-            });
-          } catch (_) { /* non-fatal */ }
+          try { await env.EVENTS_KV.put(eventsKvKey, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 }); } catch (_) { /* non-fatal */ }
         }
       }
     } catch (e) {
@@ -3028,9 +3026,9 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     ? await fetchWikipediaSummaryByTitle(wikiTitle)
     : "";
 
-  // Build topEvents FIRST — prioritise events with images, up to 5
-  const evAll = eventsData?.events || [];
+  // Gather top events with images for carousel slides (images-first order)
   const topEvents = [];
+  const evAll = eventsData?.events || [];
   for (const e of evAll) { if (e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
   for (const e of evAll) { if (!e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
 
@@ -3101,20 +3099,6 @@ async function handleQuizPage(_request, env, monthSlug, day) {
       }).replace(/<\//g, "<\\/")
     : null;
 
-  const ogImg = featuredEvent?.pages?.[0]?.thumbnail?.source
-    ? escapeHtml(featuredEvent.pages[0].thumbnail.source)
-    : `${siteUrl}/images/logo.png`;
-
-  const breadcrumbSchema = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: siteUrl },
-      { "@type": "ListItem", position: 2, name: `${mDisplay} ${day}`, item: `${siteUrl}/events/${monthSlug}/${day}/` },
-      { "@type": "ListItem", position: 3, name: "Quiz", item: canonical },
-    ],
-  }).replace(/<\//g, "<\\/");
-
   const html = `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(quizPageTitle)}</title>
@@ -3125,19 +3109,17 @@ async function handleQuizPage(_request, env, monthSlug, day) {
 <meta property="og:description" content="${escapeHtml(quizPageDesc)}"/>
 <meta property="og:type" content="website"/>
 <meta property="og:url" content="${escapeHtml(canonical)}"/>
-<meta property="og:image" content="${ogImg}"/>
+<meta property="og:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
 <meta name="twitter:card" content="summary_large_image"/>
 <meta name="twitter:title" content="${escapeHtml(quizPageTitle)}"/>
 <meta name="twitter:description" content="${escapeHtml(quizPageDesc)}"/>
-<meta name="twitter:image" content="${ogImg}"/>
-${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}<\/script>` : ""}
-<script type="application/ld+json">${breadcrumbSchema}<\/script>
+<meta name="twitter:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
+${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 <style>
 :root{--pb:#3b82f6;--sb:#f5f0e8;--tc:#1a1a1a;--htc:#fff;--fb:#1e293b;--ftc:#fff;--lc:#c0440a;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b;--badge:#c0440a}
 body.dark-theme{--pb:#020617;--sb:#0f172a;--tc:#f1f5f9;--fb:#020617;--lc:#f97316;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#94a3b8;--badge:#f97316}
@@ -3221,23 +3203,12 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
 </style>
 </head>
 <body>
-<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
 <nav class="navbar navbar-expand-lg navbar-dark">
   <div class="container-fluid">
     <a class="navbar-brand" href="/">thisDay.</a>
-    <div class="form-check form-switch d-lg-none me-2">
-      <input class="form-check-input" type="checkbox" id="tsm" aria-label="Toggle dark mode"/>
-      <label class="form-check-label" for="tsm"><i class="bi bi-brightness-high-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
-    </div>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
         <li class="nav-item"><a class="nav-link" href="/events/${todaySlug}/${todayDay}/">Today's Events</a></li>
-        <li class="nav-item d-flex align-items-center">
-          <div class="form-check form-switch d-none d-lg-block me-2">
-            <input class="form-check-input" type="checkbox" id="tsd" aria-label="Toggle dark mode"/>
-            <label class="form-check-label" for="tsd" style="color:#fff">Dark Mode</label>
-          </div>
-        </li>
       </ul>
     </div>
   </div>
@@ -3258,41 +3229,22 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
 </main>
 <footer class="footer">
-  <div class="container d-flex justify-content-center my-2">
-    <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
-  </div>
   <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
-  <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
-  <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
   <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
 </footer>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>document.getElementById('yr').textContent=new Date().getFullYear();</script>
 <script>
-const yrEl=document.getElementById('yr');
-if(yrEl)yrEl.textContent=new Date().getFullYear();
-const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
-const ap=d=>document.body.classList.toggle('dark-theme',d);
-const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
-const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
-const dk=gt('darkTheme')!=='false';
-ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
-if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
-if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
+  const tsd=document.getElementById('tsd');
+  const saved=localStorage.getItem('darkTheme');
+  if(saved!=='false')document.body.classList.add('dark-theme');
 </script>
 <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
 <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
-<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
 </body></html>`;
 
-  // Cache the full rendered page HTML in KV
+  // Cache the full rendered page for future visits
   if (env.EVENTS_KV) {
-    try {
-      await env.EVENTS_KV.put(pageHtmlKey, html, { expirationTtl: 24 * 60 * 60 });
-    } catch (_) { /* non-fatal */ }
+    try { await env.EVENTS_KV.put(pageHtmlKey, html, { expirationTtl: 24 * 60 * 60 }); } catch (_) { /* non-fatal */ }
   }
 
   return new Response(html, {

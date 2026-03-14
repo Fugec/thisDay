@@ -2462,6 +2462,10 @@ async function handleScheduledEvent(env) {
     const wikiSummary = wikiTitle
       ? await fetchWikipediaSummaryByTitle(wikiTitle)
       : "";
+    const evAll = eventsData?.events || [];
+    const topEventsPre = [];
+    for (const e of evAll) { if (e.pages?.[0]?.thumbnail?.source && topEventsPre.length < 5) topEventsPre.push(e); }
+    for (const e of evAll) { if (!e.pages?.[0]?.thumbnail?.source && topEventsPre.length < 5) topEventsPre.push(e); }
     await generateQuizForDate(
       env,
       monthSlug,
@@ -2469,6 +2473,7 @@ async function handleScheduledEvent(env) {
       eventsData,
       featuredEvent,
       wikiSummary,
+      topEventsPre,
     );
     console.log(`Quiz pre-generated for ${monthSlug}/${day}.`);
   } catch (e) {
@@ -2484,6 +2489,7 @@ async function generateQuizForDate(
   eventsData,
   featuredEvent,
   wikiSummary,
+  topEvents = [],
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
@@ -2493,17 +2499,18 @@ async function generateQuizForDate(
     const cached = await env.EVENTS_KV.get(kvKey);
     if (cached) {
       const parsed = JSON.parse(cached);
-      const hasTruncatedFallbackQuestion = Array.isArray(parsed?.questions)
-        ? parsed.questions.some((q) => {
-            const text = String(q?.q || "");
-            return (
-              /^In which year did\s+"/i.test(text) &&
-              (text.includes("…") || /\.\.\./.test(text))
-            );
-          })
-        : false;
+      const questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
+      const hasTruncatedFallbackQuestion = questions.some((q) => {
+        const text = String(q?.q || "");
+        return (
+          /^In which year did\s+"/i.test(text) &&
+          (text.includes("…") || /\.\.\./.test(text))
+        );
+      });
+      // Also force regeneration if cached questions lack eventIndex (image-question link)
+      const missingEventIndex = topEvents.length > 0 && questions.some((q) => q.eventIndex === undefined);
 
-      if (!hasTruncatedFallbackQuestion) {
+      if (!hasTruncatedFallbackQuestion && !missingEventIndex) {
         return parsed;
       }
     }
@@ -2512,20 +2519,22 @@ async function generateQuizForDate(
   }
 
   const mDisplay = MONTH_DISPLAY_NAMES[MONTH_NUM_MAP[monthName]];
-  const events = eventsData?.events || [];
   const births = eventsData?.births || [];
+
+  // Use topEvents if provided (image-prioritised order), else fall back to raw events
+  const eventsForContext = topEvents.length >= 5
+    ? topEvents
+    : (eventsData?.events || []).slice(0, 5);
 
   const contextLines = [];
   if (featuredEvent)
-    contextLines.push(
-      `Featured event: ${featuredEvent.year} — ${featuredEvent.text}`,
-    );
+    contextLines.push(`Featured event: ${featuredEvent.year} — ${featuredEvent.text}`);
   if (wikiSummary)
     contextLines.push(`Wikipedia context: ${wikiSummary.substring(0, 300)}`);
-  events
+  eventsForContext
     .slice(0, 5)
-    .forEach((e) =>
-      contextLines.push(`Event: ${e.year} — ${e.text.substring(0, 100)}`),
+    .forEach((e, i) =>
+      contextLines.push(`Event[${i}]: ${e.year} — ${e.text.substring(0, 120)}`),
     );
   births
     .slice(0, 3)
@@ -2550,7 +2559,7 @@ async function generateQuizForDate(
             },
             {
               role: "user",
-              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the featured event\n- "sourceEvent" is the full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
+              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nContext (events are indexed 0-${eventsForContext.slice(0, 5).length - 1}):\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions — one question per Event[index] above\n- Each question MUST set "eventIndex" to the Event index (0-4) it is about\n- Each question has exactly 4 options\n- Exactly one correct answer per question (0-based index in "answer")\n- Questions must be specific, fact-based, preferring cause/consequence/location over year questions\n- "topic" must be 5 words or fewer naming the most significant event\n- "sourceEvent" is the full text of the featured event\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"eventIndex":0,"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"1-2 sentence explanation of correct answer"}]}`,
             },
           ],
           max_tokens: 1500,
@@ -2758,7 +2767,8 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
 
   // Build slides — one per question
   const slidesHtml = quiz.questions.slice(0, total).map((q, qi) => {
-    const ev = topEvents[qi] || topEvents[0] || null;
+    const evIdx = (q.eventIndex !== undefined && q.eventIndex >= 0 && q.eventIndex < topEvents.length) ? q.eventIndex : qi;
+    const ev = topEvents[evIdx] || topEvents[qi] || topEvents[0] || null;
     const imgSrc = ev?.pages?.[0]?.thumbnail?.source || "";
     const imgAlt = ev?.pages?.[0]?.title || "";
     const evYear = ev?.year ? String(ev.year) : "";
@@ -2978,6 +2988,12 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     ? await fetchWikipediaSummaryByTitle(wikiTitle)
     : "";
 
+  // Build topEvents FIRST — prioritise events with images, up to 5
+  const evAll = eventsData?.events || [];
+  const topEvents = [];
+  for (const e of evAll) { if (e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
+  for (const e of evAll) { if (!e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
+
   const quiz = await generateQuizForDate(
     env,
     monthSlug,
@@ -2985,12 +3001,8 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     eventsData,
     featuredEvent,
     wikiSummary,
+    topEvents,
   );
-  // Gather top events with images for carousel slides
-  const topEvents = [];
-  const evAll = eventsData?.events || [];
-  for (const e of evAll) { if (e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
-  for (const e of evAll) { if (!e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
 
   // Next day for CTA
   const _nd = new Date(Date.UTC(new Date().getUTCFullYear(), MONTH_NUM_MAP[monthSlug] - 1, day + 1));

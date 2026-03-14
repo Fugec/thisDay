@@ -1608,7 +1608,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v7:${mm}-${dd}`;
+    const kvKey = `quiz-v8:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2445,7 +2445,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v7:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v8:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2499,7 +2499,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v7:${mm}-${dd}`;
+  const kvKey = `quiz-v8:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2770,27 +2770,32 @@ function buildQuizHTML(quiz, monthDisplay, day) {
 // ---------------------------------------------------------------------------
 // Carousel quiz page builder — one event + one question per slide
 // ---------------------------------------------------------------------------
-function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, nextMonthSlug, nextDay) {
+function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, nextMonthSlug, nextDay, blogEntry = null) {
   if (!quiz?.questions?.length) return "<p class='text-muted'>Quiz unavailable for this date.</p>";
 
   const answers = quiz.questions.map((q) => Number(q.answer));
   const answersJson = JSON.stringify(answers);
   const total = Math.min(quiz.questions.length, 5);
 
+  // Blog post mode: same image + link for all slides
+  const blogImgSrc = blogEntry?.imageUrl || "";
+  const blogTitle = blogEntry?.title || "";
+  const blogUrl = blogEntry ? `/blog/archive/${blogEntry.slug}/` : "";
+
   // Build slides — one per question
   const slidesHtml = quiz.questions.slice(0, total).map((q, qi) => {
-    const ev = topEvents[qi] || topEvents[0] || null;
-    const imgSrc = ev?.pages?.[0]?.thumbnail?.source || "";
-    const imgAlt = ev?.pages?.[0]?.title || "";
-    const evYear = ev?.year ? String(ev.year) : "";
-    const wikiUrl = ev?.pages?.[0]?.content_urls?.desktop?.page || "";
+    // When blog post quiz: use blog image for all slides; otherwise use per-event images
+    const imgSrc = blogEntry ? blogImgSrc : (topEvents[qi]?.pages?.[0]?.thumbnail?.source || topEvents[0]?.pages?.[0]?.thumbnail?.source || "");
+    const imgAlt = blogEntry ? blogTitle : (topEvents[qi]?.pages?.[0]?.title || "");
+    const evYear = blogEntry ? "" : (topEvents[qi]?.year ? String(topEvents[qi].year) : "");
+    const readMoreUrl = blogEntry ? blogUrl : (topEvents[qi]?.pages?.[0]?.content_urls?.desktop?.page || `/events/${escapeHtml(monthSlug)}/${day}/`);
+    const readMoreTarget = (blogEntry || !topEvents[qi]?.pages?.[0]?.content_urls?.desktop?.page) ? "_self" : "_blank";
 
     const imgHtml = imgSrc
       ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
       : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
 
-    const readMoreUrl = wikiUrl || `/events/${escapeHtml(monthSlug)}/${day}/`;
-    const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${wikiUrl ? "_blank" : "_self"}" rel="noopener" class="qsc-read-more-btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
+    const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${readMoreTarget}" rel="noopener" class="qsc-read-more-btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
 
     const optsHtml = (q.options || []).map((opt, oi) =>
       `<div class="tdq-opt qsc-opt" data-qi="${qi}" data-oi="${oi}" role="radio" aria-checked="false" tabindex="0">` +
@@ -2979,7 +2984,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v7:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v8:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -2993,6 +2998,26 @@ async function handleQuizPage(_request, env, monthSlug, day) {
         });
       }
     } catch (_) { /* ignore */ }
+  }
+
+  // --- Blog post quiz for this date (primary source) ---
+  let blogQuiz = null;
+  let blogEntry = null;
+  if (env.BLOG_AI_KV) {
+    const curYear = new Date().getUTCFullYear();
+    for (const yr of [curYear, curYear - 1]) {
+      try {
+        const bSlug = `${day}-${monthSlug}-${yr}`;
+        const raw = await env.BLOG_AI_KV.get(`quiz-v2:blog:${bSlug}`);
+        if (raw) {
+          blogQuiz = JSON.parse(raw);
+          const indexRaw = await env.BLOG_AI_KV.get("index");
+          const idx = indexRaw ? JSON.parse(indexRaw) : [];
+          blogEntry = idx.find(e => e.slug === bSlug) || { slug: bSlug, title: `${mDisplay} ${day}`, imageUrl: null };
+          break;
+        }
+      } catch (_) { /* ignore */ }
+    }
   }
 
   // Events data: try KV first, fall back to Wikipedia API
@@ -3040,7 +3065,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   for (const e of evAll) { if (e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
   for (const e of evAll) { if (!e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
 
-  const quiz = await generateQuizForDate(
+  const quiz = blogQuiz || await generateQuizForDate(
     env,
     monthSlug,
     day,
@@ -3055,7 +3080,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const nextMonthSlug = MONTHS_ALL[_nd.getUTCMonth()];
   const nextDay = _nd.getUTCDate();
 
-  const carouselHtml = buildCarouselQuizHTML(quiz, topEvents, mDisplay, day, monthSlug, nextMonthSlug, nextDay);
+  const carouselHtml = buildCarouselQuizHTML(quiz, topEvents, mDisplay, day, monthSlug, nextMonthSlug, nextDay, blogEntry);
   const siteUrl = "https://thisday.info";
   const canonical = `${siteUrl}/quiz/${monthSlug}/${day}/`;
   const _d = new Date();

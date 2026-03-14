@@ -932,6 +932,21 @@ body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-co
 body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-color:#60a5fa;color:#e2e8f0}
 .tdq-feedback{font-size:.85rem;margin-top:5px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
 .tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.2rem}
+.site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--cbr);border-radius:10px;overflow:hidden;margin-top:1rem;font-size:.9rem}
+.site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--cbr);text-align:left;color:var(--tc)}
+.site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
+.site-table th{background:rgba(59,130,246,.07);font-weight:600;white-space:nowrap;width:40%}
+body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}
+body.dark-theme .site-table th{background:rgba(96,165,250,.1)}
+body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}
+.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--cbr);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--tc);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
+.site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07);color:var(--tc);text-decoration:none}
+.site-btn-primary{border-color:#3b82f6;color:#2563eb}
+.site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}
+body.dark-theme .site-btn{border-color:rgba(255,255,255,.18);color:var(--tc)}
+body.dark-theme .site-btn:hover{border-color:#60a5fa;background:rgba(96,165,250,.1);color:#f8fafc}
+body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}
+body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}
 </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
@@ -977,13 +992,13 @@ body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-col
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
     ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:#f59e0b"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
-    <table class="table table-sm table-bordered mt-3" style="max-width:480px">
-      <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
+    <table class="site-table">
+      <tbody><tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
       <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
       <tr><th>Events recorded</th><td>${events.length}</td></tr>
       <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
-    </table>
-    ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="btn btn-outline-primary btn-sm" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right me-1"></i>Full Article on Wikipedia</a>` : ""}
+    </tbody></table>
+    ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn site-btn-primary mt-3" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Full Article on Wikipedia</a>` : ""}
   </div>`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
@@ -1035,13 +1050,13 @@ body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-col
   }
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <a href="/events/${prevMonthName}/${prevDayNum}/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
-      <a href="/events/${nextMonthName}/${nextDayNum}/" class="btn btn-outline-secondary btn-sm">${escapeHtml(nextMonthDisplay)} ${nextDayNum}<i class="bi bi-arrow-right ms-1"></i></a>
+      <a href="/events/${prevMonthName}/${prevDayNum}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
+      <a href="/events/${nextMonthName}/${nextDayNum}/" class="site-btn">${escapeHtml(nextMonthDisplay)} ${nextDayNum}<i class="bi bi-arrow-right"></i></a>
     </div>
     <div class="text-center">
       <p class="text-muted mb-3">Explore history for any date on the interactive calendar.</p>
-      <a href="/" class="btn btn-primary me-2"><i class="bi bi-calendar3 me-1"></i>Open the Calendar</a>
-      <a href="/blog/" class="btn btn-outline-primary"><i class="bi bi-journal-text me-1"></i>All Blog Posts</a>
+      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
   </div>
 </main>
@@ -2685,9 +2700,10 @@ function buildQuizHTML(quiz, monthDisplay, day) {
   return (
     `<div class="card-box" id="tdq-widget">` +
     `<h2 class="h4 mb-3"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge — ${escapeHtml(monthDisplay)} ${day}</h2>` +
-    `<p class="text-muted mb-3" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out. <a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" style="font-size:.85rem;white-space:nowrap">Full quiz page →</a></p>` +
+    `<p class="text-muted mb-2" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out.</p>` +
+    `<a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" class="site-btn mb-3"><i class="bi bi-list-check"></i>Full quiz page</a>` +
     `<div id="tdq-questions">${questionsHtml}</div>` +
-    `<button class="btn btn-warning mt-3 px-4" id="tdq-submit-btn">Check Answers</button>` +
+    `<button class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"><i class="bi bi-check2-circle"></i>Check Answers</button>` +
     `<div id="tdq-score" class="mt-3" hidden></div>` +
     `</div>` +
     `<script>(function(){` +

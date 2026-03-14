@@ -2580,18 +2580,23 @@ async function generateQuizForDate(
       const objMatch = cleaned.match(/\{[\s\S]*\}/);
       if (objMatch) {
         const parsed = JSON.parse(objMatch[0]);
-        if (Array.isArray(parsed?.questions) && parsed.questions.length >= 3) {
-          // Validate each question has required fields — drop malformed ones
+        const eventCount = Math.min(indexedEvents.length, 5);
+        if (Array.isArray(parsed?.questions) && parsed.questions.length === eventCount) {
+          // All-or-nothing: every question must be valid and correspond to an event
           const valid = parsed.questions.filter(
             (q) =>
               q.q &&
+              String(q.q).length > 15 &&
               Array.isArray(q.options) &&
               q.options.length === 4 &&
+              q.options.every((o) => o && String(o).length > 2) &&
               typeof q.answer === "number" &&
               q.answer >= 0 &&
-              q.answer <= 3,
+              q.answer <= 3 &&
+              q.explanation &&
+              String(q.explanation).length > 8,
           );
-          if (valid.length >= 3) quiz = { ...parsed, questions: valid };
+          if (valid.length === eventCount) quiz = { ...parsed, questions: valid };
         }
       }
     } catch (e) {

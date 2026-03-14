@@ -596,13 +596,9 @@ body.dark-theme .event-commentary-icon {
 
 /* Quiz CTA Strip */
 .quiz-cta-strip {
-  background: rgba(245, 158, 11, 0.07);
-  border-top: 1px solid rgba(245, 158, 11, 0.2);
-  border-bottom: 1px solid rgba(245, 158, 11, 0.2);
-}
-body.dark-theme .quiz-cta-strip {
-  background: rgba(245, 158, 11, 0.1);
-  border-color: rgba(245, 158, 11, 0.25);
+  background: var(--card-bg, #ffffff);
+  border-top: 1px solid var(--card-border, #e2e8f0);
+  border-bottom: 1px solid var(--card-border, #e2e8f0);
 }
 .quiz-cta-strip strong {
   font-size: 1rem;

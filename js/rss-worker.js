@@ -14,11 +14,11 @@
 // Constants
 // ---------------------------------------------------------------------------
 
+import { SITE_DESCRIPTION } from "./shared/layout.js";
+
 const DOMAIN = "https://thisday.info";
 const FEED_URL = `${DOMAIN}/rss.xml`;
 const SITE_TITLE = "thisDay. — On This Day in History";
-const SITE_DESCRIPTION =
-  "A daily journey through history. Articles about significant events, people, and turning points that shaped our world.";
 const SITE_LOGO_URL = `${DOMAIN}/images/logo.png`;
 
 const CACHE_MAX_AGE = 3600; // 1 hour
@@ -99,6 +99,7 @@ function buildFeed(posts) {
     `    <language>en-us</language>\n` +
     `    <lastBuildDate>${lastBuildDate}</lastBuildDate>\n` +
     `    <atom:link href="${FEED_URL}" rel="self" type="application/rss+xml"/>\n` +
+    `    <atom:link rel="hub" href="https://pubsubhubbub.appspot.com/"/>\n` +
     `    <image>\n` +
     `      <url>${SITE_LOGO_URL}</url>\n` +
     `      <title>${esc(SITE_TITLE)}</title>\n` +

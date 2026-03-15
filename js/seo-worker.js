@@ -3,6 +3,8 @@
 // Adds various security headers to enhance protection.
 // Injects Schema.org JSON-LD for better SEO.
 
+import { siteNav, siteFooter, SITE_DESCRIPTION } from "./shared/layout.js";
+
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
@@ -954,28 +956,7 @@ body.dark-theme #read-progress{background:#60a5fa}
 </head>
 <body>
 <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-<nav class="navbar navbar-expand-lg navbar-dark">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="/">thisDay.</a>
-    <div class="form-check form-switch d-lg-none me-2">
-      <input class="form-check-input" type="checkbox" id="tsm" aria-label="Toggle dark mode"/>
-      <label class="form-check-label" for="tsm"><i class="bi bi-brightness-high-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
-    </div>
-    <div class="collapse navbar-collapse">
-      <ul class="navbar-nav ms-auto">
-        <li class="nav-item">
-          <a class="nav-link" href="/events/${todayMonthSlug}/${todayDayNum}/">Today's Events</a>
-        </li>
-        <li class="nav-item d-flex align-items-center">
-          <div class="form-check form-switch d-none d-lg-block me-2">
-            <input class="form-check-input" type="checkbox" id="tsd" aria-label="Toggle dark mode"/>
-            <label class="form-check-label" for="tsd" style="color:#fff">Dark Mode</label>
-          </div>
-        </li>
-      </ul>
-    </div>
-  </div>
-</nav>
+${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
 <main class="container my-4" style="max-width:860px">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
@@ -1063,19 +1044,7 @@ body.dark-theme #read-progress{background:#60a5fa}
     </div>
   </div>
 </main>
-<footer class="footer">
-  <div class="container d-flex justify-content-center my-2">
-    <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
-  </div>
-  <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
-  <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
-  <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
-  <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
-</footer>
+${siteFooter("yr")}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 const yrEl=document.getElementById('yr');
@@ -1776,10 +1745,9 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   // Prepare dynamic meta tags and content based on fetched data
-  let dynamicDescription =
-    "Explore historical events, milestones, and notable figures from any date. Dive into history with this interactive calendar.";
+  let dynamicDescription = SITE_DESCRIPTION;
   let dynamicKeywords =
-    "thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history, history, educational, timeline, trivia, historical figures";
+    "thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history, educational, timeline, trivia, historical figures, history quiz, daily quiz, history blog, history articles, YouTube Shorts history, this day in history, what happened today, historical milestones, Flipboard history";
   let dynamicTitle =
     "thisDay. | What Happened on This Day? | Historical Events";
   let ogImageUrl = "https://thisday.info/images/logo.png"; // Default fallback image
@@ -3298,26 +3266,7 @@ body.dark-theme .qsc-rec-card{border-color:rgba(255,255,255,.1)}
 </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="/">thisDay.</a>
-    <div class="form-check form-switch d-lg-none me-2">
-      <input class="form-check-input" type="checkbox" id="tsm" aria-label="Toggle dark mode"/>
-      <label class="form-check-label" for="tsm"><i class="bi bi-brightness-high-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
-    </div>
-    <div class="collapse navbar-collapse">
-      <ul class="navbar-nav ms-auto">
-        <li class="nav-item"><a class="nav-link" href="/events/${todaySlug}/${todayDay}/">Today's Events</a></li>
-        <li class="nav-item d-flex align-items-center">
-          <div class="form-check form-switch d-none d-lg-block me-2">
-            <input class="form-check-input" type="checkbox" id="tsd" aria-label="Toggle dark mode"/>
-            <label class="form-check-label" for="tsd" style="color:#fff">Dark Mode</label>
-          </div>
-        </li>
-      </ul>
-    </div>
-  </div>
-</nav>
+${siteNav({ todayLink: `/events/${todaySlug}/${todayDay}/` })}
 <main class="container my-4" style="max-width:720px">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
@@ -3334,19 +3283,7 @@ body.dark-theme .qsc-rec-card{border-color:rgba(255,255,255,.1)}
   ${recSliderHtml}
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
 </main>
-<footer class="footer">
-  <div class="container d-flex justify-content-center my-2">
-    <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
-    <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
-  </div>
-  <p>&copy; <span id="yr"></span> thisDay. All rights reserved.</p>
-  <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
-  <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
-  <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
-</footer>
+${siteFooter("yr")}
 <script>
 const yrEl=document.getElementById('yr');
 if(yrEl)yrEl.textContent=new Date().getFullYear();

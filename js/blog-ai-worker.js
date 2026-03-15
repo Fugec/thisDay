@@ -348,14 +348,9 @@ export default {
   <\/script>`;
           // Build "Explore in History" section from slug (e.g. "1-march-2026" → March 1)
           let exploreHtml = "";
-          const slugParts = slug.match(/^(\d+)-([a-z]+)-\d+$/i);
-          if (slugParts) {
-            const hDay = parseInt(slugParts[1], 10);
-            const hMonthSlug = slugParts[2].toLowerCase();
-            const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
-            const monthSlugs = ["january","february","march","april","may","june","july","august","september","october","november","december"];
-            const mIdx = monthSlugs.indexOf(hMonthSlug);
-            const hMonthDisplay = mIdx >= 0 ? monthNames[mIdx].charAt(0).toUpperCase() + monthNames[mIdx].slice(1) : hMonthSlug;
+          const slugParsed = parseSlugDate(slug);
+          if (slugParsed) {
+            const { day: hDay, monthSlug: hMonthSlug, monthDisplay: hMonthDisplay } = slugParsed;
             exploreHtml = `
           <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
             <i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i>
@@ -914,10 +909,16 @@ Writing style rules:
 - Do not use dashes ("-" or "—") inside sentences. Use commas, periods, or rewrite the sentence instead.
 - Write in a natural, human tone. Avoid bullet-point thinking inside paragraphs.
 
+Title rules:
+- The "title" field MUST follow exactly this format: "[Specific Action or Event] — ${monthName} ${day}, Year"
+- The first part must be the specific historical event name (e.g. "Assassination of Julius Caesar", "Apollo 11 Moon Landing", "Fall of Constantinople").
+- Do NOT use colloquial date names or phrases like "Ides of March", "D-Day", or "Black Tuesday" as the title — use the actual event name instead.
+- The separator between event name and date MUST be " — " (space, em dash, space).
+
 Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation — just the JSON.
 
 {
-  "title": "Event Name — ${monthName} ${day}, Year",
+  "title": "Specific Event Name — ${monthName} ${day}, Year",
   "eventTitle": "Short event name",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
@@ -1041,15 +1042,21 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     }
   }
 
-  // Enforce that the title always contains the date (Month Day, Year).
-  // The AI sometimes omits it or uses a wrong format.
+  // Enforce that the title always follows the format "Event Name — Month Day, Year".
+  // The AI sometimes omits the date, uses wrong format, or uses colloquial date names.
   const year = parsed.historicalYear ?? date.getFullYear();
   const expectedDateSuffix = `${monthName} ${day}, ${year}`;
-  if (!parsed.title || !parsed.title.includes(monthName)) {
-    // Strip any existing trailing date-like pattern and append the correct one
-    const cleanTitle = (parsed.title ?? parsed.eventTitle ?? "Untitled")
-      .replace(/[—:\-]\s*\w+ \d{1,2},\s*\d{4}\s*$/, "")
-      .trim();
+  const hasSeparator = parsed.title && parsed.title.includes(" — ");
+  if (!parsed.title || !parsed.title.includes(monthName) || !hasSeparator) {
+    // When title lacks the " — " separator, prefer eventTitle as the cleaner base name
+    const useEventTitle = !hasSeparator && parsed.eventTitle;
+    const base = useEventTitle
+      ? parsed.eventTitle
+      : (parsed.title ?? parsed.eventTitle ?? "Untitled");
+    // Only strip trailing date patterns when using parsed.title (eventTitle has none)
+    const cleanTitle = useEventTitle
+      ? base.trim()
+      : base.replace(/[—:\-]\s*\w+ \d{1,2},\s*\d{4}\s*$/, "").trim();
     parsed.title = `${cleanTitle} — ${expectedDateSuffix}`;
   }
 
@@ -1589,9 +1596,19 @@ ${analysisBadItems}
             // Cross-link to /generated/ page for the event's month/day
             if (!c.historicalDateISO) return "";
             const hd = new Date(c.historicalDateISO + "T12:00:00Z");
-            const hMonthSlug = MONTH_SLUGS[hd.getUTCMonth()];
-            const hDay = hd.getUTCDate();
-            const hMonthDisplay = MONTH_NAMES[hd.getUTCMonth()];
+            let hMonthSlug, hDay, hMonthDisplay;
+            if (!isNaN(hd.getTime())) {
+              hMonthSlug = MONTH_SLUGS[hd.getUTCMonth()];
+              hDay = hd.getUTCDate();
+              hMonthDisplay = MONTH_NAMES[hd.getUTCMonth()];
+            } else {
+              // BCE or unparseable date — fall back to publication slug (e.g. "15-march-2026")
+              const sp = parseSlugDate(slug);
+              if (!sp) return "";
+              hDay = sp.day;
+              hMonthSlug = sp.monthSlug;
+              hMonthDisplay = sp.monthDisplay;
+            }
             return `<div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
               <i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i>
               <div>
@@ -2235,6 +2252,20 @@ async function serve404(env) {
 
 function buildSlug(date) {
   return `${date.getDate()}-${MONTH_SLUGS[date.getMonth()]}-${date.getFullYear()}`;
+}
+
+/**
+ * Inverse of buildSlug — parses "15-march-2026" into its components.
+ * Returns null if the slug doesn't match the expected format.
+ */
+function parseSlugDate(slug) {
+  const m = slug.match(/^(\d+)-([a-z]+)-\d+$/i);
+  if (!m) return null;
+  const day = parseInt(m[1], 10);
+  const monthSlug = m[2].toLowerCase();
+  const monthIndex = MONTH_SLUGS.indexOf(monthSlug);
+  if (monthIndex < 0) return null;
+  return { day, monthSlug, monthIndex, monthDisplay: MONTH_NAMES[monthIndex] };
 }
 
 /** Minimal HTML entity escaping to prevent XSS in generated output. */

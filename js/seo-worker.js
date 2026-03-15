@@ -3096,17 +3096,15 @@ async function handleQuizPage(_request, env, monthSlug, day) {
       dPad: String(d.getUTCDate()).padStart(2, "0"),
     });
   }
-  // Fetch thumbnail images for adjacent days in parallel from events-data KV
-  const adjImgResults = await Promise.allSettled(
-    adjDays.map(d =>
-      env.EVENTS_KV
-        ? env.EVENTS_KV.get(`events-data:${d.mPad}-${d.dPad}`, { type: "json" })
-        : Promise.resolve(null)
-    )
-  );
-  const adjCards = adjDays.map((d, i) => {
-    const evData = adjImgResults[i].status === "fulfilled" ? adjImgResults[i].value : null;
-    const thumb = evData?.events?.find(e => e.pages?.[0]?.thumbnail?.source)?.pages?.[0]?.thumbnail?.source || null;
+  // Fetch blog post images for adjacent days from BLOG_AI_KV index (directly tied to quiz topic)
+  const blogIndex = env.BLOG_AI_KV
+    ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
+    : null;
+  const adjCards = adjDays.map((d) => {
+    const curYear = new Date().getUTCFullYear();
+    const blogEntry2 = (blogIndex || []).find(e => e.slug === `${d.day}-${d.monthSlug}-${curYear}`)
+      || (blogIndex || []).find(e => e.slug === `${d.day}-${d.monthSlug}-${curYear - 1}`);
+    const thumb = blogEntry2?.imageUrl || null;
     const imgHtml = thumb
       ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(d.monthDisplay)} ${d.day}" class="qsc-rec-img" loading="lazy"/>`
       : "";

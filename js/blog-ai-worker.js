@@ -434,7 +434,7 @@ export default {
           const wikiAnchor = '<div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08)';
           if (patchedHtml.includes(wikiAnchor)) {
             patchedHtml = patchedHtml.replace(wikiAnchor, quizCta + "\n          " + wikiAnchor);
-            if (exploreHtml && !patchedHtml.includes('bi-calendar3')) {
+            if (exploreHtml && !patchedHtml.includes('data-explore-injected="1"')) {
               const afterWikiAnchor = patchedHtml.includes('<!-- Quiz CTA -->')
                 ? '<!-- Quiz CTA -->'
                 : patchedHtml.includes('You Might Also Like')
@@ -451,8 +451,15 @@ export default {
           const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
+        // Remove old icon-based Explore card (no data-explore-injected) so it can be replaced with thumbnail version
+        if (patchedHtml.includes('bi-calendar3') && !patchedHtml.includes('data-explore-injected="1"')) {
+          patchedHtml = patchedHtml.replace(
+            /<div class="mt-4 p-3 rounded d-flex align-items-center gap-3"[^>]*>\s*<i class="bi bi-calendar3[\s\S]*?<\/div>\s*<\/div>/,
+            ''
+          );
+        }
         // Inject "Explore [Date] in History" card for any post missing it (covers posts with quiz already baked in)
-        if (!patchedHtml.includes('bi-calendar3') && slugParsedForThumb) {
+        if (!patchedHtml.includes('data-explore-injected="1"') && slugParsedForThumb) {
           const sp = slugParsedForThumb;
           const thumb = eventsThumb
             ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`

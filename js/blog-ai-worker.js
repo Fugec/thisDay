@@ -310,12 +310,12 @@ export default {
   <style>
     .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
     .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
-    .tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+    .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.07)}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
     .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
-    .tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
-    body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
-    body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
+    .tdq-opt-selected .tdq-opt-key{background:#f59e0b;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+    body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.08)}
+    body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
     body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
     .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
@@ -417,7 +417,7 @@ export default {
             <div>
               <strong>Explore ${hMonthDisplay} ${hDay} in History</strong><br/>
               <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
-              <a href="/generated/${hMonthSlug}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">
+              <a href="/events/${hMonthSlug}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">
                 <i class="bi bi-arrow-right me-1"></i>View ${hMonthDisplay} ${hDay}
               </a>
             </div>
@@ -428,7 +428,7 @@ export default {
           if (patchedHtml.includes(wikiAnchor)) {
             // Insert quiz before Wikipedia box, then inject Explore section after Wikipedia box
             patchedHtml = patchedHtml.replace(wikiAnchor, quizCta + "\n          " + wikiAnchor);
-            if (exploreHtml && !patchedHtml.includes("/generated/")) {
+            if (exploreHtml && !patchedHtml.includes('bi-calendar3')) {
               // Inject Explore section after the Wikipedia box (before You Might Also Like or </article>)
               const afterWikiAnchor = patchedHtml.includes('You Might Also Like')
                 ? '<section class="mt-5">'
@@ -443,6 +443,17 @@ export default {
           }
           const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
+        }
+        // Inject "Explore [Date] in History" card for any post missing it
+        if (!patchedHtml.includes('bi-calendar3')) {
+          const sp = parseSlugDate(slug);
+          if (sp) {
+            const exploreCard = `<div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)"><i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i><div><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-arrow-right me-1"></i>View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
+            const anchor = patchedHtml.includes('<section class="mt-5">')
+              ? '<section class="mt-5">'
+              : "</article>";
+            patchedHtml = patchedHtml.replace(anchor, exploreCard + "\n          " + anchor);
+          }
         }
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
@@ -1280,6 +1291,7 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     <title>${esc(c.title)} | thisDay.</title>
     <link rel="canonical" href="${canonicalUrl}" />
     <meta name="robots" content="index, follow" />
+    <meta name="author" content="thisDay. Editorial" />
     <meta name="description" content="${esc(c.description)}" />
     <meta name="keywords" content="${esc(c.keywords)}" />
 
@@ -1289,6 +1301,7 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     <meta property="og:type" content="article" />
     <meta property="og:url" content="${canonicalUrl}" />
     <meta property="og:image" content="${esc(c.imageUrl)}" />
+    <meta property="og:image:alt" content="${esc(c.title)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="en_US" />
@@ -1690,7 +1703,7 @@ ${analysisBadItems}
               <div>
                 <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
                 <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
-                <a href="/generated/${esc(hMonthSlug)}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">
+                <a href="/events/${esc(hMonthSlug)}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">
                   <i class="bi bi-arrow-right me-1"></i>View ${esc(hMonthDisplay)} ${hDay}
                 </a>
               </div>
@@ -1808,12 +1821,12 @@ ${analysisBadItems}
   <style>
     .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
     .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
-    .tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+    .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.07)}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
     .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
-    .tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
-    body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
-    body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
+    .tdq-opt-selected .tdq-opt-key{background:#f59e0b;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+    body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.08)}
+    body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
     body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
     .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
@@ -1989,6 +2002,7 @@ async function buildListingHTML(index) {
     <title>History Blog | thisDay. — Articles on Historical Events</title>
     <link rel="canonical" href="https://thisday.info/blog/archive/" />
     <meta name="robots" content="index, follow" />
+    <meta name="author" content="thisDay. Editorial" />
     <meta name="description" content="Original articles about historical events published regularly by thisDay.info." />
     <meta property="og:title" content="History Blog | thisDay." />
     <meta property="og:description" content="In-depth articles about the events, people, and moments that shaped world history." />
@@ -1997,6 +2011,10 @@ async function buildListingHTML(index) {
     <meta property="og:image" content="https://thisday.info/images/logo.png" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="thisDay." />
+    <meta name="twitter:card" content="summary_large_image"/>
+    <meta name="twitter:title" content="History Blog | thisDay."/>
+    <meta name="twitter:description" content="In-depth articles covering historical events published regularly by thisDay.info."/>
+    <meta name="twitter:image" content="https://thisday.info/images/logo.png"/>
 
     <!-- JSON-LD -->
     <script type="application/ld+json">
@@ -2042,6 +2060,7 @@ ${JSON.stringify(
       function gtag() { dataLayer.push(arguments); }
       gtag("js", new Date()); gtag("config", "G-WXEZ3868VN");
     </script>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
     <style>
       :root {
         --primary-bg: #3b82f6; --secondary-bg: #fff; --text-color: #6c757d;
@@ -2076,6 +2095,8 @@ ${JSON.stringify(
       .post-title { font-weight: 600; font-size: 0.95rem; line-height: 1.4; color: var(--link-color); }
       body.dark-theme .post-title { color: #60a5fa; }
       .month-header { font-size: 1.3rem; font-weight: 700; color: #3b82f6 !important; border-bottom: 2px solid rgba(59,130,246,0.3); padding-bottom: 6px; margin-bottom: 14px; }
+      .ad-unit { text-align: center; }
+      .ad-unit-label { font-size: 0.7rem; color: #adb5bd; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
     </style>
   </head>
   <body>
@@ -2090,6 +2111,15 @@ ${JSON.stringify(
           In-depth articles covering fascinating historical events published regularly by thisDay.info.
           <a href="/blog/">View all posts</a>
         </p>
+        <div class="ad-unit" style="margin-bottom:24px">
+          <div class="ad-unit-label">Advertisement</div>
+          <ins class="adsbygoogle"
+               style="display:block;border-radius:8px;overflow:hidden"
+               data-ad-client="ca-pub-8565025017387209"
+               data-ad-slot="9477779891"
+               data-ad-format="auto"
+               data-full-width-responsive="true"></ins>
+        </div>
         <div class="month-section">
           <h2 class="month-header"><i class="bi bi-book me-2"></i>All Articles (${index.length})</h2>
           ${postItems}
@@ -2116,6 +2146,7 @@ ${JSON.stringify(
       if (tsd) tsd.addEventListener("change", (e) => setTheme(e.target.checked));
       if (tsm) tsm.addEventListener("change",  (e) => setTheme(e.target.checked));
     });
+    (adsbygoogle = window.adsbygoogle || []).push({});
   </script>
 </body>
 </html>`;

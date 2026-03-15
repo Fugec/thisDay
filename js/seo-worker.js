@@ -650,9 +650,9 @@ function generateBlogPostHTML(
 
   const featured =
     events.find((e) => e.pages?.[0]?.thumbnail?.source) || events[0] || null;
-  const others = events.filter((e) => e !== featured).slice(0, 8);
-  const topBirths = births.slice(0, 5);
-  const topDeaths = deaths.slice(0, 5);
+  const others = events.filter((e) => e !== featured).slice(0, 15);
+  const topBirths = births.slice(0, 10);
+  const topDeaths = deaths.slice(0, 10);
 
   const pageTitle = featured
     ? `What Happened on ${mDisplay} ${day}: ${featured.text.split(".")[0]} | thisDay.info`
@@ -873,7 +873,8 @@ function generateBlogPostHTML(
 <meta name="robots" content="index, follow"/><meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/><meta property="og:description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:type" content="article"/><meta property="og:url" content="${escapeHtml(canonical)}"/>
-<meta property="og:locale" content="en_US"/><meta property="og:image" content="${escapeHtml(ogImg)}"/>
+<meta property="og:locale" content="en_US"/>
+<meta property="og:site_name" content="thisDay."/><meta property="og:image" content="${escapeHtml(ogImg)}"/>
 <meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
 <meta name="twitter:description" content="${escapeHtml(pageDesc)}"/><meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
 <meta name="author" content="thisDay.info"/>
@@ -986,7 +987,6 @@ ${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
   </div>`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
-  ${quizHtml}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle"
@@ -1001,7 +1001,7 @@ ${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
       ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
-    ${othersHtml}
+    <div style="max-height:340px;overflow-y:auto;padding-right:4px">${othersHtml}</div>
   </div>
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
@@ -1019,7 +1019,7 @@ ${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
       ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
-    ${birthsHtml}
+    <div style="max-height:300px;overflow-y:auto;padding-right:4px">${birthsHtml}</div>
   </div>`
       : ""
   }
@@ -1028,7 +1028,7 @@ ${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
       ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day}</h2>
-    ${deathsHtml}
+    <div style="max-height:300px;overflow-y:auto;padding-right:4px">${deathsHtml}</div>
   </div>`
       : ""
   }
@@ -3169,6 +3169,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
 <meta name="twitter:description" content="${escapeHtml(quizPageDesc)}"/>
 <meta name="twitter:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
 <meta property="og:locale" content="en_US"/>
+<meta property="og:site_name" content="thisDay."/>
 <meta name="author" content="thisDay.info"/>
 ${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
@@ -3296,6 +3297,15 @@ ${siteNav({ todayLink: `/events/${todaySlug}/${todayDay}/` })}
   ${carouselHtml}
   ${recSliderHtml}
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
+  <div class="ad-unit" style="margin:24px 0">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle"
+         style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209"
+         data-ad-slot="4828593028"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+  </div>
 </main>
 ${siteFooter("yr")}
 <script>

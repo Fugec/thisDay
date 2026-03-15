@@ -412,7 +412,7 @@ export default {
           if (slugParsed) {
             const { day: hDay, monthSlug: hMonthSlug, monthDisplay: hMonthDisplay } = slugParsed;
             exploreHtml = `
-          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+          <div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
             <i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i>
             <div>
               <strong>Explore ${hMonthDisplay} ${hDay} in History</strong><br/>
@@ -428,10 +428,10 @@ export default {
           if (patchedHtml.includes(wikiAnchor)) {
             // Insert quiz before Wikipedia box, then inject Explore section after Wikipedia box
             patchedHtml = patchedHtml.replace(wikiAnchor, quizCta + "\n          " + wikiAnchor);
-            if (exploreHtml && !patchedHtml.includes('bi-calendar3')) {
-              // Inject Explore section after the Wikipedia box (before You Might Also Like or </article>)
+            if (exploreHtml && !patchedHtml.includes('data-explore-injected')) {
+              // Inject Explore section before You Might Also Like or before </article>
               const afterWikiAnchor = patchedHtml.includes('You Might Also Like')
-                ? '<section class="mt-5">'
+                ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
                 : "</article>";
               patchedHtml = patchedHtml.replace(afterWikiAnchor, exploreHtml + "\n          " + afterWikiAnchor);
             }
@@ -445,12 +445,12 @@ export default {
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
         // Inject "Explore [Date] in History" card for any post missing it
-        if (!patchedHtml.includes('bi-calendar3')) {
+        if (!patchedHtml.includes('data-explore-injected')) {
           const sp = parseSlugDate(slug);
           if (sp) {
-            const exploreCard = `<div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)"><i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i><div><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-arrow-right me-1"></i>View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
-            const anchor = patchedHtml.includes('<section class="mt-5">')
-              ? '<section class="mt-5">'
+            const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)"><i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i><div><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-arrow-right me-1"></i>View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
+            const anchor = patchedHtml.includes('You Might Also Like')
+              ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
               : "</article>";
             patchedHtml = patchedHtml.replace(anchor, exploreCard + "\n          " + anchor);
           }
@@ -1698,7 +1698,7 @@ ${analysisBadItems}
               hMonthSlug = sp.monthSlug;
               hMonthDisplay = sp.monthDisplay;
             }
-            return `<div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+            return `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
               <i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i>
               <div>
                 <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
@@ -1715,13 +1715,21 @@ ${analysisBadItems}
             if (related.length === 0) return "";
             const cards = related
               .map(
-                (p) => `
-              <div class="col-md-4">
-                <a href="/blog/${esc(p.slug)}/" class="related-card d-block p-3 rounded text-decoration-none h-100">
-                  <p class="mb-1 fw-semibold" style="color:var(--text-color);font-size:.92rem;line-height:1.35">${esc(p.title)}</p>
-                  <small class="article-meta">${new Date(p.publishedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</small>
+                (p) => {
+                  const thumb = p.imageUrl
+                    ? `<img src="/image-proxy?src=${encodeURIComponent(p.imageUrl)}&w=80&q=75" alt="" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+                    : `<div style="width:56px;height:56px;border-radius:8px;flex-shrink:0;background:var(--card-border,#e2e8f0);display:flex;align-items:center;justify-content:center"><i class="bi bi-clock-history" style="color:#94a3b8;font-size:1.2rem"></i></div>`;
+                  return `
+              <div class="col-12 col-md-4">
+                <a href="/blog/${esc(p.slug)}/" class="related-card d-flex align-items-center gap-2 p-3 rounded text-decoration-none h-100">
+                  ${thumb}
+                  <div style="min-width:0">
+                    <p class="mb-0 fw-semibold" style="color:var(--text-color);font-size:.88rem;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(p.title)}</p>
+                    <small class="article-meta">${new Date(p.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</small>
+                  </div>
                 </a>
-              </div>`,
+              </div>`;
+                },
               )
               .join("");
             return `<!-- Quiz CTA -->
@@ -2146,7 +2154,13 @@ ${JSON.stringify(
       if (tsd) tsd.addEventListener("change", (e) => setTheme(e.target.checked));
       if (tsm) tsm.addEventListener("change",  (e) => setTheme(e.target.checked));
     });
-    (adsbygoogle = window.adsbygoogle || []).push({});
+    if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
+      document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
+        if (!ins.getAttribute('data-adsbygoogle-status')) {
+          try { (adsbygoogle = window.adsbygoogle || []).push({}); } catch {}
+        }
+      });
+    }
   </script>
 </body>
 </html>`;

@@ -913,6 +913,7 @@ body.dark-theme .commentary{background:rgba(59,130,246,.15)}
 .did-you-know{background:rgba(245,158,11,.07);border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
 body.dark-theme .did-you-know{background:rgba(245,158,11,.13)}
 .yr{background:#3b82f6;color:#fff;padding:2px 7px;border-radius:4px;font-size:.78rem;font-weight:600;margin-right:6px;white-space:nowrap}
+.ev-scroll-wrap{position:relative;max-height:320px;overflow-y:auto;padding-right:12px;-webkit-overflow-scrolling:touch}.ev-scroll-wrap::after{content:'';position:sticky;bottom:0;left:0;right:0;display:block;height:40px;background:linear-gradient(to bottom,transparent,var(--cb,#fff));pointer-events:none;margin-top:-40px}body.dark-theme .ev-scroll-wrap::after{background:linear-gradient(to bottom,transparent,var(--cb,#1e293b))}
 .ev-row{padding:11px 0;border-bottom:1px solid var(--cbr)}.ev-row:last-child{border-bottom:none}
 .person-row{padding:9px 0;border-bottom:1px solid var(--cbr)}.person-row:last-child{border-bottom:none}
 .p-thumb{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
@@ -1000,8 +1001,8 @@ ${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
     others.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
-    <div style="max-height:340px;overflow-y:auto;padding-right:4px">${othersHtml}</div>
+    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${others.length})</small></h2>
+    <div class="ev-scroll-wrap">${othersHtml}</div>
   </div>
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
@@ -1018,8 +1019,8 @@ ${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
     topBirths.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
-    <div style="max-height:300px;overflow-y:auto;padding-right:4px">${birthsHtml}</div>
+    <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Born on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${topBirths.length})</small></h2>
+    <div class="ev-scroll-wrap">${birthsHtml}</div>
   </div>`
       : ""
   }
@@ -1027,8 +1028,8 @@ ${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
     topDeaths.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day}</h2>
-    <div style="max-height:300px;overflow-y:auto;padding-right:4px">${deathsHtml}</div>
+    <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${topDeaths.length})</small></h2>
+    <div class="ev-scroll-wrap">${deathsHtml}</div>
   </div>`
       : ""
   }
@@ -1276,7 +1277,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v19-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v20-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);

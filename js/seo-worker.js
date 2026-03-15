@@ -1276,7 +1276,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v18-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v19-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1294,18 +1294,32 @@ async function handleGeneratedPost(_request, env, ctx, url) {
     console.error("KV read:", e);
   }
 
-  // Fetch from Wikipedia /all/ endpoint (returns events + births + deaths)
+  // Fetch events: KV first (avoids Wikipedia round-trip on cache miss), then Wikipedia
   const mPad = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dPad = String(day).padStart(2, "0");
-  const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
   let eventsData = { events: [], births: [], deaths: [] };
-  try {
-    const r = await fetch(apiUrl, {
-      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
-    });
-    if (r.ok) eventsData = await r.json();
-  } catch (e) {
-    console.error("Wikipedia API:", e);
+  let eventsFromKv = false;
+  if (env.EVENTS_KV) {
+    try {
+      const kvData = await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, { type: "json" });
+      if (kvData?.events?.length) { eventsData = kvData; eventsFromKv = true; }
+    } catch (_) { /* ignore */ }
+  }
+  if (!eventsFromKv) {
+    const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
+    try {
+      const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+      if (r.ok) {
+        eventsData = await r.json();
+        if (env.EVENTS_KV && eventsData?.events?.length) {
+          ctx.waitUntil(
+            env.EVENTS_KV.put(`events-data:${mPad}-${dPad}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 }).catch(() => {})
+          );
+        }
+      }
+    } catch (e) {
+      console.error("Wikipedia API:", e);
+    }
   }
 
   // Identify featured event and generate AI "Did You Know" facts
@@ -2413,7 +2427,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v11:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v12:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2952,7 +2966,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v11:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v12:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -3054,7 +3068,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const todayUTC = new Date();
   todayUTC.setUTCHours(0, 0, 0, 0);
   const adjDays = [];
-  for (let offset = -6; offset <= -1; offset++) {
+  for (let offset = -1; offset >= -6; offset--) {
     const d = new Date(Date.UTC(new Date().getUTCFullYear(), monthNum - 1, day + offset));
     if (d > todayUTC) continue; // skip future dates
     const mSlug = MONTHS_ALL[d.getUTCMonth()];

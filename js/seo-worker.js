@@ -3082,11 +3082,13 @@ async function handleQuizPage(_request, env, monthSlug, day) {
 
   const carouselHtml = buildCarouselQuizHTML(quiz, topEvents, mDisplay, day, monthSlug, nextMonthSlug, nextDay, blogEntry);
 
-  // Adjacent quiz days: 3 before + 3 after, handling month boundaries
+  // Adjacent quiz days: up to 6 past days (no future dates)
+  const todayUTC = new Date();
+  todayUTC.setUTCHours(0, 0, 0, 0);
   const adjDays = [];
-  for (let offset = -3; offset <= 3; offset++) {
-    if (offset === 0) continue;
+  for (let offset = -6; offset <= -1; offset++) {
     const d = new Date(Date.UTC(new Date().getUTCFullYear(), monthNum - 1, day + offset));
+    if (d > todayUTC) continue; // skip future dates
     const mSlug = MONTHS_ALL[d.getUTCMonth()];
     adjDays.push({
       monthSlug: mSlug,

@@ -17,6 +17,8 @@
 // Constants
 // ---------------------------------------------------------------------------
 
+import { siteNav, siteFooter, footerYearScript } from "./shared/layout.js";
+
 // Cloudflare Workers AI model — free tier, no API key needed.
 const CF_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const KV_POST_PREFIX = "post:";
@@ -763,6 +765,22 @@ async function generateAndStore(env) {
     }
   }
 
+  // Ping WebSub hub so Flipboard (and other subscribers) get notified immediately
+  try {
+    const hubBody = new URLSearchParams({
+      "hub.mode": "publish",
+      "hub.url": "https://thisday.info/rss.xml",
+    });
+    await fetch("https://pubsubhubbub.appspot.com/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: hubBody,
+    });
+    console.log("Blog: WebSub hub pinged");
+  } catch (e) {
+    console.error("Blog: WebSub ping failed:", e);
+  }
+
   console.log(
     `Blog: published post "${content.title}" → /blog/archive/${slug}/`,
   );
@@ -1437,27 +1455,7 @@ ${JSON.stringify({
   <body>
 
   <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-    <div class="container-fluid">
-      <a class="navbar-brand" href="/">thisDay.</a>
-      <div class="form-check form-switch theme-switch-mobile d-lg-none me-2">
-        <input class="form-check-input" type="checkbox" id="themeSwitchMobile" aria-label="Toggle dark mode" />
-        <label class="form-check-label" for="themeSwitchMobile">
-          <i class="bi bi-brightness-high-fill"></i>
-        </label>
-      </div>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav ms-auto">
-          <li class="nav-item d-flex align-items-center">
-            <div class="form-check form-switch theme-switch-desktop d-none d-lg-block me-2">
-              <input class="form-check-input" type="checkbox" id="themeSwitchDesktop" aria-label="Toggle dark mode" />
-              <label class="form-check-label" for="themeSwitchDesktop">Dark Mode</label>
-            </div>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </nav>
+  ${siteNav()}
 
   <main class="container my-5">
     <div class="row justify-content-center">
@@ -1680,79 +1678,30 @@ ${analysisBadItems}
 
   <script src="/js/chatbot.js"></script>
 
-  <footer class="footer">
-    <div class="container d-flex justify-content-center my-2">
-      <div class="me-2">
-        <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
-          <i class="bi bi-github h3 text-white"></i>
-        </a>
-      </div>
-      <div class="me-2">
-        <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook">
-          <i class="bi bi-facebook h3 text-white"></i>
-        </a>
-      </div>
-      <div class="me-2">
-        <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
-          <i class="bi bi-instagram h3 text-white"></i>
-        </a>
-      </div>
-      <div class="me-2">
-        <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok">
-          <i class="bi bi-tiktok h3 text-white"></i>
-        </a>
-      </div>
-      <div class="me-2">
-        <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube">
-          <i class="bi bi-youtube h3 text-white"></i>
-        </a>
-      </div>
-    </div>
-    <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
-    <p>
-      Historical data sourced from Wikipedia.org under
-      <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer"
-         title="Creative Commons Attribution-ShareAlike 4.0 International License">CC BY-SA 4.0</a> license.
-      Note: Data is for informational purposes and requires verification.
-    </p>
-    <p>
-      This website is not affiliated with any official historical organization or entity.
-      The content is provided for educational and entertainment purposes only.
-    </p>
-    <p class="footer-bottom">
-      <a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a>
-      | <a href="/blog/">Blog</a>
-      | <a href="/about/">About Us</a>
-      | <a href="/contact/">Contact</a>
-      | <a href="/terms/">Terms and Conditions</a>
-      | <a href="/privacy-policy/">Privacy Policy</a>
-    </p>
-  </footer>
+  ${siteFooter()}
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="/js/script.js"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => {
-      const currentYearSpan = document.getElementById("currentYear");
-      if (currentYearSpan) currentYearSpan.textContent = new Date().getFullYear();
-
-      const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
-      const themeSwitchMobile  = document.getElementById("themeSwitchMobile");
+      ${footerYearScript()}
+      const tsd = document.getElementById("tsd");
+      const tsm = document.getElementById("tsm");
       const body = document.body;
       const DARK_THEME_KEY = "darkTheme";
 
       const setTheme = (isDark) => {
         isDark ? body.classList.add("dark-theme") : body.classList.remove("dark-theme");
         localStorage.setItem(DARK_THEME_KEY, String(isDark));
-        if (themeSwitchDesktop) themeSwitchDesktop.checked = isDark;
-        if (themeSwitchMobile)  themeSwitchMobile.checked  = isDark;
+        if (tsd) tsd.checked = isDark;
+        if (tsm) tsm.checked  = isDark;
       };
 
       const savedTheme = localStorage.getItem(DARK_THEME_KEY);
       setTheme(savedTheme !== "false"); // default: dark
 
-      if (themeSwitchDesktop) themeSwitchDesktop.addEventListener("change", (e) => setTheme(e.target.checked));
-      if (themeSwitchMobile)  themeSwitchMobile.addEventListener("change",  (e) => setTheme(e.target.checked));
+      if (tsd) tsd.addEventListener("change", (e) => setTheme(e.target.checked));
+      if (tsm) tsm.addEventListener("change",  (e) => setTheme(e.target.checked));
     });
   </script>
 
@@ -2060,25 +2009,7 @@ ${JSON.stringify(
   </head>
   <body>
 
-  <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-    <div class="container-fluid">
-      <a class="navbar-brand" href="/">thisDay.</a>
-      <div class="form-check form-switch d-lg-none me-2">
-        <input class="form-check-input" type="checkbox" id="themeSwitchMobile" aria-label="Toggle dark mode" />
-        <label class="form-check-label" for="themeSwitchMobile"><i class="bi bi-brightness-high-fill" style="color:#fff;font-size:1.2rem;margin-left:.5rem"></i></label>
-      </div>
-      <div class="collapse navbar-collapse" id="navbarNav">
-        <ul class="navbar-nav ms-auto">
-          <li class="nav-item d-flex align-items-center">
-            <div class="form-check form-switch d-none d-lg-block me-2">
-              <input class="form-check-input" type="checkbox" id="themeSwitchDesktop" aria-label="Toggle dark mode" />
-              <label class="form-check-label" for="themeSwitchDesktop" style="color:#fff">Dark Mode</label>
-            </div>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </nav>
+  ${siteNav()}
 
   <main class="container">
     <div class="row justify-content-center">
@@ -2096,34 +2027,23 @@ ${JSON.stringify(
     </div>
   </main>
 
-  <footer class="footer">
-    <div class="container d-flex justify-content-center my-2">
-      <div class="me-2"><a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white"></i></a></div>
-      <div class="me-2"><a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white"></i></a></div>
-      <div class="me-2"><a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white"></i></a></div>
-      <div class="me-2"><a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white"></i></a></div>
-      <div class="me-2"><a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white"></i></a></div>
-    </div>
-    <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
-    <p>Historical data sourced from Wikipedia.org. Content is for educational and entertainment purposes only.</p>
-    <p class="footer-bottom"><a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a> | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> | <a href="/contact/">Contact</a> | <a href="/terms/">Terms and Conditions</a> | <a href="/privacy-policy/">Privacy Policy</a></p>
-  </footer>
+  ${siteFooter()}
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     document.addEventListener("DOMContentLoaded", () => {
-      document.getElementById("currentYear").textContent = new Date().getFullYear();
-      const td = document.getElementById("themeSwitchDesktop");
-      const tm = document.getElementById("themeSwitchMobile");
+      ${footerYearScript()}
+      const tsd = document.getElementById("tsd");
+      const tsm = document.getElementById("tsm");
       const body = document.body;
       const setTheme = (d) => {
         d ? body.classList.add("dark-theme") : body.classList.remove("dark-theme");
         localStorage.setItem("darkTheme", String(d));
-        if (td) td.checked = d; if (tm) tm.checked = d;
+        if (tsd) tsd.checked = d; if (tsm) tsm.checked = d;
       };
       setTheme(localStorage.getItem("darkTheme") !== "false");
-      if (td) td.addEventListener("change", (e) => setTheme(e.target.checked));
-      if (tm) tm.addEventListener("change",  (e) => setTheme(e.target.checked));
+      if (tsd) tsd.addEventListener("change", (e) => setTheme(e.target.checked));
+      if (tsm) tsm.addEventListener("change",  (e) => setTheme(e.target.checked));
     });
   </script>
 </body>

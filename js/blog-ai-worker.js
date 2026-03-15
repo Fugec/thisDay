@@ -220,6 +220,12 @@ export default {
         // Patch old site-btn-primary submit button back to btn-warning
         patchedHtml = patchedHtml
           .replaceAll('class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"', 'class="btn btn-warning mt-3" id="tdq-submit-btn"');
+        // Patch old quick facts table style → site-table
+        if (patchedHtml.includes('class="table table-bordered"')) {
+          patchedHtml = patchedHtml
+            .replaceAll('class="table table-bordered"', 'class="site-table"')
+            .replaceAll('<th scope="row">', '<th>');
+        }
         // Patch old footer — replace any footer that lacks the shared layout (gap:1.25rem + Flipboard icon)
         if (!patchedHtml.includes('gap:1.25rem')) {
           patchedHtml = patchedHtml.replace(
@@ -1122,7 +1128,7 @@ function buildPostHTML(c, date, slug, allPosts = []) {
   const quickFactsRows = (c.quickFacts || [])
     .map(
       (f) =>
-        `              <tr><th scope="row">${esc(f.label)}</th><td>${esc(f.value)}</td></tr>`,
+        `              <tr><th>${esc(f.label)}</th><td>${esc(f.value)}</td></tr>`,
     )
     .join("\n");
 
@@ -1459,6 +1465,13 @@ ${JSON.stringify({
       .site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}
       body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}
       body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}
+      .site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--card-border,#e2e8f0);border-radius:10px;overflow:hidden;margin-top:1rem;font-size:.9rem}
+      .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--card-border,#e2e8f0);text-align:left;color:var(--text-color)}
+      .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
+      .site-table th{background:rgba(59,130,246,.07);font-weight:600;white-space:nowrap;width:40%}
+      body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}
+      body.dark-theme .site-table th{background:rgba(96,165,250,.1)}
+      body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}
       .tdq-cta-sub{color:#6c757d}
       body.dark-theme .tdq-cta-sub{color:#fff}
     </style>
@@ -1511,7 +1524,7 @@ ${JSON.stringify({
 
           <!-- Quick Facts -->
           <h2 class="mt-4 h3">Quick Facts</h2>
-          <table class="table table-bordered">
+          <table class="site-table">
             <tbody>
 ${quickFactsRows}
             </tbody>

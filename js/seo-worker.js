@@ -4,13 +4,13 @@
 // Injects Schema.org JSON-LD for better SEO.
 
 import { siteNav, siteFooter, SITE_DESCRIPTION } from "./shared/layout.js";
+import { resolveAiModel, checkAndUpdateAiModel } from "./shared/ai-model.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
-const CF_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 // --- Helper function to fetch daily events from Wikipedia API ---
 async function fetchDailyEvents(date) {
@@ -1348,7 +1348,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
         setTimeout(() => reject(new Error("AI timeout")), 9000),
       );
       const aiResult = await Promise.race([
-        env.AI.run(CF_AI_MODEL, {
+        env.AI.run(await resolveAiModel(env.BLOG_AI_KV), {
           messages: [
             {
               role: "system",
@@ -2412,6 +2412,8 @@ async function handleFetchRequest(request, env, ctx) {
 // --- Scheduled Event Handler (Cron Trigger) ---
 async function handleScheduledEvent(env) {
   console.log("Scheduled event triggered: Pre-fetching today's events to KV.");
+  // Weekly AI model check — updates KV if a newer CF llama model is available
+  await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
   const today = new Date();
   const isoDateKey = today.toISOString().split("T")[0];
   const todayKvKey = `today-events-${isoDateKey}`;
@@ -2533,7 +2535,7 @@ async function generateQuizForDate(
         setTimeout(() => reject(new Error("AI timeout")), 12000),
       );
       const aiResult = await Promise.race([
-        env.AI.run(CF_AI_MODEL, {
+        env.AI.run(await resolveAiModel(env.BLOG_AI_KV), {
           messages: [
             {
               role: "system",

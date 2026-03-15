@@ -18,9 +18,7 @@
 // ---------------------------------------------------------------------------
 
 import { siteNav, siteFooter, footerYearScript } from "./shared/layout.js";
-
-// Cloudflare Workers AI model — free tier, no API key needed.
-const CF_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+import { resolveAiModel, checkAndUpdateAiModel, CF_AI_MODEL } from "./shared/ai-model.js";
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
@@ -65,7 +63,12 @@ export default {
    * Cron trigger — runs daily, generates every other day.
    */
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(maybeGenerateBlogPost(env));
+    ctx.waitUntil(
+      (async () => {
+        await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
+        await maybeGenerateBlogPost(env);
+      })(),
+    );
   },
 
   /**
@@ -146,7 +149,7 @@ export default {
           if (existing) return { slug: entry.slug, status: "skipped" };
         }
         const content = await buildRichContent(entry, entry.slug);
-        const quiz = await generateBlogQuiz(env.AI, content, entry.slug);
+        const quiz = await generateBlogQuiz(env.AI, content, entry.slug, await resolveAiModel(env.BLOG_AI_KV));
         if (quiz) {
           await env.BLOG_AI_KV.put(kvKey, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
           return { slug: entry.slug, status: "generated", questions: quiz.questions.length };
@@ -180,7 +183,7 @@ export default {
         const entry = index.find((p) => p.slug === slug);
         if (entry && env.AI) {
           const content = await buildRichContent(entry, slug);
-          const quiz = await generateBlogQuiz(env.AI, content, slug);
+          const quiz = await generateBlogQuiz(env.AI, content, slug, await resolveAiModel(env.BLOG_AI_KV));
           if (quiz) {
             await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
             return new Response(JSON.stringify(quiz), {
@@ -432,7 +435,7 @@ export default {
               const entry = index.find(p => p.slug === slug);
               if (entry) {
                 const richContent = await buildRichContent(entry, slug);
-                const quiz = await generateBlogQuiz(env.AI, richContent, slug);
+                const quiz = await generateBlogQuiz(env.AI, richContent, slug, await resolveAiModel(env.BLOG_AI_KV));
                 if (quiz) await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
               }
             } catch (e) { console.error("Quiz pre-warm failed:", e); }
@@ -649,6 +652,7 @@ async function resolveWorkingImageForContent(content) {
  */
 async function generateAndStore(env) {
   const now = new Date();
+  const activeModel = await resolveAiModel(env.BLOG_AI_KV);
 
   // Collect titles already published this month so the AI avoids duplicates
   const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
@@ -658,7 +662,7 @@ async function generateAndStore(env) {
     .filter((e) => e.publishedAt && e.publishedAt.startsWith(thisMonthPrefix))
     .map((e) => e.title);
 
-  let content = await callWorkersAI(env.AI, now, takenThisMonth);
+  let content = await callWorkersAI(env.AI, now, takenThisMonth, activeModel);
 
   // Validate image URLs and fetch alternatives if broken.
   // If no working image is found, regenerate once with a different topic.
@@ -675,7 +679,7 @@ async function generateAndStore(env) {
       console.warn(
         `Blog AI: no valid image for \"${content.title}\". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
       );
-      content = await callWorkersAI(env.AI, now, avoid);
+      content = await callWorkersAI(env.AI, now, avoid, activeModel);
       continue;
     }
 
@@ -740,7 +744,7 @@ async function generateAndStore(env) {
   try {
     const richContent = await buildRichContent({ title: content.title, description: content.description || "" }, slug);
     const enrichedContent = { ...content, ...richContent };
-    const quiz = await generateBlogQuiz(env.AI, enrichedContent, slug);
+    const quiz = await generateBlogQuiz(env.AI, enrichedContent, slug, activeModel);
     if (quiz) {
       await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), {
         expirationTtl: 90 * 86_400,
@@ -848,7 +852,7 @@ async function buildRichContent(entry, slug) {
   return base;
 }
 
-async function generateBlogQuiz(ai, content, _slug) {
+async function generateBlogQuiz(ai, content, _slug, model = CF_AI_MODEL) {
   if (!ai) return null;
 
   const contextLines = [
@@ -870,7 +874,7 @@ async function generateBlogQuiz(ai, content, _slug) {
     setTimeout(() => reject(new Error("AI timeout")), 25000),
   );
   const aiResult = await Promise.race([
-    ai.run(CF_AI_MODEL, {
+    ai.run(model, {
       messages: [
         {
           role: "system",
@@ -921,7 +925,7 @@ async function generateBlogQuiz(ai, content, _slug) {
 // Claude API call
 // ---------------------------------------------------------------------------
 
-async function callWorkersAI(ai, date, takenThisMonth = []) {
+async function callWorkersAI(ai, date, takenThisMonth = [], model = CF_AI_MODEL) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
 
@@ -1021,7 +1025,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "youtubeSearchQuery": "specific event name year history documentary"
 }`;
 
-  const result = await ai.run(CF_AI_MODEL, {
+  const result = await ai.run(model, {
     messages: [
       {
         role: "system",

@@ -414,6 +414,11 @@ export default {
     }
   })();
   <\/script>`;
+          // Strip any old icon-based Explore card before injecting the new thumbnail version
+          patchedHtml = patchedHtml.replace(
+            /<div class="mt-4 p-3 rounded d-flex align-items-center gap-3"[^>]*>\s*<i class="bi bi-calendar3[\s\S]*?<\/div>\s*<\/div>/,
+            ''
+          );
           // Build "Explore in History" section
           const _sp = slugParsedForThumb;
           let exploreHtml = "";
@@ -451,8 +456,8 @@ export default {
           const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
-        // Remove old icon-based Explore card (no data-explore-injected) so it can be replaced with thumbnail version
-        if (patchedHtml.includes('bi-calendar3') && !patchedHtml.includes('data-explore-injected="1"')) {
+        // Always strip old icon-based Explore card (covers KV that has both old + new)
+        if (patchedHtml.includes('bi-calendar3')) {
           patchedHtml = patchedHtml.replace(
             /<div class="mt-4 p-3 rounded d-flex align-items-center gap-3"[^>]*>\s*<i class="bi bi-calendar3[\s\S]*?<\/div>\s*<\/div>/,
             ''

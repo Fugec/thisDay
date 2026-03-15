@@ -4,7 +4,7 @@
 // Injects Schema.org JSON-LD for better SEO.
 
 import { siteNav, siteFooter, SITE_DESCRIPTION } from "./shared/layout.js";
-import { resolveAiModel, checkAndUpdateAiModel } from "./shared/ai-model.js";
+import { resolveAiModel } from "./shared/ai-model.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -2412,8 +2412,6 @@ async function handleFetchRequest(request, env, ctx) {
 // --- Scheduled Event Handler (Cron Trigger) ---
 async function handleScheduledEvent(env) {
   console.log("Scheduled event triggered: Pre-fetching today's events to KV.");
-  // Weekly AI model check — updates KV if a newer CF llama model is available
-  await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
   const today = new Date();
   const isoDateKey = today.toISOString().split("T")[0];
   const todayKvKey = `today-events-${isoDateKey}`;

@@ -1,6 +1,6 @@
 /**
  * Shared AI model resolution — auto-updates to the latest available
- * Cloudflare Workers AI text-generation model via a weekly cron check.
+ * Cloudflare Workers AI text-generation model via a cron check (blog-ai-worker).
  *
  * Import:
  *   import { resolveAiModel, checkAndUpdateAiModel, CF_AI_MODEL } from "./shared/ai-model.js";
@@ -9,10 +9,9 @@
  *   const model = await resolveAiModel(env.BLOG_AI_KV);
  *   await env.AI.run(model, { messages: [...] });
  *
- * Auto-update (in scheduled handler):
+ * Auto-update (in blog-ai-worker scheduled handler only — avoids duplicate CF API calls):
  *   await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
- *   Requires CF_API_TOKEN secret set on the worker via:
- *     npx wrangler secret put CF_API_TOKEN
+ *   Requires CF_API_TOKEN secret:  npx wrangler secret put CF_API_TOKEN
  */
 
 // Hardcoded fallback — used when KV has no override stored yet
@@ -20,22 +19,32 @@ export const CF_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 const AI_MODEL_KV_KEY = "ai-model-override";
 const CF_ACCOUNT_ID = "b1b63aec792a52fb199b8ebfb8eed4b1";
+// Re-read KV after 60 min so request isolates pick up model changes within a reasonable window
+const CACHE_TTL_MS = 60 * 60 * 1000;
 
-// Module-level cache — avoids a KV read on every AI call within the same worker instance
+// Per-isolate cache — avoids a KV read on every AI call within the same worker instance
 let _cachedModel = null;
+let _cachedAt = 0;
 
 /**
  * Returns the best available AI model name.
- * Reads from KV on first call, then caches in memory for the worker instance lifetime.
+ * Reads from KV on first call (or after CACHE_TTL_MS), then caches in memory.
+ * Each Worker isolate maintains its own cache — independently populated from KV.
  * @param {KVNamespace} kvNamespace
  */
 export async function resolveAiModel(kvNamespace) {
-  if (_cachedModel) return _cachedModel;
+  const now = Date.now();
+  if (_cachedModel && now - _cachedAt < CACHE_TTL_MS) return _cachedModel;
   try {
     const stored = await kvNamespace.get(AI_MODEL_KV_KEY);
-    if (stored) { _cachedModel = stored; return stored; }
-  } catch (_) { /* KV unavailable — fall through */ }
+    if (stored) {
+      _cachedModel = stored;
+      _cachedAt = now;
+      return stored;
+    }
+  } catch (_) { /* KV unavailable — fall through to hardcoded constant */ }
   _cachedModel = CF_AI_MODEL;
+  _cachedAt = now;
   return CF_AI_MODEL;
 }
 
@@ -48,7 +57,7 @@ function scoreModel(name) {
   const vMatch = name.match(/llama-(\d+)(?:[._-](\d+))?/i);
   if (vMatch) {
     score += parseInt(vMatch[1], 10) * 100;
-    score += parseInt(vMatch[2] || 0, 10) * 10;
+    score += parseInt(vMatch[2] ?? "0", 10) * 10;
   }
   if (/70b/i.test(name)) score += 7;
   else if (/8b/i.test(name)) score += 4;
@@ -62,6 +71,9 @@ function scoreModel(name) {
  * Calls the CF AI models API, finds the best @cf/meta/llama instruct model,
  * and updates KV + the in-memory cache if a better model is available.
  *
+ * Only call this from blog-ai-worker's scheduled handler to avoid duplicate
+ * CF API requests when multiple workers share the same KV namespace.
+ *
  * Requires env.CF_API_TOKEN worker secret. Silently skips if not set.
  * @param {object}       env          Worker env (must have CF_API_TOKEN secret)
  * @param {KVNamespace}  kvNamespace  Where to persist the override
@@ -71,6 +83,7 @@ export async function checkAndUpdateAiModel(env, kvNamespace) {
     console.log("AI model check: CF_API_TOKEN secret not set — skipping");
     return;
   }
+  let best;
   try {
     const url = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/models/search?task=text-generation&per_page=100`;
     const r = await fetch(url, {
@@ -93,17 +106,28 @@ export async function checkAndUpdateAiModel(env, kvNamespace) {
       console.warn("AI model check: no matching models found in CF catalog");
       return;
     }
-    const best = models.sort((a, b) => scoreModel(b) - scoreModel(a))[0];
-    const current =
-      (await kvNamespace.get(AI_MODEL_KV_KEY)) || CF_AI_MODEL;
-    if (best !== current) {
+    best = models.sort((a, b) => scoreModel(b) - scoreModel(a))[0];
+  } catch (e) {
+    console.error("AI model check: CF API fetch failed:", e);
+    return;
+  }
+
+  // Separate KV operations so a read failure doesn't suppress the write
+  let current = CF_AI_MODEL;
+  try {
+    current = (await kvNamespace.get(AI_MODEL_KV_KEY)) || CF_AI_MODEL;
+  } catch (_) { /* fall through — compare against hardcoded constant */ }
+
+  if (best !== current) {
+    try {
       await kvNamespace.put(AI_MODEL_KV_KEY, best);
       _cachedModel = best;
+      _cachedAt = Date.now();
       console.log(`AI model updated: ${current} → ${best}`);
-    } else {
-      console.log(`AI model up to date: ${current}`);
+    } catch (e) {
+      console.error("AI model check: KV write failed:", e);
     }
-  } catch (e) {
-    console.error("checkAndUpdateAiModel failed:", e);
+  } else {
+    console.log(`AI model up to date: ${current}`);
   }
 }

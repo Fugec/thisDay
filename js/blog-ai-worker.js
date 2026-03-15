@@ -220,6 +220,13 @@ export default {
         // Patch old site-btn-primary submit button back to btn-warning
         patchedHtml = patchedHtml
           .replaceAll('class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"', 'class="btn btn-warning mt-3" id="tdq-submit-btn"');
+        // Patch old footer — replace any footer that lacks the shared layout (gap:1.25rem + Flipboard icon)
+        if (!patchedHtml.includes('gap:1.25rem')) {
+          patchedHtml = patchedHtml.replace(
+            /<footer class="footer">[\s\S]*?<\/footer>\s*(?=<\/body>|<\/html>|$)/,
+            siteFooter(),
+          );
+        }
         // Patch image caption — replace any AI-generated caption with correct Wikimedia attribution
         patchedHtml = patchedHtml.replace(
           /<figcaption class="article-meta mt-2">\s*<small>(?!Image courtesy of)[\s\S]*?<\/small>\s*<\/figcaption>/,

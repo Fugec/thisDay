@@ -1047,16 +1047,13 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   const year = parsed.historicalYear ?? date.getFullYear();
   const expectedDateSuffix = `${monthName} ${day}, ${year}`;
   const hasSeparator = parsed.title && parsed.title.includes(" — ");
-  if (!parsed.title || !parsed.title.includes(monthName) || !hasSeparator) {
-    // When title lacks the " — " separator, prefer eventTitle as the cleaner base name
-    const useEventTitle = !hasSeparator && parsed.eventTitle;
-    const base = useEventTitle
-      ? parsed.eventTitle
-      : (parsed.title ?? parsed.eventTitle ?? "Untitled");
-    // Only strip trailing date patterns when using parsed.title (eventTitle has none)
-    const cleanTitle = useEventTitle
-      ? base.trim()
-      : base.replace(/[—:\-]\s*\w+ \d{1,2},\s*\d{4}\s*$/, "").trim();
+  // Also rebuild if the event part (before " — ") doesn't exactly match eventTitle —
+  // catches cases like "Ides of March Assassination of Julius Caesar — …" where the
+  // AI prefixed a colloquial name before the real event name.
+  const eventPart = hasSeparator ? parsed.title.split(" — ")[0].trim() : "";
+  const eventPartMismatch = parsed.eventTitle && eventPart !== parsed.eventTitle.trim();
+  if (!parsed.title || !parsed.title.includes(monthName) || !hasSeparator || eventPartMismatch) {
+    const cleanTitle = (parsed.eventTitle ?? eventPart ?? parsed.title ?? "Untitled").trim();
     parsed.title = `${cleanTitle} — ${expectedDateSuffix}`;
   }
 

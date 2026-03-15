@@ -205,16 +205,24 @@ export default {
     const postMatch = path.match(/^\/blog\/([^/]+)$/);
     if (postMatch) {
       const slug = postMatch[1];
-      const [html, ytRaw] = await Promise.all([
+      const slugParsedForThumb = parseSlugDate(slug);
+      const eventsThumbPromise = slugParsedForThumb && env.EVENTS_KV
+        ? env.EVENTS_KV.get(`events-data:${String(slugParsedForThumb.monthIndex + 1).padStart(2, '0')}-${String(slugParsedForThumb.day).padStart(2, '0')}`, { type: "json" })
+            .then((d) => d?.events?.find((e) => e.pages?.[0]?.thumbnail?.source)?.pages?.[0]?.thumbnail?.source || "")
+            .catch(() => "")
+        : Promise.resolve("");
+      const [html, ytRaw, eventsThumb] = await Promise.all([
         env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`),
         env.BLOG_AI_KV.get("youtube:uploaded"),
+        eventsThumbPromise,
       ]);
       if (html) {
         // Patch old quiz API path in already-stored HTML
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
         // Patch old btn-warning buttons to site-btn-primary
         patchedHtml = patchedHtml
-          .replaceAll('class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"', 'class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"')
+          .replaceAll('class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"', 'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"')
+          .replaceAll('class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"', 'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"')
           .replaceAll('class="btn btn-warning px-4 mt-3" id="tdq-submit-btn"', 'class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"')
           .replaceAll('class="text-muted">Can you answer', 'class="tdq-cta-sub">Can you answer');
         // Patch old site-btn-primary submit button back to btn-warning
@@ -284,8 +292,8 @@ export default {
             <div>
               <strong style="color:var(--text-color)">Test Your Knowledge</strong><br/>
               <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
-                <i class="bi bi-play-fill me-1"></i>Take the Quiz
+              <button class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+                Take the Quiz
               </button>
             </div>
           </div>`;
@@ -406,33 +414,32 @@ export default {
     }
   })();
   <\/script>`;
-          // Build "Explore in History" section from slug (e.g. "1-march-2026" → March 1)
+          // Build "Explore in History" section
+          const _sp = slugParsedForThumb;
           let exploreHtml = "";
-          const slugParsed = parseSlugDate(slug);
-          if (slugParsed) {
-            const { day: hDay, monthSlug: hMonthSlug, monthDisplay: hMonthDisplay } = slugParsed;
+          if (_sp) {
+            const _thumb = eventsThumb
+              ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+              : "";
             exploreHtml = `
           <div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
-            <i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i>
-            <div>
-              <strong>Explore ${hMonthDisplay} ${hDay} in History</strong><br/>
+            ${_thumb}<div>
+              <strong>Explore ${_sp.monthDisplay} ${_sp.day} in History</strong><br/>
               <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
-              <a href="/events/${hMonthSlug}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">
-                <i class="bi bi-arrow-right me-1"></i>View ${hMonthDisplay} ${hDay}
-              </a>
+              <a href="/events/${_sp.monthSlug}/${_sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${_sp.monthDisplay} ${_sp.day}</a>
             </div>
           </div>`;
           }
           // Inject quiz before Wikipedia source box (matching March 14 template order)
           const wikiAnchor = '<div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08)';
           if (patchedHtml.includes(wikiAnchor)) {
-            // Insert quiz before Wikipedia box, then inject Explore section after Wikipedia box
             patchedHtml = patchedHtml.replace(wikiAnchor, quizCta + "\n          " + wikiAnchor);
-            if (exploreHtml && !patchedHtml.includes('data-explore-injected')) {
-              // Inject Explore section before You Might Also Like or before </article>
-              const afterWikiAnchor = patchedHtml.includes('You Might Also Like')
-                ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
-                : "</article>";
+            if (exploreHtml && !patchedHtml.includes('bi-calendar3')) {
+              const afterWikiAnchor = patchedHtml.includes('<!-- Quiz CTA -->')
+                ? '<!-- Quiz CTA -->'
+                : patchedHtml.includes('You Might Also Like')
+                  ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
+                  : "</article>";
               patchedHtml = patchedHtml.replace(afterWikiAnchor, exploreHtml + "\n          " + afterWikiAnchor);
             }
           } else {
@@ -444,16 +451,19 @@ export default {
           const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
-        // Inject "Explore [Date] in History" card for any post missing it
-        if (!patchedHtml.includes('data-explore-injected')) {
-          const sp = parseSlugDate(slug);
-          if (sp) {
-            const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)"><i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i><div><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-arrow-right me-1"></i>View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
-            const anchor = patchedHtml.includes('You Might Also Like')
+        // Inject "Explore [Date] in History" card for any post missing it (covers posts with quiz already baked in)
+        if (!patchedHtml.includes('bi-calendar3') && slugParsedForThumb) {
+          const sp = slugParsedForThumb;
+          const thumb = eventsThumb
+            ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+            : "";
+          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
+          const anchor = patchedHtml.includes('<!-- Quiz CTA -->')
+            ? '<!-- Quiz CTA -->'
+            : patchedHtml.includes('You Might Also Like')
               ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
               : "</article>";
-            patchedHtml = patchedHtml.replace(anchor, exploreCard + "\n          " + anchor);
-          }
+          patchedHtml = patchedHtml.replace(anchor, exploreCard + "\n          " + anchor);
         }
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
@@ -468,6 +478,12 @@ export default {
           if (!patchedHtml.includes(progressJs)) {
             patchedHtml = patchedHtml.replace("</html>", progressJs + "</html>");
           }
+        }
+        // Patch old blue quiz option selection → amber (matches btn-warning on homepage)
+        if (patchedHtml.includes('tdq-opt-selected{border-color:#3b82f6')) {
+          patchedHtml = patchedHtml.replace('</head>',
+            '<style>.tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.07)!important}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important}.tdq-opt-selected .tdq-opt-key{background:#f59e0b!important}body.dark-theme .tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.08)!important}body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}</style></head>'
+          );
         }
         const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
         if (ytEntry?.youtubeId && ytEntry.privacy !== "private") {
@@ -1698,14 +1714,15 @@ ${analysisBadItems}
               hMonthSlug = sp.monthSlug;
               hMonthDisplay = sp.monthDisplay;
             }
+            const exploreThumb = (c.eventsImageUrl || c.imageUrl)
+              ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+              : "";
             return `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
-              <i class="bi bi-calendar3" style="font-size:1.5rem;color:#3b82f6;flex-shrink:0"></i>
+              ${exploreThumb}
               <div>
                 <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
                 <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
-                <a href="/events/${esc(hMonthSlug)}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">
-                  <i class="bi bi-arrow-right me-1"></i>View ${esc(hMonthDisplay)} ${hDay}
-                </a>
+                <a href="/events/${esc(hMonthSlug)}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">View ${esc(hMonthDisplay)} ${hDay}</a>
               </div>
             </div>`;
           })()}
@@ -1738,8 +1755,8 @@ ${analysisBadItems}
             <div>
               <strong style="color:var(--text-color)">Test Your Knowledge</strong><br/>
               <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
-                <i class="bi bi-play-fill me-1"></i>Take the Quiz
+              <button class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+                Take the Quiz
               </button>
             </div>
           </div>

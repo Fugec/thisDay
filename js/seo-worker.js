@@ -3081,6 +3081,45 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const nextDay = _nd.getUTCDate();
 
   const carouselHtml = buildCarouselQuizHTML(quiz, topEvents, mDisplay, day, monthSlug, nextMonthSlug, nextDay, blogEntry);
+
+  // Adjacent quiz days: 3 before + 3 after, handling month boundaries
+  const adjDays = [];
+  for (let offset = -3; offset <= 3; offset++) {
+    if (offset === 0) continue;
+    const d = new Date(Date.UTC(new Date().getUTCFullYear(), monthNum - 1, day + offset));
+    const mSlug = MONTHS_ALL[d.getUTCMonth()];
+    adjDays.push({
+      monthSlug: mSlug,
+      monthDisplay: MONTH_DISPLAY_NAMES[MONTH_NUM_MAP[mSlug]],
+      day: d.getUTCDate(),
+      mPad: String(d.getUTCMonth() + 1).padStart(2, "0"),
+      dPad: String(d.getUTCDate()).padStart(2, "0"),
+    });
+  }
+  // Fetch thumbnail images for adjacent days in parallel from events-data KV
+  const adjImgResults = await Promise.allSettled(
+    adjDays.map(d =>
+      env.EVENTS_KV
+        ? env.EVENTS_KV.get(`events-data:${d.mPad}-${d.dPad}`, { type: "json" })
+        : Promise.resolve(null)
+    )
+  );
+  const adjCards = adjDays.map((d, i) => {
+    const evData = adjImgResults[i].status === "fulfilled" ? adjImgResults[i].value : null;
+    const thumb = evData?.events?.find(e => e.pages?.[0]?.thumbnail?.source)?.pages?.[0]?.thumbnail?.source || null;
+    const imgHtml = thumb
+      ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(d.monthDisplay)} ${d.day}" class="qsc-rec-img" loading="lazy"/>`
+      : "";
+    return `<a href="/quiz/${escapeHtml(d.monthSlug)}/${d.day}/" class="qsc-rec-card" aria-label="${escapeHtml(d.monthDisplay)} ${d.day} quiz">` +
+      `<div class="qsc-rec-img-wrap">${imgHtml}<div class="qsc-rec-overlay"></div><span class="qsc-rec-badge">Quiz</span></div>` +
+      `<div class="qsc-rec-body"><div class="qsc-rec-date">${escapeHtml(d.monthDisplay)} ${d.day}</div><div class="qsc-rec-lbl">5 questions</div></div>` +
+      `</a>`;
+  });
+  const recSliderHtml = `<div class="mt-4 mb-2">` +
+    `<h2 class="qsc-rec-heading"><i class="bi bi-calendar3-range me-2" style="color:#3b82f6"></i>More Daily Quizzes</h2>` +
+    `<div class="qsc-rec-slider">${adjCards.join("")}</div>` +
+    `</div>`;
+
   const siteUrl = "https://thisday.info";
   const canonical = `${siteUrl}/quiz/${monthSlug}/${day}/`;
   const _d = new Date();
@@ -3243,6 +3282,19 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
 .qsc-page-header{text-align:center;padding:8px 0 24px;border-bottom:1px solid var(--cbr);margin-bottom:28px}
 .qsc-page-header h1{font-size:1.7rem;font-weight:800;color:var(--tc);margin-bottom:6px}
 .qsc-page-header p{color:var(--mu);font-size:.95rem;margin:0}
+/* Recommended quizzes slider */
+.qsc-rec-heading{font-size:1rem;font-weight:700;color:var(--tc);margin-bottom:12px}
+.qsc-rec-slider{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.qsc-rec-slider::-webkit-scrollbar{height:4px}.qsc-rec-slider::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:2px}
+.qsc-rec-card{flex:0 0 130px;text-decoration:none;border-radius:12px;overflow:hidden;border:1.5px solid var(--cbr);background:var(--cb);transition:transform .15s,border-color .15s;display:block}
+.qsc-rec-card:hover{transform:translateY(-3px);border-color:#3b82f6;text-decoration:none}
+.qsc-rec-img-wrap{height:82px;overflow:hidden;position:relative;background:linear-gradient(135deg,#1e3a5f 0%,#2d1b69 100%)}
+.qsc-rec-img{width:100%;height:100%;object-fit:cover;display:block}
+.qsc-rec-overlay{position:absolute;inset:0;background:rgba(0,0,0,.25)}
+.qsc-rec-badge{position:absolute;top:7px;right:8px;background:var(--badge);color:#fff;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.04em;text-transform:uppercase}
+.qsc-rec-body{padding:8px 10px}
+.qsc-rec-date{font-size:.85rem;font-weight:700;color:var(--tc);line-height:1.2}
+.qsc-rec-lbl{font-size:.72rem;color:var(--mu);margin-top:2px}
+body.dark-theme .qsc-rec-card{border-color:rgba(255,255,255,.1)}
 </style>
 </head>
 <body>
@@ -3279,6 +3331,7 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
     <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
   </div>
   ${carouselHtml}
+  ${recSliderHtml}
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
 </main>
 <footer class="footer">

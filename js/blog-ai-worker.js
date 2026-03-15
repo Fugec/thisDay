@@ -748,6 +748,21 @@ async function generateAndStore(env) {
     console.error("Blog quiz generation failed:", e);
   }
 
+  // Bust the quiz page HTML cache so /quiz/{month}/{day}/ rebuilds with the new blog quiz
+  if (env.EVENTS_KV) {
+    try {
+      const sp = parseSlugDate(slug);
+      if (sp) {
+        const mPad = String(sp.monthIndex + 1).padStart(2, "0");
+        const dPad = String(sp.day).padStart(2, "0");
+        await env.EVENTS_KV.delete(`quiz-page-v9:${mPad}-${dPad}`);
+        console.log(`Blog: busted quiz-page-v9:${mPad}-${dPad} cache`);
+      }
+    } catch (e) {
+      console.error("Blog: quiz page cache bust failed:", e);
+    }
+  }
+
   console.log(
     `Blog: published post "${content.title}" → /blog/archive/${slug}/`,
   );

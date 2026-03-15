@@ -35,11 +35,15 @@
     "crons": ["31 0 * * *"]
   },
 
-  // KV namespace — stores generated posts and the index.
+  // KV namespaces — blog posts/index and shared events/quiz cache.
   "kv_namespaces": [
     {
       "binding": "BLOG_AI_KV",
       "id": "5173c34a7bd04cde9988c0e89d77bb6e"
+    },
+    {
+      "binding": "EVENTS_KV",
+      "id": "39d7ce85d93a49c5bb42ee6f2416b1e0"
     }
   ],
 

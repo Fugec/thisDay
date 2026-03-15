@@ -242,6 +242,39 @@ export default {
           /<figcaption class="article-meta mt-2">\s*<small>(?!Image courtesy of)[\s\S]*?<\/small>\s*<\/figcaption>/,
           '<figcaption class="article-meta mt-2"><small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small></figcaption>'
         );
+        // Patch old quiz popup to flex-column sticky-header layout
+        if (patchedHtml.includes('id="tdq-popup"') && !patchedHtml.includes('id="tdq-header"')) {
+          patchedHtml = patchedHtml
+            // Popup div: drop overflow-y:auto and old padding, add flex-direction:column
+            .replace(
+              /(<div id="tdq-popup"[^>]*?)overflow-y:auto;([^>]*?)padding:24px 20px 32px;/,
+              '$1flex-direction:column;$2padding:0 0 32px;'
+            )
+            // Remove position:absolute from close button, add min touch target
+            .replace(
+              /(<button id="tdq-close"[^>]*?)position:absolute;top:12px;right:16px;([^>]*?line-height:1)(")/,
+              '$1$2;flex-shrink:0;min-width:44px;min-height:44px$3'
+            )
+            // Wrap tdq-close + tdq-topic in sticky header div
+            .replace(
+              /(<button id="tdq-close"[\s\S]*?<\/button>)\s*(<div id="tdq-topic"[^>]*?><\/div>)/,
+              '<div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--card-border,#e2e8f0);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">$2$1</div>'
+            )
+            // Wrap body content in scrollable inner div
+            .replace(
+              /(<\/div>)\s*(<h3 style="font-size:1\.1rem)/,
+              '$1<div style="overflow-y:auto;padding:16px 20px 32px">$2'
+            )
+            .replace(
+              /(<div id="tdq-score"[^>]*?hidden><\/div>)\s*(<\/div>)/,
+              '$1</div>$2'
+            )
+            // Patch CSS: .tdq-popup-open needs display:flex!important
+            .replace(
+              '.tdq-popup-open{transform:translateY(0)!important}',
+              '.tdq-popup-open{transform:translateY(0)!important;display:flex!important}'
+            );
+        }
         // Inject quiz CTA + popup for old posts that don't have it
         if (!patchedHtml.includes("tdq-cta-btn")) {
           const quizCta = `

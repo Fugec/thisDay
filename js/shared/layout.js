@@ -78,13 +78,13 @@ export const NAV_CSS =
  */
 export function siteFooter(yearSpanId = "yr") {
   return `<footer class="footer">
-  <div class="container d-flex justify-content-center flex-wrap my-2" style="gap:.75rem">
+  <div class="container d-flex justify-content-center flex-wrap my-2" style="gap:1.25rem">
     <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white mb-0"></i></a>
     <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white mb-0"></i></a>
     <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white mb-0"></i></a>
     <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white mb-0"></i></a>
     <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white mb-0"></i></a>
-    <a href="https://flipboard.com/@thisdayinfo" target="_blank" rel="noopener noreferrer" aria-label="Flipboard">${FLIPBOARD_ICON}</a>
+    <a href="https://flipboard.com/@ArminKapetanovi/magazines/" target="_blank" rel="noopener noreferrer" aria-label="Flipboard">${FLIPBOARD_ICON}</a>
   </div>
   <p>&copy; <span id="${yearSpanId}"></span> thisDay. All rights reserved.</p>
   <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>

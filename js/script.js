@@ -12,8 +12,8 @@ const carouselInner = document.getElementById("carouselInner");
 const carouselIndicators = document.getElementById("carouselIndicators");
 
 // Theme toggle elements (checkboxes)
-const themeSwitchMobile = document.getElementById("themeSwitchMobile");
-const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
+const themeSwitchMobile = document.getElementById("tsm");
+const themeSwitchDesktop = document.getElementById("tsd");
 const body = document.body;
 
 let currentDate = new Date();

@@ -7,7 +7,7 @@
  * Audio:  ElevenLabs TTS narration (from Did You Know / Quick Facts section)
  *         mixed with background music (assets/background.mp3) at 15% volume.
  * Image:  Wikipedia image from the post's imageUrl, or fallback logo.
- * Schedule: 1 video per run, Sun/Mon/Wed/Fri via GitHub Actions cron "0 2 * * 0,1,3,5" (4/week)
+ * Schedule: 1 video per run, Sun/Mon/Wed/Fri via GitHub Actions cron at 02:00 and 10:00 UTC (2 runs/day, 4 days/week)
  *
  * Run:        npm start
  * Auth setup: npm run auth   (one-time, to get YOUTUBE_REFRESH_TOKEN)
@@ -172,6 +172,12 @@ async function main() {
       console.log(`  Video ready: ${videoPath}`);
 
       // ── Upload to YouTube ──────────────────────────────────────────────────
+      // Re-fetch tracker to guard against double-upload if two cron runs overlap
+      const freshUploaded = await getUploaded();
+      if (freshUploaded[post.slug] && !reuploadSlugs.has(post.slug)) {
+        console.log(`  ⚠ Already uploaded by a concurrent run — skipping.`);
+        continue;
+      }
       console.log("  Uploading to YouTube...");
       const youtubeId = await uploadToYoutube(videoPath, post);
       console.log(`  ✓ https://youtube.com/shorts/${youtubeId}`);

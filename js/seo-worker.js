@@ -1277,7 +1277,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v20-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v21-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);

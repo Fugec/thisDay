@@ -419,15 +419,20 @@ export default {
             /<div class="mt-4 p-3 rounded d-flex align-items-center gap-3"[^>]*>\s*<i class="bi bi-calendar3[\s\S]*?<\/div>\s*<\/div>/,
             ''
           );
+          // Fix intermediate explore cards that have data-explore-injected but Bootstrap flex classes (no nowrap)
+          patchedHtml = patchedHtml.replace(
+            /(<div data-explore-injected="1" class="mt-4 p-3 rounded) d-flex[^"]*"([^>]*)>/g,
+            '$1" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">'
+          );
           // Build "Explore in History" section
           const _sp = slugParsedForThumb;
           let exploreHtml = "";
           if (_sp) {
             const _thumb = eventsThumb
-              ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+              ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
               : "";
             exploreHtml = `
-          <div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+          <div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
             ${_thumb}<div style="flex:1;min-width:0">
               <strong>Explore ${_sp.monthDisplay} ${_sp.day} in History</strong><br/>
               <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
@@ -478,9 +483,9 @@ export default {
         if (!patchedHtml.includes('data-explore-injected="1"') && slugParsedForThumb) {
           const sp = slugParsedForThumb;
           const thumb = eventsThumb
-            ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+            ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
             : "";
-          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
+          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
           const anchor = patchedHtml.includes('<!-- Quiz CTA -->')
             ? '<!-- Quiz CTA -->'
             : patchedHtml.includes('You Might Also Like')
@@ -1758,9 +1763,9 @@ ${analysisBadItems}
               hMonthDisplay = sp.monthDisplay;
             }
             const exploreThumb = (c.eventsImageUrl || c.imageUrl)
-              ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+              ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
               : "";
-            return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+            return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
               ${exploreThumb}
               <div style="flex:1;min-width:0">
                 <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>

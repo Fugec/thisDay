@@ -2428,7 +2428,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v12:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v13:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2967,7 +2967,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v12:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v13:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);

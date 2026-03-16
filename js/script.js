@@ -1934,6 +1934,8 @@ window.addEventListener("unhandledrejection", (event) => {
 if (typeof PerformanceObserver !== "undefined") {
   const observer = new PerformanceObserver((list) => {
     list.getEntries().forEach((entry) => {
+      if (entry.entryType === "navigation") return;
+      if (/^GTM-|^AW-|googletag|googleads/i.test(entry.name)) return;
       if (entry.duration > 1000) {
         console.warn(
           `Slow operation detected: ${entry.name} took ${entry.duration}ms`,

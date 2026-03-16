@@ -2359,7 +2359,7 @@ async function handleFetchRequest(request, env, ctx) {
   const csp =
     `default-src 'none'; ` +
     `connect-src 'self' https://api.wikimedia.org https://en.wikipedia.org https://cdn.jsdelivr.net ` +
-    `https://www.google-analytics.com https://www.google.com https://www.gstatic.com ` +
+    `https://www.google-analytics.com https://www.google.com https://www.google.ba https://www.gstatic.com ` +
     `https://www.googleadservices.com https://pagead2.googlesyndication.com ` +
     `https://*.adtrafficquality.google https://*.doubleclick.net ` +
     `https://fundingchoicesmessages.google.com https://www.googletagmanager.com; ` +

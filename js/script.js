@@ -1956,11 +1956,8 @@ document.addEventListener("DOMContentLoaded", () => {
         .then((data) => {
           if (data && data.prefetched) {
             if (data.prefetched.eager) {
-              const link = document.createElement("link");
-              link.rel = "preload";
-              link.as = "image";
-              link.href = data.prefetched.eager;
-              document.head.appendChild(link);
+              const img = new Image();
+              img.src = data.prefetched.eager;
             }
             data.prefetched.lazy.forEach((url) => {
               const img = new Image();

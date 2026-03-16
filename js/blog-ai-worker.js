@@ -427,7 +427,7 @@ export default {
               ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
               : "";
             exploreHtml = `
-          <div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+          <div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
             ${_thumb}<div>
               <strong>Explore ${_sp.monthDisplay} ${_sp.day} in History</strong><br/>
               <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
@@ -469,7 +469,7 @@ export default {
           const thumb = eventsThumb
             ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
             : "";
-          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
+          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
           const anchor = patchedHtml.includes('<!-- Quiz CTA -->')
             ? '<!-- Quiz CTA -->'
             : patchedHtml.includes('You Might Also Like')
@@ -496,6 +496,25 @@ export default {
           patchedHtml = patchedHtml.replace('</head>',
             '<style>.tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.07)!important}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important}.tdq-opt-selected .tdq-opt-key{background:#f59e0b!important}body.dark-theme .tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.08)!important}body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}</style></head>'
           );
+        }
+        // Inject floating quiz bar into stored posts that don't have it yet
+        if (!patchedHtml.includes('tdq-float-bar')) {
+          const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:linear-gradient(90deg,#f59e0b,#d97706);box-shadow:0 -2px 14px rgba(0,0,0,.22);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1)}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{width:100%;background:none;border:none;color:#fff;font-weight:700;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px}#tdq-float-btn:hover{background:rgba(0,0,0,.08)}</style>`;
+          const floatHtml = `<div id="tdq-float-bar"><button id="tdq-float-btn"><i class="bi bi-patch-question-fill"></i> Take the Quiz</button></div>`;
+          const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');}function hideBar(){bar.classList.remove('tdq-float-visible');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});var h2s=document.querySelectorAll('h2');var trigger=null;for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}if(trigger&&'IntersectionObserver' in window){var obs=new IntersectionObserver(function(e){if(e[0].isIntersecting){showBar();obs.disconnect();}},{threshold:0.1});obs.observe(trigger);}else{document.addEventListener('scroll',function onScroll(){var d=document.documentElement;var total=d.scrollHeight-d.clientHeight;if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}},{passive:true});}})();<\/script>`;
+          const bodyClose = patchedHtml.includes('</body>') ? '</body>' : '</html>';
+          patchedHtml = patchedHtml
+            .replace('</head>', floatCss + '</head>')
+            .replace(bodyClose, floatHtml + '\n' + floatJs + '\n' + bodyClose);
+        }
+        // Inject AdSense ad unit into stored posts that don't have one yet
+        if (!patchedHtml.includes('<ins class="adsbygoogle"') && patchedHtml.includes('</article>')) {
+          const adUnit = `<div class="ad-unit-container"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>`;
+          const adInitJs = `<script>(function(){if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;var ins=document.querySelector('ins.adsbygoogle');if(!ins)return;function push(){if(!ins.getAttribute('data-adsbygoogle-status')){try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}}if('IntersectionObserver' in window){new IntersectionObserver(function(e,o){if(e[0].isIntersecting){push();o.disconnect();}},{threshold:0.1}).observe(ins);}else{push();}})();<\/script>`;
+          const bodyClose2 = patchedHtml.includes('</body>') ? '</body>' : '</html>';
+          const lastArticleIdx = patchedHtml.lastIndexOf('</article>');
+          patchedHtml = patchedHtml.slice(0, lastArticleIdx + '</article>'.length) + '\n' + adUnit + patchedHtml.slice(lastArticleIdx + '</article>'.length);
+          patchedHtml = patchedHtml.replace(bodyClose2, adInitJs + '\n' + bodyClose2);
         }
         const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
         if (ytEntry?.youtubeId && ytEntry.privacy !== "private") {
@@ -1729,7 +1748,7 @@ ${analysisBadItems}
             const exploreThumb = (c.eventsImageUrl || c.imageUrl)
               ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
               : "";
-            return `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3 flex-wrap" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+            return `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
               ${exploreThumb}
               <div>
                 <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
@@ -1788,6 +1807,15 @@ ${analysisBadItems}
           </footer>
 
         </article>
+
+        <div class="ad-unit-container">
+          <span class="ad-unit-label">Advertisement</span>
+          <ins class="adsbygoogle"
+               data-ad-client="ca-pub-8565025017387209"
+               data-ad-slot="9477779891"
+               data-ad-format="auto"
+               data-full-width-responsive="true"></ins>
+        </div>
       </div>
     </div>
   </main>
@@ -1855,8 +1883,61 @@ ${analysisBadItems}
 
   <div id="tdq-sentinel" style="height:1px"></div>
 
+  <!-- Floating quiz bar — slides up when user reaches Eyewitness section -->
   <style>
-    .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
+    #tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:linear-gradient(90deg,#f59e0b,#d97706);box-shadow:0 -2px 14px rgba(0,0,0,.22);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding-bottom:max(0px,env(safe-area-inset-bottom))}
+    #tdq-float-bar.tdq-float-visible{transform:translateY(0)}
+    #tdq-float-btn{width:100%;background:none;border:none;color:#fff;font-weight:700;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px}
+    #tdq-float-btn:hover{background:rgba(0,0,0,.08)}
+  </style>
+  <div id="tdq-float-bar">
+    <button id="tdq-float-btn">
+      <i class="bi bi-patch-question-fill"></i> Take the Quiz
+    </button>
+  </div>
+  <script>
+  (function(){
+    var bar=document.getElementById('tdq-float-bar');
+    var btn=document.getElementById('tdq-float-btn');
+    var closeBtn=document.getElementById('tdq-close');
+    if(!bar||!btn)return;
+    function showBar(){bar.classList.add('tdq-float-visible');}
+    function hideBar(){bar.classList.remove('tdq-float-visible');}
+    btn.addEventListener('click',function(){
+      hideBar();
+      var overlay=document.getElementById('tdq-overlay');
+      var popup=document.getElementById('tdq-popup');
+      if(overlay)overlay.style.display='block';
+      if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}
+      document.body.style.overflow='hidden';
+      if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();
+    });
+    if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});
+    // Trigger: Eyewitness heading comes into view
+    var h2s=document.querySelectorAll('h2');
+    var trigger=null;
+    for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}
+    if(trigger&&'IntersectionObserver' in window){
+      var obs=new IntersectionObserver(function(e){if(e[0].isIntersecting){showBar();obs.disconnect();}},{threshold:0.1});
+      obs.observe(trigger);
+    } else {
+      document.addEventListener('scroll',function onScroll(){
+        var d=document.documentElement;
+        var total=d.scrollHeight-d.clientHeight;
+        if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}
+      },{passive:true});
+    }
+  })();
+  </script>
+
+  <style>
+    .tdq-question{margin-bottom:16px;display:none}.tdq-question.tdq-q-active{display:block}
+    @keyframes tdq-slide-in{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:translateX(0)}}
+    .tdq-q-enter{animation:tdq-slide-in .22s ease forwards}
+    @keyframes tdq-pulse-in{0%{background:rgba(59,130,246,.13)}60%{background:rgba(59,130,246,.06)}100%{background:transparent}}
+    .tdq-q-pulse{animation:tdq-pulse-in .6s ease forwards}
+    @media(prefers-reduced-motion:reduce){.tdq-q-pulse,.tdq-q-enter{animation:none;transition:none}}
+    .tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
     .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
     .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.07)}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
@@ -1866,6 +1947,8 @@ ${analysisBadItems}
     body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
     body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
     .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
+    .tdq-next-btn{width:100%;margin-top:14px;padding:11px;border:none;border-radius:8px;background:#f59e0b;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:none;transition:background .15s}
+    .tdq-next-btn:hover{background:#d97706}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
     #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important}
     body.dark-theme #tdq-header{background:var(--card-bg,#1e293b);border-bottom-color:rgba(255,255,255,.1)}
@@ -1881,10 +1964,17 @@ ${analysisBadItems}
     function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
     function openPopup() {
+      var popup = document.getElementById("tdq-popup");
       document.getElementById("tdq-overlay").style.display = "block";
-      document.getElementById("tdq-popup").style.display = "block";
-      requestAnimationFrame(function() { document.getElementById("tdq-popup").classList.add("tdq-popup-open"); });
+      popup.style.display = "block";
+      requestAnimationFrame(function() { popup.classList.add("tdq-popup-open"); });
       document.body.style.overflow = "hidden";
+      // After slide-up animation: scroll to top and pulse first question for attention
+      setTimeout(function() {
+        popup.scrollTop = 0;
+        var firstQ = popup.querySelector(".tdq-question");
+        if (firstQ) { firstQ.classList.add("tdq-q-pulse"); setTimeout(function(){ firstQ.classList.remove("tdq-q-pulse"); }, 650); }
+      }, 360);
     }
 
     function closePopup() {
@@ -1900,6 +1990,30 @@ ${analysisBadItems}
     document.getElementById("tdq-close").addEventListener("click", closePopup);
     document.getElementById("tdq-overlay").addEventListener("click", closePopup);
 
+    var currentQ = 0;
+
+    function showQuestion(qi, animate) {
+      var popup = document.getElementById("tdq-popup");
+      var container = document.getElementById("tdq-questions");
+      container.querySelectorAll(".tdq-question").forEach(function(el) { el.classList.remove("tdq-q-active", "tdq-q-enter"); });
+      var qEl = document.getElementById("tdq-q-" + qi);
+      if (!qEl) return;
+      qEl.classList.add("tdq-q-active");
+      if (animate) { void qEl.offsetWidth; qEl.classList.add("tdq-q-enter"); }
+      if (popup) { setTimeout(function(){ popup.scrollTop = 0; }, 30); }
+    }
+
+    function prevDayUrl() {
+      var m = slug.match(/^(\d+)-([a-z]+)-(\d+)$/i);
+      if (!m) return "/blog/";
+      var months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+      var idx = months.indexOf(m[2].toLowerCase());
+      if (idx < 0) return "/blog/";
+      var d = new Date(parseInt(m[3]), idx, parseInt(m[1]));
+      d.setDate(d.getDate() - 1);
+      return "/blog/" + d.getDate() + "-" + months[d.getMonth()] + "-" + d.getFullYear() + "/";
+    }
+
     function renderQuiz(quiz) {
       answers = quiz.questions.map(function(q) { return Number(q.answer); });
       var total = quiz.questions.length;
@@ -1911,58 +2025,104 @@ ${analysisBadItems}
           return '<div class="tdq-opt" data-qi="' + qi + '" data-oi="' + oi + '">' +
             '<span class="tdq-opt-key">' + String.fromCharCode(65 + oi) + '</span>' + esc(String(opt)) + '</div>';
         }).join("");
+        var isLast = qi === total - 1;
+        var nextLabel = isLast ? '<i class="bi bi-check2-circle me-1"></i>See Results' : 'Next Question <i class="bi bi-arrow-right ms-1"></i>';
         var expHtml = q.explanation
           ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>'
           : '';
         return '<div class="tdq-question" id="tdq-q-' + qi + '">' +
-          '<p class="tdq-q-text"><strong>' + (qi + 1) + '.</strong> ' + esc(String(q.q)) + '</p>' +
+          '<p class="tdq-q-text"><strong>' + (qi + 1) + ' / ' + total + '.</strong> ' + esc(String(q.q)) + '</p>' +
           '<div class="tdq-options">' + optsHtml + '</div>' +
           '<div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' +
           expHtml +
+          '<button class="tdq-next-btn" id="tdq-next-' + qi + '">' + nextLabel + '</button>' +
           '</div>';
       }).join("");
+
+      // Show first question
+      currentQ = 0;
+      showQuestion(0, false);
+      var progEl = document.getElementById("tdq-progress");
+      if (progEl) progEl.textContent = "1 of " + total;
 
       container.querySelectorAll(".tdq-opt").forEach(function(opt) {
         opt.addEventListener("click", function() {
           var qi = parseInt(this.dataset.qi), oi = parseInt(this.dataset.oi);
+          if (qi !== currentQ) return; // only active question
           selected[qi] = oi;
           container.querySelectorAll('[data-qi="' + qi + '"]').forEach(function(o) { o.classList.remove("tdq-opt-selected"); });
           this.classList.add("tdq-opt-selected");
-          var answered = Object.keys(selected).length;
-          var progEl = document.getElementById("tdq-progress");
-          if (progEl) progEl.textContent = answered + " of " + total + " answered";
-          var allAnswered = quiz.questions.every(function(_, i) { return selected[i] !== undefined; });
-          document.getElementById("tdq-submit-btn").style.display = allAnswered ? "" : "none";
+          // Show next button and scroll to it
+          var nextBtn = document.getElementById("tdq-next-" + qi);
+          if (nextBtn) {
+            nextBtn.style.display = "block";
+            var popup = document.getElementById("tdq-popup");
+            setTimeout(function() {
+              if (popup && nextBtn) {
+                var offset = nextBtn.getBoundingClientRect().top - popup.getBoundingClientRect().top - 12;
+                if (offset > 4) popup.scrollBy({ top: offset, behavior: "smooth" });
+              }
+            }, 160);
+          }
         });
       });
+
+      // Next button handlers
+      for (var qi = 0; qi < total; qi++) {
+        (function(qi) {
+          var nextBtn = document.getElementById("tdq-next-" + qi);
+          if (!nextBtn) return;
+          nextBtn.addEventListener("click", function() {
+            var isLast = qi === total - 1;
+            if (isLast) {
+              showResults(total);
+            } else {
+              currentQ = qi + 1;
+              var progEl = document.getElementById("tdq-progress");
+              if (progEl) progEl.textContent = (currentQ + 1) + " of " + total;
+              showQuestion(currentQ, true);
+            }
+          });
+        })(qi);
+      }
     }
 
-    document.getElementById("tdq-submit-btn").addEventListener("click", function() {
+    function showResults(total) {
       var score = 0;
       answers.forEach(function(correct, qi) {
         var chosen = selected[qi] !== undefined ? selected[qi] : -1;
         var fb = document.getElementById("tdq-f-" + qi);
         var opts = document.querySelectorAll('[data-qi="' + qi + '"]');
-        fb.hidden = false;
+        if (fb) fb.hidden = false;
         opts.forEach(function(o) { o.style.pointerEvents = "none"; });
-        opts[correct].classList.add("tdq-opt-correct");
+        if (opts[correct]) opts[correct].classList.add("tdq-opt-correct");
         if (chosen === correct) {
           score++;
-          fb.innerHTML = '<span class="tdq-correct">✓ Correct!</span>';
+          if (fb) fb.innerHTML = '<span class="tdq-correct">✓ Correct!</span>';
         } else {
-          if (chosen >= 0) opts[chosen].classList.add("tdq-opt-wrong");
-          fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>';
+          if (chosen >= 0 && opts[chosen]) opts[chosen].classList.add("tdq-opt-wrong");
+          if (fb) fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>';
         }
         var exp = document.getElementById("tdq-e-" + qi);
         if (exp) exp.hidden = false;
+        // Show all questions for results view
+        var qEl = document.getElementById("tdq-q-" + qi);
+        if (qEl) { qEl.classList.add("tdq-q-active"); var nb = document.getElementById("tdq-next-" + qi); if (nb) nb.style.display = "none"; }
       });
-      this.hidden = true;
-      var pct = Math.round(score / answers.length * 100);
+      document.getElementById("tdq-submit-btn").style.display = "none";
+      var pct = Math.round(score / total * 100);
       var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
       var el = document.getElementById("tdq-score");
       el.hidden = false;
-      el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + '/' + answers.length + '</span> (' + pct + '%) — ' + msg + '</div>';
-    });
+      el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + "/" + total + '</span> (' + pct + '%) — ' + msg + '</div>' +
+        '<a href="' + prevDayUrl() + '" class="btn btn-outline-primary w-100 mt-3"><i class="bi bi-arrow-left me-1"></i>Previous Day\'s Story</a>';
+      var popup = document.getElementById("tdq-popup");
+      if (popup) { setTimeout(function(){ popup.scrollTop = 0; }, 30); }
+      var progEl = document.getElementById("tdq-progress");
+      if (progEl) progEl.textContent = "Results — " + score + "/" + total + " correct";
+    }
+
+    document.getElementById("tdq-submit-btn").addEventListener("click", function() { showResults(answers.length); });
 
     function maybeLoadAndShow() {
       if (quizLoaded) return;
@@ -2004,6 +2164,17 @@ ${analysisBadItems}
       bar.style.width=pct+'%';
       bar.setAttribute('aria-valuenow',pct);
     },{passive:true});
+  })();
+  </script>
+  <script>
+  (function(){
+    if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;
+    var ins=document.querySelector('ins.adsbygoogle');
+    if(!ins)return;
+    function push(){if(!ins.getAttribute('data-adsbygoogle-status')){try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}}
+    if('IntersectionObserver' in window){
+      new IntersectionObserver(function(e,o){if(e[0].isIntersecting){push();o.disconnect();}},{threshold:0.1}).observe(ins);
+    } else { push(); }
   })();
   </script>
 </body>
@@ -2148,10 +2319,9 @@ ${JSON.stringify(
           In-depth articles covering fascinating historical events published regularly by thisDay.info.
           <a href="/blog/">View all posts</a>
         </p>
-        <div class="ad-unit" style="margin-bottom:24px">
-          <div class="ad-unit-label">Advertisement</div>
+        <div class="ad-unit-container">
+          <span class="ad-unit-label">Advertisement</span>
           <ins class="adsbygoogle"
-               style="display:block;border-radius:8px;overflow:hidden"
                data-ad-client="ca-pub-8565025017387209"
                data-ad-slot="9477779891"
                data-ad-format="auto"

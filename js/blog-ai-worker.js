@@ -457,8 +457,9 @@ export default {
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
         // Strip chatbot from old KV posts (now removed from template)
-        if (patchedHtml.includes('/js/chatbot.js')) {
+        if (patchedHtml.includes('chatbot')) {
           patchedHtml = patchedHtml.replace(/<script\s+src="\/js\/chatbot\.js"><\/script>/g, '');
+          patchedHtml = patchedHtml.replace('</head>', '<style>#chatbotToggle,#chatbotWindow,.chatbot-toggle,.chatbot-window{display:none!important}</style></head>');
         }
         // Always strip old icon-based Explore card (covers KV that has both old + new)
         if (patchedHtml.includes('bi-calendar3')) {

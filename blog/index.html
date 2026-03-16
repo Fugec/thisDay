@@ -372,13 +372,13 @@
              data-full-width-responsive="true"></ins>
       </div>
 
-      <!-- 2026 — dynamically loaded posts -->
-      <section class="month-section" id="posts-2026" style="display:none">
-        <h2 class="month-header">
+      <!-- Latest blog posts — dynamically loaded -->
+      <section class="month-section" id="month-section-blog" style="display:none">
+        <h2 class="month-header" id="month-header-blog">
           <i class="bi bi-calendar3 me-2"></i>2026
-          <span class="post-count-badge" id="posts-2026-count"></span>
+          <span class="post-count-badge" id="month-section-blog-count"></span>
         </h2>
-        <div id="posts-2026-list"></div>
+        <div id="month-section-blog-list"></div>
       </section>
 
       <!-- July -->
@@ -695,9 +695,9 @@
         .then(function (r) { return r.json(); })
         .then(function (posts) {
           if (!posts || !posts.length) return;
-          var section = document.getElementById("posts-2026");
-          var list    = document.getElementById("posts-2026-list");
-          var badge   = document.getElementById("posts-2026-count");
+          var section = document.getElementById("month-section-blog");
+          var list    = document.getElementById("month-section-blog-list");
+          var badge   = document.getElementById("month-section-blog-count");
           badge.textContent = posts.length + (posts.length === 1 ? " post" : " posts");
           posts.forEach(function (p) {
             var a = document.createElement("a");
@@ -708,6 +708,7 @@
             list.appendChild(a);
           });
           section.style.display = "";
+          setTimeout(function(){ document.getElementById("month-header-blog").scrollIntoView({behavior:"smooth",block:"start"}); }, 100);
         })
         .catch(function () { /* silently ignore if endpoint unavailable */ });
     })();

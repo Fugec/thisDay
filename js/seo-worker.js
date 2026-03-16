@@ -2428,7 +2428,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v13:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v14:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2851,11 +2851,12 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `var results={};` +
     `var score=0;` +
     // Show slide
-    `function showSlide(n){` +
+    `function showSlide(n,noScroll){` +
     `document.querySelectorAll('.qsc-slide').forEach(function(s){s.classList.remove('qsc-active');});` +
     `var s=document.getElementById('qsc-slide-'+n);if(s)s.classList.add('qsc-active');` +
     `cur=n;updateProgress(n);` +
     `document.getElementById('qsc-prev').disabled=(n===0);` +
+    `if(!noScroll){var b=document.getElementById('qsc-body-'+n);if(b)setTimeout(function(){b.scrollIntoView({behavior:'smooth',block:'start'});},50);}` +
     `}` +
     // Update progress
     `function updateProgress(n){` +
@@ -2951,7 +2952,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `p.x+=p.vx;p.y+=p.vy;p.rot+=p.rv;p.a-=.011;});` +
     `fr++;if(fr<130)requestAnimationFrame(draw);else c.remove();}` +
     `requestAnimationFrame(draw);}` +
-    `showSlide(0);` +
+    `showSlide(0,true);` +
     `})();</script>`
   );
 }
@@ -2967,7 +2968,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v13:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v14:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);

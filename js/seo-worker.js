@@ -2799,7 +2799,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
       readMoreHtml +
       `<div class="tdq-feedback qsc-feedback" id="tdq-f-${qi}" hidden></div>` +
       expHtml +
-      `<button class="qsc-next-btn" data-slide="${qi}" hidden>` +
+      `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
       (qi < total - 1 ? `Next Question <i class="bi bi-arrow-right"></i>` : `See Results <i class="bi bi-trophy-fill"></i>`) +
       `</button>` +
       `</div></div>`;
@@ -2856,7 +2856,6 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `var s=document.getElementById('qsc-slide-'+n);if(s)s.classList.add('qsc-active');` +
     `cur=n;updateProgress(n);` +
     `document.getElementById('qsc-prev').disabled=(n===0);` +
-    `var body=document.getElementById('qsc-body-'+n);if(body)setTimeout(function(){body.scrollIntoView({behavior:'smooth',block:'start'});},60);` +
     `}` +
     // Update progress
     `function updateProgress(n){` +
@@ -2893,7 +2892,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `if(chosen===correct){score++;results[qi]=true;fb.innerHTML='<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';}` +
     `else{results[qi]=false;if(chosen>=0&&opts[chosen])opts[chosen].classList.add('tdq-opt-wrong');fb.innerHTML='<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
     `fb.hidden=false;if(exp)exp.hidden=false;` +
-    `var nb=document.querySelector('.qsc-next-btn[data-slide="'+qi+'"]');if(nb)nb.hidden=false;` +
+    `var nb=document.getElementById('qsc-next-'+qi);if(nb){nb.hidden=false;setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'nearest'});},80);}` +
     `document.getElementById('qsc-hint').textContent='';` +
     `updateProgress(cur);` +
     `}` +

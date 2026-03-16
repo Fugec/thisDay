@@ -456,6 +456,10 @@ export default {
           const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
+        // Strip chatbot from old KV posts (now removed from template)
+        if (patchedHtml.includes('/js/chatbot.js')) {
+          patchedHtml = patchedHtml.replace(/<script\s+src="\/js\/chatbot\.js"><\/script>/g, '');
+        }
         // Always strip old icon-based Explore card (covers KV that has both old + new)
         if (patchedHtml.includes('bi-calendar3')) {
           patchedHtml = patchedHtml.replace(
@@ -2058,12 +2062,8 @@ ${analysisBadItems}
             nextBtn.style.display = "block";
             var popup = document.getElementById("tdq-popup");
             setTimeout(function() {
-              if (popup && nextBtn) {
-                var btnRect = nextBtn.getBoundingClientRect();
-                var popupRect = popup.getBoundingClientRect();
-                if (btnRect.bottom > popupRect.bottom - 16) {
-                  popup.scrollBy({ top: btnRect.bottom - popupRect.bottom + 24, behavior: "smooth" });
-                }
+              if (nextBtn) {
+                nextBtn.scrollIntoView({ behavior: "smooth", block: "nearest" });
               }
             }, 160);
           }

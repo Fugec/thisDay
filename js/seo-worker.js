@@ -2428,7 +2428,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v14:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v15:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2856,7 +2856,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `var s=document.getElementById('qsc-slide-'+n);if(s)s.classList.add('qsc-active');` +
     `cur=n;updateProgress(n);` +
     `document.getElementById('qsc-prev').disabled=(n===0);` +
-    `if(!noScroll){var b=document.getElementById('qsc-body-'+n);if(b)setTimeout(function(){b.scrollIntoView({behavior:'smooth',block:'start'});},50);}` +
+    `if(!noScroll){var b=document.getElementById('qsc-body-'+n);if(b)setTimeout(function(){b.scrollIntoView({behavior:'smooth',block:'start'});},80);}` +
     `}` +
     // Update progress
     `function updateProgress(n){` +
@@ -2893,7 +2893,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `if(chosen===correct){score++;results[qi]=true;fb.innerHTML='<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';}` +
     `else{results[qi]=false;if(chosen>=0&&opts[chosen])opts[chosen].classList.add('tdq-opt-wrong');fb.innerHTML='<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
     `fb.hidden=false;if(exp)exp.hidden=false;` +
-    `var nb=document.getElementById('qsc-next-'+qi);if(nb){nb.hidden=false;setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'nearest'});},80);}` +
+    `var nb=document.getElementById('qsc-next-'+qi);if(nb){nb.hidden=false;setTimeout(function(){var b=document.getElementById('qsc-body-'+qi);if(b)b.scrollIntoView({behavior:'smooth',block:'start'});},80);}` +
     `document.getElementById('qsc-hint').textContent='';` +
     `updateProgress(cur);` +
     `}` +
@@ -2968,7 +2968,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v14:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v15:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -3239,7 +3239,7 @@ body.dark-theme #qsc-wrapper{box-shadow:0 4px 24px rgba(0,0,0,.4)}
 .qsc-img-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.7) 0%,rgba(0,0,0,.1) 60%,transparent 100%)}
 .qsc-year-pill{position:absolute;bottom:14px;left:16px;background:var(--badge);color:#fff;padding:4px 12px;border-radius:20px;font-size:.8rem;font-weight:700;letter-spacing:.04em}
 /* Slide body */
-.qsc-slide-body{padding:18px 20px 22px}
+.qsc-slide-body{padding:18px 20px 22px;scroll-margin-top:60px}
 @media(min-width:600px){.qsc-slide-body{padding:22px 28px 28px}}
 .qsc-read-more-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 14px;padding:6px 14px;border:1.5px solid rgba(59,130,246,.35);border-radius:20px;font-size:.8rem;font-weight:500;color:#3b82f6;text-decoration:none;transition:all .2s;background:rgba(59,130,246,.06)}
 .qsc-read-more-btn:hover{background:rgba(59,130,246,.14);border-color:#3b82f6;color:#2563eb;text-decoration:none}

@@ -2792,7 +2792,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
 
     return `<div class="qsc-slide${qi === 0 ? " qsc-active" : ""}" data-slide="${qi}" id="qsc-slide-${qi}">` +
       imgHtml +
-      `<div class="qsc-slide-body">` +
+      `<div class="qsc-slide-body" id="qsc-body-${qi}">` +
       `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:#f59e0b"></i>Question ${qi + 1} of ${total}</div>` +
       `<p class="tdq-q-text qsc-q-text">${escapeHtml(String(q.q))}</p>` +
       `<div class="tdq-options qsc-opts-wrap">${optsHtml}</div>` +
@@ -2856,6 +2856,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `var s=document.getElementById('qsc-slide-'+n);if(s)s.classList.add('qsc-active');` +
     `cur=n;updateProgress(n);` +
     `document.getElementById('qsc-prev').disabled=(n===0);` +
+    `var body=document.getElementById('qsc-body-'+n);if(body)setTimeout(function(){body.scrollIntoView({behavior:'smooth',block:'start'});},60);` +
     `}` +
     // Update progress
     `function updateProgress(n){` +
@@ -2892,7 +2893,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `if(chosen===correct){score++;results[qi]=true;fb.innerHTML='<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';}` +
     `else{results[qi]=false;if(chosen>=0&&opts[chosen])opts[chosen].classList.add('tdq-opt-wrong');fb.innerHTML='<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
     `fb.hidden=false;if(exp)exp.hidden=false;` +
-    `var nb=document.querySelector('.qsc-next-btn[data-slide="'+qi+'"]');if(nb){nb.hidden=false;setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'nearest'});},80);}` +
+    `var nb=document.querySelector('.qsc-next-btn[data-slide="'+qi+'"]');if(nb)nb.hidden=false;` +
     `document.getElementById('qsc-hint').textContent='';` +
     `updateProgress(cur);` +
     `}` +

@@ -459,7 +459,13 @@ export default {
         // Strip chatbot from old KV posts (now removed from template)
         if (patchedHtml.includes('chatbot')) {
           patchedHtml = patchedHtml.replace(/<script\s+src="\/js\/chatbot\.js"><\/script>/g, '');
-          patchedHtml = patchedHtml.replace('</head>', '<style>#chatbotToggle,#chatbotWindow,.chatbot-toggle,.chatbot-window{display:none!important}</style></head>');
+          patchedHtml = patchedHtml.replace(/<button[^>]+id="chatbotToggle"[^>]*>[\s\S]*?<\/button>/g, '');
+          const chatbotCss = '<style>#chatbotToggle,#chatbotWindow,.chatbot-toggle,.chatbot-window{display:none!important}</style>';
+          if (patchedHtml.includes('</head>')) {
+            patchedHtml = patchedHtml.replace('</head>', chatbotCss + '</head>');
+          } else {
+            patchedHtml = patchedHtml.replace(/(<body[^>]*>)/, '$1' + chatbotCss);
+          }
         }
         // Always strip old icon-based Explore card (covers KV that has both old + new)
         if (patchedHtml.includes('bi-calendar3')) {
@@ -1566,6 +1572,7 @@ ${JSON.stringify({
       .theme-switch-mobile label i { color: var(--header-text-color); font-size: 1.2rem; margin-left: 0.5rem; }
       #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}
       body.dark-theme #read-progress{background:#60a5fa}
+      button#chatbotToggle,#chatbotWindow{display:none!important}
       .site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
       .site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}
       .site-btn-primary{border-color:#3b82f6;color:#2563eb}

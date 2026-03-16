@@ -427,8 +427,8 @@ export default {
               ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
               : "";
             exploreHtml = `
-          <div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
-            ${_thumb}<div>
+          <div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+            ${_thumb}<div style="flex:1;min-width:0">
               <strong>Explore ${_sp.monthDisplay} ${_sp.day} in History</strong><br/>
               <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
               <a href="/events/${_sp.monthSlug}/${_sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${_sp.monthDisplay} ${_sp.day}</a>
@@ -469,7 +469,7 @@ export default {
           const thumb = eventsThumb
             ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
             : "";
-          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
+          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
           const anchor = patchedHtml.includes('<!-- Quiz CTA -->')
             ? '<!-- Quiz CTA -->'
             : patchedHtml.includes('You Might Also Like')
@@ -1748,9 +1748,9 @@ ${analysisBadItems}
             const exploreThumb = (c.eventsImageUrl || c.imageUrl)
               ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
               : "";
-            return `<div data-explore-injected="1" class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+            return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
               ${exploreThumb}
-              <div>
+              <div style="flex:1;min-width:0">
                 <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
                 <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
                 <a href="/events/${esc(hMonthSlug)}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">View ${esc(hMonthDisplay)} ${hDay}</a>
@@ -1820,7 +1820,6 @@ ${analysisBadItems}
     </div>
   </main>
 
-  <script src="/js/chatbot.js"></script>
 
   ${siteFooter()}
 
@@ -1966,15 +1965,16 @@ ${analysisBadItems}
     function openPopup() {
       var popup = document.getElementById("tdq-popup");
       document.getElementById("tdq-overlay").style.display = "block";
+      popup.scrollTop = 0;
       popup.style.display = "block";
       requestAnimationFrame(function() { popup.classList.add("tdq-popup-open"); });
       document.body.style.overflow = "hidden";
-      // After slide-up animation: scroll to top and pulse first question for attention
+      // After slide-up animation: ensure scroll at top and pulse active question for attention
       setTimeout(function() {
         popup.scrollTop = 0;
-        var firstQ = popup.querySelector(".tdq-question");
-        if (firstQ) { firstQ.classList.add("tdq-q-pulse"); setTimeout(function(){ firstQ.classList.remove("tdq-q-pulse"); }, 650); }
-      }, 360);
+        var activeQ = popup.querySelector(".tdq-q-active") || popup.querySelector(".tdq-question");
+        if (activeQ) { activeQ.classList.add("tdq-q-pulse"); setTimeout(function(){ activeQ.classList.remove("tdq-q-pulse"); }, 650); }
+      }, 380);
     }
 
     function closePopup() {
@@ -2059,8 +2059,11 @@ ${analysisBadItems}
             var popup = document.getElementById("tdq-popup");
             setTimeout(function() {
               if (popup && nextBtn) {
-                var offset = nextBtn.getBoundingClientRect().top - popup.getBoundingClientRect().top - 12;
-                if (offset > 4) popup.scrollBy({ top: offset, behavior: "smooth" });
+                var btnRect = nextBtn.getBoundingClientRect();
+                var popupRect = popup.getBoundingClientRect();
+                if (btnRect.bottom > popupRect.bottom - 16) {
+                  popup.scrollBy({ top: btnRect.bottom - popupRect.bottom + 24, behavior: "smooth" });
+                }
               }
             }, 160);
           }

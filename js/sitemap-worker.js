@@ -16,7 +16,7 @@
 // ---------------------------------------------------------------------------
 
 const DOMAIN = "https://thisday.info";
-const CACHE_MAX_AGE = 3600; // 1 hour — new AI posts appear every 2 days
+const CACHE_MAX_AGE = 3600; // 1 hour (purged immediately after each new publish)
 const KV_INDEX_KEY = "index";
 
 // ---------------------------------------------------------------------------
@@ -24,12 +24,13 @@ const KV_INDEX_KEY = "index";
 // ---------------------------------------------------------------------------
 
 const STATIC_PAGES = [
-  { loc: "/",               lastmod: "2026-02-18", changefreq: "daily",   priority: "1.0" },
-  { loc: "/about/",         lastmod: "2026-02-18", changefreq: "monthly", priority: "0.7" },
-  { loc: "/contact/",       lastmod: "2026-02-18", changefreq: "monthly", priority: "0.6" },
-  { loc: "/blog/",          lastmod: "2026-02-18", changefreq: "weekly",  priority: "0.8" },
-  { loc: "/privacy-policy/", lastmod: "2026-02-18", changefreq: "yearly", priority: "0.3" },
-  { loc: "/terms/",         lastmod: "2026-02-18", changefreq: "yearly",  priority: "0.3" },
+  { loc: "/",               lastmod: "2026-03-17", changefreq: "daily",   priority: "1.0", dynamicLastmod: true },
+  { loc: "/about/",         lastmod: "2026-03-17", changefreq: "monthly", priority: "0.7" },
+  { loc: "/contact/",       lastmod: "2026-03-17", changefreq: "monthly", priority: "0.6" },
+  { loc: "/blog/",          lastmod: "2026-03-17", changefreq: "weekly",  priority: "0.8", dynamicLastmod: true },
+  { loc: "/blog/archive/",  lastmod: "2026-03-17", changefreq: "weekly",  priority: "0.8", dynamicLastmod: true },
+  { loc: "/privacy-policy/", lastmod: "2026-03-17", changefreq: "yearly", priority: "0.3" },
+  { loc: "/terms/",         lastmod: "2026-03-17", changefreq: "yearly",  priority: "0.3" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,17 @@ export default {
       return fetch(request);
     }
 
+    // Helpful for diagnosing Search Console “couldn’t fetch” issues.
+    // Logs show up in `wrangler tail` for this worker.
+    try {
+      console.log("sitemap.xml request", {
+        ua: request.headers.get("user-agent") || "",
+        cf: request.cf || null,
+      });
+    } catch {
+      // ignore logging errors
+    }
+
     // Serve from edge cache if available
     const cache = caches.default;
     const cacheKey = new Request(`${DOMAIN}/sitemap.xml`);
@@ -140,11 +152,13 @@ export default {
 function buildSitemap(aiPosts) {
   const entries = [];
 
+  const latestPostLastmod = computeLatestPostLastmod(aiPosts);
+
   // 1. Core static pages
   for (const page of STATIC_PAGES) {
     entries.push(urlEntry(
       `${DOMAIN}${page.loc}`,
-      page.lastmod,
+      page.dynamicLastmod ? latestPostLastmod : page.lastmod,
       page.changefreq,
       page.priority,
     ));
@@ -164,7 +178,7 @@ function buildSitemap(aiPosts) {
   for (const post of aiPosts) {
     const lastmod = post.publishedAt
       ? post.publishedAt.slice(0, 10) // "YYYY-MM-DD"
-      : new Date().toISOString().slice(0, 10);
+      : latestPostLastmod;
 
     entries.push(urlEntry(
       `${DOMAIN}/blog/${post.slug}/`,
@@ -191,4 +205,23 @@ function urlEntry(loc, lastmod, changefreq, priority) {
     `    <priority>${priority}</priority>\n` +
     `  </url>`
   );
+}
+
+function computeLatestPostLastmod(aiPosts) {
+  const candidates = [];
+
+  for (const post of STATIC_BLOG_POSTS) {
+    if (post?.lastmod) candidates.push(post.lastmod);
+  }
+
+  for (const post of aiPosts || []) {
+    if (typeof post?.publishedAt === "string" && post.publishedAt.length >= 10) {
+      candidates.push(post.publishedAt.slice(0, 10));
+    }
+  }
+
+  // YYYY-MM-DD compares lexicographically.
+  return candidates.length
+    ? candidates.reduce((max, cur) => (cur > max ? cur : max))
+    : new Date().toISOString().slice(0, 10);
 }

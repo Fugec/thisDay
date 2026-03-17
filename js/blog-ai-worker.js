@@ -870,6 +870,14 @@ async function generateAndStore(env) {
     cache.delete(new Request("https://thisday.info/sitemap.xml")),
     cache.delete(new Request("https://thisday.info/rss.xml")),
     cache.delete(new Request("https://thisday.info/news-sitemap.xml")),
+    // Optional: ping search engines so they discover sitemap updates faster.
+    // This is safe to fail without breaking publishing.
+    fetch("https://thisday.info/search-ping", {
+      method: "POST",
+      headers: env.SEARCH_PING_SECRET
+        ? { Authorization: `Bearer ${env.SEARCH_PING_SECRET}` }
+        : {},
+    }),
   ]);
 
   // Generate and store a quiz for this blog post using rich context from the live post HTML

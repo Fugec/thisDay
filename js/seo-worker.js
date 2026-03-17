@@ -1109,12 +1109,14 @@ setTimeout(initAds,1200);
 }
 
 function serveGeneratedSitemap(siteUrl) {
-  const today = new Date().toISOString().split("T")[0];
   let urls = "";
   for (let m = 0; m < 12; m++) {
     for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
-      urls += `  <url>\n    <loc>${siteUrl}/events/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.6</priority>\n  </url>\n`;
-      urls += `  <url>\n    <loc>${siteUrl}/quiz/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
+      // Note: <lastmod> should reflect the actual last significant content change.
+      // Since these pages are generated from upstream data and can change asynchronously,
+      // we omit <lastmod> entirely to avoid sending inaccurate signals to crawlers.
+      urls += `  <url>\n    <loc>${siteUrl}/events/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
+      urls += `  <url>\n    <loc>${siteUrl}/quiz/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
     }
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
@@ -2465,6 +2467,28 @@ async function handleScheduledEvent(env) {
       cronTopEvents,
     );
     console.log(`Quiz pre-generated for ${monthSlug}/${day}.`);
+
+    // Best-effort: notify IndexNow (via /search-ping) that the dynamic pages changed.
+    // This helps Bing discover fresh daily /events/ and /quiz/ content faster.
+    // (Google's sitemap ping endpoint is deprecated; sitemaps still work normally.)
+    try {
+      const urls = [
+        `https://thisday.info/events/${monthSlug}/${day}/`,
+        `https://thisday.info/quiz/${monthSlug}/${day}/`,
+      ];
+      await fetch("https://thisday.info/search-ping", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(env.SEARCH_PING_SECRET
+            ? { Authorization: `Bearer ${env.SEARCH_PING_SECRET}` }
+            : {}),
+        },
+        body: JSON.stringify({ urls }),
+      });
+    } catch (e) {
+      console.error("Scheduled: /search-ping failed:", e);
+    }
   } catch (e) {
     console.error("Quiz pre-generation failed:", e);
   }

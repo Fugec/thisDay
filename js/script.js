@@ -299,6 +299,52 @@ function tryCarouselFallbacks(img, fallbacks) {
   img.src = next;
 }
 
+// Extract a teaser sentence without getting tripped up by common abbreviations
+// like "St." (e.g. "St. Patrick's Day...").
+function pickTeaserSentence(text) {
+  const clean = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return "";
+
+  const abbreviations = new Set([
+    "st",
+    "mr",
+    "mrs",
+    "ms",
+    "dr",
+    "prof",
+    "sr",
+    "jr",
+    "mt",
+    "no",
+    "vs",
+    "etc",
+    "e.g",
+    "i.e",
+  ]);
+
+  const boundaryRe = /[.!?]\s+/g;
+  let match;
+  while ((match = boundaryRe.exec(clean))) {
+    const punctIndex = match.index;
+    const punct = clean[punctIndex];
+    const before = clean.slice(0, punctIndex).trimEnd();
+
+    if (punct === ".") {
+      const lastToken = (before.split(/\s+/).pop() || "")
+        .replace(/^[('"“]+/, "")
+        .replace(/[)"'”]+$/, "");
+      const tokenKey = lastToken.replace(/\.+$/, "").toLowerCase();
+      if (abbreviations.has(tokenKey)) continue;
+    }
+
+    return before + punct;
+  }
+
+  return clean;
+}
+
 // Helper function to render a single carousel item
 function renderCarouselItem(container, post, index) {
   const carouselItem = document.createElement("div");
@@ -333,6 +379,11 @@ function renderCarouselItem(container, post, index) {
   const dateLabel = `<span style="display:none;" class="year-label">${
     post.day
   } ${monthNames[new Date().getMonth()]} ${post.year}</span>`;
+  const teaserRaw = pickTeaserSentence(
+    post.excerpt || "Read this blog post about historical events.",
+  );
+  const teaserSafe = teaserRaw.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+  const teaserFinal = /[.!?]$/.test(teaserSafe) ? teaserSafe : `${teaserSafe}.`;
 
   carouselItem.innerHTML = `
     <div style="position:relative;">
@@ -347,7 +398,7 @@ function renderCarouselItem(container, post, index) {
     </div>
     <div class="carousel-caption">
       <h5>${truncatedTitle}</h5>
-      <p>${(post.excerpt || "Read this blog post about historical events.").split(". ")[0].replace(/\.$/, "") + "."}</p>
+      <p>${teaserFinal}</p>
       <div class="d-flex justify-content-center gap-2">
         <a href="${post.url}" class="btn btn-primary btn-sm"
            ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>Read Full Post</a>

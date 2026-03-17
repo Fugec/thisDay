@@ -570,6 +570,94 @@ export default {
             patchedHtml = patchedHtml.replace(/(<body[^>]*>)/, '$1' + chatbotCss);
           }
         }
+
+        // Upgrade legacy list-style quiz popup (older KV posts) to step-by-step + shuffled questions.
+        // This handles posts that already have a quiz injected, but still render all questions in a list.
+        if (patchedHtml.includes('id="tdq-popup"') && patchedHtml.includes('id="tdq-questions"') && !patchedHtml.includes('tdq-next-btn')) {
+          const tdqUpgradeStyle = `
+  <style id="tdq-upgrade-style">
+    #tdq-submit-btn{display:none!important}
+    .tdq-question{display:none}
+    .tdq-question.tdq-q-active{display:block}
+    .tdq-next-btn{width:100%;margin-top:14px;padding:11px;border:none;border-radius:8px;background:#f59e0b;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:none;transition:background .15s}
+    .tdq-next-btn:hover{background:#d97706}
+  </style>`;
+          const tdqUpgradeScript = `
+  <script id="tdq-upgrade-script">(function(){
+    if(window.__tdqStepUpgrade)return;window.__tdqStepUpgrade=true;
+    function randInt(max){try{var a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%max;}catch(e){return Math.floor(Math.random()*max);}}
+    function shuffle(arr){for(var i=arr.length-1;i>0;i--){var j=randInt(i+1);var t=arr[i];arr[i]=arr[j];arr[j]=t;}return arr;}
+    function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}
+    function getSlug(){var m=location.pathname.match(/\\/blog\\/([^\\/]+)\\/?/i);return m?m[1]:'';}
+    function renderStepped(quiz){
+      if(!quiz||!quiz.questions||quiz.questions.length<3)return;
+      var qs=quiz.questions.slice(0);shuffle(qs);
+      var answers=qs.map(function(q){return Number(q.answer);});
+      var selected={};var total=qs.length;var cur=0;
+      var container=document.getElementById('tdq-questions');if(!container)return;
+      container.innerHTML=qs.map(function(q,qi){
+        var optsHtml=(q.options||[]).map(function(opt,oi){
+          return '<div class=\"tdq-opt\" data-qi=\"'+qi+'\" data-oi=\"'+oi+'\"><span class=\"tdq-opt-key\">'+String.fromCharCode(65+oi)+'</span>'+esc(String(opt))+'</div>';
+        }).join('');
+        var isLast=qi===total-1;
+        var nextLabel=isLast?'<i class=\"bi bi-check2-circle me-1\"></i>See Results':'Next Question <i class=\"bi bi-arrow-right ms-1\"></i>';
+        var expHtml=q.explanation?'<div class=\"tdq-explanation\" id=\"tdq-e-'+qi+'\" hidden style=\"font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0\">'+esc(String(q.explanation))+'</div>':'';
+        return '<div class=\"tdq-question\" id=\"tdq-q-'+qi+'\"><p class=\"tdq-q-text\"><strong>'+(qi+1)+' / '+total+'.</strong> '+esc(String(q.q))+'</p><div class=\"tdq-options\">'+optsHtml+'</div><div class=\"tdq-feedback\" id=\"tdq-f-'+qi+'\" hidden></div>'+expHtml+'<button class=\"tdq-next-btn\" id=\"tdq-next-'+qi+'\">'+nextLabel+'</button></div>';
+      }).join('');
+      function showQuestion(qi){
+        container.querySelectorAll('.tdq-question').forEach(function(el){el.classList.remove('tdq-q-active');});
+        var qEl=document.getElementById('tdq-q-'+qi);if(qEl)qEl.classList.add('tdq-q-active');
+        var prog=document.getElementById('tdq-progress');if(prog)prog.textContent=(qi+1)+' of '+total;
+      }
+      function showResults(){
+        var score=0;
+        for(var qi=0;qi<total;qi++){
+          var correct=answers[qi];var chosen=selected[qi]!==undefined?selected[qi]:-1;
+          var fb=document.getElementById('tdq-f-'+qi);var opts=document.querySelectorAll('[data-qi=\"'+qi+'\"]');
+          if(fb)fb.hidden=false;opts.forEach(function(o){o.style.pointerEvents='none';});
+          if(opts[correct])opts[correct].classList.add('tdq-opt-correct');
+          if(chosen===correct){score++;if(fb)fb.innerHTML='<span class=\"tdq-correct\">✓ Correct!</span>';}
+          else{if(chosen>=0&&opts[chosen])opts[chosen].classList.add('tdq-opt-wrong');if(fb)fb.innerHTML='<span class=\"tdq-wrong\">✗ Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}
+          var exp=document.getElementById('tdq-e-'+qi);if(exp)exp.hidden=false;
+          var qEl=document.getElementById('tdq-q-'+qi);if(qEl)qEl.classList.add('tdq-q-active');
+          var nb=document.getElementById('tdq-next-'+qi);if(nb)nb.style.display='none';
+        }
+        var pct=Math.round(score/total*100);
+        var msg=pct===100?'Perfect score!':pct>=80?'Excellent!':pct>=60?'Good job!':'Keep learning!';
+        var el=document.getElementById('tdq-score');if(el){el.hidden=false;el.innerHTML='<div class=\"tdq-score-box\">You scored <span class=\"tdq-score-num\">'+score+'/'+total+'</span> ('+pct+'%) — '+msg+'</div>';}
+        var prog=document.getElementById('tdq-progress');if(prog)prog.textContent='Results — '+score+'/'+total+' correct';
+      }
+      showQuestion(0);
+      container.querySelectorAll('.tdq-opt').forEach(function(opt){
+        opt.addEventListener('click',function(){
+          var qi=parseInt(this.dataset.qi,10),oi=parseInt(this.dataset.oi,10);
+          if(qi!==cur)return;
+          selected[qi]=oi;
+          container.querySelectorAll('[data-qi=\"'+qi+'\"]').forEach(function(o){o.classList.remove('tdq-opt-selected');});
+          this.classList.add('tdq-opt-selected');
+          var nb=document.getElementById('tdq-next-'+qi);
+          if(nb){nb.style.display='block';setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'nearest'});},120);}
+        });
+      });
+      for(var qi=0;qi<total;qi++){
+        (function(qi){
+          var nb=document.getElementById('tdq-next-'+qi);if(!nb)return;
+          nb.addEventListener('click',function(){if(qi===total-1){showResults();}else{cur=qi+1;showQuestion(cur);}});
+        })(qi);
+      }
+    }
+    var loaded=false;
+    function loadAndRender(){
+      if(loaded)return;loaded=true;
+      var slug=getSlug();if(!slug)return;
+      fetch('/blog/quiz/'+slug).then(function(r){return r.ok?r.json():null;}).then(function(q){renderStepped(q);}).catch(function(){});
+    }
+    window.maybeLoadAndShowQuiz=function(){loadAndRender();};
+  })();<\/script>`;
+          const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
+          patchedHtml = patchedHtml.replace(bodyClose, tdqUpgradeStyle + "\n" + tdqUpgradeScript + "\n" + bodyClose);
+        }
+
         // Always strip old icon-based Explore card (covers KV that has both old + new)
         if (patchedHtml.includes('bi-calendar3')) {
           patchedHtml = patchedHtml.replace(

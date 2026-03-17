@@ -373,10 +373,12 @@ export default {
             );
         }
         // Patch old show-all quiz JS → step-by-step (posts with quiz already baked in but old JS)
+        // Only apply if post has old quiz (submit-btn, no finish-btn) AND doesn't already have step CSS (tdq-q-active)
         if (
           patchedHtml.includes('id="tdq-popup"') &&
           patchedHtml.includes('id="tdq-submit-btn"') &&
-          !patchedHtml.includes("tdq-finish-btn")
+          !patchedHtml.includes("tdq-finish-btn") &&
+          !patchedHtml.includes("tdq-q-active")
         ) {
           const stepOverride = `<script>
 (function(){

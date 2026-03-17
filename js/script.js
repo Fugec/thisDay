@@ -2,9 +2,9 @@ const calendarGrid = document.getElementById("calendarGrid");
 const currentMonthYearDisplay = document.getElementById("currentMonthYear");
 const modalDate = document.getElementById("modalDate");
 const modalBodyContent = document.getElementById("modalBodyContent");
-const eventDetailModal = new bootstrap.Modal(
-  document.getElementById("eventDetailModal"),
-);
+const eventDetailModal = document.getElementById("eventDetailModal")
+  ? new bootstrap.Modal(document.getElementById("eventDetailModal"))
+  : null;
 const loadingIndicator = document.getElementById("loadingIndicator");
 
 // Elements for carousel
@@ -382,7 +382,10 @@ function renderCarouselItem(container, post, index) {
   const teaserRaw = pickTeaserSentence(
     post.excerpt || "Read this blog post about historical events.",
   );
-  const teaserSafe = teaserRaw.replace(/</g, "&lt;").replace(/>/g, "&gt;").trim();
+  const teaserSafe = teaserRaw
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .trim();
   const teaserFinal = /[.!?]$/.test(teaserSafe) ? teaserSafe : `${teaserSafe}.`;
 
   carouselItem.innerHTML = `
@@ -1694,7 +1697,7 @@ function renderFilteredItems(itemsToRender) {
                         <div class="modal-thumbnail-container ms-3">
                             <img src="${event.thumbnailUrl}" class="rounded"
                                 style="width: 40px; height: 40px; object-fit: cover;"
-                                alt="${event.title ? event.title.substring(0, 80) : ''}" onerror="this.style.display='none'">
+                                alt="${event.title ? event.title.substring(0, 80) : ""}" onerror="this.style.display='none'">
                         </div>
                         `
                         : ""

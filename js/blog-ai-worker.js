@@ -408,7 +408,7 @@ export default {
         if(selected[qi]!==undefined)return;
         selected[qi]=oi;
         var correct=answers[qi];
-        var opts=container.querySelectorAll('[data-qi="'+qi+'"]');
+        var opts=container.querySelectorAll('.tdq-opt[data-qi="'+qi+'"]');
         opts.forEach(function(o){o.style.pointerEvents='none';});
         opts[correct].classList.add('tdq-opt-correct');
         var fb=document.getElementById('tdq-f-'+qi);fb.hidden=false;

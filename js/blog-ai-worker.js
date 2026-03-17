@@ -1307,8 +1307,8 @@ async function generateAndStore(env) {
       if (sp) {
         const mPad = String(sp.monthIndex + 1).padStart(2, "0");
         const dPad = String(sp.day).padStart(2, "0");
-        await env.EVENTS_KV.delete(`quiz-page-v12:${mPad}-${dPad}`);
-        console.log(`Blog: busted quiz-page-v12:${mPad}-${dPad} cache`);
+        await env.EVENTS_KV.delete(`quiz-page-v24:${mPad}-${dPad}`);
+        console.log(`Blog: busted quiz-page-v24:${mPad}-${dPad} cache`);
       }
     } catch (e) {
       console.error("Blog: quiz page cache bust failed:", e);

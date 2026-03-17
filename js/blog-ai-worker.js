@@ -399,7 +399,7 @@ export default {
     container.innerHTML=quiz.questions.slice(0,total).map(function(q,qi){
       var optsHtml=(q.options||[]).map(function(opt,oi){return '<div class="tdq-opt" data-qi="'+qi+'" data-oi="'+oi+'"><span class="tdq-opt-key">'+String.fromCharCode(65+oi)+'</span>'+esc(String(opt))+'</div>';}).join('');
       var expHtml=q.explanation?'<div class="tdq-explanation" id="tdq-e-'+qi+'" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">'+esc(String(q.explanation))+'</div>':'';
-      var actionBtn=qi<total-1?'<button class="btn btn-warning mt-3 tdq-next-btn" id="tdq-next-'+qi+'" data-qi="'+qi+'" style="display:none">Next <i class="bi bi-arrow-right ms-1"></i></button>':'<button class="btn btn-warning mt-3" id="tdq-finish-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
+      var actionBtn=qi<total-1?'<button class="tdq-next-btn" id="tdq-next-'+qi+'" data-qi="'+qi+'" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;gap:8px;align-items:center;justify-content:center">Next Question <i class="bi bi-arrow-right"></i></button>':'<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
       return '<div class="tdq-question" id="tdq-q-'+qi+'" style="display:'+(qi===0?'block':'none')+'"><p class="tdq-q-text"><strong>'+(qi+1)+'.</strong> '+esc(String(q.q))+'</p><div class="tdq-options">'+optsHtml+'</div><div class="tdq-feedback" id="tdq-f-'+qi+'" hidden></div>'+expHtml+actionBtn+'</div>';
     }).join('');
     container.querySelectorAll('.tdq-opt').forEach(function(opt){
@@ -550,8 +550,8 @@ export default {
         }).join("");
         var expHtml = q.explanation ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>' : '';
         var actionBtn = qi < total - 1
-          ? '<button class="btn btn-warning mt-3 tdq-next-btn" id="tdq-next-' + qi + '" data-qi="' + qi + '" style="display:none">Next <i class="bi bi-arrow-right ms-1"></i></button>'
-          : '<button class="btn btn-warning mt-3" id="tdq-finish-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
+          ? '<button class="tdq-next-btn" id="tdq-next-' + qi + '" data-qi="' + qi + '" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer">Next Question <i class="bi bi-arrow-right ms-1"></i></button>'
+          : '<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
         return '<div class="tdq-question" id="tdq-q-' + qi + '" style="display:' + (qi === 0 ? 'block' : 'none') + '"><p class="tdq-q-text"><strong>' + (qi + 1) + '.</strong> ' + esc(String(q.q)) + '</p><div class="tdq-options">' + optsHtml + '</div><div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' + expHtml + actionBtn + '</div>';
       }).join("");
       container.querySelectorAll(".tdq-opt").forEach(function(opt) {

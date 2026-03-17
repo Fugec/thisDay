@@ -2434,7 +2434,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v19:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v23:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2827,14 +2827,23 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
       readMoreHtml +
       `<div class="tdq-feedback qsc-feedback" id="tdq-f-${qi}" hidden></div>` +
       expHtml +
-      `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
-      (qi < total - 1 ? `Next Question <i class="bi bi-arrow-right"></i>` : `See Results <i class="bi bi-trophy-fill"></i>`) +
-      `</button>` +
+      (qi < total - 1
+        ? `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
+          `Next Question <i class="bi bi-arrow-right"></i>` +
+          `</button>`
+        : `<div class="qsc-last-actions" id="qsc-actions-${qi}" hidden>` +
+          `<button class="qsc-retry-inline" id="qsc-retry-inline" type="button"><i class="bi bi-arrow-repeat"></i>Retry</button>` +
+          `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" type="button">See Results <i class="bi bi-trophy-fill"></i></button>` +
+          `</div>`) +
       `</div></div>`;
   }).join("");
 
   // Final score slide
+  const _prev = new Date(Date.UTC(new Date().getUTCFullYear(), MONTH_NUM_MAP[monthSlug] - 1, day - 1));
+  const prevMonthSlug = MONTHS_ALL[_prev.getUTCMonth()];
+  const prevDay = _prev.getUTCDate();
   const retryLink = `<a href="/quiz/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn qsc-cta-primary" id="qsc-retry"><i class="bi bi-arrow-repeat"></i>Retry Quiz</a>`;
+  const prevQuizLink = `<a href="/quiz/${escapeHtml(prevMonthSlug)}/${prevDay}/" class="qsc-cta-btn"><i class="bi bi-arrow-left-circle"></i>Previous Day Quiz</a>`;
   const scoreSlide =
     `<div class="qsc-slide qsc-final-slide" data-slide="${total}" id="qsc-slide-${total}">` +
     `<div class="qsc-final-body">` +
@@ -2846,6 +2855,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `<div class="qsc-cta-row">` +
     `<a href="/events/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn"><i class="bi bi-calendar-event"></i>See All Events</a>` +
     `<a href="/blog/" class="qsc-cta-btn"><i class="bi bi-journal-text"></i>Read the Blog</a>` +
+    prevQuizLink +
     retryLink +
     `</div></div></div>`;
 
@@ -2909,6 +2919,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `for(var i=0;i<total;i++){` +
     `var fb=document.getElementById('tdq-f-'+i);if(fb){fb.hidden=true;fb.innerHTML='';}` +
     `var exp=document.getElementById('tdq-e-'+i);if(exp)exp.hidden=true;` +
+    `var ar=document.getElementById('qsc-actions-'+i);if(ar)ar.hidden=true;` +
     `var nb=document.getElementById('qsc-next-'+i);if(nb)nb.hidden=true;` +
     `}` +
     `var rev=document.getElementById('qsc-review-list');if(rev)rev.innerHTML='';` +
@@ -2921,6 +2932,18 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `resetUI();` +
     `showSlide(0,true);` +
     `var hint=document.getElementById('qsc-hint');if(hint)hint.textContent='Select an answer to continue';` +
+    `}` +
+    `function localISO(d){var y=d.getFullYear();var m=String(d.getMonth()+1).padStart(2,'0');var da=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+da;}` +
+    `function markQuizCompleted(){` +
+    `var today=localISO(new Date());` +
+    `var last='';var count=0;` +
+    `try{last=localStorage.getItem('td_streak_last_completed')||'';count=parseInt(localStorage.getItem('td_streak_count')||'0',10)||0;}catch(e){return;}` +
+    `if(last===today)return;` +
+    `var yd=new Date();yd.setDate(yd.getDate()-1);` +
+    `var yesterday=localISO(yd);` +
+    `count=(last===yesterday)?(count+1):1;` +
+    `try{localStorage.setItem('td_streak_last_completed',today);localStorage.setItem('td_streak_count',String(count));}catch(e){}` +
+    `var badge=document.getElementById('td-streak-badge');if(badge)badge.textContent='Streak: '+count+' day'+(count===1?'':'s');` +
     `}` +
     // Show slide
     `function showSlide(n,noScroll){` +
@@ -2965,7 +2988,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `if(chosen===correct){score++;results[qi]=true;fb.innerHTML='<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';}` +
     `else{results[qi]=false;if(chosen>=0&&opts[chosen])opts[chosen].classList.add('tdq-opt-wrong');fb.innerHTML='<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
     `fb.hidden=false;if(exp)exp.hidden=false;` +
-    `var nb=document.getElementById('qsc-next-'+qi);if(nb){nb.hidden=false;setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'end'});},80);}` +
+    `var ar=document.getElementById('qsc-actions-'+qi);if(ar){ar.hidden=false;var nb=ar.querySelector('#qsc-next-'+qi);if(nb)setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'end'});},80);}else{var nb=document.getElementById('qsc-next-'+qi);if(nb){nb.hidden=false;setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'end'});},80);}}` +
     `document.getElementById('qsc-hint').textContent='';` +
     `updateProgress(cur);` +
     `}` +
@@ -2998,6 +3021,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `},{passive:true});` +
     // Final score
     `function showFinal(){` +
+    `markQuizCompleted();` +
     `var pct=Math.round((score/total)*100);` +
     `var msg=pct===100?'Perfect score! \uD83C\uDF89':pct>=80?'Excellent work!':pct>=60?'Good job!':'Keep exploring!';` +
     `document.getElementById('qsc-score-num').textContent=score+'/'+total;` +
@@ -3025,6 +3049,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `fr++;if(fr<130)requestAnimationFrame(draw);else c.remove();}` +
     `requestAnimationFrame(draw);}` +
     `var retry=document.getElementById('qsc-retry');if(retry){retry.addEventListener('click',function(e){e.preventDefault();retryQuiz();});}` +
+    `var retry2=document.getElementById('qsc-retry-inline');if(retry2){retry2.addEventListener('click',function(){retryQuiz();});}` +
     `showSlide(0,true);` +
     `})();</script>`
   );
@@ -3041,7 +3066,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v19:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v23:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -3323,6 +3348,10 @@ body.dark-theme #qsc-wrapper{box-shadow:0 4px 24px rgba(0,0,0,.4)}
 .qsc-next-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:12px;background:var(--badge);color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;animation:qscIn .25s ease}
 .qsc-next-btn:hover{background:#a03508;transform:translateY(-1px)}
 body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:hover{background:#ea6c0a}
+.qsc-last-actions{display:flex;gap:10px;margin-top:18px}
+.qsc-last-actions .qsc-next-btn{margin-top:0;flex:1}
+.qsc-retry-inline{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;border-radius:10px;border:1.5px solid var(--cbr);background:var(--cb);color:var(--tc);font-size:.95rem;font-weight:700;cursor:pointer;transition:transform .1s,border-color .15s,color .15s}
+.qsc-retry-inline:hover{border-color:#3b82f6;color:#3b82f6;transform:translateY(-1px)}
 /* Final score slide */
 .qsc-final-slide .qsc-final-body{padding:32px 24px;text-align:center}
 .qsc-trophy-wrap{margin-bottom:18px}
@@ -3368,6 +3397,7 @@ ${siteNav({ todayLink: `/events/${todaySlug}/${todayDay}/` })}
   <div class="qsc-page-header">
     <h1><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
     <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
+    <div id="td-streak-badge" style="display:inline-flex;align-items:center;gap:8px;margin-top:10px;padding:6px 12px;border:1.5px solid var(--cbr);border-radius:999px;font-size:.85rem;font-weight:700;color:var(--tc);background:var(--cb)">Streak: 0 days</div>
   </div>
   ${carouselHtml}
   ${recSliderHtml}
@@ -3394,6 +3424,16 @@ const dk=gt('darkTheme')!=='false';
 ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
 if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
 if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
+
+// Streak badge (updated when a quiz is completed)
+(function(){
+  const badge=document.getElementById('td-streak-badge');
+  if(!badge) return;
+  try{
+    const count=parseInt(localStorage.getItem('td_streak_count')||'0',10)||0;
+    badge.textContent='Streak: '+count+' day'+(count===1?'':'s');
+  }catch{}
+})();
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>

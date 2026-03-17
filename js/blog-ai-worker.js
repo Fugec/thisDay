@@ -18,7 +18,11 @@
 // ---------------------------------------------------------------------------
 
 import { siteNav, siteFooter, footerYearScript } from "./shared/layout.js";
-import { resolveAiModel, checkAndUpdateAiModel, CF_AI_MODEL } from "./shared/ai-model.js";
+import {
+  resolveAiModel,
+  checkAndUpdateAiModel,
+  CF_AI_MODEL,
+} from "./shared/ai-model.js";
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
@@ -130,7 +134,18 @@ export default {
       if (!entry) return new Response("not found", { status: 404 });
       const content = await buildRichContent(entry, slug);
       const keyFacts = (content.keyFacts || []).slice(0, 5);
-      return new Response(JSON.stringify({ keyFactsCount: content.keyFacts?.length, keyFacts, description: content.description?.substring(0, 200) }, null, 2), { headers: { "Content-Type": "application/json" } });
+      return new Response(
+        JSON.stringify(
+          {
+            keyFactsCount: content.keyFacts?.length,
+            keyFacts,
+            description: content.description?.substring(0, 200),
+          },
+          null,
+          2,
+        ),
+        { headers: { "Content-Type": "application/json" } },
+      );
     }
 
     // Admin: regenerate quizzes in parallel — POST /blog/preload-quizzes?offset=0&limit=8&force=false
@@ -142,24 +157,48 @@ export default {
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
       const index = indexRaw ? JSON.parse(indexRaw) : [];
       const batch = index.slice(offset, offset + limit);
-      const results = await Promise.allSettled(batch.map(async (entry) => {
-        const kvKey = `quiz-v3:blog:${entry.slug}`;
-        if (!force) {
-          const existing = await env.BLOG_AI_KV.get(kvKey);
-          if (existing) return { slug: entry.slug, status: "skipped" };
-        }
-        const content = await buildRichContent(entry, entry.slug);
-        const quiz = await generateBlogQuiz(env.AI, content, entry.slug, await resolveAiModel(env.BLOG_AI_KV));
-        if (quiz) {
-          await env.BLOG_AI_KV.put(kvKey, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
-          return { slug: entry.slug, status: "generated", questions: quiz.questions.length };
-        }
-        return { slug: entry.slug, status: "ai_failed" };
-      }));
-      const out = results.map(r => r.status === "fulfilled" ? r.value : { slug: "?", status: "error", msg: r.reason?.message });
-      return new Response(JSON.stringify({ total: index.length, offset, batch: batch.length, results: out }, null, 2), {
-        headers: { "Content-Type": "application/json" },
-      });
+      const results = await Promise.allSettled(
+        batch.map(async (entry) => {
+          const kvKey = `quiz-v3:blog:${entry.slug}`;
+          if (!force) {
+            const existing = await env.BLOG_AI_KV.get(kvKey);
+            if (existing) return { slug: entry.slug, status: "skipped" };
+          }
+          const content = await buildRichContent(entry, entry.slug);
+          const quiz = await generateBlogQuiz(
+            env.AI,
+            content,
+            entry.slug,
+            await resolveAiModel(env.BLOG_AI_KV),
+          );
+          if (quiz) {
+            await env.BLOG_AI_KV.put(kvKey, JSON.stringify(quiz), {
+              expirationTtl: 90 * 86_400,
+            });
+            return {
+              slug: entry.slug,
+              status: "generated",
+              questions: quiz.questions.length,
+            };
+          }
+          return { slug: entry.slug, status: "ai_failed" };
+        }),
+      );
+      const out = results.map((r) =>
+        r.status === "fulfilled"
+          ? r.value
+          : { slug: "?", status: "error", msg: r.reason?.message },
+      );
+      return new Response(
+        JSON.stringify(
+          { total: index.length, offset, batch: batch.length, results: out },
+          null,
+          2,
+        ),
+        {
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
 
     // Blog quiz API: /blog/quiz/{slug}
@@ -183,11 +222,24 @@ export default {
         const entry = index.find((p) => p.slug === slug);
         if (entry && env.AI) {
           const content = await buildRichContent(entry, slug);
-          const quiz = await generateBlogQuiz(env.AI, content, slug, await resolveAiModel(env.BLOG_AI_KV));
+          const quiz = await generateBlogQuiz(
+            env.AI,
+            content,
+            slug,
+            await resolveAiModel(env.BLOG_AI_KV),
+          );
           if (quiz) {
-            await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+            await env.BLOG_AI_KV.put(
+              `quiz-v3:blog:${slug}`,
+              JSON.stringify(quiz),
+              { expirationTtl: 90 * 86_400 },
+            );
             return new Response(JSON.stringify(quiz), {
-              headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=3600",
+              },
             });
           }
         }
@@ -196,7 +248,10 @@ export default {
       }
       return new Response(JSON.stringify({ error: "Quiz not found" }), {
         status: 404,
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
       });
     }
 
@@ -206,11 +261,19 @@ export default {
     if (postMatch) {
       const slug = postMatch[1];
       const slugParsedForThumb = parseSlugDate(slug);
-      const eventsThumbPromise = slugParsedForThumb && env.EVENTS_KV
-        ? env.EVENTS_KV.get(`events-data:${String(slugParsedForThumb.monthIndex + 1).padStart(2, '0')}-${String(slugParsedForThumb.day).padStart(2, '0')}`, { type: "json" })
-            .then((d) => d?.events?.find((e) => e.pages?.[0]?.thumbnail?.source)?.pages?.[0]?.thumbnail?.source || "")
-            .catch(() => "")
-        : Promise.resolve("");
+      const eventsThumbPromise =
+        slugParsedForThumb && env.EVENTS_KV
+          ? env.EVENTS_KV.get(
+              `events-data:${String(slugParsedForThumb.monthIndex + 1).padStart(2, "0")}-${String(slugParsedForThumb.day).padStart(2, "0")}`,
+              { type: "json" },
+            )
+              .then(
+                (d) =>
+                  d?.events?.find((e) => e.pages?.[0]?.thumbnail?.source)
+                    ?.pages?.[0]?.thumbnail?.source || "",
+              )
+              .catch(() => "")
+          : Promise.resolve("");
       const [html, ytRaw, eventsThumb] = await Promise.all([
         env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`),
         env.BLOG_AI_KV.get("youtube:uploaded"),
@@ -221,28 +284,48 @@ export default {
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
         // Patch broken JS apostrophe — \'s inside template literal got unescaped to 's,
         // breaking the JS string literal in showResults()
-        patchedHtml = patchedHtml.replace("Previous Day's Story</a>'", "Previous Day&#39;s Story</a>'");
+        patchedHtml = patchedHtml.replace(
+          "Previous Day's Story</a>'",
+          "Previous Day&#39;s Story</a>'",
+        );
         // Patch old btn-warning buttons to site-btn-primary
         patchedHtml = patchedHtml
-          .replaceAll('class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"', 'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"')
-          .replaceAll('class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"', 'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"')
-          .replaceAll('class="btn btn-warning px-4 mt-3" id="tdq-submit-btn"', 'class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"')
-          .replaceAll('class="text-muted">Can you answer', 'class="tdq-cta-sub">Can you answer');
+          .replaceAll(
+            'class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"',
+            'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"',
+          )
+          .replaceAll(
+            'class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"',
+            'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"',
+          )
+          .replaceAll(
+            'class="btn btn-warning px-4 mt-3" id="tdq-submit-btn"',
+            'class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"',
+          )
+          .replaceAll(
+            'class="text-muted">Can you answer',
+            'class="tdq-cta-sub">Can you answer',
+          );
         // Patch old site-btn-primary submit button back to btn-warning
-        patchedHtml = patchedHtml
-          .replaceAll('class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"', 'class="btn btn-warning mt-3" id="tdq-submit-btn"');
+        patchedHtml = patchedHtml.replaceAll(
+          'class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"',
+          'class="btn btn-warning mt-3" id="tdq-submit-btn"',
+        );
         // Patch old quick facts table style → site-table
         if (patchedHtml.includes('class="table table-bordered"')) {
           patchedHtml = patchedHtml
             .replaceAll('class="table table-bordered"', 'class="site-table"')
-            .replaceAll('<th scope="row">', '<th>');
-          if (!patchedHtml.includes('.site-table{')) {
+            .replaceAll('<th scope="row">', "<th>");
+          if (!patchedHtml.includes(".site-table{")) {
             const siteTableCss = `<style>.site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--card-border,#e2e8f0);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}.site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--card-border,#e2e8f0);text-align:left;color:var(--text-color)}.site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}.site-table th{background:rgba(59,130,246,.07);font-weight:600;white-space:nowrap;width:40%}body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}body.dark-theme .site-table th{background:rgba(96,165,250,.1)}body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}</style>`;
-            patchedHtml = patchedHtml.replace('</head>', siteTableCss + '</head>');
+            patchedHtml = patchedHtml.replace(
+              "</head>",
+              siteTableCss + "</head>",
+            );
           }
         }
         // Patch old footer — replace any footer that lacks the shared layout (gap:1.25rem + Flipboard icon)
-        if (!patchedHtml.includes('gap:1.25rem')) {
+        if (!patchedHtml.includes("gap:1.25rem")) {
           patchedHtml = patchedHtml.replace(
             /<footer class="footer">[\s\S]*?<\/footer>\s*(?=<\/body>|<\/html>|$)/,
             siteFooter(),
@@ -251,39 +334,42 @@ export default {
         // Patch image caption — replace any AI-generated caption with correct Wikimedia attribution
         patchedHtml = patchedHtml.replace(
           /<figcaption class="article-meta mt-2">\s*<small>(?!Image courtesy of)[\s\S]*?<\/small>\s*<\/figcaption>/,
-          '<figcaption class="article-meta mt-2"><small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small></figcaption>'
+          '<figcaption class="article-meta mt-2"><small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small></figcaption>',
         );
         // Patch old quiz popup to flex-column sticky-header layout
-        if (patchedHtml.includes('id="tdq-popup"') && !patchedHtml.includes('id="tdq-header"')) {
+        if (
+          patchedHtml.includes('id="tdq-popup"') &&
+          !patchedHtml.includes('id="tdq-header"')
+        ) {
           patchedHtml = patchedHtml
             // Popup div: drop overflow-y:auto and old padding, add flex-direction:column
             .replace(
               /(<div id="tdq-popup"[^>]*?)overflow-y:auto;([^>]*?)padding:24px 20px 32px;/,
-              '$1flex-direction:column;$2padding:0 0 32px;'
+              "$1flex-direction:column;$2padding:0 0 32px;",
             )
             // Remove position:absolute from close button, add min touch target
             .replace(
               /(<button id="tdq-close"[^>]*?)position:absolute;top:12px;right:16px;([^>]*?line-height:1)(")/,
-              '$1$2;flex-shrink:0;min-width:44px;min-height:44px$3'
+              "$1$2;flex-shrink:0;min-width:44px;min-height:44px$3",
             )
             // Wrap tdq-close + tdq-topic in sticky header div
             .replace(
               /(<button id="tdq-close"[\s\S]*?<\/button>)\s*(<div id="tdq-topic"[^>]*?><\/div>)/,
-              '<div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--card-border,#e2e8f0);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">$2$1</div>'
+              '<div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--card-border,#e2e8f0);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">$2$1</div>',
             )
             // Wrap body content in scrollable inner div
             .replace(
               /(<\/div>)\s*(<h3 style="font-size:1\.1rem)/,
-              '$1<div style="overflow-y:auto;padding:16px 20px 32px">$2'
+              '$1<div style="overflow-y:auto;padding:16px 20px 32px">$2',
             )
             .replace(
               /(<div id="tdq-score"[^>]*?hidden><\/div>)\s*(<\/div>)/,
-              '$1</div>$2'
+              "$1</div>$2",
             )
             // Patch CSS: .tdq-popup-open needs display:flex!important
             .replace(
-              '.tdq-popup-open{transform:translateY(0)!important}',
-              '.tdq-popup-open{transform:translateY(0)!important;display:flex!important}'
+              ".tdq-popup-open{transform:translateY(0)!important}",
+              ".tdq-popup-open{transform:translateY(0)!important;display:flex!important}",
             );
         }
         // Inject quiz CTA + popup for old posts that don't have it
@@ -365,42 +451,63 @@ export default {
           return '<div class="tdq-opt" data-qi="' + qi + '" data-oi="' + oi + '"><span class="tdq-opt-key">' + String.fromCharCode(65 + oi) + '</span>' + esc(String(opt)) + '</div>';
         }).join("");
         var expHtml = q.explanation ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>' : '';
-        return '<div class="tdq-question" id="tdq-q-' + qi + '"><p class="tdq-q-text"><strong>' + (qi + 1) + '.</strong> ' + esc(String(q.q)) + '</p><div class="tdq-options">' + optsHtml + '</div><div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' + expHtml + '</div>';
+        var actionBtn = qi < total - 1
+          ? '<button class="btn btn-warning mt-3 tdq-next-btn" id="tdq-next-' + qi + '" data-qi="' + qi + '" style="display:none">Next <i class="bi bi-arrow-right ms-1"></i></button>'
+          : '<button class="btn btn-warning mt-3" id="tdq-finish-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
+        return '<div class="tdq-question" id="tdq-q-' + qi + '" style="display:' + (qi === 0 ? 'block' : 'none') + '"><p class="tdq-q-text"><strong>' + (qi + 1) + '.</strong> ' + esc(String(q.q)) + '</p><div class="tdq-options">' + optsHtml + '</div><div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' + expHtml + actionBtn + '</div>';
       }).join("");
       container.querySelectorAll(".tdq-opt").forEach(function(opt) {
         opt.addEventListener("click", function() {
           var qi = parseInt(this.dataset.qi), oi = parseInt(this.dataset.oi);
+          if (selected[qi] !== undefined) return;
           selected[qi] = oi;
-          container.querySelectorAll('[data-qi="' + qi + '"]').forEach(function(o) { o.classList.remove("tdq-opt-selected"); });
-          this.classList.add("tdq-opt-selected");
-          var answered = Object.keys(selected).length;
+          var correct = answers[qi];
+          var opts = container.querySelectorAll('[data-qi="' + qi + '"]');
+          opts.forEach(function(o) { o.style.pointerEvents = "none"; });
+          opts[correct].classList.add("tdq-opt-correct");
+          var fb = document.getElementById("tdq-f-" + qi);
+          fb.hidden = false;
+          if (oi === correct) {
+            this.classList.add("tdq-opt-correct");
+            fb.innerHTML = '<span class="tdq-correct">✓ Correct!</span>';
+          } else {
+            this.classList.add("tdq-opt-wrong");
+            fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>';
+          }
+          var exp = document.getElementById("tdq-e-" + qi); if (exp) exp.hidden = false;
           var progEl = document.getElementById("tdq-progress");
-          if (progEl) progEl.textContent = answered + " of " + total + " answered";
-          var allAnswered = quiz.questions.every(function(_, i) { return selected[i] !== undefined; });
-          document.getElementById("tdq-submit-btn").style.display = allAnswered ? "" : "none";
+          if (progEl) progEl.textContent = Object.keys(selected).length + " of " + total + " answered";
+          var nextBtn = document.getElementById("tdq-next-" + qi);
+          if (nextBtn) nextBtn.style.display = "";
+          var finishBtn = document.getElementById("tdq-finish-btn");
+          if (finishBtn && qi === total - 1) finishBtn.style.display = "";
         });
       });
-    }
-    document.getElementById("tdq-submit-btn").addEventListener("click", function() {
-      var score = 0;
-      answers.forEach(function(correct, qi) {
-        var chosen = selected[qi] !== undefined ? selected[qi] : -1;
-        var fb = document.getElementById("tdq-f-" + qi);
-        var opts = document.querySelectorAll('[data-qi="' + qi + '"]');
-        fb.hidden = false;
-        opts.forEach(function(o) { o.style.pointerEvents = "none"; });
-        opts[correct].classList.add("tdq-opt-correct");
-        if (chosen === correct) { score++; fb.innerHTML = '<span class="tdq-correct">✓ Correct!</span>'; }
-        else { if (chosen >= 0) opts[chosen].classList.add("tdq-opt-wrong"); fb.innerHTML = '<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>' + String.fromCharCode(65 + correct) + '</strong>'; }
-        var exp = document.getElementById("tdq-e-" + qi); if (exp) exp.hidden = false;
+      container.addEventListener("click", function(e) {
+        var btn = e.target.closest(".tdq-next-btn");
+        if (!btn) return;
+        var qi = parseInt(btn.dataset.qi);
+        var inner = document.querySelector("#tdq-popup [style*='overflow-y:auto']") || document.getElementById("tdq-popup");
+        if (inner) inner.scrollTop = 0;
+        document.getElementById("tdq-q-" + qi).style.display = "none";
+        document.getElementById("tdq-q-" + (qi + 1)).style.display = "block";
       });
-      this.hidden = true;
-      var pct = Math.round(score / answers.length * 100);
-      var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
-      var el = document.getElementById("tdq-score");
-      el.hidden = false;
-      el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + '/' + answers.length + '</span> (' + pct + '%) — ' + msg + '</div>';
-    });
+      var finishBtn = document.getElementById("tdq-finish-btn");
+      if (finishBtn) finishBtn.addEventListener("click", function() {
+        var score = 0;
+        answers.forEach(function(correct, qi) { if (selected[qi] === correct) score++; });
+        this.hidden = true;
+        document.getElementById("tdq-q-" + (total - 1)).style.display = "none";
+        var pct = Math.round(score / answers.length * 100);
+        var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
+        var el = document.getElementById("tdq-score");
+        el.hidden = false;
+        el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + '/' + answers.length + '</span> (' + pct + '%) — ' + msg + '</div>';
+        var inner = document.querySelector("#tdq-popup [style*='overflow-y:auto']") || document.getElementById("tdq-popup");
+        if (inner) inner.scrollTop = 0;
+      });
+    }
+    document.getElementById("tdq-submit-btn").addEventListener("click", function() {});
     function maybeLoadAndShow() {
       if (quizLoaded) return; quizLoaded = true;
       fetch("/blog/quiz/" + slug)
@@ -420,12 +527,12 @@ export default {
           // Strip any old icon-based Explore card before injecting the new thumbnail version
           patchedHtml = patchedHtml.replace(
             /<div class="mt-4 p-3 rounded d-flex align-items-center gap-3"[^>]*>\s*<i class="bi bi-calendar3[\s\S]*?<\/div>\s*<\/div>/,
-            ''
+            "",
           );
           // Fix intermediate explore cards that have data-explore-injected but Bootstrap flex classes (no nowrap)
           patchedHtml = patchedHtml.replace(
             /(<div data-explore-injected="1" class="mt-4 p-3 rounded) d-flex[^"]*"([^>]*)>/g,
-            '$1" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">'
+            '$1" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">',
           );
           // Build "Explore in History" section
           const _sp = slugParsedForThumb;
@@ -444,57 +551,94 @@ export default {
           </div>`;
           }
           // Inject quiz before Wikipedia source box (matching March 14 template order)
-          const wikiAnchor = '<div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08)';
+          const wikiAnchor =
+            '<div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08)';
           if (patchedHtml.includes(wikiAnchor)) {
-            patchedHtml = patchedHtml.replace(wikiAnchor, quizCta + "\n          " + wikiAnchor);
-            if (exploreHtml && !patchedHtml.includes('data-explore-injected="1"')) {
-              const afterWikiAnchor = patchedHtml.includes('<!-- Quiz CTA -->')
-                ? '<!-- Quiz CTA -->'
-                : patchedHtml.includes('You Might Also Like')
+            patchedHtml = patchedHtml.replace(
+              wikiAnchor,
+              quizCta + "\n          " + wikiAnchor,
+            );
+            if (
+              exploreHtml &&
+              !patchedHtml.includes('data-explore-injected="1"')
+            ) {
+              const afterWikiAnchor = patchedHtml.includes("<!-- Quiz CTA -->")
+                ? "<!-- Quiz CTA -->"
+                : patchedHtml.includes("You Might Also Like")
                   ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
                   : "</article>";
-              patchedHtml = patchedHtml.replace(afterWikiAnchor, exploreHtml + "\n          " + afterWikiAnchor);
+              patchedHtml = patchedHtml.replace(
+                afterWikiAnchor,
+                exploreHtml + "\n          " + afterWikiAnchor,
+              );
             }
           } else {
-            const quizAnchor = patchedHtml.includes('You Might Also Like')
+            const quizAnchor = patchedHtml.includes("You Might Also Like")
               ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
               : "</article>";
-            patchedHtml = patchedHtml.replace(quizAnchor, quizCta + "\n          " + quizAnchor);
+            patchedHtml = patchedHtml.replace(
+              quizAnchor,
+              quizCta + "\n          " + quizAnchor,
+            );
           }
-          const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
-          patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
+          const bodyClose = patchedHtml.includes("</body>")
+            ? "</body>"
+            : "</html>";
+          patchedHtml = patchedHtml.replace(
+            bodyClose,
+            quizBlock + "\n" + bodyClose,
+          );
         }
         // Strip chatbot from old KV posts (now removed from template)
-        if (patchedHtml.includes('chatbot')) {
-          patchedHtml = patchedHtml.replace(/<script\s+src="\/js\/chatbot\.js"><\/script>/g, '');
-          patchedHtml = patchedHtml.replace(/<button[^>]+id="chatbotToggle"[^>]*>[\s\S]*?<\/button>/g, '');
-          const chatbotCss = '<style>#chatbotToggle,#chatbotWindow,.chatbot-toggle,.chatbot-window{display:none!important}</style>';
-          if (patchedHtml.includes('</head>')) {
-            patchedHtml = patchedHtml.replace('</head>', chatbotCss + '</head>');
+        if (patchedHtml.includes("chatbot")) {
+          patchedHtml = patchedHtml.replace(
+            /<script\s+src="\/js\/chatbot\.js"><\/script>/g,
+            "",
+          );
+          patchedHtml = patchedHtml.replace(
+            /<button[^>]+id="chatbotToggle"[^>]*>[\s\S]*?<\/button>/g,
+            "",
+          );
+          const chatbotCss =
+            "<style>#chatbotToggle,#chatbotWindow,.chatbot-toggle,.chatbot-window{display:none!important}</style>";
+          if (patchedHtml.includes("</head>")) {
+            patchedHtml = patchedHtml.replace(
+              "</head>",
+              chatbotCss + "</head>",
+            );
           } else {
-            patchedHtml = patchedHtml.replace(/(<body[^>]*>)/, '$1' + chatbotCss);
+            patchedHtml = patchedHtml.replace(
+              /(<body[^>]*>)/,
+              "$1" + chatbotCss,
+            );
           }
         }
         // Always strip old icon-based Explore card (covers KV that has both old + new)
-        if (patchedHtml.includes('bi-calendar3')) {
+        if (patchedHtml.includes("bi-calendar3")) {
           patchedHtml = patchedHtml.replace(
             /<div class="mt-4 p-3 rounded d-flex align-items-center gap-3"[^>]*>\s*<i class="bi bi-calendar3[\s\S]*?<\/div>\s*<\/div>/,
-            ''
+            "",
           );
         }
         // Inject "Explore [Date] in History" card for any post missing it (covers posts with quiz already baked in)
-        if (!patchedHtml.includes('data-explore-injected="1"') && slugParsedForThumb) {
+        if (
+          !patchedHtml.includes('data-explore-injected="1"') &&
+          slugParsedForThumb
+        ) {
           const sp = slugParsedForThumb;
           const thumb = eventsThumb
             ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
             : "";
           const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
-          const anchor = patchedHtml.includes('<!-- Quiz CTA -->')
-            ? '<!-- Quiz CTA -->'
-            : patchedHtml.includes('You Might Also Like')
+          const anchor = patchedHtml.includes("<!-- Quiz CTA -->")
+            ? "<!-- Quiz CTA -->"
+            : patchedHtml.includes("You Might Also Like")
               ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
               : "</article>";
-          patchedHtml = patchedHtml.replace(anchor, exploreCard + "\n          " + anchor);
+          patchedHtml = patchedHtml.replace(
+            anchor,
+            exploreCard + "\n          " + anchor,
+          );
         }
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
@@ -507,33 +651,51 @@ export default {
             .replace("</body>", progressJs + "</body>");
           // If no </body>, append before </html>
           if (!patchedHtml.includes(progressJs)) {
-            patchedHtml = patchedHtml.replace("</html>", progressJs + "</html>");
+            patchedHtml = patchedHtml.replace(
+              "</html>",
+              progressJs + "</html>",
+            );
           }
         }
         // Patch old blue quiz option selection → amber (matches btn-warning on homepage)
-        if (patchedHtml.includes('tdq-opt-selected{border-color:#3b82f6')) {
-          patchedHtml = patchedHtml.replace('</head>',
-            '<style>.tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.07)!important}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important}.tdq-opt-selected .tdq-opt-key{background:#f59e0b!important}body.dark-theme .tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.08)!important}body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}</style></head>'
+        if (patchedHtml.includes("tdq-opt-selected{border-color:#3b82f6")) {
+          patchedHtml = patchedHtml.replace(
+            "</head>",
+            "<style>.tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.07)!important}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important}.tdq-opt-selected .tdq-opt-key{background:#f59e0b!important}body.dark-theme .tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.08)!important}body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}</style></head>",
           );
         }
         // Inject floating quiz bar into stored posts that don't have it yet
-        if (!patchedHtml.includes('tdq-float-bar')) {
+        if (!patchedHtml.includes("tdq-float-bar")) {
           const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:rgba(15,23,42,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(0,0,0,.3);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:linear-gradient(90deg,#f59e0b,#d97706);border:none;border-radius:100px;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(245,158,11,.35);max-width:320px;width:100%}#tdq-float-btn:hover{background:linear-gradient(90deg,#d97706,#b45309);box-shadow:0 2px 16px rgba(245,158,11,.5)}</style>`;
           const floatHtml = `<div id="tdq-float-bar"><button id="tdq-float-btn"><i class="bi bi-patch-question-fill"></i> Take the Quiz</button></div>`;
           const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');}function hideBar(){bar.classList.remove('tdq-float-visible');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});var h2s=document.querySelectorAll('h2');var trigger=null;for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}if(trigger){function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else{hideBar();}}window.addEventListener('scroll',updateBar,{passive:true});}else{document.addEventListener('scroll',function onScroll(){var d=document.documentElement;var total=d.scrollHeight-d.clientHeight;if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}},{passive:true});}})();<\/script>`;
-          const bodyClose = patchedHtml.includes('</body>') ? '</body>' : '</html>';
+          const bodyClose = patchedHtml.includes("</body>")
+            ? "</body>"
+            : "</html>";
           patchedHtml = patchedHtml
-            .replace('</head>', floatCss + '</head>')
-            .replace(bodyClose, floatHtml + '\n' + floatJs + '\n' + bodyClose);
+            .replace("</head>", floatCss + "</head>")
+            .replace(bodyClose, floatHtml + "\n" + floatJs + "\n" + bodyClose);
         }
         // Inject AdSense ad unit into stored posts that don't have one yet
-        if (!patchedHtml.includes('<ins class="adsbygoogle"') && patchedHtml.includes('</article>')) {
+        if (
+          !patchedHtml.includes('<ins class="adsbygoogle"') &&
+          patchedHtml.includes("</article>")
+        ) {
           const adUnit = `<div class="ad-unit-container"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>`;
           const adInitJs = `<script>(function(){if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;var ins=document.querySelector('ins.adsbygoogle');if(!ins)return;function push(){if(!ins.getAttribute('data-adsbygoogle-status')){try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}}if('IntersectionObserver' in window){new IntersectionObserver(function(e,o){if(e[0].isIntersecting){push();o.disconnect();}},{threshold:0.1}).observe(ins);}else{push();}})();<\/script>`;
-          const bodyClose2 = patchedHtml.includes('</body>') ? '</body>' : '</html>';
-          const lastArticleIdx = patchedHtml.lastIndexOf('</article>');
-          patchedHtml = patchedHtml.slice(0, lastArticleIdx + '</article>'.length) + '\n' + adUnit + patchedHtml.slice(lastArticleIdx + '</article>'.length);
-          patchedHtml = patchedHtml.replace(bodyClose2, adInitJs + '\n' + bodyClose2);
+          const bodyClose2 = patchedHtml.includes("</body>")
+            ? "</body>"
+            : "</html>";
+          const lastArticleIdx = patchedHtml.lastIndexOf("</article>");
+          patchedHtml =
+            patchedHtml.slice(0, lastArticleIdx + "</article>".length) +
+            "\n" +
+            adUnit +
+            patchedHtml.slice(lastArticleIdx + "</article>".length);
+          patchedHtml = patchedHtml.replace(
+            bodyClose2,
+            adInitJs + "\n" + bodyClose2,
+          );
         }
         const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
         if (ytEntry?.youtubeId && ytEntry.privacy !== "private") {
@@ -558,21 +720,35 @@ export default {
           );
         }
         // Pre-warm quiz in background so it's ready before the user clicks "Take the Quiz"
-        ctx.waitUntil((async () => {
-          const cached = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
-          if (!cached && env.AI) {
-            try {
-              const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
-              const index = indexRaw ? JSON.parse(indexRaw) : [];
-              const entry = index.find(p => p.slug === slug);
-              if (entry) {
-                const richContent = await buildRichContent(entry, slug);
-                const quiz = await generateBlogQuiz(env.AI, richContent, slug, await resolveAiModel(env.BLOG_AI_KV));
-                if (quiz) await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+        ctx.waitUntil(
+          (async () => {
+            const cached = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
+            if (!cached && env.AI) {
+              try {
+                const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+                const index = indexRaw ? JSON.parse(indexRaw) : [];
+                const entry = index.find((p) => p.slug === slug);
+                if (entry) {
+                  const richContent = await buildRichContent(entry, slug);
+                  const quiz = await generateBlogQuiz(
+                    env.AI,
+                    richContent,
+                    slug,
+                    await resolveAiModel(env.BLOG_AI_KV),
+                  );
+                  if (quiz)
+                    await env.BLOG_AI_KV.put(
+                      `quiz-v3:blog:${slug}`,
+                      JSON.stringify(quiz),
+                      { expirationTtl: 90 * 86_400 },
+                    );
+                }
+              } catch (e) {
+                console.error("Quiz pre-warm failed:", e);
               }
-            } catch (e) { console.error("Quiz pre-warm failed:", e); }
-          }
-        })());
+            }
+          })(),
+        );
         return htmlResponse(patchedHtml);
       }
     }
@@ -826,7 +1002,10 @@ async function generateAndStore(env) {
   if (!content.description || content.description.length < 120) {
     const loc = content.location ? ` in ${content.location}` : "";
     content.description =
-      `Discover the story of ${content.eventTitle} on ${content.historicalDate}${loc}.`.substring(0, 155);
+      `Discover the story of ${content.eventTitle} on ${content.historicalDate}${loc}.`.substring(
+        0,
+        155,
+      );
   }
   if (!content.ogDescription || content.ogDescription.length < 80) {
     content.ogDescription = content.description.substring(0, 130);
@@ -882,9 +1061,17 @@ async function generateAndStore(env) {
 
   // Generate and store a quiz for this blog post using rich context from the live post HTML
   try {
-    const richContent = await buildRichContent({ title: content.title, description: content.description || "" }, slug);
+    const richContent = await buildRichContent(
+      { title: content.title, description: content.description || "" },
+      slug,
+    );
     const enrichedContent = { ...content, ...richContent };
-    const quiz = await generateBlogQuiz(env.AI, enrichedContent, slug, activeModel);
+    const quiz = await generateBlogQuiz(
+      env.AI,
+      enrichedContent,
+      slug,
+      activeModel,
+    );
     if (quiz) {
       await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {
         expirationTtl: 90 * 86_400,
@@ -937,22 +1124,43 @@ async function generateAndStore(env) {
 // Fetch a blog post's HTML and extract rich context for quiz generation
 async function extractRichContext(slug) {
   try {
-    const res = await fetch(`https://thisday.info/blog/${slug}`, { headers: { "User-Agent": "thisday-quiz-bot/1.0" } });
+    const res = await fetch(`https://thisday.info/blog/${slug}`, {
+      headers: { "User-Agent": "thisday-quiz-bot/1.0" },
+    });
     if (!res.ok) return null;
     const html = await res.text();
     const ctx = {};
     // Quick facts table: <th>…</th> … <td>…</td>
-    const factRows = [...html.matchAll(/<th[^>]*>([\s\S]*?)<\/th>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/gi)];
-    ctx.quickFacts = factRows.map(([, k, v]) => `${k.replace(/<[^>]+>/g,"").trim()}: ${v.replace(/<[^>]+>/g,"").trim()}`).filter(Boolean);
+    const factRows = [
+      ...html.matchAll(
+        /<th[^>]*>([\s\S]*?)<\/th>[\s\S]*?<td[^>]*>([\s\S]*?)<\/td>/gi,
+      ),
+    ];
+    ctx.quickFacts = factRows
+      .map(
+        ([, k, v]) =>
+          `${k.replace(/<[^>]+>/g, "").trim()}: ${v.replace(/<[^>]+>/g, "").trim()}`,
+      )
+      .filter(Boolean);
     // Did You Know + analysis list items — grab informative <li> items (>40 chars)
     const liItems = [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
-      .map(([, v]) => v.replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim())
-      .filter(s => s.length > 40 && s.length < 400);
+      .map(([, v]) =>
+        v
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
+      .filter((s) => s.length > 40 && s.length < 400);
     ctx.facts = liItems.slice(0, 12);
     // Article paragraphs from <p> tags inside the article (skip very short ones)
     const paras = [...html.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
-      .map(([, v]) => v.replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim())
-      .filter(s => s.length > 80 && s.length < 750);
+      .map(([, v]) =>
+        v
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
+      .filter((s) => s.length > 80 && s.length < 750);
     ctx.paragraphs = paras.slice(0, 6);
     return ctx;
   } catch (e) {
@@ -975,9 +1183,12 @@ async function buildRichContent(entry, slug) {
   const rich = await extractRichContext(slug);
   if (rich) {
     if (rich.quickFacts?.length) {
-      const locFact = rich.quickFacts.find(f => /^Location:/i.test(f));
+      const locFact = rich.quickFacts.find((f) => /^Location:/i.test(f));
       if (locFact) {
-        const parts = locFact.replace(/^Location:\s*/i,"").split(",").map(s=>s.trim());
+        const parts = locFact
+          .replace(/^Location:\s*/i, "")
+          .split(",")
+          .map((s) => s.trim());
         base.location = parts[0] || "";
         base.country = parts[1] || "";
       }
@@ -987,7 +1198,11 @@ async function buildRichContent(entry, slug) {
     } else if (rich.facts?.length) {
       base.keyFacts = rich.facts.slice(0, 15);
     }
-    if (rich.paragraphs?.length) base.description = rich.paragraphs.slice(0, 3).join(" ").substring(0, 800);
+    if (rich.paragraphs?.length)
+      base.description = rich.paragraphs
+        .slice(0, 3)
+        .join(" ")
+        .substring(0, 800);
   }
   return base;
 }
@@ -998,15 +1213,23 @@ async function generateBlogQuiz(ai, content, _slug, model = CF_AI_MODEL) {
   const contextLines = [
     `Title: ${content.title}`,
     `Event: ${content.eventTitle} on ${content.historicalDate}`,
-    (content.location || content.country) ? `Location: ${[content.location, content.country].filter(Boolean).join(", ")}` : "",
-    content.description ? `Summary: ${content.description.replace(/Published:.*?min read\s*/s, "").substring(0, 400)}` : "",
+    content.location || content.country
+      ? `Location: ${[content.location, content.country].filter(Boolean).join(", ")}`
+      : "",
+    content.description
+      ? `Summary: ${content.description.replace(/Published:.*?min read\s*/s, "").substring(0, 400)}`
+      : "",
     ...(content.keyFacts || []).slice(0, 15).map((f) => `Fact: ${f}`),
   ].filter(Boolean);
 
   // Skip AI only if we have truly nothing beyond title/event line
-  const factLines = contextLines.filter(l => l.startsWith("Fact:") || l.startsWith("Summary:"));
+  const factLines = contextLines.filter(
+    (l) => l.startsWith("Fact:") || l.startsWith("Summary:"),
+  );
   if (factLines.length < 1) {
-    console.error(`Blog quiz: no context for "${content.title}" — skipping AI call`);
+    console.error(
+      `Blog quiz: no context for "${content.title}" — skipping AI call`,
+    );
     return null;
   }
 
@@ -1049,13 +1272,22 @@ async function generateBlogQuiz(ai, content, _slug, model = CF_AI_MODEL) {
     console.error("Blog quiz JSON.parse failed:", parseErr);
     return null;
   }
-  if (!Array.isArray(parsed?.questions) || parsed.questions.length !== 5) return null;
-  const valid = parsed.questions.filter(q =>
-    q.q && typeof q.q === "string" && q.q.trim().length > 10 &&
-    Array.isArray(q.options) && q.options.length === 4 &&
-    q.options.every(o => typeof o === "string" && o.trim().length > 2) &&
-    Number.isInteger(q.answer) && q.answer >= 0 && q.answer <= 3 &&
-    q.explanation && typeof q.explanation === "string" && q.explanation.trim().length > 8
+  if (!Array.isArray(parsed?.questions) || parsed.questions.length !== 5)
+    return null;
+  const valid = parsed.questions.filter(
+    (q) =>
+      q.q &&
+      typeof q.q === "string" &&
+      q.q.trim().length > 10 &&
+      Array.isArray(q.options) &&
+      q.options.length === 4 &&
+      q.options.every((o) => typeof o === "string" && o.trim().length > 2) &&
+      Number.isInteger(q.answer) &&
+      q.answer >= 0 &&
+      q.answer <= 3 &&
+      q.explanation &&
+      typeof q.explanation === "string" &&
+      q.explanation.trim().length > 8,
   );
   if (valid.length !== 5) return null;
   return { ...parsed, questions: valid };
@@ -1065,7 +1297,12 @@ async function generateBlogQuiz(ai, content, _slug, model = CF_AI_MODEL) {
 // Claude API call
 // ---------------------------------------------------------------------------
 
-async function callWorkersAI(ai, date, takenThisMonth = [], model = CF_AI_MODEL) {
+async function callWorkersAI(
+  ai,
+  date,
+  takenThisMonth = [],
+  model = CF_AI_MODEL,
+) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
 
@@ -1228,9 +1465,20 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   // catches cases like "Ides of March Assassination of Julius Caesar — …" where the
   // AI prefixed a colloquial name before the real event name.
   const eventPart = hasSeparator ? parsed.title.split(" — ")[0].trim() : "";
-  const eventPartMismatch = parsed.eventTitle && eventPart !== parsed.eventTitle.trim();
-  if (!parsed.title || !parsed.title.includes(monthName) || !hasSeparator || eventPartMismatch) {
-    const cleanTitle = (parsed.eventTitle ?? eventPart ?? parsed.title ?? "Untitled").trim();
+  const eventPartMismatch =
+    parsed.eventTitle && eventPart !== parsed.eventTitle.trim();
+  if (
+    !parsed.title ||
+    !parsed.title.includes(monthName) ||
+    !hasSeparator ||
+    eventPartMismatch
+  ) {
+    const cleanTitle = (
+      parsed.eventTitle ??
+      eventPart ??
+      parsed.title ??
+      "Untitled"
+    ).trim();
     parsed.title = `${cleanTitle} — ${expectedDateSuffix}`;
   }
 
@@ -1773,9 +2021,10 @@ ${analysisBadItems}
               hMonthSlug = sp.monthSlug;
               hMonthDisplay = sp.monthDisplay;
             }
-            const exploreThumb = (c.eventsImageUrl || c.imageUrl)
-              ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
-              : "";
+            const exploreThumb =
+              c.eventsImageUrl || c.imageUrl
+                ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
+                : "";
             return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
               ${exploreThumb}
               <div style="flex:1;min-width:0">
@@ -1790,12 +2039,11 @@ ${analysisBadItems}
             const related = allPosts.filter((p) => p.slug !== slug).slice(0, 3); // already sorted newest-first; today's post is always shown first
             if (related.length === 0) return "";
             const cards = related
-              .map(
-                (p) => {
-                  const thumb = p.imageUrl
-                    ? `<img src="/image-proxy?src=${encodeURIComponent(p.imageUrl)}&w=80&q=75" alt="" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
-                    : `<div style="width:56px;height:56px;border-radius:8px;flex-shrink:0;background:var(--card-border,#e2e8f0);display:flex;align-items:center;justify-content:center"><i class="bi bi-clock-history" style="color:#94a3b8;font-size:1.2rem"></i></div>`;
-                  return `
+              .map((p) => {
+                const thumb = p.imageUrl
+                  ? `<img src="/image-proxy?src=${encodeURIComponent(p.imageUrl)}&w=80&q=75" alt="" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+                  : `<div style="width:56px;height:56px;border-radius:8px;flex-shrink:0;background:var(--card-border,#e2e8f0);display:flex;align-items:center;justify-content:center"><i class="bi bi-clock-history" style="color:#94a3b8;font-size:1.2rem"></i></div>`;
+                return `
               <div class="col-12 col-md-4">
                 <a href="/blog/${esc(p.slug)}/" class="related-card d-flex align-items-center gap-2 p-3 rounded text-decoration-none h-100">
                   ${thumb}
@@ -1805,8 +2053,7 @@ ${analysisBadItems}
                   </div>
                 </a>
               </div>`;
-                },
-              )
+              })
               .join("");
             return `<!-- Quiz CTA -->
           <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">

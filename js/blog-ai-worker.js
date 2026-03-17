@@ -570,6 +570,14 @@ export default {
           const bodyClose = patchedHtml.includes("</body>") ? "</body>" : "</html>";
           patchedHtml = patchedHtml.replace(bodyClose, quizBlock + "\n" + bodyClose);
         }
+
+        // Fix a legacy HTML bug on some early posts where the quiz popup had one extra closing </div>.
+        // This breaks the DOM structure around the quiz and can make the widget appear "broken".
+        patchedHtml = patchedHtml.replace(
+          /(<div id="tdq-score"[^>]*\bhidden\b[^>]*><\/div>)\s*<\/div>\s*<\/div>/,
+          "$1</div>",
+        );
+
         // Strip chatbot from old KV posts (now removed from template)
         if (patchedHtml.includes('chatbot')) {
           patchedHtml = patchedHtml.replace(/<script\s+src="\/js\/chatbot\.js"><\/script>/g, '');

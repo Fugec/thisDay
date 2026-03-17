@@ -1279,7 +1279,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v21-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v22-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1594,7 +1594,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v9:${mm}-${dd}`;
+    const kvKey = `quiz-v10:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2430,7 +2430,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v16:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v17:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2506,7 +2506,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v9:${mm}-${dd}`;
+  const kvKey = `quiz-v10:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2992,7 +2992,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v16:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v17:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -3016,7 +3016,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     for (const yr of [curYear, curYear - 1]) {
       try {
         const bSlug = `${day}-${monthSlug}-${yr}`;
-        const raw = await env.BLOG_AI_KV.get(`quiz-v2:blog:${bSlug}`);
+        const raw = await env.BLOG_AI_KV.get(`quiz-v3:blog:${bSlug}`);
         if (raw) {
           blogQuiz = JSON.parse(raw);
           const indexRaw = await env.BLOG_AI_KV.get("index");

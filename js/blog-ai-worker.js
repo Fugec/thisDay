@@ -143,7 +143,7 @@ export default {
       const index = indexRaw ? JSON.parse(indexRaw) : [];
       const batch = index.slice(offset, offset + limit);
       const results = await Promise.allSettled(batch.map(async (entry) => {
-        const kvKey = `quiz-v2:blog:${entry.slug}`;
+        const kvKey = `quiz-v3:blog:${entry.slug}`;
         if (!force) {
           const existing = await env.BLOG_AI_KV.get(kvKey);
           if (existing) return { slug: entry.slug, status: "skipped" };
@@ -166,7 +166,7 @@ export default {
     const blogQuizMatch = path.match(/^\/blog\/quiz\/([^/]+)$/);
     if (blogQuizMatch) {
       const slug = blogQuizMatch[1];
-      const quizRaw = await env.BLOG_AI_KV.get(`quiz-v2:blog:${slug}`);
+      const quizRaw = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
       if (quizRaw) {
         return new Response(quizRaw, {
           headers: {
@@ -185,7 +185,7 @@ export default {
           const content = await buildRichContent(entry, slug);
           const quiz = await generateBlogQuiz(env.AI, content, slug, await resolveAiModel(env.BLOG_AI_KV));
           if (quiz) {
-            await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+            await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
             return new Response(JSON.stringify(quiz), {
               headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
             });
@@ -559,7 +559,7 @@ export default {
         }
         // Pre-warm quiz in background so it's ready before the user clicks "Take the Quiz"
         ctx.waitUntil((async () => {
-          const cached = await env.BLOG_AI_KV.get(`quiz-v2:blog:${slug}`);
+          const cached = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
           if (!cached && env.AI) {
             try {
               const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
@@ -568,7 +568,7 @@ export default {
               if (entry) {
                 const richContent = await buildRichContent(entry, slug);
                 const quiz = await generateBlogQuiz(env.AI, richContent, slug, await resolveAiModel(env.BLOG_AI_KV));
-                if (quiz) await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
+                if (quiz) await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), { expirationTtl: 90 * 86_400 });
               }
             } catch (e) { console.error("Quiz pre-warm failed:", e); }
           }
@@ -886,7 +886,7 @@ async function generateAndStore(env) {
     const enrichedContent = { ...content, ...richContent };
     const quiz = await generateBlogQuiz(env.AI, enrichedContent, slug, activeModel);
     if (quiz) {
-      await env.BLOG_AI_KV.put(`quiz-v2:blog:${slug}`, JSON.stringify(quiz), {
+      await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {
         expirationTtl: 90 * 86_400,
       });
     }
@@ -901,8 +901,8 @@ async function generateAndStore(env) {
       if (sp) {
         const mPad = String(sp.monthIndex + 1).padStart(2, "0");
         const dPad = String(sp.day).padStart(2, "0");
-        await env.EVENTS_KV.delete(`quiz-page-v12:${mPad}-${dPad}`);
-        console.log(`Blog: busted quiz-page-v12:${mPad}-${dPad} cache`);
+        await env.EVENTS_KV.delete(`quiz-page-v13:${mPad}-${dPad}`);
+        console.log(`Blog: busted quiz-page-v13:${mPad}-${dPad} cache`);
       }
     } catch (e) {
       console.error("Blog: quiz page cache bust failed:", e);

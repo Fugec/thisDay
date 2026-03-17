@@ -372,6 +372,91 @@ export default {
               ".tdq-popup-open{transform:translateY(0)!important;display:flex!important}",
             );
         }
+        // Patch old show-all quiz JS → step-by-step (posts with quiz already baked in but old JS)
+        if (
+          patchedHtml.includes('id="tdq-popup"') &&
+          patchedHtml.includes('id="tdq-submit-btn"') &&
+          !patchedHtml.includes("tdq-finish-btn")
+        ) {
+          const stepOverride = `<script>
+(function(){
+  var sm=[].slice.call(document.scripts).find(function(s){return s.textContent.indexOf('var slug =')!==-1});
+  var m=sm&&sm.textContent.match(/var slug = "([^"]+)"/);
+  if(!m)return;
+  var slug=m[1],selected={},answers=[],quizLoaded=false,total=0;
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+  function openPopup(){var ol=document.getElementById('tdq-overlay'),pp=document.getElementById('tdq-popup');if(ol)ol.style.display='block';if(pp){pp.style.display='block';requestAnimationFrame(function(){pp.classList.add('tdq-popup-open')});}document.body.style.overflow='hidden';}
+  function closePopup(){var pp=document.getElementById('tdq-popup');pp.classList.remove('tdq-popup-open');setTimeout(function(){pp.style.display='none';var ol=document.getElementById('tdq-overlay');if(ol)ol.style.display='none';document.body.style.overflow='';},300);}
+  function renderQuiz(quiz){
+    answers=quiz.questions.map(function(q){return Number(q.answer)});
+    total=Math.min(quiz.questions.length,5);
+    var topicEl=document.getElementById('tdq-topic');
+    if(topicEl){var h1=document.querySelector('h1');if(h1)topicEl.textContent='Quiz: '+h1.textContent.trim();}
+    var sb=document.getElementById('tdq-submit-btn');if(sb)sb.style.display='none';
+    var container=document.getElementById('tdq-questions');
+    container.innerHTML=quiz.questions.slice(0,total).map(function(q,qi){
+      var optsHtml=(q.options||[]).map(function(opt,oi){return '<div class="tdq-opt" data-qi="'+qi+'" data-oi="'+oi+'"><span class="tdq-opt-key">'+String.fromCharCode(65+oi)+'</span>'+esc(String(opt))+'</div>';}).join('');
+      var expHtml=q.explanation?'<div class="tdq-explanation" id="tdq-e-'+qi+'" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">'+esc(String(q.explanation))+'</div>':'';
+      var actionBtn=qi<total-1?'<button class="btn btn-warning mt-3 tdq-next-btn" id="tdq-next-'+qi+'" data-qi="'+qi+'" style="display:none">Next <i class="bi bi-arrow-right ms-1"></i></button>':'<button class="btn btn-warning mt-3" id="tdq-finish-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
+      return '<div class="tdq-question" id="tdq-q-'+qi+'" style="display:'+(qi===0?'block':'none')+'"><p class="tdq-q-text"><strong>'+(qi+1)+'.</strong> '+esc(String(q.q))+'</p><div class="tdq-options">'+optsHtml+'</div><div class="tdq-feedback" id="tdq-f-'+qi+'" hidden></div>'+expHtml+actionBtn+'</div>';
+    }).join('');
+    container.querySelectorAll('.tdq-opt').forEach(function(opt){
+      opt.addEventListener('click',function(){
+        var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);
+        if(selected[qi]!==undefined)return;
+        selected[qi]=oi;
+        var correct=answers[qi];
+        var opts=container.querySelectorAll('[data-qi="'+qi+'"]');
+        opts.forEach(function(o){o.style.pointerEvents='none';});
+        opts[correct].classList.add('tdq-opt-correct');
+        var fb=document.getElementById('tdq-f-'+qi);fb.hidden=false;
+        if(oi===correct){this.classList.add('tdq-opt-correct');fb.innerHTML='<span class="tdq-correct">✓ Correct!</span>';}
+        else{this.classList.add('tdq-opt-wrong');fb.innerHTML='<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}
+        var exp=document.getElementById('tdq-e-'+qi);if(exp)exp.hidden=false;
+        var progEl=document.getElementById('tdq-progress');if(progEl)progEl.textContent=Object.keys(selected).length+' of '+total+' answered';
+        var nb=document.getElementById('tdq-next-'+qi);if(nb)nb.style.display='';
+        var fb2=document.getElementById('tdq-finish-btn');if(fb2&&qi===total-1)fb2.style.display='';
+      });
+    });
+    container.addEventListener('click',function(e){
+      var btn=e.target.closest('.tdq-next-btn');if(!btn)return;
+      var qi=parseInt(btn.dataset.qi);
+      var inner=document.querySelector('#tdq-popup [style*="overflow-y:auto"]')||document.getElementById('tdq-popup');
+      if(inner)inner.scrollTop=0;
+      document.getElementById('tdq-q-'+qi).style.display='none';
+      document.getElementById('tdq-q-'+(qi+1)).style.display='block';
+    });
+    var finBtn=document.getElementById('tdq-finish-btn');
+    if(finBtn)finBtn.addEventListener('click',function(){
+      var score=0;answers.forEach(function(c,qi){if(selected[qi]===c)score++;});
+      this.hidden=true;
+      document.getElementById('tdq-q-'+(total-1)).style.display='none';
+      var pct=Math.round(score/answers.length*100);
+      var msg=pct===100?'Perfect score!':pct>=80?'Excellent!':pct>=60?'Good job!':'Keep learning!';
+      var el=document.getElementById('tdq-score');el.hidden=false;
+      el.innerHTML='<div class="tdq-score-box">You scored <span class="tdq-score-num">'+score+'/'+answers.length+'</span> ('+pct+'%) — '+msg+'</div>';
+      var inner=document.querySelector('#tdq-popup [style*="overflow-y:auto"]')||document.getElementById('tdq-popup');
+      if(inner)inner.scrollTop=0;
+    });
+  }
+  window.maybeLoadAndShowQuiz=function(){
+    if(quizLoaded){openPopup();return;}
+    quizLoaded=true;
+    if(window.__tdqQuiz){var q=window.__tdqQuiz;window.__tdqQuiz=null;renderQuiz(q);openPopup();return;}
+    fetch('/blog/quiz/'+slug).then(function(r){return r.ok?r.json():null;}).then(function(quiz){if(!quiz||!quiz.questions||quiz.questions.length<3)return;renderQuiz(quiz);openPopup();}).catch(function(){});
+  };
+  var closeBtn=document.getElementById('tdq-close');if(closeBtn){closeBtn.replaceWith(closeBtn.cloneNode(true));document.getElementById('tdq-close').addEventListener('click',closePopup);}
+  var ol=document.getElementById('tdq-overlay');if(ol){ol.replaceWith(ol.cloneNode(true));document.getElementById('tdq-overlay').addEventListener('click',closePopup);}
+})();
+<\/script>`;
+          const bodyClose = patchedHtml.includes("</body>")
+            ? "</body>"
+            : "</html>";
+          patchedHtml = patchedHtml.replace(
+            bodyClose,
+            stepOverride + "\n" + bodyClose,
+          );
+        }
         // Inject quiz CTA + popup for old posts that don't have it
         if (!patchedHtml.includes("tdq-cta-btn")) {
           const quizCta = `
@@ -510,6 +595,7 @@ export default {
     document.getElementById("tdq-submit-btn").addEventListener("click", function() {});
     function maybeLoadAndShow() {
       if (quizLoaded) return; quizLoaded = true;
+      if (window.__tdqQuiz) { var q=window.__tdqQuiz; window.__tdqQuiz=null; renderQuiz(q); openPopup(); return; }
       fetch("/blog/quiz/" + slug)
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(quiz) { if (!quiz || !quiz.questions || quiz.questions.length < 3) return; renderQuiz(quiz); openPopup(); })
@@ -719,10 +805,23 @@ export default {
             ),
           );
         }
+        // Inline quiz JSON so popup opens instantly (no fetch round-trip)
+        const inlineQuizRaw = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
+        if (inlineQuizRaw) {
+          const bodyCloseInline = patchedHtml.includes("</body>")
+            ? "</body>"
+            : "</html>";
+          patchedHtml = patchedHtml.replace(
+            bodyCloseInline,
+            `<script>window.__tdqQuiz=${inlineQuizRaw};<\/script>\n${bodyCloseInline}`,
+          );
+        }
         // Pre-warm quiz in background so it's ready before the user clicks "Take the Quiz"
         ctx.waitUntil(
           (async () => {
-            const cached = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
+            const cached =
+              inlineQuizRaw ||
+              (await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`));
             if (!cached && env.AI) {
               try {
                 const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
@@ -2401,6 +2500,7 @@ ${analysisBadItems}
     function maybeLoadAndShow() {
       if (quizLoaded) return;
       quizLoaded = true;
+      if (window.__tdqQuiz) { var q = window.__tdqQuiz; window.__tdqQuiz = null; renderQuiz(q); openPopup(); return; }
       fetch("/blog/quiz/" + slug)
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(quiz) {

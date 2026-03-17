@@ -397,7 +397,16 @@ export default {
       d.setDate(d.getDate() - 1);
       return "/blog/" + d.getDate() + "-" + months[d.getMonth()] + "-" + d.getFullYear() + "/";
     }
-
+    function prevDayQuizUrl() {
+      var m = slug.match(/^(\d+)-([a-z]+)-(\d+)$/i);
+      if (!m) return "/quiz/";
+      var months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+      var idx = months.indexOf(m[2].toLowerCase());
+      if (idx < 0) return "/quiz/";
+      var dayNum = parseInt(m[1], 10) || 0;
+      if (dayNum <= 1) return "";
+      return "/quiz/" + months[idx] + "/" + (dayNum - 1) + "/";
+    }
     function renderQuiz(quiz) {
       var qs = (quiz.questions || []).slice(0);
       shuffle(qs); // randomize question order per visit
@@ -486,7 +495,9 @@ export default {
       var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
       var el = document.getElementById("tdq-score");
       el.hidden = false;
+      var pq = prevDayQuizUrl();
       el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + "/" + total + '</span> (' + pct + '%) — ' + msg + '</div>' +
+        (pq ? '<a href="' + pq + '" class="btn btn-warning w-100 mt-3"><i class="bi bi-arrow-left-circle me-1"></i>Previous Day Quiz</a>' : '') +
         '<a href="' + prevDayUrl() + '" class="btn btn-outline-primary w-100 mt-3"><i class="bi bi-arrow-left me-1"></i>Previous Day&#39;s Story</a>';
       var popup = document.getElementById("tdq-popup");
       if (popup) { setTimeout(function(){ popup.scrollTop = 0; }, 30); }
@@ -589,6 +600,16 @@ export default {
     function shuffle(arr){for(var i=arr.length-1;i>0;i--){var j=randInt(i+1);var t=arr[i];arr[i]=arr[j];arr[j]=t;}return arr;}
     function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}
     function getSlug(){var m=location.pathname.match(/\\/blog\\/([^\\/]+)\\/?/i);return m?m[1]:'';}
+    function prevDayQuizUrlFromSlug(slug){
+      var m=String(slug||'').match(/^(\\d+)-([a-z]+)-(\\d+)$/i);
+      if(!m)return '/quiz/';
+      var months=['january','february','march','april','may','june','july','august','september','october','november','december'];
+      var idx=months.indexOf(m[2].toLowerCase());if(idx<0)return '/quiz/';
+      var dayNum=parseInt(m[1],10)||0;
+      var yearNum=parseInt(m[3],10)||new Date().getFullYear();
+      var prev=new Date(Date.UTC(yearNum,idx,dayNum-1));
+      return '/quiz/'+months[prev.getUTCMonth()]+'/'+prev.getUTCDate()+'/';
+    }
     function renderStepped(quiz){
       if(!quiz||!quiz.questions||quiz.questions.length<3)return;
       var qs=quiz.questions.slice(0);shuffle(qs);
@@ -624,7 +645,7 @@ export default {
         }
         var pct=Math.round(score/total*100);
         var msg=pct===100?'Perfect score!':pct>=80?'Excellent!':pct>=60?'Good job!':'Keep learning!';
-        var el=document.getElementById('tdq-score');if(el){el.hidden=false;el.innerHTML='<div class=\"tdq-score-box\">You scored <span class=\"tdq-score-num\">'+score+'/'+total+'</span> ('+pct+'%) — '+msg+'</div>';}
+        var el=document.getElementById('tdq-score');if(el){var pq=prevDayQuizUrlFromSlug(getSlug());el.hidden=false;el.innerHTML='<div class=\"tdq-score-box\">You scored <span class=\"tdq-score-num\">'+score+'/'+total+'</span> ('+pct+'%) — '+msg+'</div>'+(pq?'<a href=\"'+pq+'\" class=\"btn btn-warning w-100 mt-3\"><i class=\"bi bi-arrow-left-circle me-1\"></i>Previous Day Quiz</a>':'');}
         var prog=document.getElementById('tdq-progress');if(prog)prog.textContent='Results — '+score+'/'+total+' correct';
       }
       showQuestion(0);
@@ -2225,6 +2246,18 @@ ${analysisBadItems}
       return "/blog/" + d.getDate() + "-" + months[d.getMonth()] + "-" + d.getFullYear() + "/";
     }
 
+    function prevDayQuizUrl() {
+      var m = slug.match(/^(\d+)-([a-z]+)-(\d+)$/i);
+      if (!m) return "/quiz/";
+      var months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+      var idx = months.indexOf(m[2].toLowerCase());
+      if (idx < 0) return "/quiz/";
+      var dayNum = parseInt(m[1], 10) || 0;
+      var yearNum = parseInt(m[3], 10) || new Date().getFullYear();
+      var prev = new Date(Date.UTC(yearNum, idx, dayNum - 1));
+      return "/quiz/" + months[prev.getUTCMonth()] + "/" + prev.getUTCDate() + "/";
+    }
+
     function renderQuiz(quiz) {
       answers = quiz.questions.map(function(q) { return Number(q.answer); });
       var total = quiz.questions.length;
@@ -2324,7 +2357,9 @@ ${analysisBadItems}
       var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
       var el = document.getElementById("tdq-score");
       el.hidden = false;
+      var pq = prevDayQuizUrl();
       el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + "/" + total + '</span> (' + pct + '%) — ' + msg + '</div>' +
+        (pq ? '<a href="' + pq + '" class="btn btn-warning w-100 mt-3"><i class="bi bi-arrow-left-circle me-1"></i>Previous Day Quiz</a>' : '') +
         '<a href="' + prevDayUrl() + '" class="btn btn-outline-primary w-100 mt-3"><i class="bi bi-arrow-left me-1"></i>Previous Day&#39;s Story</a>';
       var popup = document.getElementById("tdq-popup");
       if (popup) { setTimeout(function(){ popup.scrollTop = 0; }, 30); }

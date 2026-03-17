@@ -1865,6 +1865,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     const savedTheme = localStorage.getItem("darkTheme");
     setTheme(savedTheme !== "false"); // default: dark
+    if (!calendarGrid) return;
     await renderCalendar();
   } catch (error) {
     console.error("Error initializing application:", error);

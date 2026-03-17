@@ -451,6 +451,17 @@ export default {
   var ol=document.getElementById('tdq-overlay');if(ol){ol.replaceWith(ol.cloneNode(true));document.getElementById('tdq-overlay').addEventListener('click',closePopup);}
 })();
 <\/script>`;
+          // Disable old baked-in auto-triggers (IntersectionObserver + #quiz hash)
+          // so the old private renderQuiz never fires and overwrites our step HTML
+          patchedHtml = patchedHtml
+            .replace(
+              /setTimeout\(maybeLoadAndShow,\s*800\)/g,
+              "setTimeout(function(){}/*tdq-disabled*/,800)",
+            )
+            .replace(
+              /if\s*\(window\.location\.hash\s*===\s*"#quiz"\)\s*\{[^}]*\}/,
+              "/* #quiz auto-open disabled */",
+            );
           const bodyClose = patchedHtml.includes("</body>")
             ? "</body>"
             : "</html>";

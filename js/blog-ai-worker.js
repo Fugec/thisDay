@@ -868,7 +868,7 @@ export default {
         if (!patchedHtml.includes("tdq-float-bar")) {
           const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:rgba(15,23,42,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(0,0,0,.3);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:linear-gradient(90deg,#f59e0b,#d97706);border:none;border-radius:100px;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(245,158,11,.35);max-width:320px;width:100%}#tdq-float-btn:hover{background:linear-gradient(90deg,#d97706,#b45309);box-shadow:0 2px 16px rgba(245,158,11,.5)}</style>`;
           const floatHtml = `<div id="tdq-float-bar"><button id="tdq-float-btn"><i class="bi bi-patch-question-fill"></i> Take the Quiz</button></div>`;
-          const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');}function hideBar(){bar.classList.remove('tdq-float-visible');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});var h2s=document.querySelectorAll('h2');var trigger=null;for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}if(trigger){function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else{hideBar();}}window.addEventListener('scroll',updateBar,{passive:true});}else{document.addEventListener('scroll',function onScroll(){var d=document.documentElement;var total=d.scrollHeight-d.clientHeight;if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}},{passive:true});}})();<\/script>`;
+          const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');var barShown=false;if(!bar||!btn)return;function showBar(){if(!barShown){bar.classList.add('tdq-float-visible');barShown=true;}}function hideBar(){bar.classList.remove('tdq-float-visible');barShown=false;}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});var h2s=document.querySelectorAll('h2');var trigger=null;for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}if(trigger){function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else if(barShown){hideBar();}}window.addEventListener('scroll',updateBar,{passive:true});updateBar();}else{function checkScroll(){var d=document.documentElement;var total=d.scrollHeight-d.clientHeight;if(total>0&&d.scrollTop/total>0.2){showBar();}}window.addEventListener('scroll',checkScroll,{passive:true});checkScroll();}})();<\/script>`;
           const bodyClose = patchedHtml.includes("</body>")
             ? "</body>"
             : "</html>";
@@ -2394,9 +2394,10 @@ ${analysisBadItems}
     var bar=document.getElementById('tdq-float-bar');
     var btn=document.getElementById('tdq-float-btn');
     var closeBtn=document.getElementById('tdq-close');
+    var barShown=false;
     if(!bar||!btn)return;
-    function showBar(){bar.classList.add('tdq-float-visible');}
-    function hideBar(){bar.classList.remove('tdq-float-visible');}
+    function showBar(){if(!barShown){bar.classList.add('tdq-float-visible');barShown=true;}}
+    function hideBar(){bar.classList.remove('tdq-float-visible');barShown=false;}
     btn.addEventListener('click',function(){
       hideBar();
       var overlay=document.getElementById('tdq-overlay');
@@ -2412,14 +2413,17 @@ ${analysisBadItems}
     var trigger=null;
     for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}
     if(trigger){
-      function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else{hideBar();}}
+      function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else if(barShown){hideBar();}}
       window.addEventListener('scroll',updateBar,{passive:true});
+      updateBar();
     } else {
-      document.addEventListener('scroll',function onScroll(){
+      function checkScroll(){
         var d=document.documentElement;
         var total=d.scrollHeight-d.clientHeight;
-        if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}
-      },{passive:true});
+        if(total>0&&d.scrollTop/total>0.2){showBar();}
+      }
+      window.addEventListener('scroll',checkScroll,{passive:true});
+      checkScroll();
     }
   })();
   </script>

@@ -922,6 +922,8 @@ body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
 .auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
 body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
 .ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:.68rem;font-weight:600;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
+.ad-unit[data-unit-status="unfilled"]{opacity:.9}
+.ad-unit[data-unit-status="unfilled"] ins.adsbygoogle{min-height:90px;border:1px dashed var(--cbr);border-radius:8px}
 .tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
 .tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
@@ -1063,9 +1065,11 @@ const syncAdUnitVisibility=(ins)=>{
   if(!ins) return;
   const unit=ins.closest('.ad-unit');
   if(!unit) return;
-  const status=ins.getAttribute('data-ad-status');
-  if(status==='unfilled') unit.style.display='none';
-  if(status==='filled') unit.style.display='';
+  const status=ins.getAttribute('data-ad-status')||'';
+  // Keep the ad container visible even when inventory is "unfilled".
+  // Hiding the whole unit makes it look like ads are broken, when in reality
+  // it may just be no-fill, consent blocking, ad blockers, or geo/inventory.
+  unit.setAttribute('data-unit-status',status);
 };
 
 const adObserver=new MutationObserver((mutations)=>{
@@ -1109,12 +1113,14 @@ setTimeout(initAds,1200);
 }
 
 function serveGeneratedSitemap(siteUrl) {
-  const today = new Date().toISOString().split("T")[0];
   let urls = "";
   for (let m = 0; m < 12; m++) {
     for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
-      urls += `  <url>\n    <loc>${siteUrl}/events/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.6</priority>\n  </url>\n`;
-      urls += `  <url>\n    <loc>${siteUrl}/quiz/${MONTHS_ALL[m]}/${d}/</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>monthly</changefreq>\n    <priority>0.5</priority>\n  </url>\n`;
+      // Note: <lastmod> should reflect the actual last significant content change.
+      // Since these pages are generated from upstream data and can change asynchronously,
+      // we omit <lastmod> entirely to avoid sending inaccurate signals to crawlers.
+      urls += `  <url>\n    <loc>${siteUrl}/events/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
+      urls += `  <url>\n    <loc>${siteUrl}/quiz/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
     }
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
@@ -2428,7 +2434,7 @@ async function handleScheduledEvent(env) {
       const dNum = String(today.getUTCDate()).padStart(2, "0");
       await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v16:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v19:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2465,6 +2471,28 @@ async function handleScheduledEvent(env) {
       cronTopEvents,
     );
     console.log(`Quiz pre-generated for ${monthSlug}/${day}.`);
+
+    // Best-effort: notify IndexNow (via /search-ping) that the dynamic pages changed.
+    // This helps Bing discover fresh daily /events/ and /quiz/ content faster.
+    // (Google's sitemap ping endpoint is deprecated; sitemaps still work normally.)
+    try {
+      const urls = [
+        `https://thisday.info/events/${monthSlug}/${day}/`,
+        `https://thisday.info/quiz/${monthSlug}/${day}/`,
+      ];
+      await fetch("https://thisday.info/search-ping", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(env.SEARCH_PING_SECRET
+            ? { Authorization: `Bearer ${env.SEARCH_PING_SECRET}` }
+            : {}),
+        },
+        body: JSON.stringify({ urls }),
+      });
+    } catch (e) {
+      console.error("Scheduled: /search-ping failed:", e);
+    }
   } catch (e) {
     console.error("Quiz pre-generation failed:", e);
   }
@@ -2806,9 +2834,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
   }).join("");
 
   // Final score slide
-  const nextLink = nextMonthSlug && nextDay
-    ? `<a href="/quiz/${escapeHtml(nextMonthSlug)}/${nextDay}/" class="qsc-cta-btn qsc-cta-primary"><i class="bi bi-arrow-right-circle"></i>Next Day's Quiz</a>`
-    : "";
+  const retryLink = `<a href="/quiz/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn qsc-cta-primary" id="qsc-retry"><i class="bi bi-arrow-repeat"></i>Retry Quiz</a>`;
   const scoreSlide =
     `<div class="qsc-slide qsc-final-slide" data-slide="${total}" id="qsc-slide-${total}">` +
     `<div class="qsc-final-body">` +
@@ -2820,7 +2846,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `<div class="qsc-cta-row">` +
     `<a href="/events/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn"><i class="bi bi-calendar-event"></i>See All Events</a>` +
     `<a href="/blog/" class="qsc-cta-btn"><i class="bi bi-journal-text"></i>Read the Blog</a>` +
-    nextLink +
+    retryLink +
     `</div></div></div>`;
 
   // Progress dots
@@ -2850,6 +2876,52 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `var selected={};` +
     `var results={};` +
     `var score=0;` +
+    // Randomize question order each visit (shuffle slides + answers mapping)
+    `function randInt(max){` +
+    `try{var a=new Uint32Array(1);crypto.getRandomValues(a);return a[0]%max;}catch(e){return Math.floor(Math.random()*max);}` +
+    `}` +
+    `function shuffle(arr){for(var i=arr.length-1;i>0;i--){var j=randInt(i+1);var t=arr[i];arr[i]=arr[j];arr[j]=t;}return arr;}` +
+    `function randomizeQuestions(){` +
+    `if(total<2)return;` +
+    `var wrap=document.getElementById('qsc-wrapper');if(!wrap)return;` +
+    `var slides=[];for(var i=0;i<total;i++){var s=document.getElementById('qsc-slide-'+i);if(s)slides.push(s);} ` +
+    `if(slides.length!==total)return;` +
+    `var scoreSlide=document.getElementById('qsc-slide-'+total);` +
+    `shuffle(slides);` +
+    `var newAnswers=[];` +
+    `slides.forEach(function(slide,newIndex){` +
+    `var oldIndex=parseInt(slide.getAttribute('data-slide')||String(newIndex),10);` +
+    `newAnswers.push(answers[oldIndex]);` +
+    `slide.id='qsc-slide-'+newIndex;slide.setAttribute('data-slide',String(newIndex));` +
+    `var body=slide.querySelector('#qsc-body-'+oldIndex);if(body)body.id='qsc-body-'+newIndex;` +
+    `var fb=slide.querySelector('#tdq-f-'+oldIndex);if(fb)fb.id='tdq-f-'+newIndex;` +
+    `var exp=slide.querySelector('#tdq-e-'+oldIndex);if(exp)exp.id='tdq-e-'+newIndex;` +
+    `var nb=slide.querySelector('#qsc-next-'+oldIndex);if(nb){nb.id='qsc-next-'+newIndex;nb.setAttribute('data-slide',String(newIndex));}` +
+    `slide.querySelectorAll('[data-qi=\"'+oldIndex+'\"]').forEach(function(n){n.setAttribute('data-qi',String(newIndex));});` +
+    `var ql=slide.querySelector('.qsc-q-label');if(ql){ql.innerHTML=ql.innerHTML.replace(/Question\\s*\\d+\\s*of\\s*\\d+/,'Question '+(newIndex+1)+' of '+total);}` +
+    `(scoreSlide?wrap.insertBefore(slide,scoreSlide):wrap.appendChild(slide));` +
+    `});` +
+    `answers=newAnswers;` +
+    `}` +
+    `randomizeQuestions();` +
+    `function resetUI(){` +
+    `document.querySelectorAll('.qsc-opt').forEach(function(o){o.classList.remove('tdq-opt-selected','tdq-opt-correct','tdq-opt-wrong');o.style.pointerEvents='';o.setAttribute('aria-checked','false');});` +
+    `for(var i=0;i<total;i++){` +
+    `var fb=document.getElementById('tdq-f-'+i);if(fb){fb.hidden=true;fb.innerHTML='';}` +
+    `var exp=document.getElementById('tdq-e-'+i);if(exp)exp.hidden=true;` +
+    `var nb=document.getElementById('qsc-next-'+i);if(nb)nb.hidden=true;` +
+    `}` +
+    `var rev=document.getElementById('qsc-review-list');if(rev)rev.innerHTML='';` +
+    `var sn=document.getElementById('qsc-score-num');if(sn)sn.textContent='0/'+total;` +
+    `var msg=document.getElementById('qsc-msg');if(msg)msg.textContent='Keep learning!';` +
+    `}` +
+    `function retryQuiz(){` +
+    `selected={};results={};score=0;cur=0;` +
+    `randomizeQuestions();` +
+    `resetUI();` +
+    `showSlide(0,true);` +
+    `var hint=document.getElementById('qsc-hint');if(hint)hint.textContent='Select an answer to continue';` +
+    `}` +
     // Show slide
     `function showSlide(n,noScroll){` +
     `document.querySelectorAll('.qsc-slide').forEach(function(s){s.classList.remove('qsc-active');});` +
@@ -2952,6 +3024,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `p.x+=p.vx;p.y+=p.vy;p.rot+=p.rv;p.a-=.011;});` +
     `fr++;if(fr<130)requestAnimationFrame(draw);else c.remove();}` +
     `requestAnimationFrame(draw);}` +
+    `var retry=document.getElementById('qsc-retry');if(retry){retry.addEventListener('click',function(e){e.preventDefault();retryQuiz();});}` +
     `showSlide(0,true);` +
     `})();</script>`
   );
@@ -2968,7 +3041,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v16:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v19:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);

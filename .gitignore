@@ -6,4 +6,5 @@
 
 # Wrangler build artifacts
 .wrangler/
+.wrangler-xdg/
 node_modules/

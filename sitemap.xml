@@ -1,39 +1,52 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  NOTE (legacy fallback):
+  This static file does NOT include the AI-generated daily posts.
+
+  In production, /sitemap.xml should be served by the Cloudflare Worker:
+    - Worker code: js/sitemap-worker.js
+    - Wrangler config: wrangler-sitemap.jsonc
+
+  That Worker automatically merges:
+    - static pages
+    - legacy on-disk blog posts
+    - AI blog posts from BLOG_AI_KV (updated automatically after each publish)
+-->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <!-- Core pages -->
   <url>
     <loc>https://thisday.info/</loc>
-    <lastmod>2026-02-18</lastmod>
+    <lastmod>2026-03-17</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://thisday.info/about/</loc>
-    <lastmod>2026-02-18</lastmod>
+    <lastmod>2026-03-17</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
     <loc>https://thisday.info/contact/</loc>
-    <lastmod>2026-02-18</lastmod>
+    <lastmod>2026-03-17</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
     <loc>https://thisday.info/privacy-policy/</loc>
-    <lastmod>2026-02-18</lastmod>
+    <lastmod>2026-03-17</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://thisday.info/terms/</loc>
-    <lastmod>2026-02-18</lastmod>
+    <lastmod>2026-03-17</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
     <loc>https://thisday.info/blog/</loc>
-    <lastmod>2026-02-18</lastmod>
+    <lastmod>2026-03-17</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>

@@ -1,0 +1,21 @@
+{
+  // Search Ping Worker — POST /search-ping triggers sitemap discovery pings
+  // to Google + Bing, helping new daily posts get noticed faster.
+  //
+  // Deploy:  npx wrangler deploy --config wrangler-search-ping.jsonc
+  // Dev:     npx wrangler dev --config wrangler-search-ping.jsonc
+  //
+  // Optional secret:
+  //   SEARCH_PING_SECRET (if set, POST requires Authorization: Bearer ...)
+  //
+  // Optional IndexNow (useful for Bing):
+  //   INDEXNOW_HOST, INDEXNOW_KEY, INDEXNOW_KEY_LOCATION
+
+  "name": "thisday-search-ping-worker",
+  "compatibility_date": "2026-03-14",
+  "main": "js/search-ping-worker.js",
+
+  "routes": [
+    { "pattern": "thisday.info/search-ping", "zone_name": "thisday.info" }
+  ]
+}

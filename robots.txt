@@ -1,5 +1,9 @@
 User-agent: *
-Disallow:
+Disallow: /blog/publish
+Disallow: /blog/preload-quizzes
+Disallow: /blog/quiz-debug/
+Disallow: /search-ping
+Disallow: /warmup
 Sitemap: https://thisday.info/sitemap.xml
+Sitemap: https://thisday.info/sitemap-generated.xml
 Sitemap: https://thisday.info/news-sitemap.xml
-

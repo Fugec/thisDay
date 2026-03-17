@@ -1283,7 +1283,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v22-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v23-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1611,7 +1611,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v10:${mm}-${dd}`;
+    const kvKey = `quiz-v12:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2451,7 +2451,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v24:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v25:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2522,18 +2522,10 @@ async function handleScheduledEvent(env) {
 }
 
 // --- Quiz: Generate quiz for a date using AI ---
-async function generateQuizForDate(
-  env,
-  monthName,
-  day,
-  eventsData,
-  featuredEvent,
-  wikiSummary,
-  topEvents = [],
-) {
+async function generateQuizForDate(env, monthName, day) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v10:${mm}-${dd}`;
+  const kvKey = `quiz-v12:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2942,14 +2934,11 @@ function buildCarouselQuizHTML(
         readMoreHtml +
         `<div class="tdq-feedback qsc-feedback" id="tdq-f-${qi}" hidden></div>` +
         expHtml +
+        `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
         (qi < total - 1
-          ? `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
-            `Next Question <i class="bi bi-arrow-right"></i>` +
-            `</button>`
-          : `<div class="qsc-last-actions" id="qsc-actions-${qi}" hidden>` +
-            `<button class="qsc-retry-inline" id="qsc-retry-inline" type="button"><i class="bi bi-arrow-repeat"></i>Retry</button>` +
-            `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" type="button">See Results <i class="bi bi-trophy-fill"></i></button>` +
-            `</div>`) +
+          ? `Next Question <i class="bi bi-arrow-right"></i>`
+          : `See Results <i class="bi bi-trophy-fill"></i>`) +
+        `</button>` +
         `</div></div>`
       );
     })
@@ -2965,7 +2954,6 @@ function buildCarouselQuizHTML(
   );
   const prevMonthSlug = MONTHS_ALL[_prev.getUTCMonth()];
   const prevDay = _prev.getUTCDate();
-  const retryLink = `<a href="/quiz/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn qsc-cta-primary" id="qsc-retry"><i class="bi bi-arrow-repeat"></i>Retry Quiz</a>`;
   const prevQuizLink = `<a href="/quiz/${escapeHtml(prevMonthSlug)}/${prevDay}/" class="qsc-cta-btn"><i class="bi bi-arrow-left-circle"></i>Previous Day Quiz</a>`;
   const scoreSlide =
     `<div class="qsc-slide qsc-final-slide" data-slide="${total}" id="qsc-slide-${total}">` +
@@ -2979,7 +2967,6 @@ function buildCarouselQuizHTML(
     `<a href="/events/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn"><i class="bi bi-calendar-event"></i>See All Events</a>` +
     `<a href="/blog/" class="qsc-cta-btn"><i class="bi bi-journal-text"></i>Read the Blog</a>` +
     prevQuizLink +
-    retryLink +
     `</div></div></div>`;
 
   // Progress dots
@@ -3031,8 +3018,10 @@ function buildCarouselQuizHTML(
     `var body=slide.querySelector('#qsc-body-'+oldIndex);if(body)body.id='qsc-body-'+newIndex;` +
     `var fb=slide.querySelector('#tdq-f-'+oldIndex);if(fb)fb.id='tdq-f-'+newIndex;` +
     `var exp=slide.querySelector('#tdq-e-'+oldIndex);if(exp)exp.id='tdq-e-'+newIndex;` +
-    `var nb=slide.querySelector('#qsc-next-'+oldIndex);if(nb){nb.id='qsc-next-'+newIndex;nb.setAttribute('data-slide',String(newIndex));}` +
-    `var ar=slide.querySelector('#qsc-actions-'+oldIndex);if(ar)ar.id='qsc-actions-'+newIndex;` +
+    `var nb=slide.querySelector('#qsc-next-'+oldIndex);if(nb){` +
+    `nb.id='qsc-next-'+newIndex;nb.setAttribute('data-slide',String(newIndex));` +
+    `nb.innerHTML=(newIndex===total-1)?'See Results <i class="bi bi-trophy-fill"></i>':'Next Question <i class="bi bi-arrow-right"></i>';` +
+    `}` +
     `slide.querySelectorAll('[data-qi=\"'+oldIndex+'\"]').forEach(function(n){n.setAttribute('data-qi',String(newIndex));});` +
     `var ql=slide.querySelector('.qsc-q-label');if(ql){ql.innerHTML=ql.innerHTML.replace(/Question\\s*\\d+\\s*of\\s*\\d+/,'Question '+(newIndex+1)+' of '+total);}` +
     `(scoreSlide?wrap.insertBefore(slide,scoreSlide):wrap.appendChild(slide));` +
@@ -3045,7 +3034,6 @@ function buildCarouselQuizHTML(
     `for(var i=0;i<total;i++){` +
     `var fb=document.getElementById('tdq-f-'+i);if(fb){fb.hidden=true;fb.innerHTML='';}` +
     `var exp=document.getElementById('tdq-e-'+i);if(exp)exp.hidden=true;` +
-    `var ar=document.getElementById('qsc-actions-'+i);if(ar)ar.hidden=true;` +
     `var nb=document.getElementById('qsc-next-'+i);if(nb)nb.hidden=true;` +
     `}` +
     `var rev=document.getElementById('qsc-review-list');if(rev)rev.innerHTML='';` +
@@ -3114,7 +3102,7 @@ function buildCarouselQuizHTML(
     `if(chosen===correct){score++;results[qi]=true;fb.innerHTML='<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';}` +
     `else{results[qi]=false;if(chosen>=0&&opts[chosen])opts[chosen].classList.add('tdq-opt-wrong');fb.innerHTML='<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
     `fb.hidden=false;if(exp)exp.hidden=false;` +
-    `var ar=document.getElementById('qsc-actions-'+qi);if(ar){ar.hidden=false;var nb=ar.querySelector('#qsc-next-'+qi);if(nb)setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'end'});},80);}else{var nb=document.getElementById('qsc-next-'+qi);if(nb){nb.hidden=false;setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'end'});},80);}}` +
+    `var nb=document.getElementById('qsc-next-'+qi);if(nb){nb.hidden=false;setTimeout(function(){nb.scrollIntoView({behavior:'smooth',block:'end'});},80);}` +
     `document.getElementById('qsc-hint').textContent='';` +
     `updateProgress(cur);` +
     `}` +
@@ -3174,8 +3162,6 @@ function buildCarouselQuizHTML(
     `p.x+=p.vx;p.y+=p.vy;p.rot+=p.rv;p.a-=.011;});` +
     `fr++;if(fr<130)requestAnimationFrame(draw);else c.remove();}` +
     `requestAnimationFrame(draw);}` +
-    `var retry=document.getElementById('qsc-retry');if(retry){retry.addEventListener('click',function(e){e.preventDefault();retryQuiz();});}` +
-    `var retry2=document.getElementById('qsc-retry-inline');if(retry2){retry2.addEventListener('click',function(){retryQuiz();});}` +
     `showSlide(0,true);` +
     `})();</script>`
   );
@@ -3192,7 +3178,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v24:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v25:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);

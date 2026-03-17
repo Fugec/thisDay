@@ -1283,7 +1283,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v21-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v22-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1308,19 +1308,32 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   let eventsFromKv = false;
   if (env.EVENTS_KV) {
     try {
-      const kvData = await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, { type: "json" });
-      if (kvData?.events?.length) { eventsData = kvData; eventsFromKv = true; }
-    } catch (_) { /* ignore */ }
+      const kvData = await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, {
+        type: "json",
+      });
+      if (kvData?.events?.length) {
+        eventsData = kvData;
+        eventsFromKv = true;
+      }
+    } catch (_) {
+      /* ignore */
+    }
   }
   if (!eventsFromKv) {
     const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
     try {
-      const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+      const r = await fetch(apiUrl, {
+        headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+      });
       if (r.ok) {
         eventsData = await r.json();
         if (env.EVENTS_KV && eventsData?.events?.length) {
           ctx.waitUntil(
-            env.EVENTS_KV.put(`events-data:${mPad}-${dPad}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 }).catch(() => {})
+            env.EVENTS_KV.put(
+              `events-data:${mPad}-${dPad}`,
+              JSON.stringify(eventsData),
+              { expirationTtl: 7 * 24 * 60 * 60 },
+            ).catch(() => {}),
           );
         }
       }
@@ -1598,7 +1611,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v9:${mm}-${dd}`;
+    const kvKey = `quiz-v10:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -2432,9 +2445,13 @@ async function handleScheduledEvent(env) {
       // Also store under the per-date key used by the quiz page fast-path
       const mNum = String(today.getUTCMonth() + 1).padStart(2, "0");
       const dNum = String(today.getUTCDate()).padStart(2, "0");
-      await env.EVENTS_KV.put(`events-data:${mNum}-${dNum}`, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 });
+      await env.EVENTS_KV.put(
+        `events-data:${mNum}-${dNum}`,
+        JSON.stringify(eventsData),
+        { expirationTtl: 7 * 24 * 60 * 60 },
+      );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v23:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v24:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -2459,8 +2476,14 @@ async function handleScheduledEvent(env) {
       : "";
     const cronTopEvents = [];
     const cronEvAll = eventsData?.events || [];
-    for (const e of cronEvAll) { if (e.pages?.[0]?.thumbnail?.source && cronTopEvents.length < 5) cronTopEvents.push(e); }
-    for (const e of cronEvAll) { if (!e.pages?.[0]?.thumbnail?.source && cronTopEvents.length < 5) cronTopEvents.push(e); }
+    for (const e of cronEvAll) {
+      if (e.pages?.[0]?.thumbnail?.source && cronTopEvents.length < 5)
+        cronTopEvents.push(e);
+    }
+    for (const e of cronEvAll) {
+      if (!e.pages?.[0]?.thumbnail?.source && cronTopEvents.length < 5)
+        cronTopEvents.push(e);
+    }
     await generateQuizForDate(
       env,
       monthSlug,
@@ -2510,7 +2533,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v9:${mm}-${dd}`;
+  const kvKey = `quiz-v10:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -2538,21 +2561,21 @@ async function generateQuizForDate(
   const births = eventsData?.births || [];
 
   // Use topEvents if provided (same order as carousel slides), else fall back to raw events
-  const indexedEvents = topEvents.length > 0 ? topEvents : (eventsData?.events || []).slice(0, 5);
+  const indexedEvents =
+    topEvents.length > 0 ? topEvents : (eventsData?.events || []).slice(0, 5);
 
   const contextLines = [];
-  if (featuredEvent)
-    contextLines.push(`Featured event: ${featuredEvent.text}`);
+  if (featuredEvent) contextLines.push(`Featured event: ${featuredEvent.text}`);
   if (wikiSummary)
-    contextLines.push(`Wikipedia context: ${wikiSummary.replace(/\b(1[0-9]{3}|20[0-2][0-9])\b/g, "").substring(0, 300)}`);
+    contextLines.push(
+      `Wikipedia context: ${wikiSummary.replace(/\b(1[0-9]{3}|20[0-2][0-9])\b/g, "").substring(0, 300)}`,
+    );
   indexedEvents.forEach((e, i) =>
     contextLines.push(`Event[${i}]: ${e.text.substring(0, 150)}`),
   );
   births
     .slice(0, 3)
-    .forEach((b) =>
-      contextLines.push(`Birth: ${b.text.substring(0, 100)}`),
-    );
+    .forEach((b) => contextLines.push(`Birth: ${b.text.substring(0, 100)}`));
 
   let quiz = null;
 
@@ -2592,7 +2615,10 @@ async function generateQuizForDate(
       if (objMatch) {
         const parsed = JSON.parse(objMatch[0]);
         const eventCount = Math.min(indexedEvents.length, 5);
-        if (Array.isArray(parsed?.questions) && parsed.questions.length === eventCount) {
+        if (
+          Array.isArray(parsed?.questions) &&
+          parsed.questions.length === eventCount
+        ) {
           // All-or-nothing: every question must be valid and correspond to an event
           const valid = parsed.questions.filter(
             (q) =>
@@ -2610,8 +2636,11 @@ async function generateQuizForDate(
           if (valid.length === eventCount) {
             // Hard filter: reject the entire quiz if ANY question asks about a year/date
             // — the AI ignores prompt instructions, so we enforce this deterministically
-            const yearPattern = /\b(in which year|what year|when did|which year|what century|what decade|in \d{3,4}|since \d{3,4})\b/i;
-            const hasYearQuestion = valid.some(q => yearPattern.test(String(q.q)));
+            const yearPattern =
+              /\b(in which year|what year|when did|which year|what century|what decade|in \d{3,4}|since \d{3,4})\b/i;
+            const hasYearQuestion = valid.some((q) =>
+              yearPattern.test(String(q.q)),
+            );
             if (!hasYearQuestion) quiz = { ...parsed, questions: valid };
           }
         }
@@ -2636,22 +2665,76 @@ async function generateQuizForDate(
 
 function buildFallbackQuiz(mDisplay, day, eventsData, orderedEvents = []) {
   // Use orderedEvents (topEvents order = same as carousel) when available, else fall back to raw Wikipedia order
-  const source = orderedEvents.length > 0 ? orderedEvents : (eventsData?.events || []);
+  const source =
+    orderedEvents.length > 0 ? orderedEvents : eventsData?.events || [];
   const events = source.filter((e) => e.year && e.text);
   const questions = [];
 
   // Fallback question templates that don't require knowing the year
   const fallbackTemplates = [
-    (text) => ({ q: `Which of the following best describes what happened on ${mDisplay} ${day}?`, opts: [text, "A royal coronation ceremony", "A scientific moon landing", "A major peace treaty signing"], ans: 0 }),
-    (text) => ({ q: `On ${mDisplay} ${day}, a notable event occurred. Which description matches it?`, opts: ["A volcanic eruption in Iceland", text, "The founding of the United Nations", "A major earthquake in Japan"], ans: 1 }),
-    (text) => ({ q: `Which event took place on ${mDisplay} ${day} in history?`, opts: ["Discovery of penicillin", "Fall of the Berlin Wall", text, "First commercial flight"], ans: 2 }),
-    (text) => ({ q: `Historians remember ${mDisplay} ${day} for which of the following?`, opts: ["First Moon walk by astronauts", "Signing of the Magna Carta", "Launch of the first satellite", text], ans: 3 }),
-    (text) => ({ q: `What significant event is recorded on ${mDisplay} ${day}?`, opts: ["Opening of the Suez Canal", text, "End of World War I", "First transatlantic telegraph cable"], ans: 1 }),
+    (text) => ({
+      q: `Which of the following best describes what happened on ${mDisplay} ${day}?`,
+      opts: [
+        text,
+        "A royal coronation ceremony",
+        "A scientific moon landing",
+        "A major peace treaty signing",
+      ],
+      ans: 0,
+    }),
+    (text) => ({
+      q: `On ${mDisplay} ${day}, a notable event occurred. Which description matches it?`,
+      opts: [
+        "A volcanic eruption in Iceland",
+        text,
+        "The founding of the United Nations",
+        "A major earthquake in Japan",
+      ],
+      ans: 1,
+    }),
+    (text) => ({
+      q: `Which event took place on ${mDisplay} ${day} in history?`,
+      opts: [
+        "Discovery of penicillin",
+        "Fall of the Berlin Wall",
+        text,
+        "First commercial flight",
+      ],
+      ans: 2,
+    }),
+    (text) => ({
+      q: `Historians remember ${mDisplay} ${day} for which of the following?`,
+      opts: [
+        "First Moon walk by astronauts",
+        "Signing of the Magna Carta",
+        "Launch of the first satellite",
+        text,
+      ],
+      ans: 3,
+    }),
+    (text) => ({
+      q: `What significant event is recorded on ${mDisplay} ${day}?`,
+      opts: [
+        "Opening of the Suez Canal",
+        text,
+        "End of World War I",
+        "First transatlantic telegraph cable",
+      ],
+      ans: 1,
+    }),
   ];
 
-  for (let i = 0; i < Math.min(events.slice(0, 5).length, fallbackTemplates.length); i++) {
+  for (
+    let i = 0;
+    i < Math.min(events.slice(0, 5).length, fallbackTemplates.length);
+    i++
+  ) {
     const e = events[i];
-    const shortText = String(e.text || "").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "").substring(0, 80);
+    const shortText = String(e.text || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/[.\s]+$/, "")
+      .substring(0, 80);
     const tmpl = fallbackTemplates[i](shortText);
     questions.push({ q: tmpl.q, options: tmpl.opts, answer: tmpl.ans });
   }
@@ -2781,8 +2864,18 @@ function buildQuizHTML(quiz, monthDisplay, day) {
 // ---------------------------------------------------------------------------
 // Carousel quiz page builder — one event + one question per slide
 // ---------------------------------------------------------------------------
-function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, nextMonthSlug, nextDay, blogEntry = null) {
-  if (!quiz?.questions?.length) return "<p class='text-muted'>Quiz unavailable for this date.</p>";
+function buildCarouselQuizHTML(
+  quiz,
+  topEvents,
+  _monthDisplay,
+  day,
+  monthSlug,
+  nextMonthSlug,
+  nextDay,
+  blogEntry = null,
+) {
+  if (!quiz?.questions?.length)
+    return "<p class='text-muted'>Quiz unavailable for this date.</p>";
 
   const answers = quiz.questions.map((q) => Number(q.answer));
   const answersJson = JSON.stringify(answers);
@@ -2794,52 +2887,82 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
   const blogUrl = blogEntry ? `/blog/${blogEntry.slug}/` : "";
 
   // Build slides — one per question
-  const slidesHtml = quiz.questions.slice(0, total).map((q, qi) => {
-    // When blog post quiz: use blog image for all slides; otherwise use per-event images
-    const imgSrc = blogEntry ? blogImgSrc : (topEvents[qi]?.pages?.[0]?.thumbnail?.source || topEvents[0]?.pages?.[0]?.thumbnail?.source || "");
-    const imgAlt = blogEntry ? blogTitle : (topEvents[qi]?.pages?.[0]?.title || "");
-    const evYear = blogEntry ? "" : (topEvents[qi]?.year ? String(topEvents[qi].year) : "");
-    const readMoreUrl = blogEntry ? blogUrl : (topEvents[qi]?.pages?.[0]?.content_urls?.desktop?.page || `/events/${escapeHtml(monthSlug)}/${day}/`);
-    const readMoreTarget = (blogEntry || !topEvents[qi]?.pages?.[0]?.content_urls?.desktop?.page) ? "_self" : "_blank";
+  const slidesHtml = quiz.questions
+    .slice(0, total)
+    .map((q, qi) => {
+      // When blog post quiz: use blog image for all slides; otherwise use per-event images
+      const imgSrc = blogEntry
+        ? blogImgSrc
+        : topEvents[qi]?.pages?.[0]?.thumbnail?.source ||
+          topEvents[0]?.pages?.[0]?.thumbnail?.source ||
+          "";
+      const imgAlt = blogEntry
+        ? blogTitle
+        : topEvents[qi]?.pages?.[0]?.title || "";
+      const evYear = blogEntry
+        ? ""
+        : topEvents[qi]?.year
+          ? String(topEvents[qi].year)
+          : "";
+      const readMoreUrl = blogEntry
+        ? blogUrl
+        : topEvents[qi]?.pages?.[0]?.content_urls?.desktop?.page ||
+          `/events/${escapeHtml(monthSlug)}/${day}/`;
+      const readMoreTarget =
+        blogEntry || !topEvents[qi]?.pages?.[0]?.content_urls?.desktop?.page
+          ? "_self"
+          : "_blank";
 
-    const imgHtml = imgSrc
-      ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
-      : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
+      const imgHtml = imgSrc
+        ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
+        : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
 
-    const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${readMoreTarget}" rel="noopener" class="qsc-read-more-btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
+      const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${readMoreTarget}" rel="noopener" class="qsc-read-more-btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
 
-    const optsHtml = (q.options || []).map((opt, oi) =>
-      `<div class="tdq-opt qsc-opt" data-qi="${qi}" data-oi="${oi}" role="radio" aria-checked="false" tabindex="0">` +
-      `<span class="tdq-opt-key">${String.fromCharCode(65 + oi)}</span>${escapeHtml(String(opt))}` +
-      `</div>`
-    ).join("");
+      const optsHtml = (q.options || [])
+        .map(
+          (opt, oi) =>
+            `<div class="tdq-opt qsc-opt" data-qi="${qi}" data-oi="${oi}" role="radio" aria-checked="false" tabindex="0">` +
+            `<span class="tdq-opt-key">${String.fromCharCode(65 + oi)}</span>${escapeHtml(String(opt))}` +
+            `</div>`,
+        )
+        .join("");
 
-    const expHtml = q.explanation
-      ? `<div class="tdq-explanation qsc-explanation" id="tdq-e-${qi}" hidden>${escapeHtml(String(q.explanation))}</div>`
-      : "";
+      const expHtml = q.explanation
+        ? `<div class="tdq-explanation qsc-explanation" id="tdq-e-${qi}" hidden>${escapeHtml(String(q.explanation))}</div>`
+        : "";
 
-    return `<div class="qsc-slide${qi === 0 ? " qsc-active" : ""}" data-slide="${qi}" id="qsc-slide-${qi}">` +
-      imgHtml +
-      `<div class="qsc-slide-body" id="qsc-body-${qi}">` +
-      `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:#f59e0b"></i>Question ${qi + 1} of ${total}</div>` +
-      `<p class="tdq-q-text qsc-q-text">${escapeHtml(String(q.q))}</p>` +
-      `<div class="tdq-options qsc-opts-wrap">${optsHtml}</div>` +
-      readMoreHtml +
-      `<div class="tdq-feedback qsc-feedback" id="tdq-f-${qi}" hidden></div>` +
-      expHtml +
-      (qi < total - 1
-        ? `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
-          `Next Question <i class="bi bi-arrow-right"></i>` +
-          `</button>`
-        : `<div class="qsc-last-actions" id="qsc-actions-${qi}" hidden>` +
-          `<button class="qsc-retry-inline" id="qsc-retry-inline" type="button"><i class="bi bi-arrow-repeat"></i>Retry</button>` +
-          `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" type="button">See Results <i class="bi bi-trophy-fill"></i></button>` +
-          `</div>`) +
-      `</div></div>`;
-  }).join("");
+      return (
+        `<div class="qsc-slide${qi === 0 ? " qsc-active" : ""}" data-slide="${qi}" id="qsc-slide-${qi}">` +
+        imgHtml +
+        `<div class="qsc-slide-body" id="qsc-body-${qi}">` +
+        `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:#f59e0b"></i>Question ${qi + 1} of ${total}</div>` +
+        `<p class="tdq-q-text qsc-q-text">${escapeHtml(String(q.q))}</p>` +
+        `<div class="tdq-options qsc-opts-wrap">${optsHtml}</div>` +
+        readMoreHtml +
+        `<div class="tdq-feedback qsc-feedback" id="tdq-f-${qi}" hidden></div>` +
+        expHtml +
+        (qi < total - 1
+          ? `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
+            `Next Question <i class="bi bi-arrow-right"></i>` +
+            `</button>`
+          : `<div class="qsc-last-actions" id="qsc-actions-${qi}" hidden>` +
+            `<button class="qsc-retry-inline" id="qsc-retry-inline" type="button"><i class="bi bi-arrow-repeat"></i>Retry</button>` +
+            `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" type="button">See Results <i class="bi bi-trophy-fill"></i></button>` +
+            `</div>`) +
+        `</div></div>`
+      );
+    })
+    .join("");
 
   // Final score slide
-  const _prev = new Date(Date.UTC(new Date().getUTCFullYear(), MONTH_NUM_MAP[monthSlug] - 1, day - 1));
+  const _prev = new Date(
+    Date.UTC(
+      new Date().getUTCFullYear(),
+      MONTH_NUM_MAP[monthSlug] - 1,
+      day - 1,
+    ),
+  );
   const prevMonthSlug = MONTHS_ALL[_prev.getUTCMonth()];
   const prevDay = _prev.getUTCDate();
   const retryLink = `<a href="/quiz/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn qsc-cta-primary" id="qsc-retry"><i class="bi bi-arrow-repeat"></i>Retry Quiz</a>`;
@@ -2860,8 +2983,10 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `</div></div></div>`;
 
   // Progress dots
-  const dotsHtml = Array.from({ length: total }, (_, i) =>
-    `<button class="qsc-dot${i === 0 ? " qsc-dot-active" : ""}" data-dot="${i}" aria-label="Question ${i + 1}" title="Q${i + 1}"></button>`
+  const dotsHtml = Array.from(
+    { length: total },
+    (_, i) =>
+      `<button class="qsc-dot${i === 0 ? " qsc-dot-active" : ""}" data-dot="${i}" aria-label="Question ${i + 1}" title="Q${i + 1}"></button>`,
   ).join("");
 
   return (
@@ -2907,6 +3032,7 @@ function buildCarouselQuizHTML(quiz, topEvents, _monthDisplay, day, monthSlug, n
     `var fb=slide.querySelector('#tdq-f-'+oldIndex);if(fb)fb.id='tdq-f-'+newIndex;` +
     `var exp=slide.querySelector('#tdq-e-'+oldIndex);if(exp)exp.id='tdq-e-'+newIndex;` +
     `var nb=slide.querySelector('#qsc-next-'+oldIndex);if(nb){nb.id='qsc-next-'+newIndex;nb.setAttribute('data-slide',String(newIndex));}` +
+    `var ar=slide.querySelector('#qsc-actions-'+oldIndex);if(ar)ar.id='qsc-actions-'+newIndex;` +
     `slide.querySelectorAll('[data-qi=\"'+oldIndex+'\"]').forEach(function(n){n.setAttribute('data-qi',String(newIndex));});` +
     `var ql=slide.querySelector('.qsc-q-label');if(ql){ql.innerHTML=ql.innerHTML.replace(/Question\\s*\\d+\\s*of\\s*\\d+/,'Question '+(newIndex+1)+' of '+total);}` +
     `(scoreSlide?wrap.insertBefore(slide,scoreSlide):wrap.appendChild(slide));` +
@@ -3066,7 +3192,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v23:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v24:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -3079,7 +3205,9 @@ async function handleQuizPage(_request, env, monthSlug, day) {
           },
         });
       }
-    } catch (_) { /* ignore */ }
+    } catch (_) {
+      /* ignore */
+    }
   }
 
   // --- Blog post quiz for this date (primary source) ---
@@ -3095,10 +3223,16 @@ async function handleQuizPage(_request, env, monthSlug, day) {
           blogQuiz = JSON.parse(raw);
           const indexRaw = await env.BLOG_AI_KV.get("index");
           const idx = indexRaw ? JSON.parse(indexRaw) : [];
-          blogEntry = idx.find(e => e.slug === bSlug) || { slug: bSlug, title: `${mDisplay} ${day}`, imageUrl: null };
+          blogEntry = idx.find((e) => e.slug === bSlug) || {
+            slug: bSlug,
+            title: `${mDisplay} ${day}`,
+            imageUrl: null,
+          };
           break;
         }
-      } catch (_) { /* ignore */ }
+      } catch (_) {
+        /* ignore */
+      }
     }
   }
 
@@ -3110,21 +3244,41 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   let eventsFromKv = false;
   if (env.EVENTS_KV) {
     try {
-      const isToday = mPad === String(MONTH_NUM_MAP[MONTHS_ALL[new Date().getUTCMonth()]]).padStart(2, "0") &&
-                      dPad === String(new Date().getUTCDate()).padStart(2, "0");
-      const kvData = await env.EVENTS_KV.get(eventsKvKey, { type: "json" }) ||
-        (isToday ? await env.EVENTS_KV.get(todayEventsKey, { type: "json" }) : null);
-      if (kvData?.events?.length) { eventsData = kvData; eventsFromKv = true; }
-    } catch (_) { /* ignore */ }
+      const isToday =
+        mPad ===
+          String(MONTH_NUM_MAP[MONTHS_ALL[new Date().getUTCMonth()]]).padStart(
+            2,
+            "0",
+          ) && dPad === String(new Date().getUTCDate()).padStart(2, "0");
+      const kvData =
+        (await env.EVENTS_KV.get(eventsKvKey, { type: "json" })) ||
+        (isToday
+          ? await env.EVENTS_KV.get(todayEventsKey, { type: "json" })
+          : null);
+      if (kvData?.events?.length) {
+        eventsData = kvData;
+        eventsFromKv = true;
+      }
+    } catch (_) {
+      /* ignore */
+    }
   }
   if (!eventsFromKv) {
     const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
     try {
-      const r = await fetch(apiUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+      const r = await fetch(apiUrl, {
+        headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+      });
       if (r.ok) {
         eventsData = await r.json();
         if (env.EVENTS_KV && eventsData?.events?.length) {
-          try { await env.EVENTS_KV.put(eventsKvKey, JSON.stringify(eventsData), { expirationTtl: 7 * 24 * 60 * 60 }); } catch (_) { /* non-fatal */ }
+          try {
+            await env.EVENTS_KV.put(eventsKvKey, JSON.stringify(eventsData), {
+              expirationTtl: 7 * 24 * 60 * 60,
+            });
+          } catch (_) {
+            /* non-fatal */
+          }
         }
       }
     } catch (e) {
@@ -3144,32 +3298,57 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   // Gather top events with images for carousel slides (images-first order)
   const topEvents = [];
   const evAll = eventsData?.events || [];
-  for (const e of evAll) { if (e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
-  for (const e of evAll) { if (!e.pages?.[0]?.thumbnail?.source && topEvents.length < 5) topEvents.push(e); }
+  for (const e of evAll) {
+    if (e.pages?.[0]?.thumbnail?.source && topEvents.length < 5)
+      topEvents.push(e);
+  }
+  for (const e of evAll) {
+    if (!e.pages?.[0]?.thumbnail?.source && topEvents.length < 5)
+      topEvents.push(e);
+  }
 
-  const quiz = blogQuiz || await generateQuizForDate(
-    env,
-    monthSlug,
-    day,
-    eventsData,
-    featuredEvent,
-    wikiSummary,
-    topEvents,
-  );
+  const quiz =
+    blogQuiz ||
+    (await generateQuizForDate(
+      env,
+      monthSlug,
+      day,
+      eventsData,
+      featuredEvent,
+      wikiSummary,
+      topEvents,
+    ));
 
   // Next day for CTA
-  const _nd = new Date(Date.UTC(new Date().getUTCFullYear(), MONTH_NUM_MAP[monthSlug] - 1, day + 1));
+  const _nd = new Date(
+    Date.UTC(
+      new Date().getUTCFullYear(),
+      MONTH_NUM_MAP[monthSlug] - 1,
+      day + 1,
+    ),
+  );
   const nextMonthSlug = MONTHS_ALL[_nd.getUTCMonth()];
   const nextDay = _nd.getUTCDate();
 
-  const carouselHtml = buildCarouselQuizHTML(quiz, topEvents, mDisplay, day, monthSlug, nextMonthSlug, nextDay, blogEntry);
+  const carouselHtml = buildCarouselQuizHTML(
+    quiz,
+    topEvents,
+    mDisplay,
+    day,
+    monthSlug,
+    nextMonthSlug,
+    nextDay,
+    blogEntry,
+  );
 
   // Adjacent quiz days: up to 6 past days (no future dates)
   const todayUTC = new Date();
   todayUTC.setUTCHours(0, 0, 0, 0);
   const adjDays = [];
   for (let offset = -1; offset >= -6; offset--) {
-    const d = new Date(Date.UTC(new Date().getUTCFullYear(), monthNum - 1, day + offset));
+    const d = new Date(
+      Date.UTC(new Date().getUTCFullYear(), monthNum - 1, day + offset),
+    );
     if (d > todayUTC) continue; // skip future dates
     const mSlug = MONTHS_ALL[d.getUTCMonth()];
     adjDays.push({
@@ -3186,18 +3365,26 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     : null;
   const adjCards = adjDays.map((d) => {
     const curYear = new Date().getUTCFullYear();
-    const blogEntry2 = (blogIndex || []).find(e => e.slug === `${d.day}-${d.monthSlug}-${curYear}`)
-      || (blogIndex || []).find(e => e.slug === `${d.day}-${d.monthSlug}-${curYear - 1}`);
+    const blogEntry2 =
+      (blogIndex || []).find(
+        (e) => e.slug === `${d.day}-${d.monthSlug}-${curYear}`,
+      ) ||
+      (blogIndex || []).find(
+        (e) => e.slug === `${d.day}-${d.monthSlug}-${curYear - 1}`,
+      );
     const thumb = blogEntry2?.imageUrl || null;
     const imgHtml = thumb
       ? `<img src="${escapeHtml(thumb)}" alt="${escapeHtml(d.monthDisplay)} ${d.day}" class="qsc-rec-img" loading="lazy"/>`
       : "";
-    return `<a href="/quiz/${escapeHtml(d.monthSlug)}/${d.day}/" class="qsc-rec-card" aria-label="${escapeHtml(d.monthDisplay)} ${d.day} quiz">` +
+    return (
+      `<a href="/quiz/${escapeHtml(d.monthSlug)}/${d.day}/" class="qsc-rec-card" aria-label="${escapeHtml(d.monthDisplay)} ${d.day} quiz">` +
       `<div class="qsc-rec-img-wrap">${imgHtml}<div class="qsc-rec-overlay"></div><span class="qsc-rec-badge">Quiz</span></div>` +
       `<div class="qsc-rec-body"><div class="qsc-rec-date">${escapeHtml(d.monthDisplay)} ${d.day}</div><div class="qsc-rec-lbl">5 questions</div></div>` +
-      `</a>`;
+      `</a>`
+    );
   });
-  const recSliderHtml = `<div class="mt-4 mb-2">` +
+  const recSliderHtml =
+    `<div class="mt-4 mb-2">` +
     `<h2 class="qsc-rec-heading"><i class="bi bi-calendar3-range me-2" style="color:#3b82f6"></i>More Daily Quizzes</h2>` +
     `<div class="qsc-rec-slider">${adjCards.join("")}</div>` +
     `</div>`;
@@ -3442,7 +3629,13 @@ if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.
 
   // Cache the full rendered page for future visits
   if (env.EVENTS_KV) {
-    try { await env.EVENTS_KV.put(pageHtmlKey, html, { expirationTtl: 24 * 60 * 60 }); } catch (_) { /* non-fatal */ }
+    try {
+      await env.EVENTS_KV.put(pageHtmlKey, html, {
+        expirationTtl: 24 * 60 * 60,
+      });
+    } catch (_) {
+      /* non-fatal */
+    }
   }
 
   return new Response(html, {

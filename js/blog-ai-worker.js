@@ -779,8 +779,11 @@ export default {
         // Only inject for posts from March 2026 onwards — leave older posts alone
         const _adParts = slug.match(/^(\d+)-([a-z]+)-(\d{4})$/i);
         const _adYear = _adParts ? parseInt(_adParts[3], 10) : 0;
-        const _adMonthIdx = _adParts ? MONTH_SLUGS.indexOf(_adParts[2].toLowerCase()) : -1;
-        const _isRecentPost = _adYear > 2026 || (_adYear === 2026 && _adMonthIdx >= 2);
+        const _adMonthIdx = _adParts
+          ? MONTH_SLUGS.indexOf(_adParts[2].toLowerCase())
+          : -1;
+        const _isRecentPost =
+          _adYear > 2026 || (_adYear === 2026 && _adMonthIdx >= 2);
         if (
           _isRecentPost &&
           !patchedHtml.includes('<ins class="adsbygoogle"') &&

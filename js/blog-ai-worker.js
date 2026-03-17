@@ -219,6 +219,9 @@ export default {
       if (html) {
         // Patch old quiz API path in already-stored HTML
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
+        // Patch broken JS apostrophe — \'s inside template literal got unescaped to 's,
+        // breaking the JS string literal in showResults()
+        patchedHtml = patchedHtml.replace("Previous Day's Story</a>'", "Previous Day&#39;s Story</a>'");
         // Patch old btn-warning buttons to site-btn-primary
         patchedHtml = patchedHtml
           .replaceAll('class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"', 'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"')
@@ -2131,7 +2134,7 @@ ${analysisBadItems}
       var el = document.getElementById("tdq-score");
       el.hidden = false;
       el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + "/" + total + '</span> (' + pct + '%) — ' + msg + '</div>' +
-        '<a href="' + prevDayUrl() + '" class="btn btn-outline-primary w-100 mt-3"><i class="bi bi-arrow-left me-1"></i>Previous Day\'s Story</a>';
+        '<a href="' + prevDayUrl() + '" class="btn btn-outline-primary w-100 mt-3"><i class="bi bi-arrow-left me-1"></i>Previous Day&#39;s Story</a>';
       var popup = document.getElementById("tdq-popup");
       if (popup) { setTimeout(function(){ popup.scrollTop = 0; }, 30); }
       var progEl = document.getElementById("tdq-progress");

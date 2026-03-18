@@ -28,9 +28,15 @@ jobs:
         with:
           node-version: "22"
 
-      # FFmpeg for video encoding + DejaVu fonts for SVG text rendering
+      # Static ffmpeg binary — avoids apt mirror issues with libssh deps
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+        id: setup-ffmpeg
+        with:
+          ffmpeg-version: release
+
+      # DejaVu fonts for SVG text rendering
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --fix-missing ffmpeg fonts-dejavu-core
+        run: sudo apt-get install -y fonts-dejavu-core
 
       - name: Install npm dependencies
         run: npm install

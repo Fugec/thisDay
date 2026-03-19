@@ -5,6 +5,9 @@
  * using text from the post's "Did You Know?" section (newer posts) or
  * "Quick Facts" table (older posts).
  *
+ * Uses the /with-timestamps endpoint to get word-level timing data
+ * so video.js can render animated synchronized captions.
+ *
  * Voice: Adam — calm, deep, suitable for history documentaries.
  * Model: eleven_turbo_v2_5 — lowest character cost on the free plan.
  *
@@ -16,13 +19,13 @@
  * Fallback is used automatically when the primary account hits its 10k char/month quota.
  */
 
-import { writeFile } from 'fs/promises';
-import { mkdirSync } from 'fs';
-import { join } from 'path';
+import { writeFile } from "fs/promises";
+import { mkdirSync } from "fs";
+import { join } from "path";
 
-const ASSETS_DIR = './assets';
-const VOICE_ID   = 'pNInz6obpgDQGcFmaJgB'; // Adam — deep, calm, documentary
-const MODEL_ID   = 'eleven_turbo_v2_5';      // fastest + lowest character cost
+const ASSETS_DIR = "./assets";
+const VOICE_ID = "pNInz6obpgDQGcFmaJgB"; // Adam — deep, calm, documentary
+const MODEL_ID = "eleven_turbo_v2_5"; // fastest + lowest character cost
 
 /**
  * Builds the TTS narration script.
@@ -36,83 +39,183 @@ const MODEL_ID   = 'eleven_turbo_v2_5';      // fastest + lowest character cost
  * @returns {string}
  */
 export function buildNarrationScript(post, contentItems) {
-  const title = post.title.replace(/ [—–] /g, ', ');
-  const parts  = ['On this day in history.', title + '.'];
+  const title = post.title.replace(/ [—–] /g, ", ");
+  const parts = ["On this day in history.", title + "."];
 
   if (contentItems && contentItems.length > 0) {
-    parts.push('Did you know?');
-    contentItems.forEach(item => parts.push(item.endsWith('.') ? item : item + '.'));
+    parts.push("Did you know?");
+    contentItems.forEach((item) =>
+      parts.push(item.endsWith(".") ? item : item + "."),
+    );
   } else {
-    parts.push(post.description + '.');
+    parts.push(post.description + ".");
   }
 
-  parts.push('Discover more at thisday dot info.');
-  return parts.join(' ');
+  parts.push("Discover more at thisday dot info.");
+  return parts.join(" ");
 }
 
 /**
- * Calls ElevenLabs TTS and saves the audio to assets/{slug}_narration.mp3.
- * Returns the local file path, or null on failure (graceful degradation).
+ * Same logic as buildNarrationScript but returns the raw parts array
+ * so video.js can match parts against word timestamps to find scene cuts.
  *
- * @param {string} slug
- * @param {string} script
- * @returns {Promise<string|null>}
+ * @param {{ title: string, description: string }} post
+ * @param {string[]|null} contentItems
+ * @returns {string[]}
  */
-async function callElevenLabs(apiKey, script) {
-  const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+export function buildNarrationParts(post, contentItems) {
+  const title = post.title.replace(/ [—–] /g, ", ");
+  const parts = ["On this day in history.", title + "."];
+  if (contentItems && contentItems.length > 0) {
+    parts.push("Did you know?");
+    contentItems.forEach((item) =>
+      parts.push(item.endsWith(".") ? item : item + "."),
+    );
+  } else {
+    parts.push(post.description + ".");
+  }
+  parts.push("Discover more at thisday dot info.");
+  return parts;
+}
+
+/**
+ * Calls ElevenLabs /with-timestamps endpoint.
+ * Returns the raw Response so the caller can handle status codes.
+ */
+async function callElevenLabsWithTimestamps(apiKey, script) {
+  return fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/with-timestamps`,
     {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'xi-api-key':   apiKey,
-        'Content-Type': 'application/json',
-        Accept:         'audio/mpeg',
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "application/json",
       },
       body: JSON.stringify({
-        text:     script,
+        text: script,
         model_id: MODEL_ID,
         voice_settings: {
-          stability:         0.55,
-          similarity_boost:  0.75,
-          style:             0.30,
+          stability: 0.55,
+          similarity_boost: 0.75,
+          style: 0.3,
           use_speaker_boost: true,
         },
       }),
     },
   );
-  return res;
 }
 
+/**
+ * Groups flat character-level alignment into word-level chunks.
+ * ElevenLabs returns per-character start/end times; we merge them into
+ * words by splitting on space/punctuation boundaries.
+ *
+ * Returns an array of { word, start, end } objects (times in seconds).
+ *
+ * @param {{ characters: string[], character_start_times_seconds: number[], character_end_times_seconds: number[] }} alignment
+ * @returns {{ word: string, start: number, end: number }[]}
+ */
+function alignmentToWords(alignment) {
+  if (!alignment?.characters?.length) return [];
+
+  const chars = alignment.characters;
+  const starts = alignment.character_start_times_seconds;
+  const ends = alignment.character_end_times_seconds;
+
+  const words = [];
+  let wordChars = [];
+  let wordStart = null;
+  let wordEnd = null;
+
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    // Space or punctuation-only characters → flush current word
+    if (/\s/.test(ch)) {
+      if (wordChars.length) {
+        words.push({
+          word: wordChars.join(""),
+          start: wordStart,
+          end: wordEnd,
+        });
+        wordChars = [];
+        wordStart = null;
+        wordEnd = null;
+      }
+    } else {
+      if (wordStart === null) wordStart = starts[i];
+      wordEnd = ends[i];
+      wordChars.push(ch);
+    }
+  }
+  // Flush the last word
+  if (wordChars.length) {
+    words.push({ word: wordChars.join(""), start: wordStart, end: wordEnd });
+  }
+
+  return words;
+}
+
+/**
+ * Calls ElevenLabs TTS (with-timestamps) and saves the audio to
+ * assets/{slug}_narration.mp3.
+ *
+ * Returns { path, words } where:
+ *   path  — local .mp3 file path (or null on failure)
+ *   words — array of { word, start, end } for animated captions (or [])
+ *
+ * @param {string} slug
+ * @param {string} script
+ * @returns {Promise<{ path: string|null, words: { word: string, start: number, end: number }[] }>}
+ */
 export async function generateNarration(slug, script) {
-  const apiKey  = process.env.ELEVENLABS_API_KEY;
+  const apiKey = process.env.ELEVENLABS_API_KEY;
   const apiKey2 = process.env.ELEVENLABS_API_KEY_2;
-  if (!apiKey && !apiKey2) return null;
+  if (!apiKey && !apiKey2) return { path: null, words: [] };
 
   mkdirSync(ASSETS_DIR, { recursive: true });
   const outputPath = join(ASSETS_DIR, `${slug}_narration.mp3`);
 
   console.log(`  TTS: ${script.length} chars — "${script.slice(0, 60)}..."`);
 
-  let res = apiKey ? await callElevenLabs(apiKey, script) : null;
+  let res = apiKey ? await callElevenLabsWithTimestamps(apiKey, script) : null;
 
   // Fall back to second account on quota exceeded (429) or missing primary key
   if ((!res || res.status === 429) && apiKey2) {
     if (res?.status === 429) {
-      console.warn('  ⚠ ElevenLabs primary quota reached — switching to fallback account');
+      console.warn(
+        "  ⚠ ElevenLabs primary quota reached — switching to fallback account",
+      );
     } else {
-      console.log('  Using ElevenLabs fallback account');
+      console.log("  Using ElevenLabs fallback account");
     }
-    res = await callElevenLabs(apiKey2, script);
+    res = await callElevenLabsWithTimestamps(apiKey2, script);
   }
 
   if (!res || !res.ok) {
-    const body = res ? await res.text() : 'no API key available';
-    console.warn(`  ⚠ ElevenLabs error ${res?.status ?? '—'}: ${body} — video will have no narration`);
-    return null;
+    const body = res ? await res.text() : "no API key available";
+    console.warn(
+      `  ⚠ ElevenLabs error ${res?.status ?? "—"}: ${body} — video will have no narration`,
+    );
+    return { path: null, words: [] };
   }
 
-  const buf = Buffer.from(await res.arrayBuffer());
+  const data = await res.json();
+
+  // Save base64-encoded audio
+  const audioBase64 = data.audio_base64;
+  if (!audioBase64) {
+    console.warn("  ⚠ ElevenLabs: no audio_base64 in response");
+    return { path: null, words: [] };
+  }
+  const buf = Buffer.from(audioBase64, "base64");
   await writeFile(outputPath, buf);
-  console.log(`  Narration saved → ${outputPath}`);
-  return outputPath;
+
+  // Parse word timestamps
+  const words = alignmentToWords(data.alignment);
+  console.log(
+    `  Narration saved → ${outputPath} (${words.length} word timestamps)`,
+  );
+
+  return { path: outputPath, words };
 }

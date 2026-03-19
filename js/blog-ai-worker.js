@@ -70,7 +70,7 @@ export default {
     ctx.waitUntil(
       (async () => {
         await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
-        await maybeGenerateBlogPost(env);
+        await maybeGenerateBlogPost(env, ctx);
       })(),
     );
   },
@@ -96,7 +96,7 @@ export default {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
       try {
-        await generateAndStore(env);
+        await generateAndStore(env, ctx);
         return jsonResponse({ status: "ok", message: "Blog post published." });
       } catch (err) {
         console.error(
@@ -938,7 +938,7 @@ export default {
  * Retry strategy: tries up to 3 times with increasing delays so transient
  * CF Workers AI timeouts don't silently skip an entire day.
  */
-async function maybeGenerateBlogPost(env) {
+async function maybeGenerateBlogPost(env, ctx) {
   const today = todayDateString(); // "YYYY-MM-DD"
   const lastGen = await env.BLOG_AI_KV.get(KV_LAST_GEN_KEY);
 
@@ -962,7 +962,7 @@ async function maybeGenerateBlogPost(env) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await generateAndStore(env);
+      await generateAndStore(env, ctx);
       console.log(
         `Blog AI: post generated successfully (attempt ${attempt}/3).`,
       );
@@ -1120,7 +1120,7 @@ async function resolveWorkingImageForContent(content) {
 /**
  * Calls the Claude API, builds the HTML page, and persists everything to KV.
  */
-async function generateAndStore(env) {
+async function generateAndStore(env, ctx) {
   const now = new Date();
   const activeModel = await resolveAiModel(env.BLOG_AI_KV);
 
@@ -1209,6 +1209,27 @@ async function generateAndStore(env) {
   if (index.length > 200) index.splice(200);
   await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
 
+  // Core write is done — fire all post-publish extras in the background so
+  // the response (or cron return) is not blocked by quiz generation, cache
+  // purges, pings, or Discord. ctx may be undefined in unit tests — guard it.
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(runPostPublishExtras(env, slug, content, activeModel));
+  } else {
+    // Fallback for environments without ctx (e.g. tests): run synchronously
+    await runPostPublishExtras(env, slug, content, activeModel);
+  }
+
+  console.log(
+    `Blog: published post "${content.title}" → /blog/archive/${slug}/`,
+  );
+}
+
+/**
+ * All non-critical post-publish work: cache purges, quiz generation,
+ * quiz page cache bust, WebSub ping, Discord notify.
+ * Runs via ctx.waitUntil() so it never blocks the HTTP response / cron return.
+ */
+async function runPostPublishExtras(env, slug, content, activeModel) {
   // Purge the cached sitemap and RSS feed so they reflect the new post immediately
   // (both workers cache for 1 h — without this, the new post would be invisible
   //  to crawlers until the next cache expiry).
@@ -1218,7 +1239,6 @@ async function generateAndStore(env) {
     cache.delete(new Request("https://thisday.info/rss.xml")),
     cache.delete(new Request("https://thisday.info/news-sitemap.xml")),
     // Optional: ping search engines so they discover sitemap updates faster.
-    // This is safe to fail without breaking publishing.
     fetch("https://thisday.info/search-ping", {
       method: "POST",
       headers: env.SEARCH_PING_SECRET
@@ -1299,10 +1319,6 @@ async function generateAndStore(env) {
       console.warn("Blog: Discord notify failed:", e.message);
     }
   }
-
-  console.log(
-    `Blog: published post "${content.title}" → /blog/archive/${slug}/`,
-  );
 }
 
 // ---------------------------------------------------------------------------

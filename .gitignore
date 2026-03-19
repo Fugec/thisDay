@@ -4,6 +4,9 @@
 .env.*
 *.env
 
+# Local documentation — personal notes, not for the repo
+documentation/
+
 # Wrangler build artifacts
 .wrangler/
 .wrangler-xdg/

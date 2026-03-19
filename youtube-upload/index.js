@@ -18,29 +18,41 @@
  *   ELEVENLABS_API_KEY     (TTS voiceover, 10k chars/month free)
  *   REUPLOAD_SLUGS         (optional: force re-upload, comma-separated)
  *   YOUTUBE_PRIVACY        (optional: private or public, default public)
+ *   USE_AI_IMAGE           (optional: true = AI-generated background, default false)
  */
 
 import "dotenv/config";
 import { unlinkSync } from "fs";
-import { getPostIndex, getDidYouKnow, getQuickFacts, updateIndexEntry, deleteIndexEntry } from "./lib/kv.js";
+import {
+  getPostIndex,
+  getDidYouKnow,
+  getQuickFacts,
+  updateIndexEntry,
+  deleteIndexEntry,
+} from "./lib/kv.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
 import { uploadToYoutube } from "./lib/youtube.js";
 import { getUploaded, markUploaded } from "./lib/tracker.js";
 import { getMusicPath } from "./lib/music.js";
-import { generateNarration, buildNarrationScript } from "./lib/elevenlabs.js";
+import { notifyUpload } from "./lib/notify.js";
+import {
+  generateNarration,
+  buildNarrationScript,
+  buildNarrationParts,
+} from "./lib/elevenlabs.js";
 
 /**
  * Deletes the broken post from KV, then calls POST /blog/publish to generate
  * a fresh article (same date slug, new topic, guaranteed real image).
  * Waits 60 s for the worker to finish, then returns the new post entry.
- * Returns null if BLOG_WORKER_URL / PUBLISH_SECRET are not configured.
+ * Returns null if BLOG_WORKER_URL / YOUTUBE_REGEN_SECRET are not configured.
  */
 async function triggerArticleRegen(slug) {
   const workerUrl = process.env.BLOG_WORKER_URL?.replace(/\/$/, "");
-  const secret = process.env.PUBLISH_SECRET;
+  const secret = process.env.YOUTUBE_REGEN_SECRET;
   if (!workerUrl || !secret) {
     console.warn(
-      "  ⚠ BLOG_WORKER_URL / PUBLISH_SECRET not set — cannot regenerate article.",
+      "  ⚠ BLOG_WORKER_URL / YOUTUBE_REGEN_SECRET not set — cannot regenerate article.",
     );
     return null;
   }
@@ -66,10 +78,14 @@ async function triggerArticleRegen(slug) {
   const fresh = await getPostIndex();
   const newPost = fresh.find((p) => p.slug === slug);
   if (!newPost) {
-    console.warn(`  ⚠ New post for "${slug}" not found in index after regeneration.`);
+    console.warn(
+      `  ⚠ New post for "${slug}" not found in index after regeneration.`,
+    );
     return null;
   }
-  console.log(`  ✓ New post ready: "${newPost.title}" — image: ${newPost.imageUrl}`);
+  console.log(
+    `  ✓ New post ready: "${newPost.title}" — image: ${newPost.imageUrl}`,
+  );
   return newPost;
 }
 
@@ -122,12 +138,12 @@ async function main() {
     return;
   }
 
-  // Background music — user places assets/background.mp3 once (YouTube Audio Library)
-  const bgMusicPath = getMusicPath();
-
   for (let post of pending) {
     console.log(`\n→ ${post.title}`);
+    // Per-post music — always uses assets/background.mp3
+    const bgMusicPath = getMusicPath();
     let videoPath;
+    let videoCuts = [];
     let narrationPath;
     try {
       // ── ElevenLabs TTS narration ───────────────────────────────────────────
@@ -149,26 +165,47 @@ async function main() {
       }
 
       const script = buildNarrationScript(post, contentItems);
-      narrationPath = await generateNarration(post.slug, script);
+      const { path: narrPath, words: narrWords } = await generateNarration(
+        post.slug,
+        script,
+      );
+      narrationPath = narrPath;
 
       // ── Image pre-check ────────────────────────────────────────────────────
-      // Validate stored imageUrl; find a Wikipedia replacement if broken.
+      // When USE_AI_IMAGE is set we skip the Wikipedia check (AI generates its own).
+      // Otherwise validate stored imageUrl; find a Wikipedia replacement if broken.
       // Throws IMAGE_UNAVAILABLE if no working image exists — post is skipped.
-      console.log("  Checking image...");
-      const { imageUrl: resolvedImage, wasReplaced } = await resolvePostImage(post);
-      if (wasReplaced) {
-        post = { ...post, imageUrl: resolvedImage };
-        await updateIndexEntry(post.slug, { imageUrl: resolvedImage });
-        console.log(`  ✓ KV index updated with replacement image`);
+      const useAiImage = process.env.USE_AI_IMAGE === "true";
+      if (!useAiImage) {
+        console.log("  Checking image...");
+        const { imageUrl: resolvedImage, wasReplaced } =
+          await resolvePostImage(post);
+        if (wasReplaced) {
+          post = { ...post, imageUrl: resolvedImage };
+          await updateIndexEntry(post.slug, { imageUrl: resolvedImage });
+          console.log(`  ✓ KV index updated with replacement image`);
+        } else {
+          console.log("  ✓ Image OK");
+        }
       } else {
-        console.log("  ✓ Image OK");
+        console.log("  AI image mode — skipping Wikipedia image check.");
       }
 
       // ── Generate video ─────────────────────────────────────────────────────
-      // Image: validated background from resolvePostImage()
+      // Image: AI-generated (useAiImage=true) or validated Wikipedia background
       // Audio: narration (full vol) + background music (15% vol)
+      // Captions: word-synced animated drawtext (when timestamps available)
       console.log("  Generating video...");
-      videoPath = await generateVideo(post, { narrationPath, bgMusicPath });
+      const videoResult = await generateVideo(post, {
+        narrationPath,
+        bgMusicPath,
+        words: narrWords,
+        useAiImage,
+        contentItems,
+        narrationParts: buildNarrationParts(post, contentItems),
+      });
+      videoPath = videoResult.path;
+      videoCuts = videoResult.cuts ?? [];
       console.log(`  Video ready: ${videoPath}`);
 
       // ── Upload to YouTube ──────────────────────────────────────────────────
@@ -179,7 +216,7 @@ async function main() {
         continue;
       }
       console.log("  Uploading to YouTube...");
-      const youtubeId = await uploadToYoutube(videoPath, post);
+      const youtubeId = await uploadToYoutube(videoPath, post, videoCuts);
       console.log(`  ✓ https://youtube.com/shorts/${youtubeId}`);
 
       // Record in KV tracker (overwrites previous entry for re-uploads)
@@ -188,8 +225,9 @@ async function main() {
       console.log(
         `  Tracker updated: youtube:uploaded[${post.slug}] (privacy=${privacy})`,
       );
+      await notifyUpload(post, youtubeId);
     } catch (err) {
-      if (err.message?.startsWith('IMAGE_UNAVAILABLE')) {
+      if (err.message?.startsWith("IMAGE_UNAVAILABLE")) {
         console.error(`  ✗ No working image for "${post.title}"`);
         const newPost = await triggerArticleRegen(post.slug);
         if (newPost) {

@@ -9,11 +9,12 @@ name: Blog Post Failsafe
 #   CF_ACCOUNT_ID        — Cloudflare account ID
 #   CF_API_TOKEN         — Cloudflare API token (KV read permission)
 #   CF_KV_NAMESPACE_ID   — KV namespace ID for BLOG_AI_KV
-#   PUBLISH_SECRET       — The PUBLISH_SECRET Cloudflare Worker secret
+#   PUBLISH_SECRET       — Bearer token for POST /blog/publish (blog failsafe)
+#   YOUTUBE_REGEN_SECRET — Bearer token for POST /blog/publish (YouTube pipeline)
 
 on:
   schedule:
-    - cron: '0 1 * * *'   # 01:00 UTC — 29 min after blog worker cron at 00:31
+    - cron: "0 1 * * *" # 01:00 UTC — 29 min after blog worker cron at 00:31
 
   # Allow manual trigger from the Actions tab
   workflow_dispatch:

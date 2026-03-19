@@ -46,7 +46,7 @@ export function siteNav({
     <a class="navbar-brand" href="/">thisDay.</a>
     <div class="form-check form-switch d-lg-none me-2">
       <input class="form-check-input" type="checkbox" id="${switchIdMobile}" aria-label="Toggle dark mode"/>
-      <label class="form-check-label" for="${switchIdMobile}"><i class="bi bi-brightness-high-fill" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
+      <label class="form-check-label" for="${switchIdMobile}"><i class="bi bi-brightness-high-fill theme-icon-sun" style="color:#fff;font-size:1.1rem;margin-left:4px"></i><i class="bi bi-moon-fill theme-icon-moon" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
     </div>
     <div class="collapse navbar-collapse">
       <ul class="navbar-nav ms-auto">
@@ -54,7 +54,7 @@ export function siteNav({
         <li class="nav-item d-flex align-items-center">
           <div class="form-check form-switch d-none d-lg-block me-2">
             <input class="form-check-input" type="checkbox" id="${switchIdDesktop}" aria-label="Toggle dark mode"/>
-            <label class="form-check-label" for="${switchIdDesktop}" style="color:#fff">Dark Mode</label>
+            <label class="form-check-label" for="${switchIdDesktop}" style="color:#fff"><i class="bi bi-brightness-high-fill theme-icon-sun" style="font-size:1.1rem"></i><i class="bi bi-moon-fill theme-icon-moon" style="font-size:1.1rem"></i></label>
           </div>
         </li>
       </ul>

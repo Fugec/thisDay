@@ -498,7 +498,7 @@ export default {
       <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
       <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1;flex-shrink:0;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:flex-end">&times;</button>
     </div>
-    <div style="overflow-y:auto;padding:16px 20px 32px">
+    <div id="tdq-scroll-body" style="overflow-y:auto;padding:16px 20px 32px">
       <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
       <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
       <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:#f59e0b;margin-bottom:16px">0 of 5 answered</div>
@@ -521,6 +521,8 @@ export default {
     .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
     #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important;display:flex!important}
+    #tdq-scroll-body{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.2) transparent}#tdq-scroll-body::-webkit-scrollbar{width:4px}#tdq-scroll-body::-webkit-scrollbar-thumb{background:rgba(0,0,0,.2);border-radius:4px}
+    body.dark-theme #tdq-scroll-body{scrollbar-color:rgba(255,255,255,.15) transparent}body.dark-theme #tdq-scroll-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15)}
     .tdq-cta-sub{color:#6c757d}body.dark-theme .tdq-cta-sub{color:#fff}
     body.dark-theme #tdq-header{border-bottom-color:rgba(255,255,255,.1)}
   </style>
@@ -2428,7 +2430,9 @@ ${analysisBadItems}
     .tdq-next-btn{width:100%;margin-top:14px;padding:11px;border:none;border-radius:8px;background:#f59e0b;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:none;transition:background .15s}
     .tdq-next-btn:hover{background:#d97706}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
-    #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important}
+    #tdq-popup{transition:transform .3s ease;transform:translateY(100%);scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.2) transparent}.tdq-popup-open{transform:translateY(0)!important}
+    #tdq-popup::-webkit-scrollbar{width:4px}#tdq-popup::-webkit-scrollbar-thumb{background:rgba(0,0,0,.2);border-radius:4px}
+    body.dark-theme #tdq-popup{scrollbar-color:rgba(255,255,255,.15) transparent}body.dark-theme #tdq-popup::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15)}
     body.dark-theme #tdq-header{background:var(--card-bg,#1e293b);border-bottom-color:rgba(255,255,255,.1)}
   </style>
 

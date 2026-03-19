@@ -291,33 +291,19 @@
   </head>
 
   <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <nav class="navbar navbar-expand-lg navbar-dark">
       <div class="container-fluid">
         <a class="navbar-brand" href="/">thisDay.</a>
-
-        <div class="form-check form-switch theme-switch-mobile d-lg-none me-2">
-          <input
-            class="form-check-input"
-            type="checkbox"
-            id="themeSwitchMobile"
-            aria-label="Toggle dark mode"
-          />
-          <label class="form-check-label" for="themeSwitchMobile">
-            <i class="bi bi-brightness-high-fill"></i>
-          </label>
+        <div class="form-check form-switch d-lg-none me-2">
+          <input class="form-check-input" type="checkbox" id="tsm" aria-label="Toggle dark mode"/>
+          <label class="form-check-label" for="tsm"><i class="bi bi-brightness-high-fill theme-icon-sun" style="color:#fff;font-size:1.1rem;margin-left:4px"></i><i class="bi bi-moon-fill theme-icon-moon" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
         </div>
-
-        <div class="collapse navbar-collapse" id="navbarNav">
+        <div class="collapse navbar-collapse">
           <ul class="navbar-nav ms-auto">
             <li class="nav-item d-flex align-items-center">
-              <div class="form-check form-switch theme-switch-desktop d-none d-lg-block me-2">
-                <input
-                  class="form-check-input"
-                  type="checkbox"
-                  id="themeSwitchDesktop"
-                  aria-label="Toggle dark mode"
-                />
-                <label class="form-check-label" for="themeSwitchDesktop">Dark Mode</label>
+              <div class="form-check form-switch d-none d-lg-block me-2">
+                <input class="form-check-input" type="checkbox" id="tsd" aria-label="Toggle dark mode"/>
+                <label class="form-check-label" for="tsd" style="color:#fff"><i class="bi bi-brightness-high-fill theme-icon-sun" style="font-size:1.1rem"></i><i class="bi bi-moon-fill theme-icon-moon" style="font-size:1.1rem"></i></label>
               </div>
             </li>
           </ul>
@@ -658,8 +644,8 @@
     <script>
       document.getElementById("currentYear").textContent = new Date().getFullYear();
 
-      const themeSwitchDesktop = document.getElementById("themeSwitchDesktop");
-      const themeSwitchMobile = document.getElementById("themeSwitchMobile");
+      const tsd = document.getElementById("tsd");
+      const tsm = document.getElementById("tsm");
 
       const applyTheme = (isDark) => {
         document.body.classList.toggle("dark-theme", isDark);
@@ -671,21 +657,21 @@
           window.matchMedia("(prefers-color-scheme: dark)").matches &&
           localStorage.getItem("darkTheme") !== "false");
       applyTheme(isDark);
-      if (themeSwitchDesktop) themeSwitchDesktop.checked = isDark;
-      if (themeSwitchMobile) themeSwitchMobile.checked = isDark;
+      if (tsd) tsd.checked = isDark;
+      if (tsm) tsm.checked = isDark;
 
-      if (themeSwitchDesktop) {
-        themeSwitchDesktop.addEventListener("change", () => {
-          applyTheme(themeSwitchDesktop.checked);
-          localStorage.setItem("darkTheme", String(themeSwitchDesktop.checked));
-          if (themeSwitchMobile) themeSwitchMobile.checked = themeSwitchDesktop.checked;
+      if (tsd) {
+        tsd.addEventListener("change", () => {
+          applyTheme(tsd.checked);
+          localStorage.setItem("darkTheme", String(tsd.checked));
+          if (tsm) tsm.checked = tsd.checked;
         });
       }
-      if (themeSwitchMobile) {
-        themeSwitchMobile.addEventListener("change", () => {
-          applyTheme(themeSwitchMobile.checked);
-          localStorage.setItem("darkTheme", String(themeSwitchMobile.checked));
-          if (themeSwitchDesktop) themeSwitchDesktop.checked = themeSwitchMobile.checked;
+      if (tsm) {
+        tsm.addEventListener("change", () => {
+          applyTheme(tsm.checked);
+          localStorage.setItem("darkTheme", String(tsm.checked));
+          if (tsd) tsd.checked = tsm.checked;
         });
       }
     </script>

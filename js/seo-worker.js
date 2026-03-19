@@ -958,7 +958,7 @@ body.dark-theme #read-progress{background:#60a5fa}
 </head>
 <body>
 <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-${siteNav({ todayLink: `/events/${todayMonthSlug}/${todayDayNum}/` })}
+${siteNav()}
 <main class="container my-4" style="max-width:860px">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
@@ -3490,7 +3490,7 @@ body.dark-theme .qsc-rec-card{border-color:rgba(255,255,255,.1)}
 </style>
 </head>
 <body>
-${siteNav({ todayLink: `/events/${todaySlug}/${todayDay}/` })}
+${siteNav()}
 <main class="container my-4" style="max-width:720px">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">

@@ -25,30 +25,34 @@
   //   /blog/archive/[slug]/   → individual post pages
   //   /blog/publish           → manual trigger endpoint
   // The main SEO worker (seo-worker.js) keeps handling everything else.
-  "routes": [
-    { "pattern": "thisday.info/blog/*", "zone_name": "thisday.info" }
-  ],
+  "routes": [{ "pattern": "thisday.info/blog/*", "zone_name": "thisday.info" }],
 
   // Cron trigger — runs every day at 00:31 UTC (30 min after the main data fetch at 00:01 UTC).
   // The worker publishes a new post every day based on the KV-stored last-run date.
   "triggers": {
-    "crons": ["31 0 * * *"]
+    "crons": ["31 0 * * *"],
   },
 
   // KV namespaces — blog posts/index and shared events/quiz cache.
   "kv_namespaces": [
     {
       "binding": "BLOG_AI_KV",
-      "id": "5173c34a7bd04cde9988c0e89d77bb6e"
+      "id": "5173c34a7bd04cde9988c0e89d77bb6e",
     },
     {
       "binding": "EVENTS_KV",
-      "id": "39d7ce85d93a49c5bb42ee6f2416b1e0"
-    }
+      "id": "39d7ce85d93a49c5bb42ee6f2416b1e0",
+    },
   ],
 
   // Cloudflare Workers AI — free tier, no external key required.
   "ai": {
-    "binding": "AI"
-  }
+    "binding": "AI",
+  },
+
+  // Secrets (set via `wrangler secret put <NAME> --config wrangler-blog.jsonc`):
+  //   PUBLISH_SECRET          — authorises POST /blog/publish
+  //   YOUTUBE_REGEN_SECRET    — authorises POST /blog/publish from youtube-upload
+  //   SEARCH_PING_SECRET      — authorises POST /search-ping
+  //   DISCORD_WEBHOOK_URL     — optional, Discord webhook for publish notifications
 }

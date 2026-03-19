@@ -83,10 +83,16 @@ export default {
     const path = url.pathname.replace(/\/$/, "") || "/";
 
     // Manual trigger (POST /blog/publish)
-    // Requires:  Authorization: Bearer <PUBLISH_SECRET>
+    // Requires:  Authorization: Bearer <PUBLISH_SECRET>  (blog failsafe)
+    //        or  Authorization: Bearer <YOUTUBE_REGEN_SECRET>  (YouTube regen)
     if (path === "/blog/publish" && request.method === "POST") {
       const auth = request.headers.get("Authorization") ?? "";
-      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+      const validPublish =
+        env.PUBLISH_SECRET && auth === `Bearer ${env.PUBLISH_SECRET}`;
+      const validYtRegen =
+        env.YOUTUBE_REGEN_SECRET &&
+        auth === `Bearer ${env.YOUTUBE_REGEN_SECRET}`;
+      if (!validPublish && !validYtRegen) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
       try {
@@ -820,12 +826,47 @@ export default {
           </div>
 
           <!-- Aftermath -->`;
-          return htmlResponse(
-            patchedHtml.replace(
-              /<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/,
-              ytIframe,
-            ),
+          let ytHtml = patchedHtml.replace(
+            /<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/,
+            ytIframe,
           );
+          // Inject VideoObject JSON-LD schema for SEO
+          if (!ytHtml.includes('"@type":"VideoObject"')) {
+            // Extract title and description from existing NewsArticle schema or meta tags
+            const titleMatch = ytHtml.match(
+              /<meta property="og:title" content="([^"]+)"/,
+            );
+            const descMatch = ytHtml.match(
+              /<meta(?:\s+(?:name="description"|property="og:description"))\s+content="([^"]+)"/,
+            );
+            const postTitle = titleMatch ? titleMatch[1] : slug;
+            const postDesc = descMatch ? descMatch[1] : "";
+            const videoSchema = {
+              "@context": "https://schema.org",
+              "@type": "VideoObject",
+              name: postTitle,
+              description: postDesc,
+              thumbnailUrl: `https://img.youtube.com/vi/${ytEntry.youtubeId}/maxresdefault.jpg`,
+              uploadDate: ytEntry.uploadedAt ?? new Date().toISOString(),
+              duration: "PT45S",
+              embedUrl: `https://www.youtube.com/embed/${ytEntry.youtubeId}`,
+              contentUrl: `https://www.youtube.com/shorts/${ytEntry.youtubeId}`,
+              publisher: {
+                "@type": "Organization",
+                name: "thisDay.info",
+                url: "https://thisday.info",
+                logo: {
+                  "@type": "ImageObject",
+                  url: "https://thisday.info/icons/android-chrome-192x192.png",
+                },
+              },
+            };
+            ytHtml = ytHtml.replace(
+              "</head>",
+              `<script type="application/ld+json">${JSON.stringify(videoSchema)}<\/script></head>`,
+            );
+          }
+          return htmlResponse(ytHtml);
         }
         // Inline quiz JSON so popup opens instantly (no fetch round-trip)
         const inlineQuizRaw = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
@@ -1083,15 +1124,21 @@ async function generateAndStore(env) {
   const now = new Date();
   const activeModel = await resolveAiModel(env.BLOG_AI_KV);
 
-  // Collect titles already published this month so the AI avoids duplicates
+  // Collect titles already published (all-time, capped at 50) so the AI avoids duplicates
   const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
   const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
   const thisMonthPrefix = now.toISOString().slice(0, 7); // "YYYY-MM"
   const takenThisMonth = existingIndex
     .filter((e) => e.publishedAt && e.publishedAt.startsWith(thisMonthPrefix))
     .map((e) => e.title);
+  // Full dedup list: most recent 50 posts across all time
+  const takenAllTime = existingIndex
+    .slice()
+    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
+    .slice(0, 50)
+    .map((e) => e.title);
 
-  let content = await callWorkersAI(env.AI, now, takenThisMonth, activeModel);
+  let content = await callWorkersAI(env.AI, now, takenAllTime, activeModel);
 
   // Validate image URLs and fetch alternatives if broken.
   // If no working image is found, regenerate once with a different topic.
@@ -1104,7 +1151,7 @@ async function generateAndStore(env) {
     }
 
     if (attempt < MAX_CONTENT_ATTEMPTS) {
-      const avoid = [...takenThisMonth, content.title].filter(Boolean);
+      const avoid = [...takenAllTime, content.title].filter(Boolean);
       console.warn(
         `Blog AI: no valid image for \"${content.title}\". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
       );
@@ -1231,6 +1278,26 @@ async function generateAndStore(env) {
     console.log("Blog: WebSub hub pinged");
   } catch (e) {
     console.error("Blog: WebSub ping failed:", e);
+  }
+
+  // Notify Discord that a new post has been published (silent no-op if not configured).
+  // Set DISCORD_WEBHOOK_URL via:  npx wrangler secret put DISCORD_WEBHOOK_URL --config wrangler-blog.jsonc
+  if (env.DISCORD_WEBHOOK_URL) {
+    try {
+      const postUrl = `https://thisday.info/blog/${slug}/`;
+      const message =
+        `📰 **New blog post published**\n` +
+        `📖 ${content.title}\n` +
+        `🌐 ${postUrl}`;
+      await fetch(env.DISCORD_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: message }),
+      });
+      console.log("Blog: Discord notified");
+    } catch (e) {
+      console.warn("Blog: Discord notify failed:", e.message);
+    }
   }
 
   console.log(
@@ -1429,7 +1496,7 @@ async function callWorkersAI(
 
   const avoidSection =
     takenThisMonth.length > 0
-      ? `\nThese topics have already been covered this month — do NOT write about any of them:\n${takenThisMonth.map((t) => `- ${t}`).join("\n")}\nChoose a completely different event.\n`
+      ? `\nThese topics have already been covered recently — do NOT write about any of them:\n${takenThisMonth.map((t) => `- ${t}`).join("\n")}\nChoose a completely different event.\n`
       : "";
 
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.

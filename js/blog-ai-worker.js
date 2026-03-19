@@ -1278,8 +1278,8 @@ async function runPostPublishExtras(env, slug, content, activeModel) {
       if (sp) {
         const mPad = String(sp.monthIndex + 1).padStart(2, "0");
         const dPad = String(sp.day).padStart(2, "0");
-        await env.EVENTS_KV.delete(`quiz-page-v17:${mPad}-${dPad}`);
-        console.log(`Blog: busted quiz-page-v17:${mPad}-${dPad} cache`);
+        await env.EVENTS_KV.delete(`quiz-page-v19:${mPad}-${dPad}`);
+        console.log(`Blog: busted quiz-page-v19:${mPad}-${dPad} cache`);
       }
     } catch (e) {
       console.error("Blog: quiz page cache bust failed:", e);

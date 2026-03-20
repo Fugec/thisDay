@@ -94,6 +94,27 @@ export async function getPostContent(slug) {
     .slice(0, 800);
 }
 
+/**
+ * Extracts meaningful article paragraphs from a post's HTML stored in KV.
+ * Returns up to ~1500 chars of clean prose, skipping boilerplate UI text.
+ *
+ * @param {string} slug
+ * @returns {Promise<string|null>}
+ */
+export async function getArticleText(slug) {
+  const raw = await kvGet(`post:${slug}`);
+  if (!raw) return null;
+
+  const paras = [...raw.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map(([, v]) =>
+      decodeEntities(v.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()),
+    )
+    .filter((s) => s.length > 60 && s.length < 800)
+    .slice(0, 8);
+
+  return paras.length > 0 ? paras.join(' ').slice(0, 2000) : null;
+}
+
 function decodeEntities(str) {
   return str
     .replace(/&amp;/g, '&')

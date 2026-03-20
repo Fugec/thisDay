@@ -1,3 +1,7 @@
+// Copyright (c) 2024–present Armin Kapetanovic. All Rights Reserved.
+// Proprietary — see LICENSE in the repository root.
+// Unauthorized use, reproduction, or deployment is prohibited.
+
 const calendarGrid = document.getElementById("calendarGrid");
 const currentMonthYearDisplay = document.getElementById("currentMonthYear");
 const modalDate = document.getElementById("modalDate");
@@ -1849,7 +1853,7 @@ function renderFilteredItems(itemsToRender) {
                             data-url="${event.sourceUrl || ""}">
                             <i class="bi bi-share"></i> Share
                           </button>
-                          <a href="${waUrl}" class="btn btn-sm btn-outline-success" target="_blank" rel="noopener noreferrer">
+                          <a href="${waUrl}" class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener noreferrer">
                             <i class="bi bi-whatsapp"></i> WhatsApp
                           </a>
                         </div>
@@ -1954,6 +1958,7 @@ async function showEventDetails(
     const totalEvents = currentDayAllItems.length;
     const exploredLabel =
       daysExplored === 1 ? "1 day explored" : `${daysExplored} days explored`;
+    const mSlug = monthNames[month - 1].toLowerCase();
     modalBodyContent.innerHTML = `
     <div class="modal-header-content">
         ${filterButtonsHtml}
@@ -1964,6 +1969,14 @@ async function showEventDetails(
     </div>
     <div id="modal-events-list">
         </div>
+    <div class="mt-4 pt-3 border-top">
+      <p class="text-muted mb-2" style="font-size:0.8rem;">Explore ${monthNames[month - 1]} ${day}</p>
+      <div class="d-flex flex-wrap gap-2">
+        <a href="/born/${mSlug}/${day}/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-person-heart me-1"></i>Famous Birthdays</a>
+        <a href="/died/${mSlug}/${day}/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-flower1 me-1"></i>Notable Deaths</a>
+        <a href="/quiz/${mSlug}/${day}/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-patch-question me-1"></i>Take the Quiz</a>
+      </div>
+    </div>
 `;
     modalBodyContent.querySelectorAll(".filter-btn").forEach((button) => {
       button.addEventListener("click", (event) => {

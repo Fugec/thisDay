@@ -6,4 +6,5 @@ Disallow: /search-ping
 Disallow: /warmup
 Sitemap: https://thisday.info/sitemap.xml
 Sitemap: https://thisday.info/sitemap-generated.xml
+Sitemap: https://thisday.info/sitemap-people.xml
 Sitemap: https://thisday.info/news-sitemap.xml

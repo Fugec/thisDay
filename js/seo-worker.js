@@ -2344,7 +2344,11 @@ async function handleFetchRequest(request, env, ctx) {
     return new Response(
       [
         "User-agent: *",
-        "Allow: /",
+        "Disallow: /blog/publish",
+        "Disallow: /blog/preload-quizzes",
+        "Disallow: /blog/quiz-debug/",
+        "Disallow: /search-ping",
+        "Disallow: /warmup",
         "",
         `Sitemap: ${url.origin}/sitemap.xml`,
         `Sitemap: ${url.origin}/sitemap-generated.xml`,

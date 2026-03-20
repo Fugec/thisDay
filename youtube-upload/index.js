@@ -27,9 +27,11 @@ import {
   getPostIndex,
   getDidYouKnow,
   getQuickFacts,
+  getArticleText,
   updateIndexEntry,
   deleteIndexEntry,
 } from "./lib/kv.js";
+import { polishNarrationItems } from "./lib/narration-expert.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
 import { uploadToYoutube } from "./lib/youtube.js";
 import { getUploaded, markUploaded } from "./lib/tracker.js";
@@ -164,7 +166,14 @@ async function main() {
         );
       }
 
-      const script = buildNarrationScript(post, contentItems);
+      // ── Narration expert: polish DYK/Quick Facts for engaging TTS ─────────
+      // Uses full article text as context. Falls back to originals on any error.
+      const articleText = contentItems ? await getArticleText(post.slug).catch(() => null) : null;
+      const narrationItems = contentItems
+        ? await polishNarrationItems(post.title, contentItems, articleText).catch(() => contentItems)
+        : null;
+
+      const script = buildNarrationScript(post, narrationItems ?? contentItems);
       const { path: narrPath, words: narrWords } = await generateNarration(
         post.slug,
         script,
@@ -202,7 +211,7 @@ async function main() {
         words: narrWords,
         useAiImage,
         contentItems,
-        narrationParts: buildNarrationParts(post, contentItems),
+        narrationParts: buildNarrationParts(post, narrationItems ?? contentItems),
       });
       videoPath = videoResult.path;
       videoCuts = videoResult.cuts ?? [];

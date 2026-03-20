@@ -7,6 +7,10 @@
 # Local documentation — personal notes, not for the repo
 documentation/
 
+# Tests — local only, not deployed or committed
+tests/
+package.json
+
 # Wrangler build artifacts
 .wrangler/
 .wrangler-xdg/

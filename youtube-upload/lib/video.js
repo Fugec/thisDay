@@ -23,15 +23,21 @@
 
 import sharp from "sharp";
 import ffmpeg from "fluent-ffmpeg";
-import { mkdirSync, writeFileSync, unlinkSync } from "fs";
+import { mkdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import { generateAIImageBatch } from "./ai-image.js";
+import { reviewPromptsWithHistoryExpert } from "./history-expert.js";
 
 const TMP = "./tmp";
 const W = 1080;
 const H = 1920;
-/** Number of AI-generated scenes per video. HuggingFace free tier: ~1000/day. */
-const N_SCENES = 5;
+/**
+ * Number of AI-generated scenes per video.
+ * Keep at 3 — Zero GPU free tier gives ~3.5 min/day GPU time;
+ * each WAN 2.2 I2V clip consumes ~50s, so 3 clips ≈ 2.5 min, safely within limit.
+ * HuggingFace FLUX free-tier image generation: 3 images/video is negligible.
+ */
+const N_SCENES = 3;
 
 /**
  * Builds an FFmpeg zoompan filter string for a single scene (Ken Burns effect).
@@ -453,17 +459,183 @@ async function downloadImageBuffer(url) {
 // ---------------------------------------------------------------------------
 
 /**
- * Builds a cinematic Shorts prompt from the post title.
- * Strips the date suffix (e.g. "— March 19, 2003") before sending to the model.
+ * Returns period-accurate visual context (clothing, weapons, architecture,
+ * technology) for a given year so the AI model renders the correct era.
+ * Extracted from the title's date suffix before it is stripped.
+ *
+ * @param {string} rawTitle  Full title including "— Month DD, YYYY" suffix
+ * @returns {{ era: string, style: string }}
+ *   era   — human-readable period name used inside the prompt sentence
+ *   style — comma-separated descriptor list appended to every scene prompt
  */
-function buildAiImagePrompt(title) {
-  const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
-  return (
-    `Cinematic dramatic historical photograph of ${event}. ` +
-    `Epic wide shot, golden hour or dramatic overcast lighting, ` +
-    `high detail, photorealistic, award-winning documentary photography, ` +
-    `vertical 9:16 portrait format, no text, no logos.`
-  );
+function getHistoricalEraContext(rawTitle) {
+  const m = rawTitle.match(/\b(\d{4})$/);
+  const year = m ? parseInt(m[1], 10) : null;
+
+  if (year === null)
+    return {
+      era: "historical",
+      style:
+        "period-accurate clothing, weapons, architecture and technology matching the depicted event",
+    };
+
+  if (year < 500)
+    return {
+      era: "ancient",
+      style:
+        "Roman or Greek soldiers in lorica segmentata or bronze hoplite armor, " +
+        "linen tunics, sandals, gladius swords, spears and round shields, " +
+        "marble columns, aqueducts, stone forums, torches for lighting",
+    };
+  if (year < 1000)
+    return {
+      era: "early medieval",
+      style:
+        "chainmail hauberks, conical nasal helmets, kite shields, " +
+        "Viking longships, Byzantine mosaics, crude iron weapons, " +
+        "thatched-roof timber longhouses, wool tunics and cloaks",
+    };
+  if (year < 1300)
+    return {
+      era: "medieval",
+      style:
+        "knights in chainmail and surcoats, great helms, heater shields, " +
+        "arming swords and lances, stone castle battlements, " +
+        "peasants in rough woolen tunics, catapults and siege towers, " +
+        "Gothic lancet-arched windows, candlelight interiors",
+    };
+  if (year < 1500)
+    return {
+      era: "late medieval",
+      style:
+        "full plate armor, heraldic surcoats, longbowmen with war arrows, " +
+        "plate-armored knights on barded warhorses, Gothic cathedrals, " +
+        "velvet and fur noble garments, cobblestone market squares, " +
+        "hand-illuminated manuscripts, tallow candles",
+    };
+  if (year < 1700)
+    return {
+      era: "Renaissance / early modern",
+      style:
+        "pikemen in morion helmets and breastplates, musketeers with matchlock arquebuses, " +
+        "doublets with ruffled collars, galleons with square-rigged sails, " +
+        "stone star forts, ornate baroque interiors, flintlock pistols",
+    };
+  if (year < 1800)
+    return {
+      era: "18th century",
+      style:
+        "tricorn hats, powdered wigs, redcoat or blue-coat uniforms with brass buttons, " +
+        "flintlock muskets with socket bayonets, horse-drawn field artillery, " +
+        "tall-masted sailing warships with cannon gun ports, " +
+        "Georgian architecture, oil lanterns",
+    };
+  if (year < 1860)
+    return {
+      era: "early 19th century",
+      style:
+        "Napoleonic shakos or kepi caps, wool frock-coat uniforms, " +
+        "percussion-cap rifles, horse-drawn artillery caissons, " +
+        "civilian top hats and waistcoats, hoop skirts and bonnets, " +
+        "steam locomotives with iron wheels, gas street lamps",
+    };
+  if (year < 1900)
+    return {
+      era: "late 19th century",
+      style:
+        "Victorian frock coats, bustled skirts and corsets, pith helmets, " +
+        "bolt-action magazine rifles, Gatling guns, ironclad warships, " +
+        "horse-drawn carriages, telegraph poles, cast-iron bridges, " +
+        "early incandescent lighting, sepia-toned photographic look",
+    };
+  if (year < 1920)
+    return {
+      era: "World War I",
+      style:
+        "khaki or feldgrau uniforms, flat-topped Brodie or Stahlhelm helmets, " +
+        "puttees wrapped around lower legs, bolt-action Lee-Enfield or Gewehr 98 rifles, " +
+        "muddy trenches with duckboards and sandbags, barbed-wire entanglements, " +
+        "horse cavalry, biplanes, early tank prototypes, artillery craters",
+    };
+  if (year < 1940)
+    return {
+      era: "interwar 1920s–30s",
+      style:
+        "fedoras and double-breasted suits, cloche hats and flapper dresses, " +
+        "Model T and early motor cars, art deco architecture, " +
+        "early radio broadcasting equipment, propeller aircraft, " +
+        "Depression-era breadlines, newsprint typography on storefronts",
+    };
+  if (year < 1946)
+    return {
+      era: "World War II",
+      style:
+        "olive-drab M1 helmet or German Stahlhelm, WWII wool uniforms, " +
+        "M1 Garand rifle or Kar98k, Sherman tank or Panzer IV, " +
+        "bombed-out rubble buildings, barbed wire and sandbag fortifications, " +
+        "period-correct 1940s aircraft — P-51 Mustang or Bf 109, " +
+        "Navy vessels with Measure 21 camouflage paint",
+    };
+  if (year < 1960)
+    return {
+      era: "1950s Cold War",
+      style:
+        "conservative 1950s suits with narrow lapels, pencil skirts and cat-eye glasses, " +
+        "crew cuts, chrome-bumper American automobiles, early Bakelite television sets, " +
+        "Korean War M1 helmets and M1 Garands if military, suburban ranch-style homes, " +
+        "drive-in theaters, soda fountain counters",
+    };
+  if (year < 1970)
+    return {
+      era: "1960s",
+      style:
+        "slim-lapel mod suits, miniskirts and go-go boots, beehive hairstyles, " +
+        "NASA Apollo-era spacesuits if applicable, M16 rifles and tiger-stripe jungle fatigues for Vietnam, " +
+        "muscle cars and Volkswagen Beetles, CRT television sets, rotary telephones, " +
+        "early IBM mainframe computers",
+    };
+  if (year < 1980)
+    return {
+      era: "1970s",
+      style:
+        "wide-lapel leisure suits, bell-bottom trousers, earth-tone polyester, " +
+        "afros and long feathered hair, 8-track tape players, " +
+        "Vietnam-era or Cold War military gear, early home video cameras, " +
+        "disco-era neon signage, wood-paneled station wagons",
+    };
+  if (year < 1990)
+    return {
+      era: "1980s",
+      style:
+        "power shoulders and neon colors, parachute pants and leg warmers, " +
+        "Sony Walkman cassette players, Cold War-era M16A2 rifles and MILES gear, " +
+        "early Apple Macintosh computers, VHS video cassettes, " +
+        "MTV-era aesthetics, boxy sedans and hatchbacks",
+    };
+  if (year < 2000)
+    return {
+      era: "1990s",
+      style:
+        "grunge flannel shirts and Doc Martens, baggy jeans and pagers, " +
+        "early brick mobile phones, CD players and cassette Walkmans, " +
+        "post-Cold War ACU or woodland camouflage military uniforms, " +
+        "CRT monitors and early World Wide Web browsers",
+    };
+  if (year < 2010)
+    return {
+      era: "early 2000s",
+      style:
+        "low-rise jeans and Von Dutch trucker hats, flip phones and early iPods, " +
+        "post-9/11 ACU camouflage with MOLLE vests and Interceptor body armor, " +
+        "early flat-screen televisions, SUVs with chrome rims",
+    };
+  return {
+    era: "contemporary",
+    style:
+      "modern urban clothing, smartphones and tablets, contemporary architecture, " +
+      "modern military MultiCam or Crye Precision gear if applicable, " +
+      "electric vehicles, LED lighting, high-rise glass buildings",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -471,40 +643,51 @@ function buildAiImagePrompt(title) {
 // ---------------------------------------------------------------------------
 
 /**
- * Builds 3 distinct cinematic AI image prompts — one per narration section:
- *   Scene 1 — wide establishing shot of the historical event
- *   Scene 2 — intense key moment drawn from the first DYK fact
- *   Scene 3 — aftermath, legacy, or reflective close-up
+ * Builds 3 distinct cinematic AI image prompts — one per narration section,
+ * each anchored to the correct historical period (clothing, weapons, architecture).
+ *
+ *   Scene 1 — epic wide establishing shot of the event location / forces
+ *   Scene 2 — human-focused action or crowd moment at the peak of the event
+ *   Scene 3 — decisive aftermath or legacy: ruins, monuments, environment
+ *
+ * Reducing from 5 → 3 keeps HuggingFace FLUX usage well within the free tier
+ * and leaves Zero GPU headroom for future WAN 2.2 I2V animation (3 clips ≈ 2.5 min/day).
  *
  * @param {string} title
  * @param {string[]|null} contentItems  DYK bullets / Quick Facts rows
  * @returns {string[]}  3 prompts
  */
 function buildScenePrompts(title, contentItems) {
+  const { era, style } = getHistoricalEraContext(title);
   const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
+  const facts = (contentItems || []).map((f) => (f || "").slice(0, 120));
+
   const base =
-    "ultra-realistic historical photograph, photorealistic, shot on 35mm film, " +
-    "Kodak Portra 400, f/2.8 lens, award-winning photojournalism, " +
-    "vertical 9:16 portrait format, anatomically correct, " +
-    "no text, no logos, no watermarks, no illustration, no CGI";
-  const facts = (contentItems || []).map((f) => (f || "").slice(0, 100));
+    `ultra-realistic ${era} scene, photorealistic painting or photograph, ` +
+    `${style}, ` +
+    `vertical 9:16 portrait format, anatomically correct, no text, no logos, no watermarks`;
+
   return [
-    // Scene 1 — epic wide establishing shot
-    `${base}. Wide establishing aerial shot of ${event}. ` +
-      `Epic monumental scale, golden hour or dramatic overcast sky, full landscape, sharp detail.`,
-    // Scene 2 — crowd / group shot (avoid lone close-up faces)
-    `${base}. Wide-angle photojournalism shot of soldiers or civilians during ${event}. ` +
-      `Group of people, full figures visible, candid documentary moment, gritty texture, natural light.`,
-    // Scene 3 — decisive moment / environment-focused
-    `${base}. Decisive moment during ${event}` +
-      `${facts[0] ? ". " + facts[0] : ""}. Equipment, vehicles or architecture visible, no isolated close-up faces, high dramatic tension.`,
-    // Scene 4 — immediate aftermath
-    `${base}. Immediate aftermath of ${event}` +
-      `${facts[1] ? ". " + facts[1] : ""}. Wide documentary shot, raw consequence, environment and people in full frame.`,
-    // Scene 5 — legacy / memorial
-    `${base}. Historical legacy of ${event}` +
-      `${facts[2] ? ". " + facts[2] : ""}. Memorial, monument or meaningful landscape, reflective poignant light.`,
-  ].slice(0, N_SCENES);
+    // Scene 1 — wide establishing shot: location, scale, atmosphere
+    `${base}. ` +
+      `Wide establishing shot of ${event}. ` +
+      `Epic monumental scale, panoramic landscape or cityscape, ` +
+      `dramatic golden hour or storm-lit overcast sky, full environment visible, sharp detail.`,
+
+    // Scene 2 — human moment: people, action, authentic period gear
+    `${base}. ` +
+      `Wide-angle group shot of soldiers, civilians or key participants during ${event}. ` +
+      `${facts[0] ? facts[0] + ". " : ""}` +
+      `Full figures visible showing ${era}-accurate clothing and equipment, ` +
+      `candid documentary tension, natural dramatic lighting, gritty authentic texture.`,
+
+    // Scene 3 — aftermath / legacy / decisive environment
+    `${base}. ` +
+      `Immediate aftermath or lasting legacy of ${event}. ` +
+      `${facts[1] ? facts[1] + ". " : ""}` +
+      `Wide documentary shot: ruins, monuments or transformed landscape, ` +
+      `raw consequence visible, reflective poignant light, no isolated close-up faces.`,
+  ];
 }
 
 /**
@@ -620,8 +803,27 @@ async function generateMultiSceneVideo(
   const { slug, title } = post;
   const XF = 0.8; // crossfade duration in seconds
 
-  // 1. Generate N_SCENES AI images in parallel (2 concurrent via pLimit — halves wait time)
-  const scenePrompts = buildScenePrompts(title, contentItems);
+  // Compute actual video duration from narration end + 3 s tail.
+  // Falls back to DURATION (45 s) when no word timestamps are available.
+  const narrEnd = words?.length > 0 ? words[words.length - 1].end : null;
+  const videoDuration = narrEnd
+    ? Math.max(Math.min(Math.ceil(narrEnd) + 3, 59), 10)
+    : DURATION;
+  console.log(
+    narrEnd
+      ? `  Video duration: ${videoDuration} s (narration ${narrEnd.toFixed(1)} s + 3 s tail)`
+      : `  Video duration: ${videoDuration} s (default — no word timestamps)`,
+  );
+
+  // 1. Build scene prompts, then have a history expert review them for accuracy
+  const { era } = getHistoricalEraContext(title);
+  const yearMatch = title.match(/\b(\d{4})$/);
+  const eventYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
+  const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
+
+  const rawPrompts = buildScenePrompts(title, contentItems);
+  const scenePrompts = await reviewPromptsWithHistoryExpert(event, eventYear, era, rawPrompts);
+
   console.log(
     `  Generating ${scenePrompts.length} AI scene images (2 concurrent)...`,
   );
@@ -646,7 +848,7 @@ async function generateMultiSceneVideo(
 
   // 2. Find N_SCENES-1 scene boundary timestamps
   const cuts = findSceneBoundaries(words, narrationParts);
-  const cutLog = [0, ...cuts, DURATION]
+  const cutLog = [0, ...cuts, videoDuration]
     .map((t, i, arr) =>
       i < arr.length - 1 ? `${t.toFixed(1)}–${arr[i + 1].toFixed(1)}s` : null,
     )
@@ -658,7 +860,7 @@ async function generateMultiSceneVideo(
   const sceneDurations = cuts.map((t, i) =>
     i === 0 ? t + XF / 2 : t - cuts[i - 1] + XF,
   );
-  sceneDurations.push(DURATION - cuts[cuts.length - 1] + XF / 2);
+  sceneDurations.push(videoDuration - cuts[cuts.length - 1] + XF / 2);
 
   // 3. Build PNG frames — resize to 110% of target so zoompan has headroom,
   //    then composite the SVG title overlay on top.
@@ -755,11 +957,11 @@ async function generateMultiSceneVideo(
 
     // End screen overlay — centred vertically in the bottom 300px, last 3s
     const endY = H - 300;
-    const endStart = DURATION - 3;
+    const endStart = videoDuration - 3;
     const endScreenPart =
       `;${afterCaptionLabel}[${endScreenIdx}:v]` +
       `overlay=x=0:y=${endY}:format=auto` +
-      `:enable='between(t,${endStart},${DURATION})'[vfinal]`;
+      `:enable='between(t,${endStart},${videoDuration})'[vfinal]`;
 
     const videoFinalLabel = "[vfinal]";
 
@@ -772,7 +974,7 @@ async function generateMultiSceneVideo(
 
     const baseOpts = [
       "-c:v libx264",
-      `-t ${DURATION}`,
+      `-t ${videoDuration}`,
       "-pix_fmt yuv420p",
       `-r ${FPS}`,
       "-movflags +faststart",
@@ -859,6 +1061,17 @@ export async function generateVideo(
   }
 
   // Single-scene: Wikipedia image as static background
+  // Compute duration from narration end + 3 s tail (same logic as multi-scene)
+  const narrEnd = words?.length > 0 ? words[words.length - 1].end : null;
+  const videoDuration = narrEnd
+    ? Math.max(Math.min(Math.ceil(narrEnd) + 3, 59), 10)
+    : DURATION;
+  console.log(
+    narrEnd
+      ? `  Video duration: ${videoDuration} s (narration ${narrEnd.toFixed(1)} s + 3 s tail)`
+      : `  Video duration: ${videoDuration} s (default — no word timestamps)`,
+  );
+
   const imageUrl = post.imageUrl;
   if (!imageUrl)
     throw new Error(
@@ -909,7 +1122,7 @@ export async function generateVideo(
 
     const baseOpts = [
       "-c:v libx264",
-      `-t ${DURATION}`,
+      `-t ${videoDuration}`,
       "-pix_fmt yuv420p",
       `-r ${FPS}`,
       "-movflags +faststart",

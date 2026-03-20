@@ -169,28 +169,28 @@ function alignmentToWords(alignment) {
  * @returns {Promise<{ path: string|null, words: { word: string, start: number, end: number }[] }>}
  */
 export async function generateNarration(slug, script) {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  const apiKey2 = process.env.ELEVENLABS_API_KEY_2;
-  if (!apiKey && !apiKey2) return { path: null, words: [] };
+  const keys = [
+    process.env.ELEVENLABS_API_KEY,
+    process.env.ELEVENLABS_API_KEY_2,
+    process.env.ELEVENLABS_API_KEY_3,
+  ].filter(Boolean);
+
+  if (!keys.length) return { path: null, words: [] };
 
   mkdirSync(ASSETS_DIR, { recursive: true });
   const outputPath = join(ASSETS_DIR, `${slug}_narration.mp3`);
 
   console.log(`  TTS: ${script.length} chars — "${script.slice(0, 60)}..."`);
 
-  let res = apiKey ? await callElevenLabsWithTimestamps(apiKey, script) : null;
-
-  // Fall back to second account on quota exceeded (429 or 401) or missing primary key
   const isQuotaError = (r) => r && (r.status === 429 || r.status === 401);
-  if ((!res || isQuotaError(res)) && apiKey2) {
-    if (res) {
-      console.warn(
-        "  ⚠ ElevenLabs primary quota reached — switching to fallback account",
-      );
-    } else {
-      console.log("  Using ElevenLabs fallback account");
+
+  let res = null;
+  for (let i = 0; i < keys.length; i++) {
+    res = await callElevenLabsWithTimestamps(keys[i], script);
+    if (res.ok) break;
+    if (isQuotaError(res) && i < keys.length - 1) {
+      console.warn(`  ⚠ ElevenLabs key ${i + 1} quota reached — trying key ${i + 2}`);
     }
-    res = await callElevenLabsWithTimestamps(apiKey2, script);
   }
 
   if (!res || !res.ok) {

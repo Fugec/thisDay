@@ -1,10 +1,14 @@
+// Copyright (c) 2024–present Armin Kapetanovic. All Rights Reserved.
+// Proprietary — see LICENSE in the repository root.
+// Unauthorized use, reproduction, or deployment is prohibited.
+//
 // This Cloudflare Worker dynamically injects SEO-friendly meta tags
 // and preloads daily event data to improve the user experience on site.
 // Adds various security headers to enhance protection.
 // Injects Schema.org JSON-LD for better SEO.
 
 import { siteNav, siteFooter, SITE_DESCRIPTION } from "./shared/layout.js";
-import { resolveAiModel } from "./shared/ai-model.js";
+import { callAI } from "./shared/ai-call.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -632,6 +636,97 @@ function buildDynamicOverview(featured, events, mDisplay, day) {
   };
 }
 
+function getSharedPageStyles() {
+  return `:root{--pb:#3b82f6;--sb:#fff;--tc:#1e293b;--htc:#fff;--fb:#3b82f6;--ftc:#fff;--lc:#2563eb;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b}
+body.dark-theme{--pb:#020617;--sb:#1e293b;--tc:#f8fafc;--fb:#020617;--lc:#60a5fa;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#cbd5e1}
+body{font-family:Inter,sans-serif;min-height:100vh;display:flex;flex-direction:column;background:var(--sb);color:var(--tc);transition:background .3s,color .3s}
+.navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
+main{flex:1;padding:20px 0}
+.footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:30px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
+.footer .container.d-flex.justify-content-center.my-2{gap:20px}
+h1,h2,h3,h4{color:var(--tc)}body.dark-theme h1,body.dark-theme h2,body.dark-theme h3,body.dark-theme h4{color:#f8fafc}
+a{color:var(--lc)}a:hover{text-decoration:underline}
+.text-muted{color:var(--mu)!important}
+.breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--mu)}
+body.dark-theme .breadcrumb-item a{color:#93c5fd}body.dark-theme .breadcrumb-item.active{color:#e2e8f0}
+.form-check-input:checked{background-color:#2563eb!important;border-color:#2563eb!important}
+.form-check-input{background:#e2e8f0;border-color:#e2e8f0}body.dark-theme .form-check-input{background:#334155;border-color:#334155}
+.form-switch .form-check-input{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e")}
+.card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
+.feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
+.commentary{border-left:4px solid #3b82f6;padding:10px 14px;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--mu);margin:18px 0}
+body.dark-theme .commentary{background:rgba(59,130,246,.15)}
+.did-you-know{background:rgba(245,158,11,.07);border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
+body.dark-theme .did-you-know{background:rgba(245,158,11,.13)}
+.yr{background:#3b82f6;color:#fff;padding:2px 7px;border-radius:4px;font-size:.78rem;font-weight:600;margin-right:6px;white-space:nowrap}
+.ev-scroll-wrap{max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--cbr) transparent;border:1px solid var(--cbr);border-radius:8px;padding:0 8px 0 0}.ev-scroll-wrap::-webkit-scrollbar{width:4px}.ev-scroll-wrap::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:4px}.ev-scroll-wrap .ev-row,.ev-scroll-wrap .person-row{padding-left:10px}
+.ev-row{padding:11px 0;border-bottom:1px solid var(--cbr)}.ev-row:last-child{border-bottom:none}
+.person-row{padding:9px 0;border-bottom:1px solid var(--cbr)}.person-row:last-child{border-bottom:none}
+.p-thumb{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.p-thumb-blank{width:44px;height:44px;border-radius:50%;background:#e2e8f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#6c757d}
+body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
+.auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
+body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
+.ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:.68rem;font-weight:600;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
+.tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
+.tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
+.tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+.tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
+.tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
+.tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15)}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
+body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
+body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}
+body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
+.tdq-explanation{font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0;color:var(--tc)}
+body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-color:#60a5fa;color:#e2e8f0}
+.tdq-feedback{font-size:.85rem;margin-top:5px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
+.tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.2rem}
+.site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--cbr);border-radius:10px;overflow:hidden;margin-top:1rem;font-size:.9rem}
+.site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--cbr);text-align:left;color:var(--tc)}
+.site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
+.site-table th{background:rgba(59,130,246,.07);font-weight:600;white-space:nowrap;width:40%}
+body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}
+body.dark-theme .site-table th{background:rgba(96,165,250,.1)}
+body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}
+.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--cbr);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--tc);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
+.site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07);color:var(--tc);text-decoration:none}
+.site-btn-primary{border-color:#3b82f6;color:#2563eb}
+.site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}
+body.dark-theme .site-btn{border-color:rgba(255,255,255,.18);color:var(--tc)}
+body.dark-theme .site-btn:hover{border-color:#60a5fa;background:rgba(96,165,250,.1);color:#f8fafc}
+body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}
+body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}
+#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}
+body.dark-theme #read-progress{background:#60a5fa}`;
+}
+
+function getSharedPageScripts() {
+  return `<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const yrEl=document.getElementById('yr');
+if(yrEl)yrEl.textContent=new Date().getFullYear();
+const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
+const ap=d=>document.body.classList.toggle('dark-theme',d);
+const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
+const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
+const dk=gt('darkTheme')!=='false';
+ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
+if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
+if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
+const syncAdUnitVisibility=(ins)=>{if(!ins)return;const unit=ins.closest('.ad-unit');if(!unit)return;const status=ins.getAttribute('data-ad-status');if(status==='unfilled')unit.style.display='none';if(status==='filled')unit.style.display='';};
+const adObserver=new MutationObserver((mutations)=>{for(const m of mutations){if(m.type==='attributes'&&m.attributeName==='data-ad-status'){syncAdUnitVisibility(m.target);}}});
+document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{syncAdUnitVisibility(ins);adObserver.observe(ins,{attributes:true,attributeFilter:['data-ad-status']});});
+setTimeout(()=>{document.querySelectorAll('ins.adsbygoogle').forEach(syncAdUnitVisibility);},5000);
+const initAds=()=>{if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{if(ins.getAttribute('data-adsbygoogle-status'))return;if((ins.offsetWidth||0)<120)return;try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch{}});};
+if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',initAds,{once:true});}else{initAds();}
+setTimeout(initAds,1200);
+</script>
+<script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
+<script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
+<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>`;
+}
+
 function generateBlogPostHTML(
   monthName,
   day,
@@ -677,9 +772,28 @@ function generateBlogPostHTML(
   const featTitle = featured
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
-  const introLine = featured
-    ? `A thisDay.info historical digest for ${mDisplay} ${day}, sourced from Wikipedia`
-    : `A thisDay.info historical digest, sourced from Wikipedia`;
+
+  // Era range helpers (must be before eventsIntroLine which references evEraRange)
+  const fmtY = (y) => (y < 0 ? `${Math.abs(y)} BC` : String(y));
+  const allEventYears = events
+    .map((e) => parseInt(e.year) || null)
+    .filter((y) => y !== null);
+  const evMin = allEventYears.length ? Math.min(...allEventYears) : null;
+  const evMax = allEventYears.length ? Math.max(...allEventYears) : null;
+  const evEraRange =
+    evMin !== null && evMax !== null && evMin !== evMax
+      ? `${fmtY(evMin)} – ${fmtY(evMax)}`
+      : evMin !== null
+        ? fmtY(evMin)
+        : "";
+
+  // Intro paragraph — original content for SEO depth
+  const eventsCountLabel =
+    events.length > 0 ? `${events.length} recorded events` : "recorded events";
+  const eventsIntroLine =
+    events.length > 0
+      ? `${mDisplay} ${day} spans ${eventsCountLabel} across recorded history${evEraRange ? ` — from ${evEraRange}` : ""}. Below is a curated digest of the most significant moments tied to this date.`
+      : `Explore historical events, births, and deaths that occurred on ${mDisplay} ${day} throughout world history.`;
   const today = new Date().toISOString().split("T")[0];
   const _todayDate = new Date();
   const todayMonthSlug = MONTHS_ALL[_todayDate.getUTCMonth()];
@@ -829,39 +943,106 @@ function generateBlogPostHTML(
       }).replace(/<\//g, "<\\/")
     : null;
 
-  const othersHtml = others
-    .map((e) => {
-      const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
-      const th = e.pages?.[0]?.thumbnail?.source || "";
-      return `<div class="ev-row d-flex align-items-start gap-3">
+  // Births era range
+  const birthYears = topBirths
+    .map((b) => parseInt(b.year) || null)
+    .filter((y) => y !== null);
+  const bMin = birthYears.length ? Math.min(...birthYears) : null;
+  const bMax = birthYears.length ? Math.max(...birthYears) : null;
+  const birthEraRange =
+    bMin !== null && bMax !== null && bMin !== bMax
+      ? `${fmtY(bMin)} – ${fmtY(bMax)}`
+      : bMin !== null
+        ? fmtY(bMin)
+        : "";
+
+  // Deaths era range
+  const deathYears = topDeaths
+    .map((d) => parseInt(d.year) || null)
+    .filter((y) => y !== null);
+  const dMin = deathYears.length ? Math.min(...deathYears) : null;
+  const dMax = deathYears.length ? Math.max(...deathYears) : null;
+  const deathEraRange =
+    dMin !== null && dMax !== null && dMin !== dMax
+      ? `${fmtY(dMin)} – ${fmtY(dMax)}`
+      : dMin !== null
+        ? fmtY(dMin)
+        : "";
+
+  // Events list — progressive disclosure after 8
+  const renderEventRow = (e) => {
+    const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
+    const th = e.pages?.[0]?.thumbnail?.source || "";
+    return `<div class="ev-row d-flex align-items-start gap-3">
   <div class="flex-grow-1"><span class="yr">${escapeHtml(String(e.year))}</span> ${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
   ${th ? `<img src="${escapeHtml(th)}" alt="" width="44" height="44" style="border-radius:4px;object-fit:cover;flex-shrink:0" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : ""}
 </div>`;
-    })
-    .join("");
+  };
+  const othersVisibleHtml = others.slice(0, 8).map(renderEventRow).join("");
+  const othersHiddenHtml = others.slice(8).map(renderEventRow).join("");
 
-  const birthsHtml = topBirths
-    .map((b) => {
-      const th = b.pages?.[0]?.thumbnail?.source || "";
-      const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
-      const name = escapeHtml(b.text.split(",")[0]);
-      return `<div class="person-row d-flex align-items-center gap-3">
-  ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : '<div class="p-thumb-blank"><i class="bi bi-person"></i></div>'}
-  <div><span class="yr">${escapeHtml(String(b.year))}</span> ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${escapeHtml(b.text)}</a>` : escapeHtml(b.text)}</div>
+  // Person card renderer — top 3 (col-12 col-md-4)
+  const renderPersonCard = (p, isDeaths = false) => {
+    const th = p.pages?.[0]?.thumbnail?.source || "";
+    const w = p.pages?.[0]?.content_urls?.desktop?.page || "";
+    const name = escapeHtml(p.text.split(",")[0]);
+    const desc = p.text.includes(",")
+      ? escapeHtml(p.text.slice(p.text.indexOf(",") + 1).trim())
+      : "";
+    const year = escapeHtml(String(p.year));
+    const yrStyle = isDeaths ? ' style="background:#6c757d"' : "";
+    return `<div class="col-12 col-md-4">
+  <div class="card-box h-100 d-flex flex-column" style="padding:16px">
+    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(59,130,246,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
+    <div class="flex-grow-1">
+      <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
+      ${desc ? `<p class="text-muted mb-0" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
+    </div>
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
+      <span class="yr"${yrStyle}>${year}</span>
+      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
+    </div>
+  </div>
 </div>`;
-    })
-    .join("");
+  };
 
-  const deathsHtml = topDeaths
-    .map((d) => {
-      const th = d.pages?.[0]?.thumbnail?.source || "";
-      const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
-      const name = escapeHtml(d.text.split(",")[0]);
-      return `<div class="person-row d-flex align-items-center gap-3">
-  ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : '<div class="p-thumb-blank"><i class="bi bi-person"></i></div>'}
-  <div><span class="yr" style="background:#6c757d">${escapeHtml(String(d.year))}</span> ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${escapeHtml(d.text)}</a>` : escapeHtml(d.text)}</div>
+  // Person grid row renderer — items 4+ (col-12 col-md-6)
+  const renderPersonGridRow = (p, isDeaths = false) => {
+    const th = p.pages?.[0]?.thumbnail?.source || "";
+    const w = p.pages?.[0]?.content_urls?.desktop?.page || "";
+    const name = escapeHtml(p.text.split(",")[0]);
+    const desc = p.text.includes(",")
+      ? escapeHtml(p.text.slice(p.text.indexOf(",") + 1).trim())
+      : "";
+    const year = escapeHtml(String(p.year));
+    const yrStyle = isDeaths ? ' style="background:#6c757d"' : "";
+    return `<div class="col-12 col-md-6">
+  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
+    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb flex-shrink-0" style="margin-top:2px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px"><i class="bi bi-person"></i></div>`}
+    <div style="min-width:0">
+      <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
+      ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
+      <span class="yr mt-1 d-inline-block"${yrStyle}>${year}</span>
+    </div>
+  </div>
 </div>`;
-    })
+  };
+
+  const birthTop3Html = topBirths
+    .slice(0, 3)
+    .map((b) => renderPersonCard(b, false))
+    .join("");
+  const birthGridHtml = topBirths
+    .slice(3)
+    .map((b) => renderPersonGridRow(b, false))
+    .join("");
+  const deathTop3Html = topDeaths
+    .slice(0, 3)
+    .map((d) => renderPersonCard(d, true))
+    .join("");
+  const deathGridHtml = topDeaths
+    .slice(3)
+    .map((d) => renderPersonGridRow(d, true))
     .join("");
 
   return `<!DOCTYPE html><html lang="en">
@@ -888,72 +1069,7 @@ ${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
-<style>
-:root{--pb:#3b82f6;--sb:#fff;--tc:#1e293b;--htc:#fff;--fb:#3b82f6;--ftc:#fff;--lc:#2563eb;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b}
-body.dark-theme{--pb:#020617;--sb:#1e293b;--tc:#f8fafc;--fb:#020617;--lc:#60a5fa;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#cbd5e1}
-body{font-family:Inter,sans-serif;min-height:100vh;display:flex;flex-direction:column;background:var(--sb);color:var(--tc);transition:background .3s,color .3s}
-.navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
-main{flex:1;padding:20px 0}
-.footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:30px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
-.footer .container.d-flex.justify-content-center.my-2{gap:20px}
-h1,h2,h3,h4{color:var(--tc)}body.dark-theme h1,body.dark-theme h2,body.dark-theme h3,body.dark-theme h4{color:#f8fafc}
-a{color:var(--lc)}a:hover{text-decoration:underline}
-.text-muted{color:var(--mu)!important}
-.breadcrumb-item a{color:var(--lc)}
-.breadcrumb-item.active{color:var(--mu)}
-body.dark-theme .breadcrumb-item a{color:#93c5fd}
-body.dark-theme .breadcrumb-item.active{color:#e2e8f0}
-.form-check-input:checked{background-color:#2563eb!important;border-color:#2563eb!important}
-.form-check-input{background:#e2e8f0;border-color:#e2e8f0}body.dark-theme .form-check-input{background:#334155;border-color:#334155}
-.form-switch .form-check-input{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e")}
-.card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
-.feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
-.commentary{border-left:4px solid #3b82f6;padding:10px 14px;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--mu);margin:18px 0}
-body.dark-theme .commentary{background:rgba(59,130,246,.15)}
-.did-you-know{background:rgba(245,158,11,.07);border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
-body.dark-theme .did-you-know{background:rgba(245,158,11,.13)}
-.yr{background:#3b82f6;color:#fff;padding:2px 7px;border-radius:4px;font-size:.78rem;font-weight:600;margin-right:6px;white-space:nowrap}
-.ev-scroll-wrap{max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--cbr) transparent;border:1px solid var(--cbr);border-radius:8px;padding:0 8px 0 0}.ev-scroll-wrap::-webkit-scrollbar{width:4px}.ev-scroll-wrap::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:4px}.ev-scroll-wrap .ev-row,.ev-scroll-wrap .person-row{padding-left:10px}
-.ev-row{padding:11px 0;border-bottom:1px solid var(--cbr)}.ev-row:last-child{border-bottom:none}
-.person-row{padding:9px 0;border-bottom:1px solid var(--cbr)}.person-row:last-child{border-bottom:none}
-.p-thumb{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
-.p-thumb-blank{width:44px;height:44px;border-radius:50%;background:#e2e8f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#6c757d}
-body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
-.auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
-body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
-.ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:.68rem;font-weight:600;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
-.tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
-.tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
-.tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
-.tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
-.tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
-.tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
-body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15)}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
-body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
-body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}
-body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
-.tdq-explanation{font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0;color:var(--tc)}
-body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-color:#60a5fa;color:#e2e8f0}
-.tdq-feedback{font-size:.85rem;margin-top:5px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
-.tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.2rem}
-.site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--cbr);border-radius:10px;overflow:hidden;margin-top:1rem;font-size:.9rem}
-.site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--cbr);text-align:left;color:var(--tc)}
-.site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
-.site-table th{background:rgba(59,130,246,.07);font-weight:600;white-space:nowrap;width:40%}
-body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}
-body.dark-theme .site-table th{background:rgba(96,165,250,.1)}
-body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}
-.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--cbr);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--tc);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
-.site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07);color:var(--tc);text-decoration:none}
-.site-btn-primary{border-color:#3b82f6;color:#2563eb}
-.site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}
-body.dark-theme .site-btn{border-color:rgba(255,255,255,.18);color:var(--tc)}
-body.dark-theme .site-btn:hover{border-color:#60a5fa;background:rgba(96,165,250,.1);color:#f8fafc}
-body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}
-body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}
-#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}
-body.dark-theme #read-progress{background:#60a5fa}
-</style>
+<style>${getSharedPageStyles()}</style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
 <body>
@@ -967,9 +1083,13 @@ ${siteNav()}
       <li class="breadcrumb-item active" aria-current="page">${escapeHtml(mDisplay)} ${day}</li>
     </ol>
   </nav>
-  <h1 class="mb-1">${escapeHtml(mDisplay)} ${day} in History <span class="auto-tag">Made for you</span></h1>
-  <p class="text-muted mb-1" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time></p>
+  <h1 class="mb-2">${escapeHtml(mDisplay)} ${day} in History</h1>
+  <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+    ${events.length > 0 ? `<span class="auto-tag"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
+    ${evEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
+  </div>
+  <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(eventsIntroLine)}</p>
+  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   ${
     featured
       ? `
@@ -1001,26 +1121,42 @@ ${siteNav()}
     others.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${others.length})</small></h2>
-    <div class="ev-scroll-wrap">${othersHtml}</div>
-  </div>
+    <h2 class="h4 mb-2"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <span class="auto-tag"><i class="bi bi-list-ul me-1"></i>${others.length} events</span>
+      ${evEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
+    </div>
+    ${othersVisibleHtml}
+    ${
+      othersHiddenHtml
+        ? `<div id="events-more" style="display:none">${othersHiddenHtml}</div>
+    <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>`
+        : ""
+    }
+  </div>`
+      : ""
+  }
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle"
          style="display:block;border-radius:8px;overflow:hidden"
          data-ad-client="ca-pub-8565025017387209"
          data-ad-slot="9477779891"
-         data-ad-format="auto"
-         data-full-width-responsive="true"></ins>
-  </div>`
-      : ""
-  }
+         data-ad-format="fluid"
+         data-ad-layout="in-article"></ins>
+  </div>
   ${
     topBirths.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Born on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${topBirths.length})</small></h2>
-    <div class="ev-scroll-wrap">${birthsHtml}</div>
+    <h2 class="h4 mb-2"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <span class="auto-tag"><i class="bi bi-people me-1"></i>${topBirths.length} people</span>
+      ${birthEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(birthEraRange)}</span>` : ""}
+    </div>
+    <div class="row g-3 mb-3">${birthTop3Html}</div>
+    ${birthGridHtml ? `<div style="padding:0 4px"><div class="row g-0">${birthGridHtml}</div></div>` : ""}
+    <a href="/born/${monthName}/${day}/" class="site-btn site-btn-primary mt-3"><i class="bi bi-person-heart"></i>See all birthdays on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
@@ -1028,11 +1164,25 @@ ${siteNav()}
     topDeaths.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${topDeaths.length})</small></h2>
-    <div class="ev-scroll-wrap">${deathsHtml}</div>
+    <h2 class="h4 mb-2"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day}</h2>
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+      <span class="auto-tag"><i class="bi bi-people me-1"></i>${topDeaths.length} people</span>
+      ${deathEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(deathEraRange)}</span>` : ""}
+    </div>
+    <div class="row g-3 mb-3">${deathTop3Html}</div>
+    ${deathGridHtml ? `<div style="padding:0 4px"><div class="row g-0">${deathGridHtml}</div></div>` : ""}
+    <a href="/died/${monthName}/${day}/" class="site-btn mt-3"><i class="bi bi-flower1"></i>See all deaths on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
+  <div class="card-box">
+    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/born/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-person-heart"></i>Famous Birthdays</a>
+      <a href="/died/${monthName}/${day}/" class="site-btn"><i class="bi bi-flower1"></i>Notable Deaths</a>
+      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Take the Quiz</a>
+    </div>
+  </div>
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
       <a href="/events/${prevMonthName}/${prevDayNum}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
@@ -1046,65 +1196,7 @@ ${siteNav()}
   </div>
 </main>
 ${siteFooter("yr")}
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-const yrEl=document.getElementById('yr');
-if(yrEl)yrEl.textContent=new Date().getFullYear();
-const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
-const ap=d=>document.body.classList.toggle('dark-theme',d);
-const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
-const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
-const dk=gt('darkTheme')!=='false';
-ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
-if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
-if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
-
-const syncAdUnitVisibility=(ins)=>{
-  if(!ins) return;
-  const unit=ins.closest('.ad-unit');
-  if(!unit) return;
-  const status=ins.getAttribute('data-ad-status');
-  if(status==='unfilled') unit.style.display='none';
-  if(status==='filled') unit.style.display='';
-};
-
-const adObserver=new MutationObserver((mutations)=>{
-  for(const m of mutations){
-    if(m.type==='attributes'&&m.attributeName==='data-ad-status'){
-      syncAdUnitVisibility(m.target);
-    }
-  }
-});
-
-document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{
-  syncAdUnitVisibility(ins);
-  adObserver.observe(ins,{attributes:true,attributeFilter:['data-ad-status']});
-});
-
-setTimeout(()=>{
-  document.querySelectorAll('ins.adsbygoogle').forEach(syncAdUnitVisibility);
-},5000);
-
-const initAds=()=>{
-  // Avoid invalid ad requests on non-approved hosts (e.g. workers.dev previews)
-  if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;
-  document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{
-    if(ins.getAttribute('data-adsbygoogle-status'))return;
-    if((ins.offsetWidth||0)<120)return;
-    try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch{}
-  });
-};
-
-if(document.readyState==='loading'){
-  document.addEventListener('DOMContentLoaded',initAds,{once:true});
-}else{
-  initAds();
-}
-setTimeout(initAds,1200);
-</script>
-<script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
-<script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
-<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
+${getSharedPageScripts()}
 </body></html>`;
 }
 
@@ -1120,6 +1212,787 @@ function serveGeneratedSitemap(siteUrl) {
     }
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
+}
+
+function servePeopleSitemap(siteUrl) {
+  let urls = "";
+  for (let m = 0; m < 12; m++) {
+    for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
+      urls += `  <url>\n    <loc>${siteUrl}/born/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
+      urls += `  <url>\n    <loc>${siteUrl}/died/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
+    }
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
+}
+
+function generateBornHTML(siteUrl, monthName, day, eventsData) {
+  const mNum = MONTH_NUM_MAP[monthName] || 1;
+  const mDisplay = MONTH_DISPLAY_NAMES[mNum];
+  const MM = String(mNum).padStart(2, "0");
+  const DD = String(day).padStart(2, "0");
+  const canonical = `${siteUrl}/born/${monthName}/${day}/`;
+
+  const births = (eventsData?.births || []).slice(0, 30);
+  const featured =
+    births.find((b) => b.pages?.[0]?.thumbnail?.source) || births[0] || null;
+  const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
+  const featImg = featured?.pages?.[0]?.thumbnail?.source || null;
+  const ogImg = featImg || `${siteUrl}/images/logo.png`;
+  const pageTitle = featured
+    ? `${featName} & Other Famous Birthdays on ${mDisplay} ${day} | thisDay.info`
+    : `Famous Birthdays on ${mDisplay} ${day} | thisDay.info`;
+  const pageDesc =
+    `Discover famous people born on ${mDisplay} ${day} throughout history. ${births.length} notable birthdays including ${births
+      .slice(0, 3)
+      .map((b) => b.text.split(",")[0])
+      .join(", ")}.`.substring(0, 155);
+
+  const mIdx = mNum - 1;
+  const prevDay = day > 1 ? day - 1 : DAYS_IN_MONTH[(mIdx - 1 + 12) % 12];
+  const prevMIdx = day > 1 ? mIdx : (mIdx - 1 + 12) % 12;
+  const prevMonth = MONTHS_ALL[prevMIdx];
+  const prevMDisplay = MONTH_DISPLAY_NAMES[prevMIdx + 1];
+  const nextDay = day < DAYS_IN_MONTH[mIdx] ? day + 1 : 1;
+  const nextMIdx = day < DAYS_IN_MONTH[mIdx] ? mIdx : (mIdx + 1) % 12;
+  const nextMonth = MONTHS_ALL[nextMIdx];
+  const nextMDisplay = MONTH_DISPLAY_NAMES[nextMIdx + 1];
+
+  // Era range for stat bar
+  const rawYears = births
+    .map((b) => parseInt(b.year) || null)
+    .filter((y) => y !== null);
+  const minYear = rawYears.length ? Math.min(...rawYears) : null;
+  const maxYear = rawYears.length ? Math.max(...rawYears) : null;
+  const fmtYear = (y) => (y < 0 ? `${Math.abs(y)} BC` : String(y));
+  const eraRange =
+    minYear !== null && maxYear !== null && minYear !== maxYear
+      ? `${fmtYear(minYear)} – ${fmtYear(maxYear)}`
+      : minYear !== null
+        ? fmtYear(minYear)
+        : "";
+
+  // Intro paragraph — original content for SEO depth
+  const introLine =
+    births.length > 0
+      ? `${mDisplay} ${day} has seen ${births.length} notable people enter the world across recorded history${eraRange ? ` — from ${eraRange}` : ""}. Below are the most significant names born on this date.`
+      : `Explore notable people born on ${mDisplay} ${day} throughout history.`;
+
+  const topEvents = (eventsData?.events || []).slice(0, 3);
+
+  // Schema — FAQPage
+  const faqSchema = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: [
+      {
+        "@type": "Question",
+        name: `Who was born on ${mDisplay} ${day}?`,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text:
+            births.length > 0
+              ? `Famous people born on ${mDisplay} ${day} include: ${births
+                  .slice(0, 5)
+                  .map((b) => b.text.split(",")[0])
+                  .join(", ")}.`
+              : `Explore notable birthdays on ${mDisplay} ${day} at thisDay.info.`,
+        },
+      },
+      ...(featured
+        ? [
+            {
+              "@type": "Question",
+              name: `What is ${featName} known for?`,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: escapeHtml(featured.text),
+              },
+            },
+          ]
+        : []),
+    ],
+  });
+
+  // Schema — ItemList with jobTitle
+  const personListSchema =
+    births.length > 0
+      ? JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "ItemList",
+          name: `Famous Birthdays on ${mDisplay} ${day}`,
+          numberOfItems: births.length,
+          itemListElement: births.slice(0, 10).map((b, i) => {
+            const jobTitle = b.text.includes(",")
+              ? b.text.slice(b.text.indexOf(",") + 1).trim()
+              : "";
+            return {
+              "@type": "ListItem",
+              position: i + 1,
+              item: {
+                "@type": "Person",
+                name: b.text.split(",")[0],
+                birthDate: `${b.year}-${MM}-${DD}`,
+                description: b.text,
+                ...(jobTitle ? { jobTitle } : {}),
+                ...(b.pages?.[0]?.content_urls?.desktop?.page
+                  ? { sameAs: b.pages[0].content_urls.desktop.page }
+                  : {}),
+              },
+            };
+          }),
+        })
+      : null;
+
+  // Top 3 featured cards
+  const top3Html = births
+    .slice(0, 3)
+    .map((b) => {
+      const th = b.pages?.[0]?.thumbnail?.source || "";
+      const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
+      const name = escapeHtml(b.text.split(",")[0]);
+      const desc = b.text.includes(",")
+        ? escapeHtml(b.text.slice(b.text.indexOf(",") + 1).trim())
+        : "";
+      const year = escapeHtml(String(b.year));
+      return `<div class="col-12 col-md-4">
+  <div class="card-box h-100 d-flex flex-column" style="padding:16px">
+    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(59,130,246,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
+    <div class="flex-grow-1">
+      <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
+      ${desc ? `<p class="text-muted mb-0" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
+    </div>
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
+      <span class="yr">${year}</span>
+      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
+    </div>
+  </div>
+</div>`;
+    })
+    .join("");
+
+  // Grid for remaining births (items 4+)
+  const gridBirths = births.slice(3);
+  const visibleGrid = gridBirths.slice(0, 9);
+  const hiddenGrid = gridBirths.slice(9);
+
+  const renderGridItem = (b) => {
+    const th = b.pages?.[0]?.thumbnail?.source || "";
+    const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
+    const name = escapeHtml(b.text.split(",")[0]);
+    const desc = b.text.includes(",")
+      ? escapeHtml(b.text.slice(b.text.indexOf(",") + 1).trim())
+      : "";
+    const year = escapeHtml(String(b.year));
+    return `<div class="col-12 col-md-6">
+  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
+    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb flex-shrink-0" style="margin-top:2px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px"><i class="bi bi-person"></i></div>`}
+    <div style="min-width:0">
+      <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
+      ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
+      <span class="yr mt-1 d-inline-block">${year}</span>
+    </div>
+  </div>
+</div>`;
+  };
+
+  // Build grid HTML with in-list ad injected after item index 5 (6th item)
+  let gridHtml = "";
+  visibleGrid.forEach((b, i) => {
+    gridHtml += renderGridItem(b);
+    if (i === 5 && visibleGrid.length > 6) {
+      gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="fluid" data-ad-layout="in-article"></ins></div></div>`;
+    }
+  });
+
+  const hiddenGridHtml = hiddenGrid.map((b) => renderGridItem(b)).join("");
+
+  // Events snippet — left-border accent style
+  const eventsSnippetHtml = topEvents
+    .map((e) => {
+      const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
+      return `<div class="d-flex gap-2 align-items-start mb-2 pb-2" style="border-bottom:1px solid var(--cbr)">
+  <span class="yr flex-shrink-0">${escapeHtml(String(e.year))}</span>
+  <div style="font-size:.88rem;line-height:1.45">${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
+</div>`;
+    })
+    .join("");
+
+  return `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${escapeHtml(pageTitle)}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<link rel="prev" href="${escapeHtml(`${siteUrl}/born/${prevMonth}/${prevDay}/`)}"/>
+<link rel="next" href="${escapeHtml(`${siteUrl}/born/${nextMonth}/${nextDay}/`)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="article"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:locale" content="en_US"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(ogImg)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
+<meta name="author" content="thisDay.info"/>
+<script type="application/ld+json">${faqSchema}</script>
+${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="/events/">On This Day</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Born on ${escapeHtml(mDisplay)} ${day}</li>
+    </ol>
+  </nav>
+  <h1 class="mb-2">Famous Birthdays on ${escapeHtml(mDisplay)} ${day}</h1>
+  <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+    <span class="auto-tag"><i class="bi bi-people me-1"></i>${births.length} people</span>
+    ${eraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+  </div>
+  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  <div class="ad-unit">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="4828593028"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  ${
+    gridBirths.length > 0
+      ? `
+  <div class="card-box" style="padding:16px 20px">
+    <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>All Birthdays on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${births.length})</small></h2>
+    <div class="row g-0">${gridHtml}</div>
+    ${
+      hiddenGrid.length > 0
+        ? `<div id="births-more" style="display:none"><div class="row g-0">${hiddenGridHtml}</div></div>
+    <button onclick="var m=document.getElementById('births-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${births.length} birthdays':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${births.length} birthdays</button>`
+        : ""
+    }
+  </div>`
+      : ""
+  }
+  ${
+    topEvents.length > 0
+      ? `
+  <div class="card-box">
+    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
+    ${eventsSnippetHtml}
+    <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
+  </div>`
+      : ""
+  }
+  <div class="ad-unit">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="card-box">
+    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
+      <a href="/died/${monthName}/${day}/" class="site-btn"><i class="bi bi-flower1"></i>Notable Deaths</a>
+      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Take the Quiz</a>
+    </div>
+  </div>
+  <div class="my-5 pt-3 border-top">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <a href="/born/${prevMonth}/${prevDay}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMDisplay)} ${prevDay}</a>
+      <a href="/born/${nextMonth}/${nextDay}/" class="site-btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
+    </div>
+    <div class="text-center">
+      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+    </div>
+  </div>
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts()}
+</body></html>`;
+}
+
+function generateDiedHTML(siteUrl, monthName, day, eventsData) {
+  const mNum = MONTH_NUM_MAP[monthName] || 1;
+  const mDisplay = MONTH_DISPLAY_NAMES[mNum];
+  const MM = String(mNum).padStart(2, "0");
+  const DD = String(day).padStart(2, "0");
+  const canonical = `${siteUrl}/died/${monthName}/${day}/`;
+
+  const deaths = (eventsData?.deaths || []).slice(0, 30);
+  const featured =
+    deaths.find((d) => d.pages?.[0]?.thumbnail?.source) || deaths[0] || null;
+  const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
+  const featImg = featured?.pages?.[0]?.thumbnail?.source || null;
+  const ogImg = featImg || `${siteUrl}/images/logo.png`;
+  const pageTitle = featured
+    ? `${featName} & Others Who Died on ${mDisplay} ${day} | thisDay.info`
+    : `Notable Deaths on ${mDisplay} ${day} | thisDay.info`;
+  const pageDesc =
+    `Discover notable people who died on ${mDisplay} ${day} throughout history. ${deaths.length} recorded deaths including ${deaths
+      .slice(0, 3)
+      .map((d) => d.text.split(",")[0])
+      .join(", ")}.`.substring(0, 155);
+
+  const mIdx = mNum - 1;
+  const prevDay = day > 1 ? day - 1 : DAYS_IN_MONTH[(mIdx - 1 + 12) % 12];
+  const prevMIdx = day > 1 ? mIdx : (mIdx - 1 + 12) % 12;
+  const prevMonth = MONTHS_ALL[prevMIdx];
+  const prevMDisplay = MONTH_DISPLAY_NAMES[prevMIdx + 1];
+  const nextDay = day < DAYS_IN_MONTH[mIdx] ? day + 1 : 1;
+  const nextMIdx = day < DAYS_IN_MONTH[mIdx] ? mIdx : (mIdx + 1) % 12;
+  const nextMonth = MONTHS_ALL[nextMIdx];
+  const nextMDisplay = MONTH_DISPLAY_NAMES[nextMIdx + 1];
+
+  // Era range for stat bar
+  const rawYears = deaths
+    .map((d) => parseInt(d.year) || null)
+    .filter((y) => y !== null);
+  const minYear = rawYears.length ? Math.min(...rawYears) : null;
+  const maxYear = rawYears.length ? Math.max(...rawYears) : null;
+  const fmtYear = (y) => (y < 0 ? `${Math.abs(y)} BC` : String(y));
+  const eraRange =
+    minYear !== null && maxYear !== null && minYear !== maxYear
+      ? `${fmtYear(minYear)} – ${fmtYear(maxYear)}`
+      : minYear !== null
+        ? fmtYear(minYear)
+        : "";
+
+  // Intro paragraph — original content for SEO depth
+  const introLine =
+    deaths.length > 0
+      ? `${mDisplay} ${day} has seen ${deaths.length} notable figures pass away throughout recorded history${eraRange ? ` — from ${eraRange}` : ""}. Below are the most significant names who died on this date.`
+      : `Explore notable people who died on ${mDisplay} ${day} throughout history.`;
+
+  const topEvents = (eventsData?.events || []).slice(0, 3);
+
+  // Schema — FAQPage
+  const faqSchema = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: [
+      {
+        "@type": "Question",
+        name: `Who died on ${mDisplay} ${day}?`,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text:
+            deaths.length > 0
+              ? `Notable people who died on ${mDisplay} ${day} include: ${deaths
+                  .slice(0, 5)
+                  .map((d) => d.text.split(",")[0])
+                  .join(", ")}.`
+              : `Explore notable deaths on ${mDisplay} ${day} at thisDay.info.`,
+        },
+      },
+      ...(featured
+        ? [
+            {
+              "@type": "Question",
+              name: `What is ${featName} known for?`,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: escapeHtml(featured.text),
+              },
+            },
+          ]
+        : []),
+    ],
+  });
+
+  // Schema — ItemList with jobTitle
+  const personListSchema =
+    deaths.length > 0
+      ? JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "ItemList",
+          name: `Notable Deaths on ${mDisplay} ${day}`,
+          numberOfItems: deaths.length,
+          itemListElement: deaths.slice(0, 10).map((d, i) => {
+            const jobTitle = d.text.includes(",")
+              ? d.text.slice(d.text.indexOf(",") + 1).trim()
+              : "";
+            return {
+              "@type": "ListItem",
+              position: i + 1,
+              item: {
+                "@type": "Person",
+                name: d.text.split(",")[0],
+                deathDate: `${d.year}-${MM}-${DD}`,
+                description: d.text,
+                ...(jobTitle ? { jobTitle } : {}),
+                ...(d.pages?.[0]?.content_urls?.desktop?.page
+                  ? { sameAs: d.pages[0].content_urls.desktop.page }
+                  : {}),
+              },
+            };
+          }),
+        })
+      : null;
+
+  // Top 3 featured cards
+  const top3Html = deaths
+    .slice(0, 3)
+    .map((d) => {
+      const th = d.pages?.[0]?.thumbnail?.source || "";
+      const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
+      const name = escapeHtml(d.text.split(",")[0]);
+      const desc = d.text.includes(",")
+        ? escapeHtml(d.text.slice(d.text.indexOf(",") + 1).trim())
+        : "";
+      const year = escapeHtml(String(d.year));
+      return `<div class="col-12 col-md-4">
+  <div class="card-box h-100 d-flex flex-column" style="padding:16px">
+    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(100,116,139,.08);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
+    <div class="flex-grow-1">
+      <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
+      ${desc ? `<p class="text-muted mb-0" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
+    </div>
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
+      <span class="yr" style="background:#6c757d">${year}</span>
+      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
+    </div>
+  </div>
+</div>`;
+    })
+    .join("");
+
+  // Grid for remaining deaths (items 4+)
+  const gridDeaths = deaths.slice(3);
+  const visibleGrid = gridDeaths.slice(0, 9);
+  const hiddenGrid = gridDeaths.slice(9);
+
+  const renderGridItem = (d) => {
+    const th = d.pages?.[0]?.thumbnail?.source || "";
+    const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
+    const name = escapeHtml(d.text.split(",")[0]);
+    const desc = d.text.includes(",")
+      ? escapeHtml(d.text.slice(d.text.indexOf(",") + 1).trim())
+      : "";
+    const year = escapeHtml(String(d.year));
+    return `<div class="col-12 col-md-6">
+  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
+    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb flex-shrink-0" style="margin-top:2px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px"><i class="bi bi-person"></i></div>`}
+    <div style="min-width:0">
+      <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
+      ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
+      <span class="yr mt-1 d-inline-block" style="background:#6c757d">${year}</span>
+    </div>
+  </div>
+</div>`;
+  };
+
+  // Build grid HTML with in-list ad injected after item index 5 (6th item)
+  let gridHtml = "";
+  visibleGrid.forEach((d, i) => {
+    gridHtml += renderGridItem(d);
+    if (i === 5 && visibleGrid.length > 6) {
+      gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="fluid" data-ad-layout="in-article"></ins></div></div>`;
+    }
+  });
+
+  const hiddenGridHtml = hiddenGrid.map((d) => renderGridItem(d)).join("");
+
+  // Events snippet — consistent style with born page
+  const eventsSnippetHtml = topEvents
+    .map((e) => {
+      const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
+      return `<div class="d-flex gap-2 align-items-start mb-2 pb-2" style="border-bottom:1px solid var(--cbr)">
+  <span class="yr flex-shrink-0">${escapeHtml(String(e.year))}</span>
+  <div style="font-size:.88rem;line-height:1.45">${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
+</div>`;
+    })
+    .join("");
+
+  return `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${escapeHtml(pageTitle)}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<link rel="prev" href="${escapeHtml(`${siteUrl}/died/${prevMonth}/${prevDay}/`)}"/>
+<link rel="next" href="${escapeHtml(`${siteUrl}/died/${nextMonth}/${nextDay}/`)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="article"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:locale" content="en_US"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(ogImg)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
+<meta name="author" content="thisDay.info"/>
+<script type="application/ld+json">${faqSchema}</script>
+${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="/events/">On This Day</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Died on ${escapeHtml(mDisplay)} ${day}</li>
+    </ol>
+  </nav>
+  <h1 class="mb-2">Notable Deaths on ${escapeHtml(mDisplay)} ${day}</h1>
+  <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+    <span class="auto-tag"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
+    ${eraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+  </div>
+  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  <div class="ad-unit">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="4828593028"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  ${
+    gridDeaths.length > 0
+      ? `
+  <div class="card-box" style="padding:16px 20px">
+    <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>All Deaths on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${deaths.length})</small></h2>
+    <div class="row g-0">${gridHtml}</div>
+    ${
+      hiddenGrid.length > 0
+        ? `<div id="deaths-more" style="display:none"><div class="row g-0">${hiddenGridHtml}</div></div>
+    <button onclick="var m=document.getElementById('deaths-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${deaths.length} deaths':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${deaths.length} deaths</button>`
+        : ""
+    }
+  </div>`
+      : ""
+  }
+  ${
+    topEvents.length > 0
+      ? `
+  <div class="card-box">
+    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
+    ${eventsSnippetHtml}
+    <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
+  </div>`
+      : ""
+  }
+  <div class="ad-unit">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="card-box">
+    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
+      <a href="/born/${monthName}/${day}/" class="site-btn"><i class="bi bi-person-heart"></i>Famous Birthdays</a>
+      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Take the Quiz</a>
+    </div>
+  </div>
+  <div class="my-5 pt-3 border-top">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <a href="/died/${prevMonth}/${prevDay}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMDisplay)} ${prevDay}</a>
+      <a href="/died/${nextMonth}/${nextDay}/" class="site-btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
+    </div>
+    <div class="text-center">
+      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+    </div>
+  </div>
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts()}
+</body></html>`;
+}
+
+async function handleBornPage(request, env, ctx, url) {
+  const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+  if (parts.length !== 3) return new Response("Not Found", { status: 404 });
+  const monthName = parts[1].toLowerCase();
+  const day = parseInt(parts[2], 10);
+  const monthNum = MONTH_NUM_MAP[monthName];
+  const maxDay = monthNum ? DAYS_IN_MONTH[monthNum - 1] : 0;
+  if (!monthNum || isNaN(day) || day < 1 || day > maxDay)
+    return new Response("Not Found", { status: 404 });
+
+  const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
+  const kvKey = `born-v1-${hostKey}-${monthName}-${day}`;
+  try {
+    if (env.EVENTS_KV) {
+      const cached = await env.EVENTS_KV.get(kvKey);
+      if (cached)
+        return new Response(cached, {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=3600, s-maxage=604800",
+            "X-Cache": "HIT",
+          },
+        });
+    }
+  } catch (e) {
+    console.error("KV read born:", e);
+  }
+
+  const mPad = String(monthNum).padStart(2, "0");
+  const dPad = String(day).padStart(2, "0");
+  let eventsData = { events: [], births: [], deaths: [] };
+  if (env.EVENTS_KV) {
+    try {
+      const kv = await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, {
+        type: "json",
+      });
+      if (kv?.births?.length) eventsData = kv;
+    } catch (_) {}
+  }
+  if (!eventsData.births.length) {
+    try {
+      const r = await fetch(
+        `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`,
+        { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+      );
+      if (r.ok) {
+        eventsData = await r.json();
+        if (env.EVENTS_KV && eventsData?.events?.length)
+          ctx.waitUntil(
+            env.EVENTS_KV.put(
+              `events-data:${mPad}-${dPad}`,
+              JSON.stringify(eventsData),
+              { expirationTtl: 7 * 24 * 60 * 60 },
+            ).catch(() => {}),
+          );
+      }
+    } catch (e) {
+      console.error("Wikipedia API born:", e);
+    }
+  }
+
+  const html = generateBornHTML(
+    "https://thisday.info",
+    monthName,
+    day,
+    eventsData,
+  );
+  if (env.EVENTS_KV && eventsData?.births?.length)
+    ctx.waitUntil(
+      env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 }).catch(
+        () => {},
+      ),
+    );
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=3600, s-maxage=604800",
+      "X-Cache": "MISS",
+    },
+  });
+}
+
+async function handleDiedPage(request, env, ctx, url) {
+  const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+  if (parts.length !== 3) return new Response("Not Found", { status: 404 });
+  const monthName = parts[1].toLowerCase();
+  const day = parseInt(parts[2], 10);
+  const monthNum = MONTH_NUM_MAP[monthName];
+  const maxDay = monthNum ? DAYS_IN_MONTH[monthNum - 1] : 0;
+  if (!monthNum || isNaN(day) || day < 1 || day > maxDay)
+    return new Response("Not Found", { status: 404 });
+
+  const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
+  const kvKey = `died-v1-${hostKey}-${monthName}-${day}`;
+  try {
+    if (env.EVENTS_KV) {
+      const cached = await env.EVENTS_KV.get(kvKey);
+      if (cached)
+        return new Response(cached, {
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=3600, s-maxage=604800",
+            "X-Cache": "HIT",
+          },
+        });
+    }
+  } catch (e) {
+    console.error("KV read died:", e);
+  }
+
+  const mPad = String(monthNum).padStart(2, "0");
+  const dPad = String(day).padStart(2, "0");
+  let eventsData = { events: [], births: [], deaths: [] };
+  if (env.EVENTS_KV) {
+    try {
+      const kv = await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, {
+        type: "json",
+      });
+      if (kv?.deaths?.length) eventsData = kv;
+    } catch (_) {}
+  }
+  if (!eventsData.deaths.length) {
+    try {
+      const r = await fetch(
+        `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`,
+        { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+      );
+      if (r.ok) {
+        eventsData = await r.json();
+        if (env.EVENTS_KV && eventsData?.events?.length)
+          ctx.waitUntil(
+            env.EVENTS_KV.put(
+              `events-data:${mPad}-${dPad}`,
+              JSON.stringify(eventsData),
+              { expirationTtl: 7 * 24 * 60 * 60 },
+            ).catch(() => {}),
+          );
+      }
+    } catch (e) {
+      console.error("Wikipedia API died:", e);
+    }
+  }
+
+  const html = generateDiedHTML(
+    "https://thisday.info",
+    monthName,
+    day,
+    eventsData,
+  );
+  if (env.EVENTS_KV && eventsData?.deaths?.length)
+    ctx.waitUntil(
+      env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 }).catch(
+        () => {},
+      ),
+    );
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=3600, s-maxage=604800",
+      "X-Cache": "MISS",
+    },
+  });
 }
 
 function normalizeDidYouKnowFact(text) {
@@ -1353,38 +2226,28 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   const [dykResult, quizResult] = await Promise.allSettled([
     // --- DYK async IIFE ---
     (async () => {
-      if (!env.AI || !featuredEvent) return [];
+      if ((!env.AI && !env.GROQ_API_KEY) || !featuredEvent) return [];
       const eventDesc = `${featuredEvent.year} — ${featuredEvent.text}`;
       const contextChunks = [
         `Featured event: ${eventDesc}`,
         wikiTitle ? `Wikipedia article title: ${wikiTitle}` : "",
         wikiSummary ? `Wikipedia summary: ${wikiSummary}` : "",
       ].filter(Boolean);
-      const aiTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("AI timeout")), 9000),
+      const raw = await callAI(
+        env,
+        [
+          {
+            role: "system",
+            content:
+              "You are a historical facts writer. Always respond with valid JSON only, no markdown, no extra text.",
+          },
+          {
+            role: "user",
+            content: `Using ONLY the featured event context below, write exactly 5 "Did You Know" paragraphs connected specifically to this one topic.\n\n${contextChunks.join("\n\n")}\n\nRules:\n- Exactly 5 items\n- Each item must be 2-3 sentences\n- Stay tightly tied to this featured event and its directly related entities\n- Do not include generic history advice, timeline instructions, or broad cross-era commentary\n- Prefer concrete names, institutions, places, and consequences mentioned in the context\n- Output ONLY a JSON array of 5 strings\n\nExample:\n["Fact one.", "Fact two.", "Fact three.", "Fact four.", "Fact five."]`,
+          },
+        ],
+        { maxTokens: 1024, timeoutMs: 9_000 },
       );
-      const aiResult = await Promise.race([
-        env.AI.run(await resolveAiModel(env.BLOG_AI_KV), {
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a historical facts writer. Always respond with valid JSON only, no markdown, no extra text.",
-            },
-            {
-              role: "user",
-              content: `Using ONLY the featured event context below, write exactly 5 "Did You Know" paragraphs connected specifically to this one topic.\n\n${contextChunks.join("\n\n")}\n\nRules:\n- Exactly 5 items\n- Each item must be 2-3 sentences\n- Stay tightly tied to this featured event and its directly related entities\n- Do not include generic history advice, timeline instructions, or broad cross-era commentary\n- Prefer concrete names, institutions, places, and consequences mentioned in the context\n- Output ONLY a JSON array of 5 strings\n\nExample:\n["Fact one.", "Fact two.", "Fact three.", "Fact four.", "Fact five."]`,
-            },
-          ],
-          max_tokens: 1024,
-        }),
-        aiTimeout,
-      ]);
-      const rawValue =
-        aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
-      const raw = (
-        typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
-      ).trim();
       const cleaned = raw
         .replace(/^```(?:json)?\s*/i, "")
         .replace(/\s*```\s*$/, "")
@@ -1483,6 +2346,7 @@ async function handleFetchRequest(request, env, ctx) {
         "",
         `Sitemap: ${url.origin}/sitemap.xml`,
         `Sitemap: ${url.origin}/sitemap-generated.xml`,
+        `Sitemap: ${url.origin}/sitemap-people.xml`,
         `Sitemap: ${url.origin}/news-sitemap.xml`,
       ].join("\n"),
       {
@@ -1631,9 +2495,60 @@ async function handleFetchRequest(request, env, ctx) {
     });
   }
 
+  // /today/ → redirect to today's events page
+  if (url.pathname === "/today" || url.pathname === "/today/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+  }
+
+  // /born/today/ → redirect to today's born page
+  if (url.pathname === "/born/today" || url.pathname === "/born/today/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return Response.redirect(`${url.origin}/born/${mn}/${dd}/`, 302);
+  }
+
+  // /died/today/ → redirect to today's died page
+  if (url.pathname === "/died/today" || url.pathname === "/died/today/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return Response.redirect(`${url.origin}/died/${mn}/${dd}/`, 302);
+  }
+
+  // Born pages: /born/{month}/{day}/
+  const bornPageMatch = url.pathname.match(/^\/born\/([a-z]+)\/(\d+)\/?$/);
+  if (bornPageMatch) {
+    const monthSlug = bornPageMatch[1];
+    const day = parseInt(bornPageMatch[2], 10);
+    return handleBornPage(request, env, ctx, url, monthSlug, day);
+  }
+
+  // Died pages: /died/{month}/{day}/
+  const diedPageMatch = url.pathname.match(/^\/died\/([a-z]+)\/(\d+)\/?$/);
+  if (diedPageMatch) {
+    const monthSlug = diedPageMatch[1];
+    const day = parseInt(diedPageMatch[2], 10);
+    return handleDiedPage(request, env, ctx, url, monthSlug, day);
+  }
+
   // Events pages — must be before the HTML pass-through guard
   if (url.pathname.startsWith("/events/")) {
     return handleGeneratedPost(request, env, ctx, url);
+  }
+
+  // Sitemap for born/died pages (366 × 2 = 732 URLs)
+  if (url.pathname === "/sitemap-people.xml") {
+    const siteUrl = `${url.protocol}//${url.host}`;
+    return new Response(servePeopleSitemap(siteUrl), {
+      headers: {
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      },
+    });
   }
 
   // Generated sitemap listing all 366 /events/ pages
@@ -2575,34 +3490,23 @@ async function generateQuizForDate(
 
   let quiz = null;
 
-  if (env.AI && contextLines.length > 0) {
+  if ((env.AI || env.GROQ_API_KEY) && contextLines.length > 0) {
     try {
-      const aiTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("AI timeout")), 12000),
+      const raw = await callAI(
+        env,
+        [
+          {
+            role: "system",
+            content:
+              "You are a history quiz creator. Always respond with valid JSON only, no markdown, no extra text.",
+          },
+          {
+            role: "user",
+            content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nThe user can already READ the following event descriptions on screen — treat these as VISIBLE TO USER:\n${contextLines.join("\n")}\n\n#1 RULE — NO VISIBLE ANSWERS: Every question's correct answer must require knowledge that is NOT stated in the event description above. If a user can answer by reading the event text, the question is INVALID.\n\nGood question types (answer requires historical knowledge beyond the description):\n- What caused this event / what triggered it\n- What happened as a direct consequence or aftermath\n- Who was the key leader, commander, or decision-maker involved\n- What was the death toll, scale, or magnitude\n- What agreement, treaty, or legislation resulted\n- What country or organization was directly responsible\n- What prior event led to this one\n\nFORBIDDEN question types (answer visible in event text or trivially known):\n- Where did it happen (location often in the title)\n- In which year / what year / when (year is shown on screen)\n- What is the name of the event (it's in the title)\n\nRules:\n- Exactly 5 questions, one per event: Q1 about Event[0], Q2 about Event[1], Q3 about Event[2], Q4 about Event[3], Q5 about Event[4]\n- Each question has exactly 4 options\n- Exactly one correct answer (0-based index "answer", must be 0–3)\n- All 4 options must be plausible — wrong options should be real historical alternatives, not obvious nonsense\n- Each question needs an "explanation" (1-2 sentences) stating why the answer is correct\n- "topic" = 5 words or fewer naming the event\n- "sourceEvent" = full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why correct."}]}`,
+          },
+        ],
+        { maxTokens: 1500, timeoutMs: 12_000 },
       );
-      const aiResult = await Promise.race([
-        env.AI.run(await resolveAiModel(env.BLOG_AI_KV), {
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a history quiz creator. Always respond with valid JSON only, no markdown, no extra text.",
-            },
-            {
-              role: "user",
-              content: `Generate a 5-question multiple choice quiz about historical events on ${mDisplay} ${day}.\n\nThe user can already READ the following event descriptions on screen — treat these as VISIBLE TO USER:\n${contextLines.join("\n")}\n\n#1 RULE — NO VISIBLE ANSWERS: Every question's correct answer must require knowledge that is NOT stated in the event description above. If a user can answer by reading the event text, the question is INVALID.\n\nGood question types (answer requires historical knowledge beyond the description):\n- What caused this event / what triggered it\n- What happened as a direct consequence or aftermath\n- Who was the key leader, commander, or decision-maker involved\n- What was the death toll, scale, or magnitude\n- What agreement, treaty, or legislation resulted\n- What country or organization was directly responsible\n- What prior event led to this one\n\nFORBIDDEN question types (answer visible in event text or trivially known):\n- Where did it happen (location often in the title)\n- In which year / what year / when (year is shown on screen)\n- What is the name of the event (it's in the title)\n\nRules:\n- Exactly 5 questions, one per event: Q1 about Event[0], Q2 about Event[1], Q3 about Event[2], Q4 about Event[3], Q5 about Event[4]\n- Each question has exactly 4 options\n- Exactly one correct answer (0-based index "answer", must be 0–3)\n- All 4 options must be plausible — wrong options should be real historical alternatives, not obvious nonsense\n- Each question needs an "explanation" (1-2 sentences) stating why the answer is correct\n- "topic" = 5 words or fewer naming the event\n- "sourceEvent" = full event text\n- Output ONLY valid JSON:\n{"topic":"string","sourceEvent":"string","questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why correct."}]}`,
-            },
-          ],
-          max_tokens: 1500,
-        }),
-        aiTimeout,
-      ]);
-
-      const rawValue =
-        aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
-      const raw = (
-        typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
-      ).trim();
       const cleaned = raw
         .replace(/^```(?:json)?\s*/i, "")
         .replace(/\s*```\s*$/, "")
@@ -3505,6 +4409,14 @@ ${siteNav()}
   </div>
   ${carouselHtml}
   ${recSliderHtml}
+  <div style="background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:18px 20px;margin-bottom:20px">
+    <h3 style="font-size:1rem;font-weight:700;margin-bottom:12px;color:var(--tc)"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="/events/${monthSlug}/${day}/" class="qsc-cta-btn qsc-cta-primary"><i class="bi bi-calendar-event me-1"></i>Historical Events</a>
+      <a href="/born/${monthSlug}/${day}/" class="qsc-cta-btn"><i class="bi bi-person-heart me-1"></i>Famous Birthdays</a>
+      <a href="/died/${monthSlug}/${day}/" class="qsc-cta-btn"><i class="bi bi-flower1 me-1"></i>Notable Deaths</a>
+    </div>
+  </div>
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
   <div class="ad-unit" style="margin:24px 0">
     <div class="ad-unit-label">Advertisement</div>
@@ -3517,21 +4429,7 @@ ${siteNav()}
   </div>
 </main>
 ${siteFooter("yr")}
-<script>
-const yrEl=document.getElementById('yr');
-if(yrEl)yrEl.textContent=new Date().getFullYear();
-const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
-const ap=d=>document.body.classList.toggle('dark-theme',d);
-const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
-const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
-const dk=gt('darkTheme')!=='false';
-ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
-if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
-if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
-</script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
-<script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
+${getSharedPageScripts()}
 </body></html>`;
 
   // Cache the full rendered page for future visits

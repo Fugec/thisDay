@@ -180,9 +180,10 @@ export async function generateNarration(slug, script) {
 
   let res = apiKey ? await callElevenLabsWithTimestamps(apiKey, script) : null;
 
-  // Fall back to second account on quota exceeded (429) or missing primary key
-  if ((!res || res.status === 429) && apiKey2) {
-    if (res?.status === 429) {
+  // Fall back to second account on quota exceeded (429 or 401) or missing primary key
+  const isQuotaError = (r) => r && (r.status === 429 || r.status === 401);
+  if ((!res || isQuotaError(res)) && apiKey2) {
+    if (res) {
       console.warn(
         "  ⚠ ElevenLabs primary quota reached — switching to fallback account",
       );

@@ -23,6 +23,7 @@ import {
   checkAndUpdateAiModel,
   CF_AI_MODEL,
 } from "./shared/ai-model.js";
+import { callAI } from "./shared/ai-call.js";
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
@@ -171,12 +172,7 @@ export default {
             if (existing) return { slug: entry.slug, status: "skipped" };
           }
           const content = await buildRichContent(entry, entry.slug);
-          const quiz = await generateBlogQuiz(
-            env.AI,
-            content,
-            entry.slug,
-            await resolveAiModel(env.BLOG_AI_KV),
-          );
+          const quiz = await generateBlogQuiz(env, content, entry.slug);
           if (quiz) {
             await env.BLOG_AI_KV.put(kvKey, JSON.stringify(quiz), {
               expirationTtl: 90 * 86_400,
@@ -226,14 +222,9 @@ export default {
         const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
         const index = indexRaw ? JSON.parse(indexRaw) : [];
         const entry = index.find((p) => p.slug === slug);
-        if (entry && env.AI) {
+        if (entry && (env.AI || env.GROQ_API_KEY)) {
           const content = await buildRichContent(entry, slug);
-          const quiz = await generateBlogQuiz(
-            env.AI,
-            content,
-            slug,
-            await resolveAiModel(env.BLOG_AI_KV),
-          );
+          const quiz = await generateBlogQuiz(env, content, slug);
           if (quiz) {
             await env.BLOG_AI_KV.put(
               `quiz-v3:blog:${slug}`,
@@ -887,19 +878,14 @@ export default {
             const cached =
               inlineQuizRaw ||
               (await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`));
-            if (!cached && env.AI) {
+            if (!cached && (env.AI || env.GROQ_API_KEY)) {
               try {
                 const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
                 const index = indexRaw ? JSON.parse(indexRaw) : [];
                 const entry = index.find((p) => p.slug === slug);
                 if (entry) {
                   const richContent = await buildRichContent(entry, slug);
-                  const quiz = await generateBlogQuiz(
-                    env.AI,
-                    richContent,
-                    slug,
-                    await resolveAiModel(env.BLOG_AI_KV),
-                  );
+                  const quiz = await generateBlogQuiz(env, richContent, slug);
                   if (quiz)
                     await env.BLOG_AI_KV.put(
                       `quiz-v3:blog:${slug}`,
@@ -1215,10 +1201,10 @@ async function generateAndStore(env, ctx) {
   // the response (or cron return) is not blocked by quiz generation, cache
   // purges, pings, or Discord. ctx may be undefined in unit tests — guard it.
   if (ctx?.waitUntil) {
-    ctx.waitUntil(runPostPublishExtras(env, slug, content, activeModel));
+    ctx.waitUntil(runPostPublishExtras(env, slug, content));
   } else {
     // Fallback for environments without ctx (e.g. tests): run synchronously
-    await runPostPublishExtras(env, slug, content, activeModel);
+    await runPostPublishExtras(env, slug, content);
   }
 
   console.log(
@@ -1231,7 +1217,7 @@ async function generateAndStore(env, ctx) {
  * quiz page cache bust, WebSub ping, Discord notify.
  * Runs via ctx.waitUntil() so it never blocks the HTTP response / cron return.
  */
-async function runPostPublishExtras(env, slug, content, activeModel) {
+async function runPostPublishExtras(env, slug, content) {
   // Purge the cached sitemap and RSS feed so they reflect the new post immediately
   // (both workers cache for 1 h — without this, the new post would be invisible
   //  to crawlers until the next cache expiry).
@@ -1256,12 +1242,7 @@ async function runPostPublishExtras(env, slug, content, activeModel) {
       slug,
     );
     const enrichedContent = { ...content, ...richContent };
-    const quiz = await generateBlogQuiz(
-      env.AI,
-      enrichedContent,
-      slug,
-      activeModel,
-    );
+    const quiz = await generateBlogQuiz(env, enrichedContent, slug);
     if (quiz) {
       await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {
         expirationTtl: 90 * 86_400,
@@ -1326,6 +1307,102 @@ async function runPostPublishExtras(env, slug, content, activeModel) {
 // ---------------------------------------------------------------------------
 // Blog quiz generation
 // ---------------------------------------------------------------------------
+
+/**
+ * Quiz Expert — uses Cloudflare Workers AI (same free binding as quiz generation)
+ * to review and sharpen quiz questions after the initial generation pass.
+ *
+ * Goals:
+ *   - Replace trivially easy recall questions with analytical or synthesis ones
+ *   - Make wrong options plausible (same era, same field, genuinely confusable)
+ *   - Ensure at least 3 of 5 questions require knowing a non-obvious fact
+ *   - Preserve question variety (Who / What / Why+How / When+Where)
+ *   - Keep the exact JSON schema unchanged so the frontend works without changes
+ *
+ * Falls back silently to original questions if the AI binding is absent,
+ * the response is malformed, or validation fails.
+ *
+ * @param {Array}  questions  Validated questions from generateBlogQuiz()
+ * @param {object} content    Rich content object (title, keyFacts, etc.)
+ * @param {object} env        Worker environment bindings
+ * @returns {Promise<Array>}  Improved questions, or originals on any failure
+ */
+async function reviewQuizWithExpert(questions, content, env) {
+  if (!env.AI && !env.GROQ_API_KEY) return questions;
+
+  const contextLines = [
+    `Title: ${content.title}`,
+    content.historicalDate ? `Date: ${content.historicalDate}` : "",
+    ...(content.keyFacts || []).slice(0, 12).map((f) => `Fact: ${f}`),
+  ].filter(Boolean).join("\n");
+
+  const systemPrompt =
+    "You are a rigorous history quiz editor. You receive a 5-question multiple-choice quiz " +
+    "and a set of historical facts. Your job is to make the quiz harder and more educational " +
+    "without changing its structure.\n\n" +
+    "Rules:\n" +
+    "- Keep all 5 questions, same order\n" +
+    "- Keep the same JSON schema: {q, options, answer, explanation}\n" +
+    "- answer is still a 0-based index (0-3) into options\n" +
+    "- Make trivially easy questions harder by asking for a less obvious detail\n" +
+    "- Wrong options must be plausible: same era, same country, same field — not obviously wrong\n" +
+    "- At least 3 questions should require knowing a non-obvious fact, not just re-reading the title\n" +
+    "- Never trick or mislead — every correct answer must be clearly supported by the facts provided\n" +
+    "- Update the explanation to match any changes\n" +
+    "- Output ONLY valid JSON, no markdown: {\"questions\":[...]}";
+
+  const userMessage =
+    `Historical context:\n${contextLines}\n\n` +
+    `Current quiz (JSON):\n${JSON.stringify({ questions }, null, 2)}\n\n` +
+    `Return the improved quiz as JSON: {"questions":[{"q":"...","options":["A","B","C","D"],"answer":0,"explanation":"..."}]}`;
+
+  let raw;
+  try {
+    raw = await callAI(
+      env,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      { maxTokens: 2000, timeoutMs: 25_000 },
+    );
+  } catch (err) {
+    console.warn(`Quiz expert: AI call failed (${err.message}) — using original questions`);
+    return questions;
+  }
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) {
+    console.warn("Quiz expert: no JSON object in response — using original questions");
+    return questions;
+  }
+
+  let parsed;
+  try { parsed = JSON.parse(match[0]); } catch {
+    console.warn("Quiz expert: JSON parse error — using original questions");
+    return questions;
+  }
+
+  const improved = parsed?.questions;
+  if (
+    !Array.isArray(improved) ||
+    improved.length !== questions.length ||
+    !improved.every(
+      (q) =>
+        typeof q.q === "string" && q.q.trim().length > 10 &&
+        Array.isArray(q.options) && q.options.length === 4 &&
+        q.options.every((o) => typeof o === "string" && o.trim().length > 2) &&
+        Number.isInteger(q.answer) && q.answer >= 0 && q.answer <= 3 &&
+        typeof q.explanation === "string" && q.explanation.trim().length > 8,
+    )
+  ) {
+    console.warn("Quiz expert: validation failed — using original questions");
+    return questions;
+  }
+
+  console.log("Quiz expert: questions reviewed and sharpened");
+  return improved;
+}
 
 // Fetch a blog post's HTML and extract rich context for quiz generation
 async function extractRichContext(slug) {
@@ -1413,8 +1490,8 @@ async function buildRichContent(entry, slug) {
   return base;
 }
 
-async function generateBlogQuiz(ai, content, _slug, model = CF_AI_MODEL) {
-  if (!ai) return null;
+async function generateBlogQuiz(env, content, _slug) {
+  if (!env.AI && !env.GROQ_API_KEY) return null;
 
   const contextLines = [
     `Title: ${content.title}`,
@@ -1439,12 +1516,11 @@ async function generateBlogQuiz(ai, content, _slug, model = CF_AI_MODEL) {
     return null;
   }
 
-  const aiTimeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error("AI timeout")), 25000),
-  );
-  const aiResult = await Promise.race([
-    ai.run(model, {
-      messages: [
+  let raw;
+  try {
+    raw = await callAI(
+      env,
+      [
         {
           role: "system",
           content:
@@ -1455,16 +1531,12 @@ async function generateBlogQuiz(ai, content, _slug, model = CF_AI_MODEL) {
           content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, no more no less\n- Each question has exactly 4 options (never fewer, never more)\n- Exactly one correct answer per question (0-based index in "answer", must be 0, 1, 2, or 3)\n- Question types must vary: include at least one each of Who, What, Why/How, When/Where\n- Questions must progress: 1 easy recall, 2 medium analysis, 2 challenging synthesis\n- Draw from ALL Fact lines — do not repeat the same topic twice\n- Wrong options must be plausible but clearly incorrect; no trick questions\n- Each question must include a short "explanation" field (1-2 sentences) explaining why the answer is correct\n- All strings must be non-empty and longer than 5 characters\n- Output ONLY valid JSON, no markdown:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
         },
       ],
-      max_tokens: 1500,
-    }),
-    aiTimeout,
-  ]);
-
-  const rawValue =
-    aiResult.response ?? aiResult.choices?.[0]?.message?.content ?? "";
-  const raw = (
-    typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
-  ).trim();
+      { maxTokens: 1500, timeoutMs: 25_000 },
+    );
+  } catch (err) {
+    console.error("Blog quiz: AI call failed —", err.message);
+    return null;
+  }
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
@@ -1496,7 +1568,8 @@ async function generateBlogQuiz(ai, content, _slug, model = CF_AI_MODEL) {
       q.explanation.trim().length > 8,
   );
   if (valid.length !== 5) return null;
-  return { ...parsed, questions: valid };
+  const sharpened = await reviewQuizWithExpert(valid, content, env);
+  return { ...parsed, questions: sharpened };
 }
 
 // ---------------------------------------------------------------------------

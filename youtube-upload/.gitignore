@@ -1,5 +1,6 @@
 node_modules/
 tmp/
-assets/
+assets/*
+!assets/background.mp3
 .env
 client_secret*.json

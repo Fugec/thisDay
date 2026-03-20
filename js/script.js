@@ -837,6 +837,8 @@ async function renderCalendar() {
 
 let currentDayAllItems = [];
 let currentActiveFilter = "all";
+let currentModalDay = null;
+let currentModalMonth = null;
 
 const eventCategories = {
   "War & Conflict": {
@@ -1399,6 +1401,88 @@ const eventCategories = {
       "tax shelter",
     ],
   },
+  "Health & Medicine": {
+    include: [
+      "hospital",
+      "disease",
+      "illness",
+      "epidemic",
+      "pandemic",
+      "plague",
+      "outbreak",
+      "vaccine",
+      "vaccination",
+      "inoculation",
+      "quarantine",
+      "surgery",
+      "transplant",
+      "antibiotic",
+      "penicillin",
+      "treatment",
+      "therapy",
+      "diagnosis",
+      "clinical",
+      "pathology",
+      "anatomy",
+      "physician",
+      "surgeon",
+      "nursing",
+      "public health",
+      "healthcare",
+      "health care",
+      "red cross",
+      "world health organization",
+      "blood transfusion",
+      "organ donation",
+      "mental health",
+      "psychiatric",
+      "insulin",
+      "chemotherapy",
+      "radiation therapy",
+      "DNA sequencing",
+      "gene therapy",
+    ],
+    exclude: [
+      "medicine man",
+      "folk medicine",
+      "alternative medicine",
+      "witch doctor",
+      "medicine show",
+      "sports medicine",
+    ],
+  },
+  "Exploration & Discovery": {
+    include: [
+      "expedition",
+      "explorer",
+      "exploration",
+      "voyage",
+      "circumnavigation",
+      "cartography",
+      "northwest passage",
+      "new world",
+      "colonization",
+      "settlers",
+      "frontier",
+      "arctic",
+      "antarctic",
+      "mount everest",
+      "deep sea",
+      "first ascent",
+      "first crossing",
+      "first descent",
+      "terra incognita",
+      "uncharted",
+      "conquistador",
+      "new territory",
+      "geographical",
+    ],
+    exclude: [
+      "oil exploration",
+      "space exploration",
+      "mineral exploration",
+    ],
+  },
   "Famous Persons": {
     include: [
       "author",
@@ -1432,11 +1516,7 @@ const eventCategories = {
       "visionary",
       "genius",
       "celebrity",
-      "icon",
-      "legend",
       "laureate",
-      "recipient",
-      "winner",
     ],
     exclude: [
       "ghost writer",
@@ -1454,6 +1534,69 @@ const eventCategories = {
     ],
   },
 };
+
+const categoryEmojis = {
+  "All": "📅",
+  "War & Conflict": "⚔️",
+  "Politics & Government": "🏛️",
+  "Science & Technology": "🔬",
+  "Arts & Culture": "🎭",
+  "Disasters & Accidents": "🌋",
+  "Sports": "🏆",
+  "Social & Human Rights": "✊",
+  "Economy & Business": "📈",
+  "Health & Medicine": "💊",
+  "Exploration & Discovery": "🧭",
+  "Births": "👶",
+  "Deaths": "🕯️",
+  "Famous Persons": "⭐",
+  "Miscellaneous": "📌",
+};
+
+function showCopyToast(message = "Copied to clipboard!") {
+  const existing = document.getElementById("thisDayCopyToast");
+  if (existing) existing.remove();
+  const toast = document.createElement("div");
+  toast.id = "thisDayCopyToast";
+  toast.textContent = message;
+  toast.style.cssText =
+    "position:fixed;bottom:28px;left:50%;transform:translateX(-50%);" +
+    "background:#222;color:#fff;padding:9px 20px;border-radius:20px;" +
+    "font-size:0.85rem;z-index:10000;opacity:1;transition:opacity 0.4s;" +
+    "box-shadow:0 4px 12px rgba(0,0,0,0.3);pointer-events:none;";
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 420);
+  }, 2000);
+}
+
+function handleShareEvent(description, year, sourceUrl) {
+  const text = `${year} — ${description}`;
+  const url = sourceUrl || "https://thisday.info";
+  if (navigator.share) {
+    navigator
+      .share({ title: "This Day in History", text, url })
+      .catch(() => {});
+    return;
+  }
+  navigator.clipboard
+    .writeText(`${text}\n${url}`)
+    .then(() => showCopyToast("Copied to clipboard!"))
+    .catch(() => showCopyToast("Could not copy — try sharing manually"));
+}
+
+function trackDayVisit(month, day) {
+  const key = `${month}-${day}`;
+  try {
+    const data = JSON.parse(sessionStorage.getItem("thisDayExplored") || "[]");
+    if (!data.includes(key)) data.push(key);
+    sessionStorage.setItem("thisDayExplored", JSON.stringify(data));
+    return data.length;
+  } catch {
+    return 1;
+  }
+}
 
 function matchesCategory(text, categoryRules) {
   const lowerText = text.toLowerCase();
@@ -1654,6 +1797,7 @@ function renderFilteredItems(itemsToRender) {
       "<p class='text-muted text-center'>No items found for this category.</p>";
     return;
   }
+  const currentYear = new Date().getFullYear();
   let htmlContent = `<ul class="list-unstyled">`;
   itemsToRender.forEach((event) => {
     let specialEmphasis = "";
@@ -1663,33 +1807,52 @@ function renderFilteredItems(itemsToRender) {
       specialEmphasis = "<strong>Death:</strong> ";
     }
     const commentary = getEventCommentary(event);
+
+    // Anniversary badge — neutral hourglass, no celebratory emoji
+    const eventYear = parseInt(event.year, 10);
+    const yearsAgo = currentYear - eventYear;
+    let anniversaryBadge = "";
+    if (yearsAgo > 0 && yearsAgo % 25 === 0) {
+      anniversaryBadge = `<span class="badge bg-secondary ms-2" title="Milestone anniversary">⏳ ${yearsAgo} years ago</span>`;
+    }
+
+    // WhatsApp share URL
+    const shareText = encodeURIComponent(
+      `${event.year} — ${event.description}\n${event.sourceUrl || "https://thisday.info"}`,
+    );
+    const waUrl = `https://wa.me/?text=${shareText}`;
+
     htmlContent += `
             <li class="mb-3 p-3 border rounded">
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="flex-grow-1">
-                        <strong class="text-primary">${event.year}</strong>
-                        <p class="mb-1">${specialEmphasis}${
-                          event.description
-                        }</p>
+                        <div class="d-flex align-items-center flex-wrap gap-1 mb-1">
+                          <strong class="text-primary">${event.year}</strong>
+                          ${anniversaryBadge}
+                        </div>
+                        <p class="mb-1">${specialEmphasis}${event.description}</p>
                         <p class="mb-2 fst-italic event-commentary">
                           <i class="bi bi-chat-quote me-1 event-commentary-icon"></i>${commentary}
                         </p>
-                        ${
-                          event.sourceUrl
-                            ? `
-                            <a href="${
-                              event.sourceUrl
-                            }" class="btn btn-sm btn-outline-primary"
-                               target="_blank" rel="noopener noreferrer">
-                                Read More About ${
-                                  event.title.length > 50
-                                    ? `${event.title.substring(0, 12)}...`
-                                    : event.title
-                                }
-                            </a>
-                            `
-                            : ""
-                        }
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                          ${
+                            event.sourceUrl
+                              ? `<a href="${event.sourceUrl}" class="btn btn-sm btn-outline-primary"
+                                 target="_blank" rel="noopener noreferrer">
+                                   Read More About ${event.title.length > 20 ? `${event.title.substring(0, 20)}...` : event.title}
+                                 </a>`
+                              : ""
+                          }
+                          <button class="btn btn-sm btn-outline-secondary share-copy-btn"
+                            data-desc="${(event.description || "").replace(/"/g, "&quot;")}"
+                            data-year="${event.year}"
+                            data-url="${event.sourceUrl || ""}">
+                            <i class="bi bi-share"></i> Share
+                          </button>
+                          <a href="${waUrl}" class="btn btn-sm btn-outline-success" target="_blank" rel="noopener noreferrer">
+                            <i class="bi bi-whatsapp"></i> WhatsApp
+                          </a>
+                        </div>
                     </div>
                     ${
                       event.thumbnailUrl
@@ -1707,6 +1870,12 @@ function renderFilteredItems(itemsToRender) {
   });
   htmlContent += `</ul>`;
   eventsListDiv.innerHTML = htmlContent;
+
+  eventsListDiv.querySelectorAll(".share-copy-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      handleShareEvent(btn.dataset.desc, btn.dataset.year, btn.dataset.url);
+    });
+  });
 }
 
 function applyFilter() {
@@ -1730,6 +1899,9 @@ async function showEventDetails(
   year,
   preFetchedStructuredEvents = null,
 ) {
+  currentModalDay = day;
+  currentModalMonth = month;
+  const daysExplored = trackDayVisit(month, day);
   modalDate.textContent = `${day}. ${monthNames[month - 1]}`;
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
@@ -1775,12 +1947,20 @@ async function showEventDetails(
     sortedCategories.forEach((category) => {
       const isActive =
         category.toLowerCase() === currentActiveFilter ? "active" : "";
-      filterButtonsHtml += `<button class="btn btn-sm btn-outline-primary filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
+      const emoji = categoryEmojis[category] || "";
+      filterButtonsHtml += `<button class="btn btn-sm btn-outline-primary filter-btn ${isActive}" data-category="${category.toLowerCase()}">${emoji ? emoji + " " : ""}${category}</button>`;
     });
     filterButtonsHtml += `</div>`;
+    const totalEvents = currentDayAllItems.length;
+    const exploredLabel =
+      daysExplored === 1 ? "1 day explored" : `${daysExplored} days explored`;
     modalBodyContent.innerHTML = `
     <div class="modal-header-content">
         ${filterButtonsHtml}
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1" style="font-size:0.8rem;opacity:0.75;">
+          <span>📖 ${totalEvents} event${totalEvents !== 1 ? "s" : ""} on this day</span>
+          <span>🗓️ ${exploredLabel}</span>
+        </div>
     </div>
     <div id="modal-events-list">
         </div>

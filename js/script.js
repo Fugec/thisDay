@@ -2025,31 +2025,11 @@ function setTheme(isDark) {
     body.classList.add("dark-theme");
     if (themeSwitchMobile) themeSwitchMobile.checked = true;
     if (themeSwitchDesktop) themeSwitchDesktop.checked = true;
-    if (themeSwitchMobile && themeSwitchMobile.nextElementSibling) {
-      const icon = themeSwitchMobile.nextElementSibling.querySelector("i");
-      if (icon) {
-        icon.classList.remove("bi-moon-fill");
-        icon.classList.add("bi-brightness-high-fill");
-      }
-    }
-    if (themeSwitchDesktop && themeSwitchDesktop.nextElementSibling) {
-      themeSwitchDesktop.nextElementSibling.textContent = "Light Mode";
-    }
     localStorage.setItem("darkTheme", "true");
   } else {
     body.classList.remove("dark-theme");
     if (themeSwitchMobile) themeSwitchMobile.checked = false;
     if (themeSwitchDesktop) themeSwitchDesktop.checked = false;
-    if (themeSwitchMobile && themeSwitchMobile.nextElementSibling) {
-      const icon = themeSwitchMobile.nextElementSibling.querySelector("i");
-      if (icon) {
-        icon.classList.remove("bi-brightness-high-fill");
-        icon.classList.add("bi-moon-fill");
-      }
-    }
-    if (themeSwitchDesktop && themeSwitchDesktop.nextElementSibling) {
-      themeSwitchDesktop.nextElementSibling.textContent = "Dark Mode";
-    }
     localStorage.setItem("darkTheme", "false");
   }
 }

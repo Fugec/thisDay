@@ -2000,6 +2000,8 @@ function normalizeDidYouKnowFact(text) {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^[-•]\s*/, "")
+    .replace(/^did you know that\s*/i, "")
+    .replace(/^did you know[,:]?\s*/i, "")
     .replace(/^[^.]{2,120}\s+is directly connected to this event\.\s*/i, "")
     .replace(/\.{2,}/g, ".")
     .trim();
@@ -2243,7 +2245,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
           },
           {
             role: "user",
-            content: `Using ONLY the featured event context below, write exactly 5 "Did You Know" paragraphs connected specifically to this one topic.\n\n${contextChunks.join("\n\n")}\n\nRules:\n- Exactly 5 items\n- Each item must be 2-3 sentences\n- Stay tightly tied to this featured event and its directly related entities\n- Do not include generic history advice, timeline instructions, or broad cross-era commentary\n- Prefer concrete names, institutions, places, and consequences mentioned in the context\n- Output ONLY a JSON array of 5 strings\n\nExample:\n["Fact one.", "Fact two.", "Fact three.", "Fact four.", "Fact five."]`,
+            content: `Using ONLY the featured event context below, write exactly 5 concise historical facts about this specific topic.\n\nFeatured event (do NOT repeat this verbatim): ${eventDesc}\n\n${contextChunks.slice(1).join("\n\n")}\n\nRules:\n- Exactly 5 items\n- Each item is 1-2 sentences, starting directly with the fact\n- Do NOT start with "Did You Know", "Did You Know that", or any similar preamble\n- Do NOT restate the featured event description — add new information only\n- Stay tightly tied to this topic and its directly related entities\n- Prefer concrete names, institutions, places, dates, and consequences\n- Output ONLY a JSON array of 5 strings\n\nExample:\n["Tokayev served as UN Director-General in Geneva before becoming president.", "Kazakhstan's constitution was amended three times under Nazarbayev's rule."]`,
           },
         ],
         { maxTokens: 1024, timeoutMs: 9_000 },

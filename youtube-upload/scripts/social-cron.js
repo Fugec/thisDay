@@ -20,7 +20,7 @@ import { config } from "dotenv";
 config({ path: new URL("../.env", import.meta.url).pathname });
 
 import { google } from "googleapis";
-import { spawnSync } from "child_process";
+import { spawnSync, execFileSync } from "child_process";
 import { existsSync, unlinkSync } from "fs";
 import { getPostIndex } from "../lib/kv.js";
 import { getUploaded, markSocialPosted } from "../lib/tracker.js";
@@ -138,14 +138,44 @@ async function main() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Wake detection — was the Mac woken by pmset schedule (RTC alarm)?
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true if the Mac was woken by a scheduled RTC/pmset alarm
+ * within the last 10 minutes — meaning the user wasn't already awake.
+ */
+function wasWokenBySchedule() {
+  try {
+    const log = execFileSync("pmset", ["-g", "log"], { encoding: "utf8", timeout: 10_000 });
+    const wakeLines = log.split("\n").filter(l => /\bWake\b/.test(l));
+    if (!wakeLines.length) return false;
+    const last = wakeLines[wakeLines.length - 1];
+    // Only treat as scheduled if reason is RTC/Alarm (not user input)
+    if (!/RTC|Alarm/i.test(last)) return false;
+    const m = last.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
+    if (!m) return false;
+    const wakeTime = new Date(m[1] + " UTC").getTime();
+    return Date.now() - wakeTime < 10 * 60_000; // woken within last 10 min
+  } catch { return false; }
+}
+
 async function rescheduleWake() {
   const script = new URL("schedule-wake.sh", import.meta.url).pathname;
   const r = spawnSync("sudo", ["bash", script], { stdio: "inherit" });
   if (r.status !== 0) console.warn("[social-cron] ⚠ Could not reschedule wake events (needs sudo)");
 }
 
+function sleepNow() {
+  console.log("[social-cron] Woken by schedule — going back to sleep");
+  // osascript sleep doesn't need sudo
+  spawnSync("osascript", ["-e", 'tell application "System Events" to sleep'], { stdio: "inherit" });
+}
+
 main()
   .then(rescheduleWake)
+  .then(() => { if (wasWokenBySchedule()) sleepNow(); })
   .catch((err) => {
     console.error("[social-cron] Fatal:", err.message);
     process.exit(1);

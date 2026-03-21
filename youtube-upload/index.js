@@ -35,10 +35,11 @@ import { polishNarrationItems } from "./lib/narration-expert.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
 import { checkVideoQuality } from "./lib/video-quality.js";
 import { uploadToYoutube } from "./lib/youtube.js";
-import { getUploaded, markUploaded } from "./lib/tracker.js";
+import { getUploaded, markUploaded, markSocialPosted } from "./lib/tracker.js";
 import { getMusicPath } from "./lib/music.js";
 import { notifyUpload } from "./lib/notify.js";
 import { postToMeta } from "./lib/meta.js";
+import { postToTikTok } from "./lib/tiktok.js";
 import {
   generateNarration,
   buildNarrationScript,
@@ -260,7 +261,9 @@ async function main() {
       console.log(
         `  Tracker updated: youtube:uploaded[${post.slug}] (privacy=${privacy})`,
       );
-      await postToMeta(videoPath, post, youtubeId);
+      const metaOk   = await postToMeta(videoPath, post, youtubeId);
+      const tiktokOk = await postToTikTok(videoPath, post, youtubeId);
+      await markSocialPosted(post.slug, { meta: metaOk, tiktok: tiktokOk });
       await notifyUpload(post, youtubeId);
     } catch (err) {
       if (err.message?.startsWith("IMAGE_UNAVAILABLE")) {

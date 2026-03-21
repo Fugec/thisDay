@@ -138,7 +138,15 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("[social-cron] Fatal:", err.message);
-  process.exit(1);
-});
+async function rescheduleWake() {
+  const script = new URL("schedule-wake.sh", import.meta.url).pathname;
+  const r = spawnSync("sudo", ["bash", script], { stdio: "inherit" });
+  if (r.status !== 0) console.warn("[social-cron] ⚠ Could not reschedule wake events (needs sudo)");
+}
+
+main()
+  .then(rescheduleWake)
+  .catch((err) => {
+    console.error("[social-cron] Fatal:", err.message);
+    process.exit(1);
+  });

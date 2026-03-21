@@ -18,8 +18,8 @@ WAKE_TIMES=("12:58:00" "14:58:00")
 
 NOW=$(date -u +%s)
 
-# Clear existing pmset-scheduled wakes before re-adding
-pmset schedule cancelall "pmset" 2>/dev/null || true
+# Clear all existing pmset-scheduled wake events before re-adding
+pmset schedule cancelall 2>/dev/null || true
 
 for WTIME in "${WAKE_TIMES[@]}"; do
   for DOW in "${WAKE_DAYS[@]}"; do

@@ -23,26 +23,29 @@
 
 import sharp from "sharp";
 import ffmpeg from "fluent-ffmpeg";
-import { mkdirSync, unlinkSync } from "fs";
+import { mkdirSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
-import { generateAIImageBatch } from "./ai-image.js";
+import { generateAISceneBatch } from "./ai-image.js";
 import { reviewPromptsWithHistoryExpert } from "./history-expert.js";
 
 const TMP = "./tmp";
 const W = 1080;
 const H = 1920;
 /**
- * Number of AI-generated scenes per video.
- * Keep at 3 — Zero GPU free tier gives ~3.5 min/day GPU time;
- * each WAN 2.2 I2V clip consumes ~50s, so 3 clips ≈ 2.5 min, safely within limit.
- * HuggingFace FLUX free-tier image generation: 3 images/video is negligible.
+ * 4 scenes per video — one cut every ~10-12s at 45s total.
+ * Research shows 4 scenes at that cadence maximises documentary-style retention.
+ * Images: Pollinations flux-2-dev (free). Animation: WAN 2.2 I2V via HF ZeroGPU
+ * (requires HF_TOKEN; falls back to Ken Burns automatically if unavailable).
  */
 const N_SCENES = 3;
 
+// Gentle crossfade only — slide/wipe transitions are too jarring for a calm history channel
+const XFADE_TRANSITIONS = ["fade", "dissolve", "fade"];
+
 /**
- * Builds an FFmpeg zoompan filter string for a single scene (Ken Burns effect).
- * Alternates between slow zoom-in, zoom-out, and subtle pan per scene index
- * so consecutive scenes feel visually distinct.
+ * Builds an FFmpeg zoompan filter string for a static-image scene (Ken Burns).
+ * 6 distinct motion patterns cycled per scene index for maximum visual variety.
+ * Input images are pre-scaled to 115% so zoom never reveals black edges.
  *
  * @param {number} sceneIdx   0-based scene index
  * @param {number} durationS  Scene duration in seconds
@@ -51,38 +54,54 @@ const N_SCENES = 3;
  * @returns {string}  filter fragment
  */
 function buildKenBurns(sceneIdx, durationS, inLabel, outLabel) {
-  const totalFrames = Math.ceil(durationS * FPS);
-  const d = totalFrames;
-  // Zoom from 1.0→1.0 on a 110%-sized source effectively gives us
-  // natural zoom headroom. zoompan output is always W×H.
+  // Use round (not ceil) so frame count exactly matches the scene duration
+  const d = Math.round(durationS * FPS);
+  // Per-frame zoom increment for pzoom accumulation — smoother than on/d formula
+  const Z_RANGE = 0.10; // 10% total zoom travel (reduced from 12% for less distortion)
   const Z_START = 1.0;
-  const Z_END = 1.06;
+  const Z_END   = (Z_START + Z_RANGE).toFixed(4);   // 1.1000
+  const Z_MID   = (Z_START + Z_RANGE / 2).toFixed(4); // 1.0500
+  const INC     = (Z_RANGE / d).toFixed(7);          // per-frame increment
+
   let zoom, x, y;
-  switch (sceneIdx % 4) {
-    case 0: // slow zoom-in, anchor centre
-      zoom = `${Z_START}+(${Z_END}-${Z_START})*on/${d}`;
+
+  switch (sceneIdx % 6) {
+    case 0: // zoom-in, anchor centre
+      // pzoom accumulates smoothly; clamp at Z_END to avoid overshoot
+      zoom = `if(eq(on,0),${Z_START},min(${Z_END},pzoom+${INC}))`;
       x = `iw/2-(iw/zoom/2)`;
       y = `ih/2-(ih/zoom/2)`;
       break;
-    case 1: // slow zoom-out, anchor centre
-      zoom = `${Z_END}-(${Z_END}-${Z_START})*on/${d}`;
+    case 1: // zoom-out, anchor centre
+      zoom = `if(eq(on,0),${Z_END},max(${Z_START},pzoom-${INC}))`;
       x = `iw/2-(iw/zoom/2)`;
       y = `ih/2-(ih/zoom/2)`;
       break;
-    case 2: // zoom-in, drift upward
-      zoom = `${Z_START}+(${Z_END}-${Z_START})*on/${d}`;
+    case 2: // zoom-in + slow pan up
+      zoom = `if(eq(on,0),${Z_START},min(${Z_END},pzoom+${INC}))`;
       x = `iw/2-(iw/zoom/2)`;
-      y = `max(0,(ih/2-(ih/zoom/2))*(1-on/${d}*0.05))`;
+      y = `max(0,ih/2-(ih/zoom/2)-ih*0.04*on/${d})`;
       break;
-    case 3: // zoom-in, drift right
-      zoom = `${Z_START}+(${Z_END}-${Z_START})*on/${d}`;
-      x = `max(0,(iw/2-(iw/zoom/2))*(1+on/${d}*0.04))`;
+    case 3: // zoom-in + slow pan down
+      zoom = `if(eq(on,0),${Z_START},min(${Z_END},pzoom+${INC}))`;
+      x = `iw/2-(iw/zoom/2)`;
+      y = `min(ih*(1-1/zoom),ih/2-(ih/zoom/2)+ih*0.04*on/${d})`;
+      break;
+    case 4: // steady mid-zoom, slow pan left
+      zoom = `${Z_MID}`;
+      x = `max(0,iw*(1-1/zoom)*0.5-iw*0.05*on/${d})`;
+      y = `ih/2-(ih/zoom/2)`;
+      break;
+    case 5: // steady mid-zoom, slow pan right
+      zoom = `${Z_MID}`;
+      x = `min(iw*(1-1/zoom),iw*(1-1/zoom)*0.5+iw*0.05*on/${d})`;
       y = `ih/2-(ih/zoom/2)`;
       break;
   }
+  // setpts resets timestamps so xfade offsets are always relative to stream start
   return (
     `${inLabel}zoompan=z='${zoom}':x='${x}':y='${y}'` +
-    `:d=${d}:s=${W}x${H}:fps=${FPS}${outLabel}`
+    `:d=${d}:s=${W}x${H}:fps=${FPS},setpts=PTS-STARTPTS${outLabel}`
   );
 }
 
@@ -655,16 +674,21 @@ function getHistoricalEraContext(rawTitle) {
  *
  * @param {string} title
  * @param {string[]|null} contentItems  DYK bullets / Quick Facts rows
+ * @param {string|null}   qualityHint   Remediation directive from a failed quality check
  * @returns {string[]}  3 prompts
  */
-function buildScenePrompts(title, contentItems) {
+function buildScenePrompts(title, contentItems, qualityHint = null) {
   const { era, style } = getHistoricalEraContext(title);
   const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
   const facts = (contentItems || []).map((f) => (f || "").slice(0, 120));
 
+  // Append remediation hint from a previous failed quality check so the retry
+  // produces visually different output (e.g. "sharper lighting, richer detail")
+  const hint = qualityHint ? `, ${qualityHint}` : "";
+
   const base =
     `ultra-realistic ${era} scene, photorealistic painting or photograph, ` +
-    `${style}, ` +
+    `${style}` + hint + `, ` +
     `vertical 9:16 portrait format, anatomically correct, no text, no logos, no watermarks`;
 
   return [
@@ -798,10 +822,11 @@ async function generateMultiSceneVideo(
     contentItems,
     narrationParts,
     videoPath,
+    qualityHint = null,
   },
 ) {
   const { slug, title } = post;
-  const XF = 0.8; // crossfade duration in seconds
+  const XF = 1.2; // crossfade duration in seconds — longer = gentler on the eyes
 
   // Compute actual video duration from narration end + 3 s tail.
   // Falls back to DURATION (45 s) when no word timestamps are available.
@@ -821,30 +846,34 @@ async function generateMultiSceneVideo(
   const eventYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
   const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
 
-  const rawPrompts = buildScenePrompts(title, contentItems);
+  const rawPrompts = buildScenePrompts(title, contentItems, qualityHint);
   const scenePrompts = await reviewPromptsWithHistoryExpert(event, eventYear, era, rawPrompts);
 
   console.log(
-    `  Generating ${scenePrompts.length} AI scene images (2 concurrent)...`,
+    `  Generating ${scenePrompts.length} AI scenes (Pollinations + WAN I2V if available)...`,
   );
-  const imageBuffers = await generateAIImageBatch(scenePrompts);
+  const rawScenes = await generateAISceneBatch(scenePrompts);
 
-  // Fall back to Wikipedia image for any scene that failed
+  // Fall back to Wikipedia image buffer for any scene that failed entirely
   const fallbackBuf = post.imageUrl
     ? await downloadImageBuffer(post.imageUrl).catch(() => null)
     : null;
-  const resolvedBuffers = imageBuffers.map((buf, i) => {
-    if (buf) return buf;
-    console.warn(
-      `  ⚠ Scene ${i + 1} AI image failed — using Wikipedia fallback`,
-    );
-    return fallbackBuf;
+  const scenes = rawScenes.map((scene, i) => {
+    if (scene) return scene;
+    console.warn(`  ⚠ Scene ${i + 1} failed — using Wikipedia fallback`);
+    return fallbackBuf ? { buffer: fallbackBuf, isVideo: false } : null;
   });
-  if (resolvedBuffers.some((b) => !b)) {
+  if (scenes.some((s) => !s)) {
     throw new Error(
       "generateMultiSceneVideo: could not acquire images for all scenes",
     );
   }
+
+  const videoScenes = scenes.filter((s) => s.isVideo).length;
+  const imageScenes = scenes.filter((s) => !s.isVideo).length;
+  console.log(
+    `  Scenes ready: ${videoScenes} animated (WAN I2V), ${imageScenes} static (Ken Burns)`,
+  );
 
   // 2. Find N_SCENES-1 scene boundary timestamps
   const cuts = findSceneBoundaries(words, narrationParts);
@@ -862,30 +891,38 @@ async function generateMultiSceneVideo(
   );
   sceneDurations.push(videoDuration - cuts[cuts.length - 1] + XF / 2);
 
-  // 3. Build PNG frames — resize to 110% of target so zoompan has headroom,
-  //    then composite the SVG title overlay on top.
-  const KB_PAD = 1.1; // 10% larger than W×H so zoom never crops to black
-  const framePaths = [];
-  for (let i = 0; i < scenePrompts.length; i++) {
-    const framePath = join(TMP, `${slug}_s${i}.png`);
-    await sharp(resolvedBuffers[i])
-      .resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD), {
-        fit: "cover",
-        position: "center",
-      })
-      .composite([
-        {
-          input: await sharp(Buffer.from(buildSVG(title)))
-            .resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD))
-            .png()
-            .toBuffer(),
-          blend: "over",
-        },
-      ])
-      .png()
-      .toFile(framePath);
-    framePaths.push(framePath);
-    console.log(`  ✓ Scene ${i + 1} frame ready`);
+  // 3. Write scene files — video clips saved as .mp4, static images resized to
+  //    115% of target (zoompan headroom) and composited with the SVG title overlay.
+  const KB_PAD = 1.15; // 15% larger than W×H so 12% zoom never crops to black
+  const sceneFiles = []; // { path, isVideo }
+  for (let i = 0; i < scenes.length; i++) {
+    const { buffer, isVideo } = scenes[i];
+    if (isVideo) {
+      const clipPath = join(TMP, `${slug}_s${i}.mp4`);
+      writeFileSync(clipPath, buffer);
+      sceneFiles.push({ path: clipPath, isVideo: true });
+      console.log(`  ✓ Scene ${i + 1} animated clip ready`);
+    } else {
+      const framePath = join(TMP, `${slug}_s${i}.png`);
+      await sharp(buffer)
+        .resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD), {
+          fit: "cover",
+          position: "center",
+        })
+        .composite([
+          {
+            input: await sharp(Buffer.from(buildSVG(title)))
+              .resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD))
+              .png()
+              .toBuffer(),
+            blend: "over",
+          },
+        ])
+        .png()
+        .toFile(framePath);
+      sceneFiles.push({ path: framePath, isVideo: false });
+      console.log(`  ✓ Scene ${i + 1} frame ready`);
+    }
   }
 
   // 4. FFmpeg: dynamic xfade chain + animated captions + end screen + audio
@@ -907,41 +944,54 @@ async function generateMultiSceneVideo(
   await new Promise((resolve, reject) => {
     const cmd = ffmpeg();
 
-    // Add all scene image inputs with their calculated durations
-    for (let i = 0; i < framePaths.length; i++) {
-      cmd
-        .input(framePaths[i])
-        .inputOptions(["-loop 1", `-t ${sceneDurations[i]}`]);
+    // Add scene inputs — video clips loop, static images freeze
+    for (let i = 0; i < sceneFiles.length; i++) {
+      const { path, isVideo } = sceneFiles[i];
+      if (isVideo) {
+        // stream_loop repeats the clip; -t trims to exact scene duration
+        cmd.input(path).inputOptions(["-stream_loop -1", `-t ${sceneDurations[i]}`]);
+      } else {
+        // -framerate must match FPS so zoompan reads at the same rate it outputs —
+        // without this the input defaults to 25 fps, causing frame duplication stuttering.
+        cmd.input(path).inputOptions(["-loop 1", `-framerate ${FPS}`, `-t ${sceneDurations[i]}`]);
+      }
     }
 
     const hasNarr = !!narrationPath;
     const hasMusic = !!bgMusicPath;
-    const narrIdx = framePaths.length;
+    const narrIdx = sceneFiles.length;
     const musicIdx =
-      hasNarr && hasMusic ? framePaths.length + 1 : framePaths.length;
+      hasNarr && hasMusic ? sceneFiles.length + 1 : sceneFiles.length;
     if (hasNarr) cmd.input(narrationPath);
     if (hasMusic) cmd.input(bgMusicPath).inputOptions(["-stream_loop -1"]);
 
     // Caption PNGs then end screen PNG (indices must be stable)
     const captionStartIdx =
-      framePaths.length + (hasNarr ? 1 : 0) + (hasMusic ? 1 : 0);
+      sceneFiles.length + (hasNarr ? 1 : 0) + (hasMusic ? 1 : 0);
     captionPNGPaths.forEach((p) => cmd.input(p));
     const endScreenIdx = captionStartIdx + captionPNGPaths.length;
     cmd.input(endScreenPath);
 
-    // Build Ken Burns (zoompan) per scene, then chain into xfade
-    const kbParts = framePaths.map((_, i) =>
-      buildKenBurns(i, sceneDurations[i], `[${i}:v]`, `[v${i}]`),
-    );
-    const kenBurnsFilter = kbParts.join(";");
+    // Per-scene filter: Ken Burns for static images, fps+loop for video clips
+    const sceneParts = sceneFiles.map(({ isVideo }, i) => {
+      if (isVideo) {
+        // Normalise to target FPS; stream_loop handles duration via -t above
+        return `[${i}:v]fps=fps=${FPS},setpts=PTS-STARTPTS[v${i}]`;
+      }
+      return buildKenBurns(i, sceneDurations[i], `[${i}:v]`, `[v${i}]`);
+    });
+    const scenePartFilter = sceneParts.join(";");
+
+    // Xfade chain with varied transitions
     let xfadeChain = "";
     cuts.forEach((t, i) => {
       const inLabel = i === 0 ? "[v0]" : `[x${i - 1}]`;
       const outLabel = i === cuts.length - 1 ? "[vscene]" : `[x${i}]`;
       const xfOff = (t - XF / 2).toFixed(3);
-      xfadeChain += `;${inLabel}[v${i + 1}]xfade=transition=fade:duration=${XF}:offset=${xfOff}${outLabel}`;
+      const transition = XFADE_TRANSITIONS[i % XFADE_TRANSITIONS.length];
+      xfadeChain += `;${inLabel}[v${i + 1}]xfade=transition=${transition}:duration=${XF}:offset=${xfOff}${outLabel}`;
     });
-    const sceneFilter = kenBurnsFilter + xfadeChain;
+    const sceneFilter = scenePartFilter + xfadeChain;
 
     // Caption overlay chain
     const afterCaptionLabel = hasCaptions ? "[vcap]" : "[vscene]";
@@ -1003,7 +1053,7 @@ async function generateMultiSceneVideo(
     cmd.output(videoPath).on("end", resolve).on("error", reject).run();
   });
 
-  [...framePaths, ...captionPNGPaths, endScreenPath].forEach((p) => {
+  [...sceneFiles.map((s) => s.path), ...captionPNGPaths, endScreenPath].forEach((p) => {
     try {
       unlinkSync(p);
     } catch {
@@ -1040,6 +1090,7 @@ export async function generateVideo(
     useAiImage = false,
     contentItems = null,
     narrationParts = null,
+    qualityHint = null, // remediation directive from a failed quality check
   } = {},
 ) {
   mkdirSync(TMP, { recursive: true });
@@ -1057,6 +1108,7 @@ export async function generateVideo(
       contentItems,
       narrationParts,
       videoPath,
+      qualityHint,
     });
   }
 

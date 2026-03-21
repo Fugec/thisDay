@@ -31,6 +31,7 @@ import {
   buildNarrationParts,
 } from "../lib/elevenlabs.js";
 import { generateVideo, resolvePostImage } from "../lib/video.js";
+import { checkVideoQuality } from "../lib/video-quality.js";
 import { uploadToYoutube } from "../lib/youtube.js";
 import { getUploaded, markUploaded } from "../lib/tracker.js";
 import { getMusicPath } from "../lib/music.js";
@@ -112,6 +113,7 @@ const env = await step("Environment — required vars present", async () => {
   const optional = {
     ELEVENLABS_API_KEY: !!process.env.ELEVENLABS_API_KEY || !!process.env.ELEVENLABS_API_KEY_2,
     GROQ_API_KEY: !!process.env.GROQ_API_KEY,
+    POLLINATIONS_API_KEY: !!process.env.POLLINATIONS_API_KEY,
     HF_TOKEN: !!process.env.HF_TOKEN,
     USE_AI_IMAGE: process.env.USE_AI_IMAGE === "true",
     DISCORD_WEBHOOK_URL: !!process.env.DISCORD_WEBHOOK_URL,
@@ -250,24 +252,51 @@ if (!useAiImage) {
 const bgMusicPath = getMusicPath();
 const narrationParts = buildNarrationParts(post, narrationItems);
 
-const videoResult = await step("Video — FFmpeg encode (history expert + FLUX if AI mode)", async () => {
+const MAX_VIDEO_ATTEMPTS = 2;
+let _qualityHint = null;
+let _quality = null;
+
+const videoResult = await step("Video — FFmpeg encode + quality gate (retry up to 2×)", async () => {
   if (useAiImage) {
-    console.log(`  AI image mode: history expert → FLUX scene generation → FFmpeg`);
+    console.log(`  AI image mode: history expert → Pollinations (flux-2-dev→flux→z-image-turbo) → FFmpeg`);
   } else {
     console.log(`  Wikipedia image mode: static background + captions + audio`);
   }
 
-  const result = await generateVideo(post, {
-    narrationPath,
-    bgMusicPath,
-    words: narrWords,
-    useAiImage,
-    contentItems,
-    narrationParts,
-  });
+  let result = null;
+  for (let attempt = 1; attempt <= MAX_VIDEO_ATTEMPTS; attempt++) {
+    if (attempt > 1) console.log(`  Retrying (attempt ${attempt}/${MAX_VIDEO_ATTEMPTS}) with hint: "${_qualityHint}"...`);
+
+    result = await generateVideo(post, {
+      narrationPath,
+      bgMusicPath,
+      words: narrWords,
+      useAiImage,
+      contentItems,
+      narrationParts,
+      qualityHint: _qualityHint,
+    });
+
+    console.log(`  Running quality check...`);
+    _quality = await checkVideoQuality(result.path);
+    console.log(_quality.report);
+
+    if (_quality.passed) break;
+
+    // Failed — clean up and decide whether to retry
+    try { unlinkSync(result.path); } catch { /* ignore */ }
+    result = null;
+
+    if (!_quality.retryable || attempt === MAX_VIDEO_ATTEMPTS) {
+      throw new Error(
+        `Quality check failed after ${attempt} attempt(s): ${_quality.issues.join("; ")}`,
+      );
+    }
+    _qualityHint = _quality.remediationHint;
+  }
 
   registerTemp(result.path);
-  console.log(`  Video: ${result.path}`);
+  console.log(`  Video: ${result.path}  quality=${_quality.score}/10`);
   console.log(`  Scene cuts: ${result.cuts?.length ?? 0}`);
   return result;
 });

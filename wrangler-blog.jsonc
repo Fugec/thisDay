@@ -27,10 +27,11 @@
   // The main SEO worker (seo-worker.js) keeps handling everything else.
   "routes": [{ "pattern": "thisday.info/blog/*", "zone_name": "thisday.info" }],
 
-  // Cron trigger — runs every day at 00:31 UTC (30 min after the main data fetch at 00:01 UTC).
-  // The worker publishes a new post every day based on the KV-stored last-run date.
+  // Cron trigger — runs every day at 13:00 UTC.
+  // Gives a clean 60-minute window before the YouTube upload cron at 14:00 UTC.
+  // Blog post is the source of truth for the video narration + metadata.
   "triggers": {
-    "crons": ["31 0 * * *"],
+    "crons": ["0 13 * * *"],
   },
 
   // KV namespaces — blog posts/index and shared events/quiz cache.

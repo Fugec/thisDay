@@ -38,6 +38,7 @@ import { uploadToYoutube } from "./lib/youtube.js";
 import { getUploaded, markUploaded } from "./lib/tracker.js";
 import { getMusicPath } from "./lib/music.js";
 import { notifyUpload } from "./lib/notify.js";
+import { postToMeta } from "./lib/meta.js";
 import {
   generateNarration,
   buildNarrationScript,
@@ -259,6 +260,7 @@ async function main() {
       console.log(
         `  Tracker updated: youtube:uploaded[${post.slug}] (privacy=${privacy})`,
       );
+      await postToMeta(videoPath, post, youtubeId);
       await notifyUpload(post, youtubeId);
     } catch (err) {
       if (err.message?.startsWith("IMAGE_UNAVAILABLE")) {

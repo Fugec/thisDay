@@ -33,6 +33,7 @@ import {
 } from "./lib/kv.js";
 import { polishNarrationItems } from "./lib/narration-expert.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
+import { checkVideoQuality } from "./lib/video-quality.js";
 import { uploadToYoutube } from "./lib/youtube.js";
 import { getUploaded, markUploaded } from "./lib/tracker.js";
 import { getMusicPath } from "./lib/music.js";
@@ -200,22 +201,46 @@ async function main() {
         console.log("  AI image mode — skipping Wikipedia image check.");
       }
 
-      // ── Generate video ─────────────────────────────────────────────────────
-      // Image: AI-generated (useAiImage=true) or validated Wikipedia background
-      // Audio: narration (full vol) + background music (15% vol)
-      // Captions: word-synced animated drawtext (when timestamps available)
-      console.log("  Generating video...");
-      const videoResult = await generateVideo(post, {
-        narrationPath,
-        bgMusicPath,
-        words: narrWords,
-        useAiImage,
-        contentItems,
-        narrationParts: buildNarrationParts(post, narrationItems ?? contentItems),
-      });
-      videoPath = videoResult.path;
-      videoCuts = videoResult.cuts ?? [];
-      console.log(`  Video ready: ${videoPath}`);
+      // ── Generate video (with quality gate + retry) ─────────────────────────
+      const MAX_VIDEO_ATTEMPTS = 2;
+      let qualityHint = null;
+      let quality = null;
+
+      for (let attempt = 1; attempt <= MAX_VIDEO_ATTEMPTS; attempt++) {
+        if (attempt > 1) console.log(`  Retrying video generation (attempt ${attempt}/${MAX_VIDEO_ATTEMPTS})...`);
+        else console.log("  Generating video...");
+
+        const videoResult = await generateVideo(post, {
+          narrationPath,
+          bgMusicPath,
+          words: narrWords,
+          useAiImage,
+          contentItems,
+          narrationParts: buildNarrationParts(post, narrationItems ?? contentItems),
+          qualityHint,
+        });
+        videoPath = videoResult.path;
+        videoCuts = videoResult.cuts ?? [];
+
+        console.log("  Running quality check...");
+        quality = await checkVideoQuality(videoPath);
+        console.log(quality.report);
+
+        if (quality.passed) break;
+
+        // Failed — clean up and decide whether to retry
+        try { unlinkSync(videoPath); } catch { /* ignore */ }
+        videoPath = null;
+
+        if (!quality.retryable || attempt === MAX_VIDEO_ATTEMPTS) {
+          throw new Error(
+            `Video quality check failed after ${attempt} attempt(s): ${quality.issues.join("; ")}`,
+          );
+        }
+        qualityHint = quality.remediationHint;
+        console.log(`  ⚠ Quality fail — retry with hint: "${qualityHint}"`);
+      }
+      console.log(`  Video ready: ${videoPath}  (quality ${quality.score}/10)`);
 
       // ── Upload to YouTube ──────────────────────────────────────────────────
       // Re-fetch tracker to guard against double-upload if two cron runs overlap

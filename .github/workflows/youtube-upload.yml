@@ -1,12 +1,13 @@
 name: YouTube Auto-Upload
 
 on:
-  # Runs twice on Mon/Wed/Fri/Sun: at 02:00 UTC (picks up overnight articles)
-  # and at 10:00 UTC (catches same-day articles generated after the first run).
-  # Uses fallback ELEVENLABS_API_KEY_2 if primary hits quota.
+  # Runs Mon/Tue/Thu/Fri at 13:00 UTC = 9am ET / 2pm CET — optimal for US+EU.
+  # "On This Day" content goes live while the date is current in all markets.
+  # Safety fallback at 15:00 UTC (2h gap) in case of API/quota failure.
+  # Uses fallback ELEVENLABS_API_KEY_2/3 if primary hits quota.
   schedule:
-    - cron: "0 1 * * 0,1,3,5"
-    - cron: "0 10 * * 0,1,3,5"
+    - cron: "0 13 * * 1,2,4,5"
+    - cron: "0 15 * * 1,2,4,5"
 
   # Allow a manual run from the Actions tab (e.g. to back-fill or re-upload)
   workflow_dispatch:

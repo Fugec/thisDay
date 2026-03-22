@@ -2541,26 +2541,28 @@ async function handleFetchRequest(request, env, ctx) {
   if (commentaryMatch) {
     const mm = commentaryMatch[1];
     const dd = commentaryMatch[2];
-    const commentaryCorsHeaders = {
+    const corsBase = {
       "Content-Type": "application/json; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
-      "Cache-Control": "public, max-age=86400, s-maxage=604800",
     };
     const commentaryKvKey = `event-commentary:${mm}-${dd}`;
     if (env.EVENTS_KV) {
       try {
         const cached = await env.EVENTS_KV.get(commentaryKvKey);
-        if (cached) return new Response(cached, { headers: commentaryCorsHeaders });
+        // KV hit: real data — cache at edge for 1 day
+        if (cached) return new Response(cached, { headers: { ...corsBase, "Cache-Control": "public, max-age=3600, s-maxage=86400" } });
       } catch (_) {}
     }
     const commentary = await generateEventCommentary(env, mm, dd);
     const json = JSON.stringify(commentary);
-    if (env.EVENTS_KV && Object.keys(commentary).length > 0) {
+    const hasData = Object.keys(commentary).length > 0;
+    if (env.EVENTS_KV && hasData) {
       ctx.waitUntil(
         env.EVENTS_KV.put(commentaryKvKey, json, { expirationTtl: 7 * 24 * 60 * 60 }).catch(() => {}),
       );
     }
-    return new Response(json, { headers: commentaryCorsHeaders });
+    // Don't cache empty responses at the edge — AI may have timed out, allow retry
+    return new Response(json, { headers: { ...corsBase, "Cache-Control": hasData ? "public, max-age=300, s-maxage=3600" : "no-store" } });
   }
 
   // Legacy generated URLs -> /events (SEO-friendly permanent redirect)

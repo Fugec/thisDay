@@ -1930,36 +1930,37 @@ function applyFilter() {
 
 function initPopupExploreBar(month, day) {
   const bar = document.getElementById("popupExploreBar");
-  const modalEl = document.getElementById("eventDetailModal");
-  if (!bar || !modalEl) return;
+  // With modal-dialog-scrollable, the actual scroll container is .modal-body
+  const scrollEl = document.getElementById("modalBodyContent");
+  if (!bar || !scrollEl) return;
   const mSlug = monthNames[month - 1].toLowerCase();
   document.getElementById("popupExploreEvents").href = `/events/${mSlug}/${day}/`;
   document.getElementById("popupExploreBirths").href = `/born/${mSlug}/${day}/`;
   document.getElementById("popupExploreDied").href = `/died/${mSlug}/${day}/`;
   bar.classList.remove("visible");
 
-  // Scroll trigger: show/hide at same 65% threshold (bidirectional)
-  if (modalEl._exploreBarScroll) {
-    modalEl.removeEventListener("scroll", modalEl._exploreBarScroll);
+  // Scroll trigger on .modal-body (actual scroll container with modal-dialog-scrollable)
+  if (scrollEl._exploreBarScroll) {
+    scrollEl.removeEventListener("scroll", scrollEl._exploreBarScroll);
   }
-  modalEl._exploreBarScroll = function () {
-    const total = modalEl.scrollHeight - modalEl.clientHeight;
+  scrollEl._exploreBarScroll = function () {
+    const total = scrollEl.scrollHeight - scrollEl.clientHeight;
     if (total <= 0) return;
-    const pct = modalEl.scrollTop / total;
+    const pct = scrollEl.scrollTop / total;
     if (pct >= 0.65) bar.classList.add("visible");
     else if (pct < 0.58) bar.classList.remove("visible");
   };
-  modalEl.addEventListener("scroll", modalEl._exploreBarScroll);
+  scrollEl.addEventListener("scroll", scrollEl._exploreBarScroll);
 
   // Hide bar when Explore section scrolls into view (bar becomes redundant)
-  if (modalEl._exploreBarObserver) modalEl._exploreBarObserver.disconnect();
+  if (scrollEl._exploreBarObserver) scrollEl._exploreBarObserver.disconnect();
   const exploreSection = document.getElementById("modalExploreSection");
   if (exploreSection && "IntersectionObserver" in window) {
-    modalEl._exploreBarObserver = new IntersectionObserver(
+    scrollEl._exploreBarObserver = new IntersectionObserver(
       (entries) => { if (entries[0].isIntersecting) bar.classList.remove("visible"); },
-      { root: modalEl, threshold: 0.1 }
+      { root: scrollEl, threshold: 0.1 }
     );
-    modalEl._exploreBarObserver.observe(exploreSection);
+    scrollEl._exploreBarObserver.observe(exploreSection);
   }
 }
 
@@ -2353,13 +2354,14 @@ if (eventDetailModalElement) {
     lastActiveCard?.setAttribute("aria-expanded", "false");
     lastActiveCard = null;
     document.getElementById("popupExploreBar")?.classList.remove("visible");
-    if (eventDetailModalElement._exploreBarScroll) {
-      eventDetailModalElement.removeEventListener("scroll", eventDetailModalElement._exploreBarScroll);
-      delete eventDetailModalElement._exploreBarScroll;
+    const scrollEl = document.getElementById("modalBodyContent");
+    if (scrollEl?._exploreBarScroll) {
+      scrollEl.removeEventListener("scroll", scrollEl._exploreBarScroll);
+      delete scrollEl._exploreBarScroll;
     }
-    if (eventDetailModalElement._exploreBarObserver) {
-      eventDetailModalElement._exploreBarObserver.disconnect();
-      delete eventDetailModalElement._exploreBarObserver;
+    if (scrollEl?._exploreBarObserver) {
+      scrollEl._exploreBarObserver.disconnect();
+      delete scrollEl._exploreBarObserver;
     }
   });
 }

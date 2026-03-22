@@ -93,6 +93,15 @@ button.carousel-control-prev {
   color: var(--link-hover-color);
 }
 
+/* Prevent link-color from overriding btn styles inside modals */
+.modal-body a.btn {
+  color: unset;
+  transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+.modal-body a.btn:hover {
+  color: unset;
+}
+
 #google_translate_element {
   margin-left: 1rem;
 }

@@ -1812,12 +1812,12 @@ function renderFilteredItems(itemsToRender) {
     }
     const commentary = getEventCommentary(event);
 
-    // Anniversary badge — neutral hourglass, no celebratory emoji
+    // Years ago badge — shown for all historical events
     const eventYear = parseInt(event.year, 10);
     const yearsAgo = currentYear - eventYear;
     let anniversaryBadge = "";
-    if (yearsAgo > 0 && yearsAgo % 25 === 0) {
-      anniversaryBadge = `<span class="badge bg-secondary ms-2" title="Milestone anniversary">⏳ ${yearsAgo} years ago</span>`;
+    if (yearsAgo > 0) {
+      anniversaryBadge = `<span class="badge bg-secondary ms-2">⏳ ${yearsAgo} years ago</span>`;
     }
 
     // WhatsApp share URL

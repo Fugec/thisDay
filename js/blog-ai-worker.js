@@ -1128,6 +1128,10 @@ async function generateAndStore(env, ctx) {
 
   let content = await callWorkersAI(env.AI, now, takenAllTime, activeModel);
 
+  // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
+  // sentence length before building HTML. Falls back to original on any error.
+  content = await reviewContentWithSEOExpert(content, env);
+
   // Validate image URLs and fetch alternatives if broken.
   // If no working image is found, regenerate once with a different topic.
   const MAX_CONTENT_ATTEMPTS = 2;
@@ -1601,6 +1605,13 @@ The article must be thorough and long — at least 800 words of body content —
 Writing style rules:
 - Do not use dashes ("-" or "—") inside sentences. Use commas, periods, or rewrite the sentence instead.
 - Write in a natural, human tone. Avoid bullet-point thinking inside paragraphs.
+- Keep sentences short. Target under 20 words per sentence. Split any sentence over 25 words into two shorter ones.
+- Aim for 6–10 word sentences when making key points — these are easiest to scan and remember.
+- No more than 25% of sentences in any paragraph should exceed 20 words.
+- Vary sentence length for rhythm. Short punchy sentences. Then a medium one to add context. Never three long sentences in a row.
+- Start each paragraph with a clear topic sentence. Use transition words between paragraphs (However, As a result, By contrast, Meanwhile, Ultimately).
+- Use active voice. Avoid passive constructions — say who did what.
+- Write for a general audience. Briefly explain historical context so any reader can follow along.
 
 Title rules:
 - The "title" field MUST follow exactly this format: "[Specific Action or Event] — ${monthName} ${day}, Year"
@@ -1762,6 +1773,134 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   }
 
   return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// SEO expert content review
+// ---------------------------------------------------------------------------
+
+/**
+ * Reviews and improves generated blog post content for SEO quality before publishing.
+ *
+ * Checks and fixes:
+ *   - Meta description length and keyword richness (120–155 chars)
+ *   - OG / Twitter description quality
+ *   - imageAlt descriptiveness
+ *   - keywords relevance and specificity
+ *   - Sentence length across all paragraph arrays (flags if avg > 20 words)
+ *   - Content clarity, active voice, and readability signals
+ *   - Title format and keyword alignment
+ *
+ * Returns the improved content object. Falls back to original on any error.
+ */
+async function reviewContentWithSEOExpert(content, env) {
+  if (!env.AI && !env.GROQ_API_KEY) return content;
+
+  // Build a compact summary of what will be reviewed — avoid sending full HTML
+  const paragraphSample = [
+    ...(content.overviewParagraphs || []).slice(0, 2),
+    ...(content.eyewitnessOrChronicle || []).slice(0, 1),
+    ...(content.aftermathParagraphs || []).slice(0, 1),
+    ...(content.conclusionParagraphs || []).slice(0, 1),
+  ].join(" ").substring(0, 1200);
+
+  const systemPrompt =
+    "You are a senior SEO content editor specializing in Google Search ranking and Google Discover recommendations. " +
+    "You receive a JSON content object for a historical blog post. Your job is to improve it for:\n" +
+    "1. Google Search ranking — strong meta description (120–155 chars), specific keywords, keyword in title\n" +
+    "2. Google Discover — engaging, curiosity-driven title and OG description that makes people click\n" +
+    "3. Readability — flag if paragraph text has long sentences (avg > 20 words) and rewrite the worst offenders\n" +
+    "4. Content quality signals — active voice, clear topic sentences, no filler phrases\n\n" +
+    "Rules:\n" +
+    "- Keep the same JSON field names exactly\n" +
+    "- description: 120–155 chars, start with the year and event name, include location, be specific\n" +
+    "- ogDescription: 100–130 chars, conversational, curiosity-driven, no clickbait\n" +
+    "- twitterDescription: 90–120 chars, punchy, action-oriented\n" +
+    "- keywords: 5–8 comma-separated terms, specific (include year, location, person names)\n" +
+    "- imageAlt: descriptive 8–15 word phrase describing what a reader would see in the image\n" +
+    "- For overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, conclusionParagraphs: " +
+    "rewrite any sentence exceeding 25 words by splitting it. Keep the same information. " +
+    "Preserve paragraph count. Active voice only.\n" +
+    "- title: must stay in format 'Event Name — Month Day, Year'. Improve the event name part only if it's vague.\n" +
+    "- Do not change: historicalDate, historicalYear, historicalDateISO, location, country, quickFacts, " +
+    "didYouKnowFacts, analysisGood, analysisBad, editorialNote, wikiUrl, youtubeSearchQuery\n" +
+    "- Output ONLY valid JSON with the fields you changed. Omit unchanged fields entirely.";
+
+  const userMessage =
+    `Blog post to review:\n` +
+    `Title: ${content.title}\n` +
+    `Event: ${content.eventTitle} on ${content.historicalDate} in ${content.location || "unknown"}\n` +
+    `description: ${content.description}\n` +
+    `ogDescription: ${content.ogDescription || ""}\n` +
+    `twitterDescription: ${content.twitterDescription || ""}\n` +
+    `keywords: ${content.keywords || ""}\n` +
+    `imageAlt: ${content.imageAlt || ""}\n\n` +
+    `Paragraph sample for readability review:\n${paragraphSample}\n\n` +
+    `Return a JSON object with ONLY the fields that need improvement. Example:\n` +
+    `{"description":"improved...","keywords":"improved...","overviewParagraphs":["para1","para2","para3","para4"]}`;
+
+  let raw;
+  try {
+    raw = await callAI(
+      env,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      { maxTokens: 2500, timeoutMs: 30_000 },
+    );
+  } catch (err) {
+    console.warn(`SEO expert: AI call failed (${err.message}) — using original content`);
+    return content;
+  }
+
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) {
+    console.warn("SEO expert: no JSON in response — using original content");
+    return content;
+  }
+
+  let improvements;
+  try {
+    improvements = JSON.parse(match[0]);
+  } catch {
+    console.warn("SEO expert: JSON parse error — using original content");
+    return content;
+  }
+
+  // Whitelist of fields the SEO expert is allowed to improve
+  const ALLOWED_FIELDS = [
+    "title", "description", "ogDescription", "twitterDescription",
+    "keywords", "imageAlt",
+    "overviewParagraphs", "eyewitnessOrChronicle", "aftermathParagraphs", "conclusionParagraphs",
+  ];
+
+  let changed = 0;
+  const improved = { ...content };
+  for (const field of ALLOWED_FIELDS) {
+    if (improvements[field] == null) continue;
+    // Validate paragraph arrays: must stay the same length
+    if (Array.isArray(improved[field])) {
+      if (!Array.isArray(improvements[field])) continue;
+      if (improvements[field].length !== improved[field].length) continue;
+      if (!improvements[field].every((p) => typeof p === "string" && p.trim().length > 20)) continue;
+    } else {
+      if (typeof improvements[field] !== "string" || improvements[field].trim().length < 5) continue;
+    }
+    improved[field] = improvements[field];
+    changed++;
+  }
+
+  // Guard: if the expert changed the title, make sure format is still correct
+  if (improved.title !== content.title) {
+    if (!improved.title.includes(" — ") || !improved.title.includes(content.historicalDate?.split(",")[1]?.trim() ?? "")) {
+      improved.title = content.title; // revert bad title
+    }
+  }
+
+  console.log(`SEO expert: reviewed content — ${changed} field(s) improved`);
+  return improved;
 }
 
 // ---------------------------------------------------------------------------
@@ -1988,6 +2127,7 @@ ${JSON.stringify({
     </script>
 
     <link rel="icon" href="/images/favicon.ico" />
+    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -2180,12 +2320,12 @@ ${JSON.stringify({
           </figure>
 
           <!-- Quick Facts -->
-          <h2 class="mt-4 h3">Quick Facts</h2>
+          ${quickFactsRows ? `<h2 class="mt-4 h3">Quick Facts</h2>
           <table class="site-table">
             <tbody>
 ${quickFactsRows}
             </tbody>
-          </table>
+          </table>` : ""}
 
           <!-- Did You Know -->
           ${
@@ -2200,10 +2340,10 @@ ${didYouKnowItems}
           }
 
           <!-- Overview -->
-          <section class="mt-4">
+          ${overviewParas ? `<section class="mt-4">
             <h2 class="h3">Overview: ${esc(c.eventTitle)}</h2>
 ${overviewParas}
-          </section>
+          </section>` : ""}
 
           <!-- Eyewitness / Chronicle Accounts -->
           ${
@@ -2241,10 +2381,10 @@ ${aftermathParas}
           }
 
           <!-- Conclusion -->
-          <section class="mt-5">
+          ${conclusionParas ? `<section class="mt-5">
             <h2 class="h3">Legacy of ${esc(c.eventTitle)}</h2>
 ${conclusionParas}
-          </section>
+          </section>` : ""}
 
           <!-- Personal Analysis -->
           ${
@@ -2302,7 +2442,7 @@ ${analysisBadItems}
             }
             const exploreThumb =
               c.eventsImageUrl || c.imageUrl
-                ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
+                ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="${esc(c.eventTitle)} historical image" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
                 : "";
             return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
               ${exploreThumb}
@@ -2320,7 +2460,7 @@ ${analysisBadItems}
             const cards = related
               .map((p) => {
                 const thumb = p.imageUrl
-                  ? `<img src="/image-proxy?src=${encodeURIComponent(p.imageUrl)}&w=80&q=75" alt="" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+                  ? `<img src="/image-proxy?src=${encodeURIComponent(p.imageUrl)}&w=80&q=75" alt="${esc(p.title)}" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
                   : `<div style="width:56px;height:56px;border-radius:8px;flex-shrink:0;background:var(--card-border,#e2e8f0);display:flex;align-items:center;justify-content:center"><i class="bi bi-clock-history" style="color:#94a3b8;font-size:1.2rem"></i></div>`;
                 return `
               <div class="col-12 col-md-4">
@@ -2814,6 +2954,7 @@ ${JSON.stringify(
     </script>
 
     <link rel="icon" href="/images/favicon.ico" />
+    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />

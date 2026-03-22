@@ -1939,20 +1939,17 @@ function initPopupExploreBar(month, day) {
   document.getElementById("popupExploreDied").href = `/died/${mSlug}/${day}/`;
   bar.classList.remove("visible");
 
-  // Scroll trigger on .modal-body (actual scroll container with modal-dialog-scrollable)
+  // Show bar on any scroll; hide when back at top or Explore section is visible
   if (scrollEl._exploreBarScroll) {
     scrollEl.removeEventListener("scroll", scrollEl._exploreBarScroll);
   }
   scrollEl._exploreBarScroll = function () {
-    const total = scrollEl.scrollHeight - scrollEl.clientHeight;
-    if (total <= 0) return;
-    const pct = scrollEl.scrollTop / total;
-    if (pct >= 0.65) bar.classList.add("visible");
-    else if (pct < 0.58) bar.classList.remove("visible");
+    if (scrollEl.scrollTop > 0) bar.classList.add("visible");
+    else bar.classList.remove("visible");
   };
   scrollEl.addEventListener("scroll", scrollEl._exploreBarScroll);
 
-  // Hide bar when Explore section scrolls into view (bar becomes redundant)
+  // Also hide when Explore section scrolls into view (links already visible)
   if (scrollEl._exploreBarObserver) scrollEl._exploreBarObserver.disconnect();
   const exploreSection = document.getElementById("modalExploreSection");
   if (exploreSection && "IntersectionObserver" in window) {

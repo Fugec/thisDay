@@ -840,6 +840,7 @@ async function renderCalendar() {
 }
 
 let currentDayAllItems = [];
+let currentDayEventsData = null;
 let currentActiveFilter = "all";
 let currentModalDay = null;
 let currentModalMonth = null;
@@ -1793,6 +1794,35 @@ function getEventCommentary(event) {
   return generic[era] || "Every date in history is someone's entire world.";
 }
 
+// Fetch AI-generated commentary from the worker and update the modal in-place
+async function fetchAndApplyCommentary(month, day) {
+  const mm = String(month).padStart(2, "0");
+  const dd = String(day).padStart(2, "0");
+  try {
+    const resp = await fetch(`/api/commentary/${mm}/${dd}`);
+    if (!resp.ok) return;
+    const commentaryMap = await resp.json();
+    if (!commentaryMap || !Object.keys(commentaryMap).length) return;
+    // Persist on items so re-renders (filtering) keep AI commentary
+    currentDayAllItems.forEach((item) => {
+      const key = `${item.year}:${(item.description || "").substring(0, 30)}`;
+      if (commentaryMap[key]) item.commentary = commentaryMap[key];
+    });
+    // Update visible commentary spans in-place without re-rendering
+    const modal = document.getElementById("modalBodyContent");
+    if (!modal) return;
+    modal.querySelectorAll(".event-commentary[data-ckey]").forEach((el) => {
+      const text = commentaryMap[el.dataset.ckey];
+      if (text) {
+        const span = el.querySelector(".commentary-text");
+        if (span) span.textContent = text;
+      }
+    });
+  } catch (_) {
+    // Fail silently — template commentary already shown
+  }
+}
+
 function renderFilteredItems(itemsToRender) {
   const eventsListDiv = document.getElementById("modal-events-list");
   if (!eventsListDiv) return;
@@ -1835,26 +1865,26 @@ function renderFilteredItems(itemsToRender) {
                           ${anniversaryBadge}
                         </div>
                         <p class="mb-1">${specialEmphasis}${event.description}</p>
-                        <p class="mb-2 fst-italic event-commentary">
-                          <i class="bi bi-chat-quote me-1 event-commentary-icon"></i>${commentary}
+                        <p class="mb-2 fst-italic event-commentary" data-ckey="${`${event.year}:${(event.description || "").substring(0, 30)}`}">
+                          <i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${event.commentary || commentary}</span>
                         </p>
-                        <div class="d-flex flex-wrap gap-2 mt-2">
+                        <div class="event-actions">
                           ${
                             event.sourceUrl
-                              ? `<a href="${event.sourceUrl}" class="btn btn-sm btn-outline-primary"
+                              ? `<a href="${event.sourceUrl}" class="event-action-btn event-action-read"
                                  target="_blank" rel="noopener noreferrer">
-                                   Read More About ${event.title.length > 20 ? `${event.title.substring(0, 20)}...` : event.title}
+                                   <i class="bi bi-book me-1"></i>Read More About ${event.title.length > 20 ? `${event.title.substring(0, 20)}...` : event.title}
                                  </a>`
                               : ""
                           }
-                          <button class="btn btn-sm btn-outline-secondary share-copy-btn"
+                          <button class="event-action-btn event-action-share share-copy-btn"
                             data-desc="${(event.description || "").replace(/"/g, "&quot;")}"
                             data-year="${event.year}"
                             data-url="${event.sourceUrl || ""}">
-                            <i class="bi bi-share"></i> Share
+                            <i class="bi bi-share me-1"></i>Share
                           </button>
-                          <a href="${waUrl}" class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener noreferrer">
-                            <i class="bi bi-whatsapp"></i> WhatsApp
+                          <a href="${waUrl}" class="event-action-btn event-action-wa" target="_blank" rel="noopener noreferrer">
+                            <i class="bi bi-whatsapp me-1"></i>WhatsApp
                           </a>
                         </div>
                     </div>
@@ -1897,6 +1927,41 @@ function applyFilter() {
   if (modalBody) modalBody.scrollTop = prevScroll;
 }
 
+function initPopupExploreBar(month, day) {
+  const bar = document.getElementById("popupExploreBar");
+  const modalEl = document.getElementById("eventDetailModal");
+  if (!bar || !modalEl) return;
+  const mSlug = monthNames[month - 1].toLowerCase();
+  document.getElementById("popupExploreEvents").href = `/events/${mSlug}/${day}/`;
+  document.getElementById("popupExploreBirths").href = `/born/${mSlug}/${day}/`;
+  document.getElementById("popupExploreDied").href = `/died/${mSlug}/${day}/`;
+  bar.classList.remove("visible");
+
+  // Scroll trigger: show/hide at same 65% threshold (bidirectional)
+  if (modalEl._exploreBarScroll) {
+    modalEl.removeEventListener("scroll", modalEl._exploreBarScroll);
+  }
+  modalEl._exploreBarScroll = function () {
+    const total = modalEl.scrollHeight - modalEl.clientHeight;
+    if (total <= 0) return;
+    const pct = modalEl.scrollTop / total;
+    if (pct >= 0.65) bar.classList.add("visible");
+    else if (pct < 0.58) bar.classList.remove("visible");
+  };
+  modalEl.addEventListener("scroll", modalEl._exploreBarScroll);
+
+  // Hide bar when Explore section scrolls into view (bar becomes redundant)
+  if (modalEl._exploreBarObserver) modalEl._exploreBarObserver.disconnect();
+  const exploreSection = document.getElementById("modalExploreSection");
+  if (exploreSection && "IntersectionObserver" in window) {
+    modalEl._exploreBarObserver = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) bar.classList.remove("visible"); },
+      { root: modalEl, threshold: 0.1 }
+    );
+    modalEl._exploreBarObserver.observe(exploreSection);
+  }
+}
+
 async function showEventDetails(
   day,
   month,
@@ -1919,6 +1984,7 @@ async function showEventDetails(
     ) {
       structuredEvents = await fetchWikipediaEvents(month, day);
     }
+    currentDayEventsData = structuredEvents;
     currentDayAllItems = [
       ...(structuredEvents.events || []),
       ...(structuredEvents.births || []),
@@ -1969,12 +2035,34 @@ async function showEventDetails(
     </div>
     <div id="modal-events-list">
         </div>
-    <div class="mt-4 pt-3 border-top">
-      <p class="text-muted mb-2" style="font-size:0.8rem;">Explore ${monthNames[month - 1]} ${day}</p>
-      <div class="d-flex flex-wrap gap-2">
-        <a href="/born/${mSlug}/${day}/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-person-heart me-1"></i>Famous Birthdays</a>
-        <a href="/died/${mSlug}/${day}/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-flower1 me-1"></i>Notable Deaths</a>
-        <a href="/quiz/${mSlug}/${day}/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-patch-question me-1"></i>Take the Quiz</a>
+    <div class="mt-3 pt-3 border-top">
+      <div class="born-died-toggle" id="toggleBorn" role="button" tabindex="0" aria-expanded="false"
+           data-section="born" data-month="${mSlug}" data-day="${day}">
+        <span><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Famous Birthdays</span>
+        <span class="born-died-count" id="bornCount">
+          <i class="bi bi-chevron-down born-died-chevron"></i>
+        </span>
+      </div>
+      <div class="born-died-panel" id="panelBorn" hidden>
+        <div class="born-died-content" id="contentBorn"></div>
+      </div>
+      <div class="born-died-toggle" id="toggleDied" role="button" tabindex="0" aria-expanded="false"
+           data-section="died" data-month="${mSlug}" data-day="${day}">
+        <span><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Notable Deaths</span>
+        <span class="born-died-count" id="diedCount">
+          <i class="bi bi-chevron-down born-died-chevron"></i>
+        </span>
+      </div>
+      <div class="born-died-panel" id="panelDied" hidden>
+        <div class="born-died-content" id="contentDied"></div>
+      </div>
+    </div>
+    <div id="modalExploreSection" class="mt-3 pt-2 border-top">
+      <p class="text-muted mb-2" style="font-size:0.8rem;"><i class="bi bi-compass me-1"></i>Explore ${monthNames[month - 1]} ${day}</p>
+      <div class="explore-actions">
+        <a href="/quiz/${mSlug}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
+        <a href="/born/${mSlug}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
+        <a href="/died/${mSlug}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
       </div>
     </div>
 `;
@@ -2001,6 +2089,53 @@ async function showEventDetails(
       });
     });
     applyFilter();
+    initPopupExploreBar(month, day);
+    fetchAndApplyCommentary(month, day);
+
+    // Born / Died accordion wiring
+    ["Born", "Died"].forEach((type) => {
+      const toggle = modalBodyContent.querySelector(`#toggle${type}`);
+      const panel = modalBodyContent.querySelector(`#panel${type}`);
+      const content = modalBodyContent.querySelector(`#content${type}`);
+      const countEl = modalBodyContent.querySelector(`#${type.toLowerCase()}Count`);
+      if (!toggle || !panel || !content) return;
+      let loaded = false;
+
+      const activateToggle = () => {
+        const isOpen = toggle.getAttribute("aria-expanded") === "true";
+        toggle.setAttribute("aria-expanded", String(!isOpen));
+        panel.hidden = isOpen;
+        toggle.querySelector(".born-died-chevron").classList.toggle("rotated", !isOpen);
+
+        if (!isOpen && !loaded) {
+          loaded = true;
+          const section = type.toLowerCase();
+          const people = (currentDayEventsData?.[section === "born" ? "births" : "deaths"] || []).slice(0, 12);
+          if (countEl) countEl.innerHTML = `<span>${people.length}</span> <i class="bi bi-chevron-down born-died-chevron${!isOpen ? " rotated" : ""}"></i>`;
+          if (people.length === 0) {
+            content.innerHTML = `<p class="text-muted text-center py-2" style="font-size:0.85rem;">No data available.</p>`;
+            return;
+          }
+          content.innerHTML = people.map((p) => `
+            <div class="born-died-person">
+              ${p.thumbnailUrl
+                ? `<img src="${p.thumbnailUrl}" alt="${p.title || ""}" class="born-died-thumb" onerror="this.style.display='none'">`
+                : `<div class="born-died-thumb-placeholder"></div>`}
+              <div class="born-died-info">
+                <a href="${p.sourceUrl || "#"}" target="_blank" rel="noopener" class="born-died-name">${p.title || p.description?.substring(0, 40) || ""}</a>
+                <span class="born-died-year">${p.year ?? ""}</span>
+              </div>
+            </div>`).join("");
+          content.insertAdjacentHTML("beforeend",
+            `<a href="/${section}/${toggle.dataset.month}/${toggle.dataset.day}/" class="born-died-view-all">See full page <i class="bi bi-arrow-right ms-1"></i></a>`
+          );
+        }
+      };
+      toggle.addEventListener("click", activateToggle);
+      toggle.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activateToggle(); }
+      });
+    });
   } catch (error) {
     console.error("Error loading event details:", error);
     modalBodyContent.innerHTML = `
@@ -2213,6 +2348,15 @@ if (eventDetailModalElement) {
     currentActiveFilter = "all";
     lastActiveCard?.setAttribute("aria-expanded", "false");
     lastActiveCard = null;
+    document.getElementById("popupExploreBar")?.classList.remove("visible");
+    if (eventDetailModalElement._exploreBarScroll) {
+      eventDetailModalElement.removeEventListener("scroll", eventDetailModalElement._exploreBarScroll);
+      delete eventDetailModalElement._exploreBarScroll;
+    }
+    if (eventDetailModalElement._exploreBarObserver) {
+      eventDetailModalElement._exploreBarObserver.disconnect();
+      delete eventDetailModalElement._exploreBarObserver;
+    }
   });
 }
 

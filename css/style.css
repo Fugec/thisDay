@@ -224,21 +224,299 @@ body.dark-theme .form-check-label {
 }
 
 #eventFilterContainer {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.5rem;
   width: 100%;
+  margin-bottom: 0.75rem;
 }
 
-#eventFilterContainer .filter-btn {
-  flex: 1 1 calc(50% - 0.25rem);
+#eventFilterContainer .filter-btn:first-child {
+  grid-column: 1 / -1;
 }
 
 @media (min-width: 576px) {
+  #eventFilterContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0;
+  }
+  #eventFilterContainer .filter-btn:first-child {
+    grid-column: auto;
+  }
   #eventFilterContainer .filter-btn {
     flex: 0 0 auto;
     min-width: 110px;
   }
+}
+
+/* --- Event action buttons (Read More / Share / WhatsApp) --- */
+
+.event-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.event-action-read {
+  grid-column: 1 / -1;
+  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+@media (min-width: 576px) {
+  .event-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .event-action-read {
+    grid-column: auto;
+  }
+}
+
+.event-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: var(--td-radius-sm);
+  border: 1.5px solid;
+  text-decoration: none;
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1.4;
+}
+
+.event-action-read:hover {
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563eb;
+}
+
+.event-action-share {
+  color: #6c757d;
+  border-color: #dee2e6;
+}
+
+.event-action-share:hover {
+  background: #f8f9fa;
+  color: #495057;
+}
+
+.event-action-wa {
+  color: #25d366;
+  border-color: rgba(37, 211, 102, 0.4);
+}
+
+.event-action-wa:hover {
+  background: rgba(37, 211, 102, 0.08);
+  color: #128c7e;
+}
+
+body.dark-theme .event-action-share {
+  color: #8f9aaa;
+  border-color: #596270;
+}
+
+body.dark-theme .event-action-share:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+body.dark-theme .event-action-read {
+  border-color: rgba(109, 175, 251, 0.4);
+  color: #6daffb;
+}
+
+body.dark-theme .event-action-wa {
+  border-color: rgba(37, 211, 102, 0.3);
+}
+
+/* --- Event popup explore section --- */
+
+.explore-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@media (min-width: 576px) {
+  .explore-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+.explore-action-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: 1.5px solid #dee2e6;
+  border-radius: var(--td-radius-sm);
+  text-decoration: none;
+  color: var(--bs-body-color);
+  background: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+@media (min-width: 576px) {
+  .explore-action-btn {
+    width: auto;
+  }
+}
+
+.explore-action-btn:hover {
+  background: rgba(59, 130, 246, 0.06);
+  border-color: rgba(59, 130, 246, 0.35);
+  color: #3b82f6;
+  text-decoration: none;
+}
+
+.explore-action-quiz {
+  border-color: rgba(59, 130, 246, 0.3);
+  color: #3b82f6;
+}
+
+.explore-action-quiz:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: #3b82f6;
+}
+
+body.dark-theme .explore-action-btn {
+  border-color: #495057;
+  color: #f8f9fa;
+}
+
+body.dark-theme .explore-action-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: #6daffb;
+  color: #6daffb;
+}
+
+/* --- Born / Died accordion in event popup --- */
+
+.born-died-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  background: transparent;
+  border: 1.5px solid #dee2e6;
+  border-radius: var(--td-radius-sm);
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--bs-body-color);
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.born-died-toggle:hover {
+  background: rgba(59, 130, 246, 0.05);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.born-died-chevron {
+  transition: transform 0.2s;
+}
+
+.born-died-chevron.rotated {
+  transform: rotate(180deg);
+}
+
+.born-died-count {
+  font-size: 0.75rem;
+  color: #6c757d;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.born-died-panel {
+  margin-bottom: 0.5rem;
+}
+
+.born-died-person {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.25rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.born-died-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.born-died-thumb-placeholder {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #e9ecef;
+  flex-shrink: 0;
+}
+
+.born-died-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.born-died-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--link-color);
+}
+
+.born-died-year {
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.born-died-view-all {
+  display: block;
+  text-align: center;
+  padding: 0.5rem;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: #3b82f6;
+  text-decoration: none;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+body.dark-theme .born-died-view-all {
+  color: #60a5fa;
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+body.dark-theme .born-died-toggle {
+  border-color: #495057;
+  color: #f8f9fa;
+}
+
+body.dark-theme .born-died-person {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+body.dark-theme .born-died-thumb-placeholder {
+  background: #495057;
 }
 
 .chatbot-toggle {
@@ -530,6 +808,8 @@ a.btn.btn-primary.btn-sm {
   --site-shadow-sm: 0 4px 14px rgba(15, 23, 42, 0.08);
   --site-shadow-md: 0 8px 28px rgba(15, 23, 42, 0.12);
   --site-focus-ring: 0 0 0 0.2rem rgba(59, 130, 246, 0.6);
+  --td-radius-sm: 0.5rem;   /* 8px — buttons, toggles */
+  --td-radius-pill: 50rem;  /* fully rounded — chips, pills */
 }
 
 body.dark-theme {
@@ -677,6 +957,86 @@ body.dark-theme .ad-unit-container ins.adsbygoogle {
     border-right: none;
   }
 }
+
+/* Floating Explore Bar — appears after 65% scroll, hides below 65% or at accordion */
+.popup-explore-bar {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  border-top: 1px solid var(--card-border, #e2e8f0);
+  background: color-mix(in srgb, var(--card-bg, #fff) 88%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.3s cubic-bezier(0.34, 1.15, 0.64, 1), opacity 0.25s ease;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .popup-explore-bar { background: var(--card-bg, #fff); }
+}
+
+.popup-explore-bar.visible {
+  max-height: 110px;
+  opacity: 1;
+}
+
+/* All Events — full width top row, primary accent */
+.popup-explore-chip-events {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--card-border, #e2e8f0);
+}
+
+.popup-explore-chip-events i,
+.popup-explore-chip-events span {
+  color: var(--link-color, #2563eb);
+  font-weight: 600;
+}
+
+.popup-explore-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.5rem max(0.55rem, env(safe-area-inset-bottom));
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  min-width: 0;
+  min-height: 44px;
+  transition: background-color 0.15s ease;
+  line-height: 1.2;
+}
+
+.popup-explore-chip:nth-child(2) {
+  border-right: 1px solid var(--card-border, #e2e8f0);
+}
+
+.popup-explore-chip i {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.popup-explore-chip span {
+  color: var(--text-color, #6c757d);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-explore-chip:hover {
+  text-decoration: none;
+  background-color: rgba(13, 110, 253, 0.05);
+}
+
+/* Born — blue icon */
+.popup-explore-chip-born i { color: #3b82f6; }
+
+/* Died — muted icon */
+.popup-explore-chip-died i { color: #6c757d; }
+
+body.dark-theme .popup-explore-chip-born i { color: #60a5fa; }
+body.dark-theme .popup-explore-chip-died i { color: #94a3b8; }
 
 /* Dark-mode toggle: sun in light theme, moon in dark theme */
 .theme-icon-moon {

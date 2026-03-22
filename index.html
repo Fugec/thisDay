@@ -1044,6 +1044,20 @@
             ></button>
           </div>
           <div class="modal-body" id="modalBodyContent"></div>
+          <div id="popupExploreBar" class="popup-explore-bar">
+            <a href="#" id="popupExploreEvents" class="popup-explore-chip popup-explore-chip-events">
+              <i class="bi bi-calendar-event"></i>
+              <span>All Events</span>
+            </a>
+            <a href="#" id="popupExploreBirths" class="popup-explore-chip popup-explore-chip-born">
+              <i class="bi bi-person-heart"></i>
+              <span>Birthdays</span>
+            </a>
+            <a href="#" id="popupExploreDied" class="popup-explore-chip popup-explore-chip-died">
+              <i class="bi bi-flower1"></i>
+              <span>Deaths</span>
+            </a>
+          </div>
           <div class="modal-footer">
             <button
               type="button"
@@ -1179,21 +1193,26 @@
       // Falls back to 5s timer on short pages where 70% is never reached
       if (!localStorage.getItem("supportPopupClosed")) {
         const showPopup = () => popup.classList.add("show");
+        let ready = false;
+        let scrolledPast70 = false;
+
+        // Unlock after 1 minute minimum
+        setTimeout(() => {
+          ready = true;
+          if (scrolledPast70) showPopup();
+        }, 60000);
+
+        // Fallback: show at 90s even if user never scrolled deep enough
+        setTimeout(() => { if (!popup.classList.contains("show")) showPopup(); }, 90000);
 
         const onScroll = () => {
           const scrolled = window.scrollY + window.innerHeight;
           const total = document.documentElement.scrollHeight;
           if (scrolled / total >= 0.7) {
-            window.removeEventListener("scroll", onScroll);
-            clearTimeout(fallbackTimer);
-            showPopup();
+            scrolledPast70 = true;
+            if (ready) showPopup();
           }
         };
-
-        const fallbackTimer = setTimeout(() => {
-          window.removeEventListener("scroll", onScroll);
-          showPopup();
-        }, 5000);
 
         window.addEventListener("scroll", onScroll, { passive: true });
       }

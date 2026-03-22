@@ -1249,7 +1249,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
   const DD = String(day).padStart(2, "0");
   const canonical = `${siteUrl}/born/${monthName}/${day}/`;
 
-  const births = (eventsData?.births || []).slice(0, 30);
+  const births = (eventsData?.births || []);
   const featured =
     births.find((b) => b.pages?.[0]?.thumbnail?.source) || births[0] || null;
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
@@ -1551,7 +1551,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
   const DD = String(day).padStart(2, "0");
   const canonical = `${siteUrl}/died/${monthName}/${day}/`;
 
-  const deaths = (eventsData?.deaths || []).slice(0, 30);
+  const deaths = (eventsData?.deaths || []);
   const featured =
     deaths.find((d) => d.pages?.[0]?.thumbnail?.source) || deaths[0] || null;
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";

@@ -120,7 +120,7 @@
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
       as="script"
     />
-    <link rel="preload" href="js/script.js" as="script" />
+    <link rel="preload" href="js/script.js?v=1" as="script" />
 
     <link
       rel="stylesheet"
@@ -696,11 +696,11 @@
 
     <link
       rel="stylesheet"
-      href="css/style.css"
+      href="css/style.css?v=1"
       media="print"
       onload="this.media = 'all'"
     />
-    <noscript><link rel="stylesheet" href="css/style.css" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.css?v=1" /></noscript>
 
     <script
       async
@@ -1085,7 +1085,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="js/script.js"></script>
+    <script src="js/script.js?v=1"></script>
     <script>
       document.addEventListener("DOMContentLoaded", () => {
         // --- Carousel: pause-on-hover + pause/play button (WCAG 2.2.2) ---
@@ -1191,7 +1191,7 @@
 
       // Show popup at 70% scroll depth (only if not previously closed)
       // Falls back to 5s timer on short pages where 70% is never reached
-      if (!localStorage.getItem("supportPopupClosed")) {
+      if (!sessionStorage.getItem("supportPopupClosed")) {
         const showPopup = () => popup.classList.add("show");
         let ready = false;
         let scrolledPast70 = false;
@@ -1220,7 +1220,7 @@
       // Handle close button click
       closeBtn.addEventListener("click", () => {
         popup.classList.remove("show");
-        localStorage.setItem("supportPopupClosed", "true");
+        sessionStorage.setItem("supportPopupClosed", "true");
       });
     }
 

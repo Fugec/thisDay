@@ -2013,8 +2013,11 @@ async function showEventDetails(
       if (b === "Famous Persons" && a !== "Births" && a !== "Deaths") return 1;
       return a.localeCompare(b);
     });
-    let filterButtonsHtml = `<div id="eventFilterContainer" class="d-flex flex-wrap gap-2 mb-3">`;
-    sortedCategories.forEach((category) => {
+    // "All" button — full width on mobile, rest in 2-col grid
+    const allActive = currentActiveFilter === "all" ? "active" : "";
+    let filterButtonsHtml = `<div id="eventFilterContainer">
+      <button class="btn btn-sm btn-outline-primary filter-btn filter-btn-all ${allActive}" data-category="all">📅 All</button>`;
+    sortedCategories.slice(1).forEach((category) => {
       const isActive =
         category.toLowerCase() === currentActiveFilter ? "active" : "";
       const emoji = categoryEmojis[category] || "";

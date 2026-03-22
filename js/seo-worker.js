@@ -698,7 +698,22 @@ body.dark-theme .site-btn:hover{border-color:#60a5fa;background:rgba(96,165,250,
 body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}
 body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}
 #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}
-body.dark-theme #read-progress{background:#60a5fa}`;
+body.dark-theme #read-progress{background:#60a5fa}
+.explore-actions{display:flex;flex-direction:column;gap:.5rem}
+@media(min-width:576px){.explore-actions{flex-direction:row;flex-wrap:wrap;gap:.5rem}}
+.explore-action-btn{display:flex;align-items:center;width:100%;padding:.6rem 1rem;font-size:.875rem;font-weight:500;border:1.5px solid var(--cbr);border-radius:8px;text-decoration:none;color:var(--tc);background:transparent;transition:background .15s,border-color .15s}
+@media(min-width:576px){.explore-action-btn{width:auto}}
+.explore-action-btn:hover{background:rgba(59,130,246,.06);border-color:rgba(59,130,246,.35);color:#3b82f6;text-decoration:none}
+.explore-action-quiz{border-color:rgba(59,130,246,.3);color:#3b82f6}
+.explore-action-quiz:hover{background:rgba(59,130,246,.1);border-color:#3b82f6}
+body.dark-theme .explore-action-btn{border-color:rgba(255,255,255,.18);color:var(--tc)}
+body.dark-theme .explore-action-btn:hover{background:rgba(96,165,250,.08);border-color:#60a5fa;color:#93c5fd}
+#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}
+#supportPopup.show{display:flex;opacity:1}
+.support-popup-content{background:var(--cb,#fff);color:var(--tc,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--cbr,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}
+@keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
+.support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--mu,#64748b);line-height:1;padding:0}
+.support-close-btn:hover{color:var(--tc,#1e293b)}`;
 }
 
 function getSharedPageScripts() {
@@ -724,7 +739,9 @@ setTimeout(initAds,1200);
 </script>
 <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
 <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
-<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>`;
+<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
+<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:#3b82f6;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
+<script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{if(localStorage.getItem('supportPopupClosed'))return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed','true');}catch(e){}});})();</script>`;
 }
 
 function generateBlogPostHTML(
@@ -1177,10 +1194,10 @@ ${siteNav()}
   }
   <div class="card-box">
     <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
-    <div class="d-flex flex-wrap gap-2">
-      <a href="/born/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-person-heart"></i>Famous Birthdays</a>
-      <a href="/died/${monthName}/${day}/" class="site-btn"><i class="bi bi-flower1"></i>Notable Deaths</a>
-      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Take the Quiz</a>
+    <div class="explore-actions">
+      <a href="/quiz/${monthName}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
+      <a href="/born/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
+      <a href="/died/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
     </div>
   </div>
   <div class="my-5 pt-3 border-top">
@@ -1508,7 +1525,7 @@ ${siteNav()}
     <div class="d-flex flex-wrap gap-2">
       <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
       <a href="/died/${monthName}/${day}/" class="site-btn"><i class="bi bi-flower1"></i>Notable Deaths</a>
-      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Take the Quiz</a>
+      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Test Your Knowledge</a>
     </div>
   </div>
   <div class="my-5 pt-3 border-top">
@@ -1810,7 +1827,7 @@ ${siteNav()}
     <div class="d-flex flex-wrap gap-2">
       <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
       <a href="/born/${monthName}/${day}/" class="site-btn"><i class="bi bi-person-heart"></i>Famous Birthdays</a>
-      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Take the Quiz</a>
+      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Test Your Knowledge</a>
     </div>
   </div>
   <div class="my-5 pt-3 border-top">
@@ -2336,6 +2353,72 @@ async function handleGeneratedPost(_request, env, ctx, url) {
   });
 }
 
+// --- Generate and cache AI editorial insights for each event on a given date ---
+async function generateEventCommentary(env, mm, dd) {
+  if (!env.AI && !env.GROQ_API_KEY) return {};
+  let eventsData = { events: [], births: [], deaths: [] };
+  if (env.EVENTS_KV) {
+    try {
+      const kv = await env.EVENTS_KV.get(`events-data:${mm}-${dd}`, { type: "json" });
+      if (kv?.events?.length) eventsData = kv;
+    } catch (_) {}
+  }
+  if (!eventsData.events.length) {
+    try {
+      const r = await fetch(
+        `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mm}/${dd}`,
+        { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+      );
+      if (r.ok) eventsData = await r.json();
+    } catch (_) {}
+  }
+  const commentary = {};
+  const typedSets = [
+    ["events", eventsData.events || []],
+    ["births", eventsData.births || []],
+    ["deaths", eventsData.deaths || []],
+  ];
+  for (const [, items] of typedSets) {
+    if (!items.length) continue;
+    const batch = items.slice(0, 30);
+    const lines = batch
+      .map((e, i) => `${i + 1}. [${e.year}] ${(e.text || "").substring(0, 120)}`)
+      .join("\n");
+    try {
+      const raw = await callAI(
+        env,
+        [
+          {
+            role: "system",
+            content:
+              "You are a sharp, opinionated historical editor. Respond with valid JSON only — no markdown, no extra text.",
+          },
+          {
+            role: "user",
+            content: `Write exactly one editorial insight for each event below. Each insight must be:\n- Exactly 1 sentence, 15–22 words\n- Specific to that event (no generic phrases like "pivotal moment", "changed history", "shaped the course")\n- Vivid and human — something a curious reader would find surprising or memorable\n\nReply ONLY with a JSON array of strings in the same order as the list.\n\nEvents:\n${lines}`,
+          },
+        ],
+        { maxTokens: 2000, timeoutMs: 8000 },
+      );
+      const cleaned = (raw || "")
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```\s*$/, "")
+        .trim();
+      const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+      if (arrMatch) {
+        const insights = JSON.parse(arrMatch[0]);
+        batch.forEach((e, i) => {
+          if (typeof insights[i] === "string" && insights[i].trim()) {
+            const key = `${e.year}:${(e.text || "").substring(0, 30)}`;
+            commentary[key] = insights[i].trim();
+          }
+        });
+      }
+    } catch (_) {}
+  }
+  return commentary;
+}
+
 // --- Main Request Handler (for user requests) ---
 async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
@@ -2451,6 +2534,33 @@ async function handleFetchRequest(request, env, ctx) {
         { headers: corsHeaders },
       );
     }
+  }
+
+  // AI commentary endpoint — generates & caches per-event editorial insights
+  const commentaryMatch = url.pathname.match(/^\/api\/commentary\/(\d{2})\/(\d{2})$/);
+  if (commentaryMatch) {
+    const mm = commentaryMatch[1];
+    const dd = commentaryMatch[2];
+    const commentaryCorsHeaders = {
+      "Content-Type": "application/json; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=86400, s-maxage=604800",
+    };
+    const commentaryKvKey = `event-commentary:${mm}-${dd}`;
+    if (env.EVENTS_KV) {
+      try {
+        const cached = await env.EVENTS_KV.get(commentaryKvKey);
+        if (cached) return new Response(cached, { headers: commentaryCorsHeaders });
+      } catch (_) {}
+    }
+    const commentary = await generateEventCommentary(env, mm, dd);
+    const json = JSON.stringify(commentary);
+    if (env.EVENTS_KV && Object.keys(commentary).length > 0) {
+      ctx.waitUntil(
+        env.EVENTS_KV.put(commentaryKvKey, json, { expirationTtl: 7 * 24 * 60 * 60 }).catch(() => {}),
+      );
+    }
+    return new Response(json, { headers: commentaryCorsHeaders });
   }
 
   // Legacy generated URLs -> /events (SEO-friendly permanent redirect)
@@ -4445,10 +4555,10 @@ ${siteNav()}
   ${recSliderHtml}
   <div style="background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:18px 20px;margin-bottom:20px">
     <h3 style="font-size:1rem;font-weight:700;margin-bottom:12px;color:var(--tc)"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
-    <div class="d-flex flex-wrap gap-2">
-      <a href="/events/${monthSlug}/${day}/" class="qsc-cta-btn qsc-cta-primary"><i class="bi bi-calendar-event me-1"></i>Historical Events</a>
-      <a href="/born/${monthSlug}/${day}/" class="qsc-cta-btn"><i class="bi bi-person-heart me-1"></i>Famous Birthdays</a>
-      <a href="/died/${monthSlug}/${day}/" class="qsc-cta-btn"><i class="bi bi-flower1 me-1"></i>Notable Deaths</a>
+    <div class="explore-actions">
+      <a href="/events/${monthSlug}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-calendar-event me-2"></i>Historical Events</a>
+      <a href="/born/${monthSlug}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
+      <a href="/died/${monthSlug}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
     </div>
   </div>
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>

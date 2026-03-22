@@ -1609,18 +1609,29 @@ STRICT DATE REQUIREMENT: You MUST write about an event that occurred on ${monthN
 
 ${eventSelection}
 ${avoidSection}
-The article must be thorough and long — at least 800 words of body content — with multiple sections including eyewitness accounts, aftermath, and a personal editorial analysis of what went right and wrong about the event or the response to it.
+The article must be substantial — at least 1,500 words of body content across all paragraph fields combined. Every paragraph must earn its place with real historical depth, not filler.
 
-Writing style rules:
-- Do not use dashes ("-" or "—") inside sentences. Use commas, periods, or rewrite the sentence instead.
-- Write in a natural, human tone. Avoid bullet-point thinking inside paragraphs.
-- Keep sentences short. Target under 20 words per sentence. Split any sentence over 25 words into two shorter ones.
-- Aim for 6–10 word sentences when making key points — these are easiest to scan and remember.
-- No more than 25% of sentences in any paragraph should exceed 20 words.
-- Vary sentence length for rhythm. Short punchy sentences. Then a medium one to add context. Never three long sentences in a row.
-- Start each paragraph with a clear topic sentence. Use transition words between paragraphs (However, As a result, By contrast, Meanwhile, Ultimately).
-- Use active voice. Avoid passive constructions — say who did what.
-- Write for a general audience. Briefly explain historical context so any reader can follow along.
+VOICE AND PERSONALITY — this is the most important instruction:
+Write like a passionate history obsessive who has spent weeks researching this event and genuinely cannot believe more people do not know about it. You have opinions. You find things surprising, tragic, infuriating, or inspiring, and you say so. You are not a textbook. You are not a Wikipedia summary. You are a storyteller who happens to know an enormous amount of history.
+
+Specific voice qualities:
+- Open sections with a scene, a striking detail, or a provocative question — not with "The event was..."
+- Use vivid, concrete language. Instead of "there was widespread suffering", write what the suffering looked like, smelled like, felt like.
+- Have a point of view. If a leader made a cowardly decision, say so. If an act was unexpectedly brave, say so. Readers come for analysis, not neutrality.
+- Use transitions that show your thinking: "What makes this stranger still is...", "Here is what the textbooks skip over:", "The irony is remarkable:", "Most people assume X, but the reality was Y."
+- Connect the past to something the reader recognizes. A parallel to a modern situation, a personality trait that feels familiar, a consequence we still live with today.
+
+Sentence and paragraph rules:
+- Mix sentence lengths deliberately for rhythm. Some sentences can be 30+ words when building a complex, layered point. Use short sentences (under 10 words) for emphasis and dramatic beats. Never write five consecutive sentences of the same length.
+- Target an average of 18-22 words per sentence across each paragraph. This creates readable depth without choppiness.
+- Every paragraph must contain at least one specific, verifiable fact: a real name, an exact year or number, a specific place, or a direct quote. No paragraph may consist entirely of vague generalizations.
+- Do not use dashes ("-" or "—") inside sentences. Use commas, semicolons, or rewrite.
+- Use active voice. Say who did what.
+- Start each paragraph with a sentence that makes the reader want to keep reading.
+- Use transition phrases between paragraphs: "What followed was even more remarkable.", "But the real damage was done quietly, in the years after.", "To understand why this mattered, you have to go back further."
+
+BANNED PHRASES — never write any of these:
+"significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
 
 Title rules:
 - The "title" field MUST follow exactly this format: "[Specific Action or Event] — ${monthName} ${day}, Year"
@@ -1658,45 +1669,45 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     { "label": "Legacy", "value": "Long-term impact" }
   ],
   "didYouKnowFacts": [
-    "Surprising or lesser-known fact about the event, 1 to 2 sentences.",
-    "Another interesting detail readers might not expect, 1 to 2 sentences.",
-    "A third fact that adds color or context to the main story, 1 to 2 sentences."
+    "A genuinely surprising lesser-known fact — something most people would not expect, 2 to 3 sentences, minimum 40 words. Must include a specific name, number, or place.",
+    "A detail that reframes the main story or reveals a hidden layer of complexity, 2 to 3 sentences, minimum 40 words.",
+    "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 2 to 3 sentences, minimum 40 words."
   ],
   "overviewParagraphs": [
-    "First paragraph: context and background leading up to the event, 4 to 5 sentences.",
-    "Second paragraph: what happened — the main events, key actors, turning points, 4 to 5 sentences.",
-    "Third paragraph: immediate consequences and how people reacted in the moment, 4 to 5 sentences.",
-    "Fourth paragraph: broader context — how this fits into the larger history of the period, 3 to 4 sentences."
+    "First paragraph (minimum 120 words): Open with a scene or striking detail that drops the reader into the moment — the place, the tension, the stakes. Then build the context: what forces had been building toward this event, who the key players were, and what made this date different from any other. Use specific names, numbers, and places. No vague scene-setting.",
+    "Second paragraph (minimum 120 words): The event itself in vivid detail. What actually happened, step by step, with the key actors named. What decisions were made and by whom. Where was the turning point? What did observers see? Make the reader feel the weight of the moment as it unfolded.",
+    "Third paragraph (minimum 100 words): How people reacted in the immediate aftermath — in the room, in the city, across the country. Quote or paraphrase specific reactions from named individuals or groups. What did those who were there think it meant? Were they right?",
+    "Fourth paragraph (minimum 100 words): Pull back and place this event in its larger historical context. What was happening in the world at the same time? What pressures, ideologies, or forces converged to make this possible? How does understanding that context change how we read the event?"
   ],
   "eyewitnessOrChronicle": [
-    "First paragraph about contemporary accounts, documents, or eyewitness descriptions of the event, 4 to 5 sentences. Include the name of the source if known.",
-    "Second paragraph with a paraphrased quote or summary of another account, or elaboration on what survivors or observers reported, 3 to 4 sentences.",
-    "Optional third paragraph addressing the reliability of sources — what historians accept, what is disputed, and why, 3 to 4 sentences."
+    "First paragraph (minimum 100 words): Introduce the most vivid or authoritative contemporary account. Name the source — a diarist, journalist, official document, military report, or letter writer. Describe what they saw and how they described it. Let their words do some of the work. Convey the texture of the moment as a real person experienced it.",
+    "Second paragraph (minimum 90 words): Bring in a contrasting account or a different perspective on the same events — someone on the other side, a bystander, a critic. How did their version differ? What does the gap between accounts reveal about who controlled the narrative, and who did not?",
+    "Third paragraph (minimum 80 words): Address what historians now agree on, what remains genuinely disputed, and why. Be specific about what evidence exists and what is missing. If sources contradict each other, say so and explain why it matters."
   ],
-  "eyewitnessQuote": "A short paraphrased or real quote from a contemporary source about the event, under 200 characters.",
-  "eyewitnessQuoteSource": "Name of the source, e.g. 'John Smith, Diary, 1776'",
+  "eyewitnessQuote": "A direct or closely paraphrased quote from a named contemporary source, under 200 characters. Must be attributed to a real person or document.",
+  "eyewitnessQuoteSource": "Full attribution: name, role, and source document with year — e.g. 'Ivan Turgenev, letter to a friend, March 1861'",
   "aftermathParagraphs": [
-    "First paragraph about immediate aftermath — what changed physically, politically, or socially in the weeks and months after the event, 4 to 5 sentences.",
-    "Second paragraph about medium-term consequences — reforms, rebuilding, institutional changes, reactions from other nations or groups, 4 to 5 sentences.",
-    "Third paragraph about long-term legacy — how historians view it today, what monuments or traditions commemorate it, and what was ultimately forgotten or ignored, 3 to 4 sentences."
+    "First paragraph (minimum 120 words): The immediate aftermath — the first days and weeks. What changed on the ground? Who gained power, who lost it, what was destroyed or rebuilt? Use specific dates and numbers where possible. Do not skip straight to abstract consequences; describe what people were actually doing and experiencing.",
+    "Second paragraph (minimum 120 words): The medium-term fallout — over the following months and years. What reforms, conflicts, or institutional changes followed directly from this event? How did other nations, groups, or governments respond? What did those who had supported the event do next, and did it match their original intentions?",
+    "Third paragraph (minimum 100 words): The long view — how historians today assess the event's legacy, what aspects have been memorialized or forgotten, and what the event reveals that we still have not fully reckoned with. Be opinionated here. What do you think history got wrong about this?"
   ],
   "conclusionParagraphs": [
-    "First conclusion paragraph summarizing the event's place in history, 3 to 4 sentences.",
-    "Second conclusion paragraph about its relevance to the modern world, 2 to 3 sentences.",
-    "Third conclusion paragraph with a thought-provoking closing observation, 2 to 3 sentences."
+    "First paragraph (minimum 100 words): Place the event in its honest historical position — not inflated, not minimized. What did it actually change, and what did it leave untouched? Name the specific people, systems, or ideas it affected most. Avoid grand sweeping statements; be precise.",
+    "Second paragraph (minimum 80 words): The modern resonance. What parallel, tension, or question does this event raise that is still alive today? Be direct and specific — name the parallel, do not just gesture at it vaguely.",
+    "Third paragraph (minimum 80 words): A closing observation that leaves the reader with something to think about. A question that does not have an easy answer. A detail that reframes everything that came before. End on something that lingers."
   ],
   "analysisGood": [
-    { "title": "Short label for what went right", "detail": "2 to 3 sentences explaining this positive aspect, who deserves credit, and why it mattered." },
-    { "title": "Another positive aspect", "detail": "2 to 3 sentences of explanation." },
-    { "title": "A third positive aspect", "detail": "2 to 3 sentences of explanation." }
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who deserves credit and why. Describe the specific decision, action, or circumstance that worked, what the alternatives were, and why this outcome was not guaranteed. No generic praise." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard — specific, analytical, opinionated." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." }
   ],
   "analysisBad": [
-    { "title": "Short label for what went wrong", "detail": "2 to 3 sentences explaining this failure, who is responsible, and what the consequences were." },
-    { "title": "Another failure or missed opportunity", "detail": "2 to 3 sentences of explanation." },
-    { "title": "A third thing that went wrong", "detail": "2 to 3 sentences of explanation." },
-    { "title": "Optional fourth point about institutional or systemic failure", "detail": "2 to 3 sentences of explanation." }
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who is responsible. Describe the specific failure, what the stakes were, and what a better decision would have looked like. Do not be vague or diplomatic." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." },
+    { "title": "Optional: a systemic or institutional failure", "detail": "Minimum 60 words. The failure that no single person owned but that shaped the outcome nonetheless." }
   ],
-  "editorialNote": "A 3 to 4 sentence personal editorial reflection from the thisDay. team — a frank, opinionated observation about what this event reveals about human nature, institutions, or history in general. Write in first-person plural (we think, what strikes us).",
+  "editorialNote": "Minimum 80 words. A frank, first-person-plural editorial reflection from the thisDay. team. Start with 'What strikes us about this is...' or 'We keep coming back to one thing:' or a similarly direct opening. Say something that the body of the article could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered and what actually happened. No hedging. No 'it is important to remember'. Say the thing.",
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
   "youtubeSearchQuery": "specific event name year history documentary"
 }`;
@@ -1814,26 +1825,35 @@ async function reviewContentWithSEOExpert(content, env) {
   ].join(" ").substring(0, 1200);
 
   const systemPrompt =
-    "You are a senior SEO content editor specializing in Google Search ranking and Google Discover recommendations. " +
-    "You receive a JSON content object for a historical blog post. Your job is to improve it for:\n" +
-    "1. Google Search ranking — strong meta description (120–155 chars), specific keywords, keyword in title\n" +
-    "2. Google Discover — engaging, curiosity-driven title and OG description that makes people click\n" +
-    "3. Readability — flag if paragraph text has long sentences (avg > 20 words) and rewrite the worst offenders\n" +
-    "4. Content quality signals — active voice, clear topic sentences, no filler phrases\n\n" +
+    "You are a dual expert: a senior SEO editor AND a passionate, opinionated history writer. " +
+    "You receive a JSON content object for a historical blog post. Your two jobs are inseparable:\n\n" +
+    "JOB 1 — SEO QUALITY:\n" +
+    "- description: 120–155 chars, open with the year and event, include location and a specific hook\n" +
+    "- ogDescription: 100–130 chars, curiosity-driven — give readers a reason to click, not just a summary\n" +
+    "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
+    "- keywords: 5–8 specific terms — include year, location, key person names, and the historical context\n" +
+    "- imageAlt: a vivid 8–15 word description of what is actually visible in the image\n" +
+    "- title: must stay in format 'Event Name — Month Day, Year'. Only touch the event name if it is vague or generic.\n\n" +
+    "JOB 2 — VOICE AND CONTENT QUALITY:\n" +
+    "You are a history obsessive. You find generic, hollow paragraph writing offensive. " +
+    "If any paragraph in the sample reads like a Wikipedia stub — vague, passive, free of specific facts — rewrite it.\n" +
+    "Standards for a paragraph you would rewrite:\n" +
+    "- It contains no specific names, numbers, dates, or places (pure generalization)\n" +
+    "- It uses banned phrases: 'significant event', 'pivotal moment', 'changed history', 'shaped the course of', " +
+    "'left a lasting impact', 'cannot be overstated', 'shows the importance of', 'reminder of'\n" +
+    "- It is under 80 words and adds nothing a reader could not guess\n" +
+    "- It reads like it was written by someone trying to avoid saying anything specific\n\n" +
+    "When you rewrite a paragraph:\n" +
+    "- Add the specific fact or detail that the vague phrase was avoiding\n" +
+    "- Open with something that makes the reader want to continue — a striking detail, a contradiction, a question\n" +
+    "- Mix sentence lengths: some long and layered (25-35 words), some short and punchy (under 10 words)\n" +
+    "- Say what you actually think. If something was brutal, say brutal. If something was surprising, say surprising.\n" +
+    "- Preserve paragraph count exactly. Do not add or remove paragraphs.\n\n" +
     "Rules:\n" +
-    "- Keep the same JSON field names exactly\n" +
-    "- description: 120–155 chars, start with the year and event name, include location, be specific\n" +
-    "- ogDescription: 100–130 chars, conversational, curiosity-driven, no clickbait\n" +
-    "- twitterDescription: 90–120 chars, punchy, action-oriented\n" +
-    "- keywords: 5–8 comma-separated terms, specific (include year, location, person names)\n" +
-    "- imageAlt: descriptive 8–15 word phrase describing what a reader would see in the image\n" +
-    "- For overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, conclusionParagraphs: " +
-    "rewrite any sentence exceeding 25 words by splitting it. Keep the same information. " +
-    "Preserve paragraph count. Active voice only.\n" +
-    "- title: must stay in format 'Event Name — Month Day, Year'. Improve the event name part only if it's vague.\n" +
+    "- Keep all JSON field names exactly as given\n" +
     "- Do not change: historicalDate, historicalYear, historicalDateISO, location, country, quickFacts, " +
     "didYouKnowFacts, analysisGood, analysisBad, editorialNote, wikiUrl, youtubeSearchQuery\n" +
-    "- Output ONLY valid JSON with the fields you changed. Omit unchanged fields entirely.";
+    "- Output ONLY valid JSON with the fields that need improvement. Omit fields that are already good.";
 
   const userMessage =
     `Blog post to review:\n` +
@@ -1844,8 +1864,8 @@ async function reviewContentWithSEOExpert(content, env) {
     `twitterDescription: ${content.twitterDescription || ""}\n` +
     `keywords: ${content.keywords || ""}\n` +
     `imageAlt: ${content.imageAlt || ""}\n\n` +
-    `Paragraph sample for readability review:\n${paragraphSample}\n\n` +
-    `Return a JSON object with ONLY the fields that need improvement. Example:\n` +
+    `Paragraph sample (check these for voice and substance — rewrite any that are hollow or vague):\n${paragraphSample}\n\n` +
+    `Return ONLY a JSON object with the fields that need improvement:\n` +
     `{"description":"improved...","keywords":"improved...","overviewParagraphs":["para1","para2","para3","para4"]}`;
 
   let raw;
@@ -1856,7 +1876,7 @@ async function reviewContentWithSEOExpert(content, env) {
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      { maxTokens: 2500, timeoutMs: 30_000 },
+      { maxTokens: 3500, timeoutMs: 35_000 },
     );
   } catch (err) {
     console.warn(`SEO expert: AI call failed (${err.message}) — using original content`);

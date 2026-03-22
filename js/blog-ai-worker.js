@@ -124,6 +124,45 @@ export default {
       }
     }
 
+    // Admin: patch SEO meta tags on existing posts without full regeneration
+    // POST /blog/regen-seo?slug=22-march-2026   — single post
+    // POST /blog/regen-seo?all=true             — all posts in index (sequential)
+    if (path === "/blog/regen-seo" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const regenParams = new URL(request.url).searchParams;
+      const targetSlug = regenParams.get("slug");
+      const regenAll = regenParams.get("all") === "true";
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const slugs = targetSlug ? [targetSlug] : regenAll ? index.map((e) => e.slug) : [];
+      if (slugs.length === 0) {
+        return jsonResponse({ status: "error", message: "Provide ?slug=X or ?all=true" }, 400);
+      }
+      const results = [];
+      for (const slug of slugs) {
+        try {
+          const html = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`);
+          if (!html) { results.push({ slug, status: "not_found" }); continue; }
+          const { updatedHtml, changed, newDescription } = await patchSEOMeta(html, slug, env);
+          await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, updatedHtml);
+          // Sync description in the index if it changed
+          if (newDescription) {
+            const idx = index.findIndex((e) => e.slug === slug);
+            if (idx !== -1) index[idx].description = newDescription;
+          }
+          results.push({ slug, status: "updated", changed });
+        } catch (err) {
+          results.push({ slug, status: "error", error: err.message });
+        }
+      }
+      // Persist updated index (descriptions may have changed)
+      await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
+      return jsonResponse({ status: "ok", results });
+    }
+
     // Listing page: /blog/archive
     if (path === "/blog/archive") {
       return serveListing(env);
@@ -1126,10 +1165,6 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
   // Collect titles already published (all-time, capped at 50) so the AI avoids duplicates
   const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
   const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
-  const thisMonthPrefix = now.toISOString().slice(0, 7); // "YYYY-MM"
-  const takenThisMonth = existingIndex
-    .filter((e) => e.publishedAt && e.publishedAt.startsWith(thisMonthPrefix))
-    .map((e) => e.title);
   // Full dedup list: most recent 50 posts across all time
   // When a forced event is provided, exclude it from the avoid list so the AI can write about it
   const takenAllTime = existingIndex
@@ -1802,6 +1837,152 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   }
 
   return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// SEO meta patcher — updates meta tags in existing KV HTML without regenerating
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts current SEO meta values from stored HTML, calls AI to improve only
+ * description / ogDescription / twitterDescription / keywords / imageAlt,
+ * then does targeted string replacements on the HTML.
+ * Returns { updatedHtml, changed: string[], newDescription: string|null }.
+ */
+async function patchSEOMeta(html, _slug, env) {
+  const getMeta = (re) => (html.match(re) || [])[1] || "";
+
+  const currentTitle       = getMeta(/<title>([^<]+) \| thisDay\.<\/title>/);
+  const currentDesc        = getMeta(/<meta name="description" content="([^"]*?)"\s*\/>/);
+  const currentOgDesc      = getMeta(/<meta property="og:description" content="([^"]*?)"\s*\/>/);
+  const currentTwitterDesc = getMeta(/<meta name="twitter:description" content="([^"]*?)"\s*\/>/);
+  const currentKeywords    = getMeta(/<meta name="keywords" content="([^"]*?)"\s*\/>/);
+  const currentImageAlt    = getMeta(/<meta name="twitter:image:alt" content="([^"]*?)"\s*\/>/);
+
+  // Pull event context from first JSON-LD block
+  let eventName = "", eventDate = "", eventLocation = "";
+  const jldMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  if (jldMatch) {
+    try {
+      const jld = JSON.parse(jldMatch[1]);
+      eventName     = jld.about?.name     || jld.headline || "";
+      eventDate     = jld.about?.startDate || "";
+      eventLocation = jld.about?.location?.name || "";
+    } catch { /* ignore */ }
+  }
+
+  const minContent = {
+    title: currentTitle, eventTitle: eventName,
+    historicalDate: eventDate, location: eventLocation,
+    description: currentDesc, ogDescription: currentOgDesc,
+    twitterDescription: currentTwitterDesc, keywords: currentKeywords,
+    imageAlt: currentImageAlt,
+  };
+
+  const improved = await reviewSEOMetaOnly(minContent, env);
+
+  let updatedHtml = html;
+  const changed = [];
+
+  const patch = (oldVal, newVal, pattern, replacement) => {
+    if (newVal && newVal !== oldVal) {
+      updatedHtml = updatedHtml.replace(pattern, replacement);
+      changed.push(pattern.source?.split("content")[0]?.trim() || "field");
+    }
+  };
+
+  patch(currentDesc, improved.description,
+    /<meta name="description" content="[^"]*?"\s*\/>/,
+    `<meta name="description" content="${esc(improved.description)}" />`);
+
+  patch(currentOgDesc, improved.ogDescription,
+    /<meta property="og:description" content="[^"]*?"\s*\/>/,
+    `<meta property="og:description" content="${esc(improved.ogDescription)}" />`);
+
+  patch(currentTwitterDesc, improved.twitterDescription,
+    /<meta name="twitter:description" content="[^"]*?"\s*\/>/,
+    `<meta name="twitter:description" content="${esc(improved.twitterDescription)}" />`);
+
+  patch(currentImageAlt, improved.imageAlt,
+    /<meta name="twitter:image:alt" content="[^"]*?"\s*\/>/,
+    `<meta name="twitter:image:alt" content="${esc(improved.imageAlt)}" />`);
+
+  // keywords + article:tag block
+  if (improved.keywords && improved.keywords !== currentKeywords) {
+    updatedHtml = updatedHtml.replace(
+      /<meta name="keywords" content="[^"]*?"\s*\/>/,
+      `<meta name="keywords" content="${esc(improved.keywords)}" />`);
+    // Replace all article:tag lines with freshly generated ones
+    const newTags = improved.keywords
+      .split(",").map((k) => k.trim()).filter(Boolean).slice(0, 6)
+      .map((k) => `<meta property="article:tag" content="${esc(k)}" />`).join("\n    ");
+    updatedHtml = updatedHtml.replace(
+      /(<meta property="article:tag" content="[^"]*?"\s*\/>\n?\s*)+/,
+      newTags + "\n    ");
+    changed.push("keywords");
+  }
+
+  return {
+    updatedHtml,
+    changed,
+    newDescription: improved.description !== currentDesc ? improved.description : null,
+  };
+}
+
+/**
+ * Focused SEO-only AI call — improves only the 5 meta fields.
+ * No paragraph rewriting. Falls back to original on any error.
+ */
+async function reviewSEOMetaOnly(content, env) {
+  if (!env.AI && !env.GROQ_API_KEY) return content;
+
+  const systemPrompt =
+    "You are a senior SEO editor. Improve only these 5 fields for a historical blog post:\n" +
+    "- description: 120–155 chars, start with year + event name, include location, specific hook\n" +
+    "- ogDescription: 100–130 chars, curiosity-driven, makes people click\n" +
+    "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
+    "- keywords: 5–8 comma-separated, specific — year, location, person names, historical context\n" +
+    "- imageAlt: vivid 8–15 word phrase describing what is visible in the image\n\n" +
+    "Rules: output ONLY valid JSON with the fields that need improvement. Omit unchanged fields. " +
+    "Do not change title, content, or any other field.";
+
+  const userMessage =
+    `Title: ${content.title}\n` +
+    `Event: ${content.eventTitle} on ${content.historicalDate} in ${content.location || "unknown"}\n` +
+    `description: ${content.description}\n` +
+    `ogDescription: ${content.ogDescription || ""}\n` +
+    `twitterDescription: ${content.twitterDescription || ""}\n` +
+    `keywords: ${content.keywords || ""}\n` +
+    `imageAlt: ${content.imageAlt || ""}\n\n` +
+    `Return ONLY JSON with improved fields, e.g. {"description":"...","keywords":"..."}`;
+
+  let raw;
+  try {
+    raw = await callAI(
+      env,
+      [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
+      { maxTokens: 800, timeoutMs: 25_000 },
+    );
+  } catch (err) {
+    console.warn(`SEO meta patcher [${content.title}]: AI call failed — ${err.message}`);
+    return content;
+  }
+
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) return content;
+
+  let improvements;
+  try { improvements = JSON.parse(match[0]); } catch { return content; }
+
+  const ALLOWED = ["description", "ogDescription", "twitterDescription", "keywords", "imageAlt"];
+  const improved = { ...content };
+  for (const f of ALLOWED) {
+    if (typeof improvements[f] === "string" && improvements[f].trim().length > 5) {
+      improved[f] = improvements[f];
+    }
+  }
+  return improved;
 }
 
 // ---------------------------------------------------------------------------

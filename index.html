@@ -1184,7 +1184,8 @@
       // Falls back to 5s timer on short pages where 70% is never reached
       const _bmcTs = localStorage.getItem("supportPopupClosed");
       if (!_bmcTs || Date.now() - Number(_bmcTs) > 86400000) {
-        const showPopup = () => popup.classList.add("show");
+        let dismissed = false;
+        const showPopup = () => { if (!dismissed) popup.classList.add("show"); };
         let ready = false;
         let scrolledPast70 = false;
 
@@ -1207,13 +1208,21 @@
         };
 
         window.addEventListener("scroll", onScroll, { passive: true });
-      }
 
-      // Handle close button click
-      closeBtn.addEventListener("click", () => {
-        popup.classList.remove("show");
-        localStorage.setItem("supportPopupClosed", String(Date.now()));
-      });
+        // Handle close button click
+        closeBtn.addEventListener("click", () => {
+          dismissed = true;
+          popup.classList.remove("show");
+          localStorage.setItem("supportPopupClosed", String(Date.now()));
+          window.removeEventListener("scroll", onScroll);
+        });
+      } else {
+        // Handle close button click (popup won't show, but keep handler clean)
+        closeBtn.addEventListener("click", () => {
+          popup.classList.remove("show");
+          localStorage.setItem("supportPopupClosed", String(Date.now()));
+        });
+      }
     }
 
     document.addEventListener("DOMContentLoaded", initSupportPopup);

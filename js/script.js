@@ -2105,7 +2105,7 @@ async function showEventDetails(
         if (!isOpen && !loaded) {
           loaded = true;
           const section = type.toLowerCase();
-          const people = (currentDayEventsData?.[section === "born" ? "births" : "deaths"] || []).slice(0, 12);
+          const people = (currentDayEventsData?.[section === "born" ? "births" : "deaths"] || []);
           if (countEl) countEl.innerHTML = `<span>${people.length}</span> <i class="bi bi-chevron-down born-died-chevron${!isOpen ? " rotated" : ""}"></i>`;
           if (people.length === 0) {
             content.innerHTML = `<p class="text-muted text-center py-2" style="font-size:0.85rem;">No data available.</p>`;

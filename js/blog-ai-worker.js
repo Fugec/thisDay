@@ -97,7 +97,9 @@ export default {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
       try {
-        await generateAndStore(env, ctx);
+        const publishUrl = new URL(request.url);
+        const forcedEvent = publishUrl.searchParams.get("force-event") || null;
+        await generateAndStore(env, ctx, forcedEvent);
         return jsonResponse({ status: "ok", message: "Blog post published." });
       } catch (err) {
         console.error(
@@ -1108,7 +1110,7 @@ async function resolveWorkingImageForContent(content) {
 /**
  * Calls the Claude API, builds the HTML page, and persists everything to KV.
  */
-async function generateAndStore(env, ctx) {
+async function generateAndStore(env, ctx, forcedEvent = null) {
   const now = new Date();
   const activeModel = await resolveAiModel(env.BLOG_AI_KV);
 
@@ -1120,13 +1122,15 @@ async function generateAndStore(env, ctx) {
     .filter((e) => e.publishedAt && e.publishedAt.startsWith(thisMonthPrefix))
     .map((e) => e.title);
   // Full dedup list: most recent 50 posts across all time
+  // When a forced event is provided, exclude it from the avoid list so the AI can write about it
   const takenAllTime = existingIndex
     .slice()
     .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
     .slice(0, 50)
-    .map((e) => e.title);
+    .map((e) => e.title)
+    .filter((t) => !forcedEvent || !t.toLowerCase().startsWith(forcedEvent.toLowerCase().split(" — ")[0].trim().toLowerCase()));
 
-  let content = await callWorkersAI(env.AI, now, takenAllTime, activeModel);
+  let content = await callWorkersAI(env.AI, now, takenAllTime, activeModel, forcedEvent);
 
   // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
   // sentence length before building HTML. Falls back to original on any error.
@@ -1585,6 +1589,7 @@ async function callWorkersAI(
   date,
   takenThisMonth = [],
   model = CF_AI_MODEL,
+  forcedEvent = null,
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -1594,11 +1599,15 @@ async function callWorkersAI(
       ? `\nThese topics have already been covered recently — do NOT write about any of them:\n${takenThisMonth.map((t) => `- ${t}`).join("\n")}\nChoose a completely different event.\n`
       : "";
 
+  const eventSelection = forcedEvent
+    ? `You MUST write about this specific event: "${forcedEvent}". Do not choose a different event.`
+    : `Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this exact date.`;
+
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.
 
 STRICT DATE REQUIREMENT: You MUST write about an event that occurred on ${monthName} ${day} ONLY. The event must have taken place in the month of ${monthName} on day ${day}. Events from ANY other month or day are strictly forbidden. Before choosing an event, verify it happened on ${monthName} ${day}. If you are not certain an event occurred on ${monthName} ${day}, choose a different event you are confident about.
 
-Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this exact date.
+${eventSelection}
 ${avoidSection}
 The article must be thorough and long — at least 800 words of body content — with multiple sections including eyewitness accounts, aftermath, and a personal editorial analysis of what went right and wrong about the event or the response to it.
 

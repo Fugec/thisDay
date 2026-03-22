@@ -1191,7 +1191,8 @@
 
       // Show popup at 70% scroll depth (only if not previously closed)
       // Falls back to 5s timer on short pages where 70% is never reached
-      if (!sessionStorage.getItem("supportPopupClosed")) {
+      const _bmcTs = localStorage.getItem("supportPopupClosed");
+      if (!_bmcTs || Date.now() - Number(_bmcTs) > 86400000) {
         const showPopup = () => popup.classList.add("show");
         let ready = false;
         let scrolledPast70 = false;
@@ -1220,7 +1221,7 @@
       // Handle close button click
       closeBtn.addEventListener("click", () => {
         popup.classList.remove("show");
-        sessionStorage.setItem("supportPopupClosed", "true");
+        localStorage.setItem("supportPopupClosed", String(Date.now()));
       });
     }
 

@@ -1937,24 +1937,17 @@ function initPopupExploreBar(month, day) {
   document.getElementById("popupExploreEvents").href = `/events/${mSlug}/${day}/`;
   document.getElementById("popupExploreBirths").href = `/born/${mSlug}/${day}/`;
   document.getElementById("popupExploreDied").href = `/died/${mSlug}/${day}/`;
-  bar.classList.remove("visible");
+  // Show immediately; hide only when Explore section scrolls into view
+  bar.classList.add("visible");
 
-  // Show bar on any scroll; hide when back at top or Explore section is visible
-  if (scrollEl._exploreBarScroll) {
-    scrollEl.removeEventListener("scroll", scrollEl._exploreBarScroll);
-  }
-  scrollEl._exploreBarScroll = function () {
-    if (scrollEl.scrollTop > 0) bar.classList.add("visible");
-    else bar.classList.remove("visible");
-  };
-  scrollEl.addEventListener("scroll", scrollEl._exploreBarScroll);
-
-  // Also hide when Explore section scrolls into view (links already visible)
   if (scrollEl._exploreBarObserver) scrollEl._exploreBarObserver.disconnect();
   const exploreSection = document.getElementById("modalExploreSection");
   if (exploreSection && "IntersectionObserver" in window) {
     scrollEl._exploreBarObserver = new IntersectionObserver(
-      (entries) => { if (entries[0].isIntersecting) bar.classList.remove("visible"); },
+      (entries) => {
+        if (entries[0].isIntersecting) bar.classList.remove("visible");
+        else bar.classList.add("visible");
+      },
       { root: scrollEl, threshold: 0.1 }
     );
     scrollEl._exploreBarObserver.observe(exploreSection);
@@ -2352,10 +2345,6 @@ if (eventDetailModalElement) {
     lastActiveCard = null;
     document.getElementById("popupExploreBar")?.classList.remove("visible");
     const scrollEl = document.getElementById("modalBodyContent");
-    if (scrollEl?._exploreBarScroll) {
-      scrollEl.removeEventListener("scroll", scrollEl._exploreBarScroll);
-      delete scrollEl._exploreBarScroll;
-    }
     if (scrollEl?._exploreBarObserver) {
       scrollEl._exploreBarObserver.disconnect();
       delete scrollEl._exploreBarObserver;

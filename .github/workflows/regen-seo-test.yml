@@ -1,0 +1,38 @@
+name: regen-seo-test
+on:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'Post slug to patch (e.g. 1-march-2026)'
+        required: true
+        default: '1-march-2026'
+
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Before state
+        run: |
+          echo "=== BEFORE ==="
+          curl -s "https://thisday.info/blog/${{ github.event.inputs.slug }}/" \
+            | grep -E 'meta name="description"|og:description|twitter:description|keywords|twitter:image:alt'
+
+      - name: Call regen-seo
+        run: |
+          RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+            -X POST "https://thisday.info/blog/regen-seo?slug=${{ github.event.inputs.slug }}" \
+            -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
+          BODY=$(echo "$RESULT" | head -n -1)
+          HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
+          echo "Response (HTTP $HTTP_STATUS): $BODY"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::regen-seo failed with HTTP $HTTP_STATUS"
+            exit 1
+          fi
+
+      - name: After state (wait 3s for propagation)
+        run: |
+          sleep 3
+          echo "=== AFTER ==="
+          curl -s "https://thisday.info/blog/${{ github.event.inputs.slug }}/" \
+            | grep -E 'meta name="description"|og:description|twitter:description|keywords|twitter:image:alt'

@@ -1808,18 +1808,23 @@ async function fetchAndApplyCommentary(month, day) {
       const key = `${item.year}:${(item.description || "").substring(0, 30)}`;
       if (commentaryMap[key]) item.commentary = commentaryMap[key];
     });
-    // Update visible commentary spans in-place without re-rendering
+    // Inject commentary paragraphs into event cards that have a match
     const modal = document.getElementById("modalBodyContent");
     if (!modal) return;
-    modal.querySelectorAll(".event-commentary[data-ckey]").forEach((el) => {
-      const text = commentaryMap[el.dataset.ckey];
-      if (text) {
-        const span = el.querySelector(".commentary-text");
-        if (span) span.textContent = text;
-      }
+    modal.querySelectorAll("li[data-ckey]").forEach((li) => {
+      const text = commentaryMap[li.dataset.ckey];
+      if (!text) return;
+      // Don't double-inject
+      if (li.querySelector(".event-commentary")) return;
+      const p = document.createElement("p");
+      p.className = "mb-2 fst-italic event-commentary";
+      p.innerHTML = `<i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${text}</span>`;
+      // Insert before .event-actions
+      const actions = li.querySelector(".event-actions");
+      if (actions) actions.before(p);
     });
   } catch (_) {
-    // Fail silently — template commentary already shown
+    // Fail silently — commentary section stays hidden
   }
 }
 
@@ -1840,8 +1845,6 @@ function renderFilteredItems(itemsToRender) {
     } else if (event.type === "death") {
       specialEmphasis = "<strong>Death:</strong> ";
     }
-    const commentary = getEventCommentary(event);
-
     // Years ago badge — shown for all historical events
     const eventYear = parseInt(event.year, 10);
     const yearsAgo = currentYear - eventYear;
@@ -1857,7 +1860,7 @@ function renderFilteredItems(itemsToRender) {
     const waUrl = `https://wa.me/?text=${shareText}`;
 
     htmlContent += `
-            <li class="mb-3 p-3 border rounded">
+            <li class="mb-3 p-3 border rounded" data-ckey="${`${event.year}:${(event.description || "").substring(0, 30)}`}">
                 <div class="d-flex justify-content-between align-items-start">
                     <div class="flex-grow-1">
                         <div class="d-flex align-items-center flex-wrap gap-1 mb-1">
@@ -1865,9 +1868,7 @@ function renderFilteredItems(itemsToRender) {
                           ${anniversaryBadge}
                         </div>
                         <p class="mb-1">${specialEmphasis}${event.description}</p>
-                        <p class="mb-2 fst-italic event-commentary" data-ckey="${`${event.year}:${(event.description || "").substring(0, 30)}`}">
-                          <i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${event.commentary || commentary}</span>
-                        </p>
+                        ${event.commentary ? `<p class="mb-2 fst-italic event-commentary"><i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${event.commentary}</span></p>` : ""}
                         <div class="event-actions">
                           ${
                             event.sourceUrl

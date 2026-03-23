@@ -1444,7 +1444,7 @@ async function reviewQuizWithExpert(questions, content, env) {
     .filter(Boolean)
     .join("\n");
 
-  const systemPrompt =
+  let systemPrompt =
     "You are a rigorous history quiz editor. You receive a 5-question multiple-choice quiz " +
     "and a set of historical facts. Your job is to make the quiz harder and more educational " +
     "without changing its structure.\n\n" +
@@ -2065,7 +2065,7 @@ async function humanizeSection(
 ) {
   if (!paragraphs.length) return paragraphs;
 
-  const systemPrompt =
+  let systemPrompt =
     "You are a senior writer for serious history documentaries — think BBC, PBS, Ken Burns. " +
     "Your draft is then reviewed by two specialists. Apply all three perspectives before output.\n\n" +
     "LEAD WRITER — BBC/PBS DOCUMENTARY VOICE:\n" +
@@ -2401,7 +2401,7 @@ async function reviewContentWithSEOExpert(content, env) {
     conclusionParagraphs: content.conclusionParagraphs || [],
   };
 
-  const systemPrompt =
+  let systemPrompt =
     "You are a triple expert: a senior SEO editor, a passionate opinionated history writer, AND a human-voice specialist. " +
     "You receive a JSON content object for a historical blog post. Your three jobs are inseparable:\n\n" +
     "JOB 1 — SEO QUALITY:\n" +

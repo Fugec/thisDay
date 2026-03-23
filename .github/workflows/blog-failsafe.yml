@@ -1,6 +1,6 @@
 name: Blog Post Failsafe
 
-# Runs 30 minutes after the blog worker cron (13:00 UTC).
+# Runs 30 minutes after the blog worker cron (00:05 UTC).
 # Checks if today's post actually exists in KV. If it doesn't (the worker
 # failed all 3 internal retries), this workflow triggers one more attempt
 # via POST /blog/publish.
@@ -14,7 +14,7 @@ name: Blog Post Failsafe
 
 on:
   schedule:
-    - cron: "30 13 * * *" # 13:30 UTC — 30 min after blog worker cron at 13:00
+    - cron: "35 0 * * *" # 00:35 UTC — 30 min after blog worker cron at 00:05
 
   # Allow manual trigger from the Actions tab
   workflow_dispatch:

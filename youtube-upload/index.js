@@ -7,7 +7,7 @@
  * Audio:  ElevenLabs TTS narration (from Did You Know / Quick Facts section)
  *         mixed with background music (assets/background.mp3) at 15% volume.
  * Image:  Wikipedia image from the post's imageUrl, or fallback logo.
- * Schedule: 1 video per run, Sun/Mon/Wed/Fri via GitHub Actions cron at 02:00 and 10:00 UTC (2 runs/day, 4 days/week)
+ * Schedule: Mon/Tue/Thu/Fri via GitHub Actions cron at 01:00 UTC (fallback 02:00 UTC)
  *
  * Run:        npm start
  * Auth setup: npm run auth   (one-time, to get YOUTUBE_REFRESH_TOKEN)
@@ -16,6 +16,8 @@
  *   CF_ACCOUNT_ID, CF_API_TOKEN, CF_KV_NAMESPACE_ID
  *   YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN
  *   ELEVENLABS_API_KEY     (TTS voiceover, 10k chars/month free)
+ *   HF_TOKEN               (HuggingFace FLUX.1-schnell, primary AI image)
+ *   HF_TOKEN_2             (HuggingFace fallback account, same model)
  *   REUPLOAD_SLUGS         (optional: force re-upload, comma-separated)
  *   YOUTUBE_PRIVACY        (optional: private or public, default public)
  *   USE_AI_IMAGE           (optional: true = AI-generated background, default false)

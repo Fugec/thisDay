@@ -1,13 +1,13 @@
 name: YouTube Auto-Upload
 
 on:
-  # Runs Mon/Tue/Thu/Fri at 14:00 UTC = 10am ET / 7am PT / 3pm CET — optimal for US-primary.
-  # "On This Day" content goes live while the date is current in all markets.
-  # Safety fallback at 16:00 UTC (2h gap) in case of API/quota failure.
+  # Runs Mon/Tue/Thu/Fri at 01:00 UTC — after blog post is generated at 00:05 and
+  # failsafe check at 00:35. Gives the blog worker 55 min to finish.
+  # Safety fallback at 02:00 UTC (1h gap) in case of API/quota failure.
   # Uses fallback ELEVENLABS_API_KEY_2/3 if primary hits quota.
   schedule:
-    - cron: "0 14 * * 1,2,4,5"
-    - cron: "0 16 * * 1,2,4,5"
+    - cron: "0 1 * * 1,2,4,5"
+    - cron: "0 2 * * 1,2,4,5"
 
   # Allow a manual run from the Actions tab (e.g. to back-fill or re-upload)
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
           YOUTUBE_REGEN_SECRET: ${{ secrets.YOUTUBE_REGEN_SECRET }}
           USE_AI_IMAGE: ${{ secrets.USE_AI_IMAGE }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN_2: ${{ secrets.HF_TOKEN_2 }}
           REPLICATE_API_TOKEN: ${{ secrets.REPLICATE_API_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

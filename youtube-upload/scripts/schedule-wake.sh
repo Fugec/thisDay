@@ -3,8 +3,8 @@
 # Run once to bootstrap, then social-cron.js calls this at the end of each
 # run to keep the schedule rolling forward automatically.
 #
-# Wake times (UTC): 14:00 and 16:00, Mon/Tue/Thu/Fri (days 1,2,4,5)
-# Mac wakes 2 min early, cron fires at :05, Mac returns to sleep on idle.
+# Wake times (UTC): 01:33 and 02:33, Mon/Tue/Thu/Fri (days 1,2,4,5)
+# Mac wakes 2 min early, cron fires at :35, Mac returns to sleep on idle.
 #
 # Usage:
 #   sudo bash scripts/schedule-wake.sh
@@ -14,7 +14,7 @@ set -e
 # Days of week that need wakes (1=Mon,2=Tue,4=Thu,5=Fri)
 WAKE_DAYS=(1 2 4 5)
 # Wake 2 min before cron fires so system is fully up
-WAKE_TIMES=("13:58:00" "15:58:00")
+WAKE_TIMES=("01:33:00" "02:33:00")
 
 NOW=$(date -u +%s)
 

@@ -8,8 +8,8 @@
  *   4. Marks metaPostedAt / tiktokPostedAt in KV so it never retries
  *
  * Crontab (Mon/Tue/Thu/Fri at 14:05 + 16:05 UTC):
- *   5 14 * * 1,2,4,5 cd /Users/arminkapetanovic/devilbox/data/www/danas/htdocs/youtube-upload && /opt/homebrew/bin/node scripts/social-cron.js >> /tmp/social-cron.log 2>&1
- *   5 16 * * 1,2,4,5 cd /Users/arminkapetanovic/devilbox/data/www/danas/htdocs/youtube-upload && /opt/homebrew/bin/node scripts/social-cron.js >> /tmp/social-cron.log 2>&1
+ *   35 1 * * 1,2,4,5 cd /Users/arminkapetanovic/devilbox/data/www/danas/htdocs/youtube-upload && /opt/homebrew/bin/node scripts/social-cron.js >> /tmp/social-cron.log 2>&1
+ *   35 2 * * 1,2,4,5 cd /Users/arminkapetanovic/devilbox/data/www/danas/htdocs/youtube-upload && /opt/homebrew/bin/node scripts/social-cron.js >> /tmp/social-cron.log 2>&1
  *
  * Optional env vars (in .env):
  *   POST_DELAY_MIN   — minutes after YouTube publish to wait (default: 5)

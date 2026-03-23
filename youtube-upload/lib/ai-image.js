@@ -1,97 +1,28 @@
 /**
  * AI image generation — provider chain:
  *
- *   1. Pollinations.AI  gen.pollinations.ai  (flux → turbo → nanobanana)
- *      Free tier keyless, or authenticated via POLLINATIONS_API_KEY for higher limits.
- *      New API: https://gen.pollinations.ai/image/{prompt}
- *      Available models: flux, turbo, gptimage, kontext, seedream, nanobanana, nanobanana-pro
- *
- *   2. Hugging Face Inference API  black-forest-labs/FLUX.1-schnell
- *      Free with a free HF account token (HF_TOKEN env var).
- *      ~1000 req/day free tier — 3–4 images per video is nowhere near the limit.
+ *   1. Hugging Face Inference API  black-forest-labs/FLUX.1-schnell  (HF_TOKEN)
+ *      Free tier with a free HF account token.
  *      Fast (~10–20s per image), 1080×1920 supported natively.
  *
- *   3. Cloudflare Workers AI  @cf/stabilityai/stable-diffusion-xl-base-1.0
- *      Requires CF_API_TOKEN with Workers AI permission.
+ *   1b. Hugging Face Inference API  (HF_TOKEN_2) — fallback account
+ *      Same model, second free-tier account for when HF_TOKEN hits monthly quota (402).
+ *      Rotate accounts when one is depleted.
+ *
+ *   2. Cloudflare Workers AI  @cf/stabilityai/stable-diffusion-xl-base-1.0
+ *      Last resort. Requires CF_API_TOKEN with Workers AI permission.
+ *      Note: negative_prompt is not supported by SDXL-base on CF (silently ignored).
  */
 
 import pLimit from "p-limit";
 // import { animateImage } from "./wan-i2v.js"; // I2V disabled — re-enable to use WAN animation
 
-// Free-tier Pollinations models only — tested 2026-03-21 (DO NOT add zimage/klein/flux-klein/nanobanana — cost credits)
-const POLLINATIONS_MODELS = ["flux-2-dev", "flux", "z-image-turbo"];
-
 const NEGATIVE =
-  "deformed,ugly,bad anatomy,extra fingers,extra limbs,missing limbs," +
-  "mutated hands,fused fingers,extra faces,multiple faces,two noses," +
-  "cloned face,disfigured,blurry,low quality,cartoon,anime,watermark,text";
-
-/**
- * Generates an image via Pollinations.AI using the specified model.
- * Uses the new gen.pollinations.ai endpoint with optional API key auth.
- *
- * @param {string} prompt
- * @param {string} model  e.g. "flux", "turbo", "nanobanana"
- * @returns {Promise<Buffer>} image bytes
- */
-async function generateViaPollinationsModel(prompt, model) {
-  const apiKey = process.env.POLLINATIONS_API_KEY;
-
-  const enriched =
-    prompt +
-    ", vertical portrait 9:16, dramatic cinematic lighting, highly detailed, photorealistic, anatomically correct";
-
-  const params = new URLSearchParams({
-    width: "1080",
-    height: "1920",
-    model,
-    nologo: "true",
-    negative: NEGATIVE,
-    seed: String(Math.floor(Math.random() * 99999)),
-  });
-
-  if (apiKey) params.set("key", apiKey);
-
-  const url =
-    `https://gen.pollinations.ai/image/${encodeURIComponent(enriched)}?${params}`;
-
-  const headers = {};
-  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-
-  const res = await fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(120_000),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(
-      `Pollinations.AI [${model}] error ${res.status}: ${body.slice(0, 200)}`,
-    );
-  }
-
-  return Buffer.from(await res.arrayBuffer());
-}
-
-/**
- * Tries Pollinations models in order: flux → turbo → nanobanana.
- *
- * @param {string} prompt
- * @returns {Promise<Buffer>} image bytes
- */
-async function generateViaPollinations(prompt) {
-  let lastErr;
-  for (const model of POLLINATIONS_MODELS) {
-    try {
-      console.log(`  → Pollinations.AI (${model})...`);
-      return await generateViaPollinationsModel(prompt, model);
-    } catch (err) {
-      console.warn(`  ⚠ Pollinations [${model}] failed: ${err.message}`);
-      lastErr = err;
-    }
-  }
-  throw lastErr;
-}
+  "deformed, ugly, bad anatomy, extra fingers, extra limbs, missing limbs, " +
+  "mutated hands, fused fingers, too many fingers, extra faces, multiple faces, " +
+  "two noses, three eyes, cloned face, disfigured, malformed, blurry, " +
+  "low quality, worst quality, cartoon, anime, illustration, painting, drawing, " +
+  "watermark, text, logo, signature, oversaturated, duplicate";
 
 /**
  * Generates a historical image via Hugging Face Inference API (FLUX.1-schnell).
@@ -101,25 +32,17 @@ async function generateViaPollinations(prompt) {
  * @param {string} prompt
  * @returns {Promise<Buffer>} image bytes
  */
-async function generateViaHuggingFace(prompt) {
-  const hfToken = process.env.HF_TOKEN;
-  if (!hfToken) throw new Error("HF_TOKEN not set");
+async function generateViaHuggingFace(prompt, token) {
+  if (!token) throw new Error("HF token not set");
 
   console.log("  → Hugging Face (FLUX.1-schnell, free tier)...");
-
-  const NEGATIVE_HF =
-    "deformed, ugly, bad anatomy, extra fingers, extra limbs, missing limbs, " +
-    "mutated hands, fused fingers, too many fingers, extra faces, multiple faces, " +
-    "two noses, three eyes, cloned face, disfigured, malformed, blurry, " +
-    "low quality, worst quality, cartoon, anime, illustration, painting, drawing, " +
-    "watermark, text, logo, signature, oversaturated, duplicate";
 
   const res = await fetch(
     "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell",
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${hfToken}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "x-use-cache": "0",
       },
@@ -127,7 +50,7 @@ async function generateViaHuggingFace(prompt) {
         inputs:
           prompt +
           ", vertical 9:16 portrait, shot on 35mm film, Kodak Portra 400, photojournalism, highly detailed, anatomically correct",
-        parameters: { width: 1080, height: 1920, negative_prompt: NEGATIVE_HF },
+        parameters: { width: 1080, height: 1920, negative_prompt: NEGATIVE },
       }),
       signal: AbortSignal.timeout(90_000),
     },
@@ -168,6 +91,7 @@ async function generateViaCFWorkersAI(prompt) {
     },
     body: JSON.stringify({
       prompt: prompt + ", vertical portrait, dramatic lighting, detailed",
+      negative_prompt: NEGATIVE,
       num_steps: 20,
     }),
   });
@@ -182,35 +106,24 @@ async function generateViaCFWorkersAI(prompt) {
 
 /**
  * Generates an AI image, trying providers in order:
- *   1. Pollinations.AI (flux → turbo → nanobanana)
- *   2. Hugging Face (FLUX.1-schnell)
- *   3. Cloudflare Workers AI (SDXL-base)
+ *   1. Hugging Face (FLUX.1-schnell)
+ *   2. Cloudflare Workers AI (SDXL-base)
  *
  * @param {string} prompt
  * @returns {Promise<Buffer>} image bytes (JPEG or PNG)
  */
 export async function generateAIImage(prompt) {
-  // 1. Pollinations.AI (primary — keyless or authenticated)
-  try {
-    return await generateViaPollinations(prompt);
-  } catch (err) {
-    console.warn(
-      `  ⚠ Pollinations.AI exhausted all models: ${err.message} — trying HuggingFace`,
-    );
-  }
-
-  // 2. Hugging Face (free tier fallback, needs HF_TOKEN)
-  if (process.env.HF_TOKEN) {
+  // 1. Hugging Face — try HF_TOKEN, then HF_TOKEN_2 as fallback
+  for (const [label, token] of [["HF_TOKEN", process.env.HF_TOKEN], ["HF_TOKEN_2", process.env.HF_TOKEN_2]]) {
+    if (!token) continue;
     try {
-      return await generateViaHuggingFace(prompt);
+      return await generateViaHuggingFace(prompt, token);
     } catch (err) {
-      console.warn(
-        `  ⚠ HuggingFace failed: ${err.message} — trying Cloudflare Workers AI`,
-      );
+      console.warn(`  ⚠ HuggingFace [${label}] failed: ${err.message}`);
     }
   }
 
-  // 3. Cloudflare Workers AI (last resort, needs CF_API_TOKEN with AI permission)
+  // 2. Cloudflare Workers AI (last resort, needs CF_API_TOKEN with AI permission)
   return await generateViaCFWorkersAI(prompt);
 }
 

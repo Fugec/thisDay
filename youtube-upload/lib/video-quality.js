@@ -107,6 +107,14 @@ Score criteria:
 - 5–6:  acceptable but needs improvement (warn, still upload)
 - 1–4:  blurry, artifacts, black frame, wrong composition, encoding error (block + retry)
 
+AUTOMATIC score 1 (block + retry) if ANY of these are present:
+- Deformed or bad anatomy (extra fingers, extra limbs, missing limbs, fused fingers, mutated hands)
+- Extra or duplicate faces, two noses, three eyes, cloned face
+- Watermark, visible text, logo, signature, or caption overlaid on the image
+- Cartoon, anime, illustration, painting, or drawing style (must be photorealistic)
+- Severely blurry, low quality, or oversaturated
+- Duplicate subjects or mirrored figures
+
 If score < 8, write a "fix" directive that a text-to-image model can use to generate a better replacement frame. Be specific: lighting, style, composition, subject clarity.
 
 Respond ONLY with valid JSON (no markdown):

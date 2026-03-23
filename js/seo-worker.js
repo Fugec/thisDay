@@ -733,7 +733,7 @@ const syncAdUnitVisibility=(ins)=>{if(!ins)return;const unit=ins.closest('.ad-un
 const adObserver=new MutationObserver((mutations)=>{for(const m of mutations){if(m.type==='attributes'&&m.attributeName==='data-ad-status'){syncAdUnitVisibility(m.target);}}});
 document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{syncAdUnitVisibility(ins);adObserver.observe(ins,{attributes:true,attributeFilter:['data-ad-status']});});
 setTimeout(()=>{document.querySelectorAll('ins.adsbygoogle').forEach(syncAdUnitVisibility);},5000);
-const initAds=()=>{if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{if(ins.getAttribute('data-adsbygoogle-status'))return;if((ins.offsetWidth||0)<120)return;try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch{}});};
+const initAds=()=>{if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{if(ins.getAttribute('data-adsbygoogle-status')||ins.getAttribute('data-ad-pushed'))return;if((ins.offsetWidth||0)<120)return;ins.setAttribute('data-ad-pushed','1');try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch{}});};
 if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',initAds,{once:true});}else{initAds();}
 setTimeout(initAds,1200);
 </script>
@@ -1370,13 +1370,18 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
       const desc = b.text.includes(",")
         ? escapeHtml(b.text.slice(b.text.indexOf(",") + 1).trim())
         : "";
+      const rawExtract = b.pages?.[0]?.extract || "";
+      const extract = rawExtract
+        ? escapeHtml(rawExtract.length > 160 ? rawExtract.slice(0, 160).replace(/\s\S*$/, "") + "…" : rawExtract)
+        : "";
       const year = escapeHtml(String(b.year));
       return `<div class="col-12 col-md-4">
   <div class="card-box h-100 d-flex flex-column" style="padding:16px">
     ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(59,130,246,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
     <div class="flex-grow-1">
       <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
-      ${desc ? `<p class="text-muted mb-0" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
+      ${desc ? `<p class="text-muted mb-1" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
+      ${extract ? `<p class="mb-0" style="font-size:.78rem;line-height:1.45;opacity:.85">${extract}</p>` : ""}
     </div>
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
       <span class="yr">${year}</span>
@@ -1672,13 +1677,18 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
       const desc = d.text.includes(",")
         ? escapeHtml(d.text.slice(d.text.indexOf(",") + 1).trim())
         : "";
+      const rawExtract = d.pages?.[0]?.extract || "";
+      const extract = rawExtract
+        ? escapeHtml(rawExtract.length > 160 ? rawExtract.slice(0, 160).replace(/\s\S*$/, "") + "…" : rawExtract)
+        : "";
       const year = escapeHtml(String(d.year));
       return `<div class="col-12 col-md-4">
   <div class="card-box h-100 d-flex flex-column" style="padding:16px">
     ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(100,116,139,.08);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
     <div class="flex-grow-1">
       <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
-      ${desc ? `<p class="text-muted mb-0" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
+      ${desc ? `<p class="text-muted mb-1" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
+      ${extract ? `<p class="mb-0" style="font-size:.78rem;line-height:1.45;opacity:.85">${extract}</p>` : ""}
     </div>
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
       <span class="yr" style="background:#6c757d">${year}</span>
@@ -1857,7 +1867,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v4-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v5-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -1940,7 +1950,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v4-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v5-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2374,12 +2384,13 @@ async function generateEventCommentary(env, mm, dd) {
   }
   const commentary = {};
   const typedSets = [
-    ["events", eventsData.events || []],
-    ["births", eventsData.births || []],
-    ["deaths", eventsData.deaths || []],
+    eventsData.events || [],
+    eventsData.births || [],
+    eventsData.deaths || [],
   ];
-  for (const [, items] of typedSets) {
-    if (!items.length) continue;
+
+  const processBatch = async (items) => {
+    if (!items.length) return;
     const batch = items.slice(0, 30);
     const lines = batch
       .map((e, i) => `${i + 1}. [${e.year}] ${(e.text || "").substring(0, 120)}`)
@@ -2398,7 +2409,7 @@ async function generateEventCommentary(env, mm, dd) {
             content: `Write exactly one editorial insight for each event below. Each insight must be:\n- Exactly 1 sentence, 15–22 words\n- Specific to that event (no generic phrases like "pivotal moment", "changed history", "shaped the course")\n- Vivid and human — something a curious reader would find surprising or memorable\n\nReply ONLY with a JSON array of strings in the same order as the list.\n\nEvents:\n${lines}`,
           },
         ],
-        { maxTokens: 2000, timeoutMs: 8000 },
+        { maxTokens: 2000, timeoutMs: 12000 },
       );
       const cleaned = (raw || "")
         .replace(/^```(?:json)?\s*/i, "")
@@ -2415,7 +2426,9 @@ async function generateEventCommentary(env, mm, dd) {
         });
       }
     } catch (_) {}
-  }
+  };
+
+  await Promise.all(typedSets.map(processBatch));
   return commentary;
 }
 

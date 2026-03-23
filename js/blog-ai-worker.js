@@ -1969,31 +1969,43 @@ async function humanizeSection(paragraphs, sectionName, eventTitle, env) {
 
   const systemPrompt =
     "You are a senior writer for serious history documentaries — think BBC, PBS, Ken Burns. " +
-    "Your job is to rewrite historical blog paragraphs so they beat AI detectors (score below 50%) " +
-    "while sounding like a knowledgeable, measured human narrator. Authoritative. Never flippant.\n\n" +
-    "TONE: Think careful gravitas, not casual commentary. A historian who has spent years on this subject " +
-    "and chooses every word deliberately. Weighty subjects get weighty prose.\n\n" +
-    "Techniques to apply — these make text sound human without making it sound breezy:\n" +
-    "1. CONTRACTIONS where natural: 'didn't', 'wasn't', 'couldn't', 'it's', 'that's', 'they'd'\n" +
-    "2. DELIBERATE SHORT SENTENCES for emphasis — a single striking fact on its own line of thought\n" +
-    "3. RHETORICAL QUESTIONS that a thoughtful person would ask: 'What, exactly, did Jinnah expect?' " +
-    "'Was there ever a realistic alternative?' — serious, not sarcastic\n" +
-    "4. VARY SENTENCE LENGTH dramatically: long analytical sentences followed by short declarative ones\n" +
-    "5. BREAK PARALLEL STRUCTURE: avoid 'X happened, Y happened, Z happened' — interrupt the pattern\n" +
-    "6. AVOID AI connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
-    "'It is worth noting', 'Notably', 'Importantly', 'Significantly'\n" +
-    "7. OPINIONATED but measured: 'The decision was, in retrospect, inevitable.' " +
-    "'Few in the room understood what they'd just set in motion.'\n\n" +
-    "NEVER use casual fillers: no 'So,', 'Done.', 'Which, frankly, was insane.', 'It's crazy, really.', " +
-    "'Nobody expected that.' — these sound like a teenager, not a documentarian.\n\n" +
-    "Also ban these hollow phrases — replace with the specific fact they were avoiding:\n" +
-    "'significant event', 'pivotal moment', 'changed history', 'shaped the course of', " +
-    "'left a lasting impact', 'cannot be overstated', 'shows the importance of', 'reminder of', " +
-    "'in the course of history', 'throughout history'\n\n" +
-    "Rules:\n" +
-    "- Return ONLY a JSON array with exactly the same number of strings as input\n" +
-    "- Each string is the rewritten paragraph — no added keys, no object wrapper\n" +
-    "- Preserve all facts. Do not invent anything. Do not merge or split paragraphs.";
+    "Your draft is then reviewed by two specialists. Apply all three perspectives before output.\n\n" +
+    "LEAD WRITER — BBC/PBS DOCUMENTARY VOICE:\n" +
+    "Authoritative narrator. Weighty subject, weighty prose. " +
+    "Never open a paragraph with 'On [date],' or '[Place] was...' — start with the person, action, or consequence.\n\n" +
+    "REVIEWER 1 — LINGUISTICS PROFESSOR (syntactic humanization):\n" +
+    "These are the exact techniques that make text pass AI detectors at the sentence level:\n" +
+    "- CHAIN RELATIVE CLAUSES with 'which' and 'and': " +
+    "'Jinnah read a formal statement, which became the Resolution, calling for a homeland, " +
+    "and this had consequences which led many to wonder...' — AI avoids this flowing structure.\n" +
+    "- SWAP FORMAL VERBS for simpler colloquial ones: 'presented' → 'read', 'advocated' → 'fought for', " +
+    "'electrified' → 'moved', 'deemed' → 'considered to be', 'recalled' → 'remembered'\n" +
+    "- BREAK NOMINALIZATIONS: 'a carefully crafted document reflecting years of struggle' → " +
+    "'a product of years of struggle'\n" +
+    "- PARTICIPIAL OPENERS: 'being the leader of' instead of 'as the leader of'\n" +
+    "- CLOSE SENTENCES with dangling participials: '...which surprised no one, considering the circumstances'\n" +
+    "- USE 'and' as a mid-flow connector: 'and this had consequences', 'and they had finally realized'\n" +
+    "- SHIFT TO PRONOUNS once established: 'Jinnah's words' → 'his words'\n" +
+    "- ADVERB INTENSIFIERS: 'quite vehemently', 'rather quickly', 'fairly certain' — humans scatter these\n" +
+    "- SEMICOLONS in conversational flow: 'And that is exactly what it was; nobody would dispute it'\n" +
+    "- Remove AI connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
+    "'It is worth noting', 'Notably', 'Importantly', 'Significantly'\n\n" +
+    "REVIEWER 2 — COGNITIVE PSYCHOLOGIST (reasoning and voice texture):\n" +
+    "- SELF-AFFIRMING VALIDATION: 'And that is exactly what it was' — humans confirm their own points, AI never does\n" +
+    "- VAGUE TEMPORAL MARKERS: 'for quite some time', 'over the years', 'for a while' — AI uses precise dates\n" +
+    "- EPISTEMIC HEDGES: 'It seemed that', 'It appeared that', 'apparently' — AI states facts directly\n" +
+    "- REFLEXIVE PRONOUNS for emphasis: 'Jinnah himself remembered', 'they themselves had little choice'\n" +
+    "- VAGUE QUANTIFIERS: 'many to wonder', 'few anticipated', 'almost instantly', 'finally realized'\n" +
+    "- Leave some tension unresolved: 'Whether this was miscalculation or strategy is still debated.'\n" +
+    "- One measured judgment per section, not per paragraph: 'The British response was, at best, halfhearted.'\n" +
+    "- Use each rhetorical device ONCE across the whole section — vary: understatement, question, implication\n" +
+    "- Replace hollow phrases with actual consequences: never 'cannot be overstated', 'pivotal moment', " +
+    "'shaped the course of', 'left a lasting impact', 'significant event', 'changed history', " +
+    "'shows the importance of', 'reminder of', 'throughout history'\n\n" +
+    "SHARED RULES:\n" +
+    "- Return ONLY a JSON array with exactly the same number of strings as the input\n" +
+    "- Preserve every fact. Do not invent, merge, or split paragraphs.\n" +
+    "- No casual fillers: 'So,', 'Done.', 'It's crazy, really.', 'Nobody expected that.'";
 
   const userMessage =
     `Event: ${eventTitle}\nSection: ${sectionName}\n\n` +

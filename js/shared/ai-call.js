@@ -33,7 +33,7 @@ const GROQ_MODEL = "llama-3.3-70b-versatile";
  * @param {string}   [opts.cfModel]      Override CF model; if omitted resolves from KV
  * @returns {Promise<string>}  Raw text from the model
  */
-export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_000, cfModel } = {}) {
+export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_000, cfModel, temperature = 0.3 } = {}) {
   // 1. Groq — higher quality, faster, free tier 6,000 req/day
   if (env.GROQ_API_KEY) {
     try {
@@ -47,7 +47,7 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
           model: GROQ_MODEL,
           messages,
           max_tokens: maxTokens,
-          temperature: 0.3,
+          temperature,
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });

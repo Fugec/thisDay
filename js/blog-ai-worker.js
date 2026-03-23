@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker — Blog Post Generator
  *
- * Runs on a cron trigger (daily at 06:00 UTC) and publishes a new blog post
+ * Runs on a cron trigger (daily at 00:05 UTC) and publishes a new blog post
  * every other day using Cloudflare Workers AI (free, no external API key).
  * Posts are stored in Cloudflare KV and served at:
  *   /blog/archive/         → listing of all published posts
@@ -161,6 +161,25 @@ export default {
       // Persist updated index (descriptions may have changed)
       await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
       return jsonResponse({ status: "ok", results });
+    }
+
+    // Admin: humanize body paragraphs on existing posts to reduce AI detection score
+    // POST /blog/regen-humanize?slug=22-march-2026
+    if (path === "/blog/regen-humanize" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const humanizeParams = new URL(request.url).searchParams;
+      const targetSlug = humanizeParams.get("slug");
+      if (!targetSlug) {
+        return jsonResponse({ status: "error", message: "Provide ?slug=X" }, 400);
+      }
+      const html = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${targetSlug}`);
+      if (!html) return jsonResponse({ status: "error", message: "Post not found" }, 404);
+      const { updatedHtml, changed } = await patchBodyParagraphs(html, env);
+      await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${targetSlug}`, updatedHtml);
+      return jsonResponse({ status: "ok", slug: targetSlug, changed });
     }
 
     // Listing page: /blog/archive
@@ -1929,6 +1948,171 @@ async function patchSEOMeta(html, _slug, env) {
   };
 }
 
+/** Reverse of esc() — decode HTML entities back to plain text. */
+function unesc(str) {
+  if (!str) return "";
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+/**
+ * Humanizes a single section's paragraphs to beat AI detection.
+ * Focused JOB 3 only — one section at a time to stay within token limits.
+ * Returns the rewritten array, or the original on any failure.
+ */
+async function humanizeSection(paragraphs, sectionName, eventTitle, env) {
+  if (!paragraphs.length) return paragraphs;
+
+  const systemPrompt =
+    "You are a senior writer for serious history documentaries — think BBC, PBS, Ken Burns. " +
+    "Your job is to rewrite historical blog paragraphs so they beat AI detectors (score below 50%) " +
+    "while sounding like a knowledgeable, measured human narrator. Authoritative. Never flippant.\n\n" +
+    "TONE: Think careful gravitas, not casual commentary. A historian who has spent years on this subject " +
+    "and chooses every word deliberately. Weighty subjects get weighty prose.\n\n" +
+    "Techniques to apply — these make text sound human without making it sound breezy:\n" +
+    "1. CONTRACTIONS where natural: 'didn't', 'wasn't', 'couldn't', 'it's', 'that's', 'they'd'\n" +
+    "2. DELIBERATE SHORT SENTENCES for emphasis — a single striking fact on its own line of thought\n" +
+    "3. RHETORICAL QUESTIONS that a thoughtful person would ask: 'What, exactly, did Jinnah expect?' " +
+    "'Was there ever a realistic alternative?' — serious, not sarcastic\n" +
+    "4. VARY SENTENCE LENGTH dramatically: long analytical sentences followed by short declarative ones\n" +
+    "5. BREAK PARALLEL STRUCTURE: avoid 'X happened, Y happened, Z happened' — interrupt the pattern\n" +
+    "6. AVOID AI connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
+    "'It is worth noting', 'Notably', 'Importantly', 'Significantly'\n" +
+    "7. OPINIONATED but measured: 'The decision was, in retrospect, inevitable.' " +
+    "'Few in the room understood what they'd just set in motion.'\n\n" +
+    "NEVER use casual fillers: no 'So,', 'Done.', 'Which, frankly, was insane.', 'It's crazy, really.', " +
+    "'Nobody expected that.' — these sound like a teenager, not a documentarian.\n\n" +
+    "Also ban these hollow phrases — replace with the specific fact they were avoiding:\n" +
+    "'significant event', 'pivotal moment', 'changed history', 'shaped the course of', " +
+    "'left a lasting impact', 'cannot be overstated', 'shows the importance of', 'reminder of', " +
+    "'in the course of history', 'throughout history'\n\n" +
+    "Rules:\n" +
+    "- Return ONLY a JSON array with exactly the same number of strings as input\n" +
+    "- Each string is the rewritten paragraph — no added keys, no object wrapper\n" +
+    "- Preserve all facts. Do not invent anything. Do not merge or split paragraphs.";
+
+  const userMessage =
+    `Event: ${eventTitle}\nSection: ${sectionName}\n\n` +
+    `Rewrite these ${paragraphs.length} paragraphs to beat AI detection:\n` +
+    `${JSON.stringify(paragraphs, null, 2)}\n\n` +
+    `Return ONLY a JSON array of ${paragraphs.length} strings.`;
+
+  let raw;
+  try {
+    raw = await callAI(
+      env,
+      [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
+      { maxTokens: 2500, timeoutMs: 45_000, temperature: 0.75 },
+    );
+  } catch (err) {
+    console.warn(`humanizeSection [${sectionName}]: AI call failed — ${err.message}`);
+    return paragraphs;
+  }
+
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (!arrMatch) {
+    console.warn(`humanizeSection [${sectionName}]: no JSON array in response`);
+    return paragraphs;
+  }
+
+  let result;
+  try {
+    result = JSON.parse(arrMatch[0]);
+  } catch {
+    console.warn(`humanizeSection [${sectionName}]: JSON parse error`);
+    return paragraphs;
+  }
+
+  if (!Array.isArray(result) || result.length !== paragraphs.length) {
+    console.warn(`humanizeSection [${sectionName}]: array length mismatch (got ${result?.length}, expected ${paragraphs.length})`);
+    return paragraphs;
+  }
+
+  if (!result.every((p) => typeof p === "string" && p.trim().length > 20)) {
+    console.warn(`humanizeSection [${sectionName}]: invalid paragraph strings in response`);
+    return paragraphs;
+  }
+
+  return result;
+}
+
+/**
+ * Extracts body paragraphs from stored HTML, humanizes each section with a focused
+ * per-section AI call (JOB 3 — AI detection reduction), then patches the <p> tags
+ * back in place. Returns { updatedHtml, changed: string[] }.
+ */
+async function patchBodyParagraphs(html, env) {
+  // Extract eventTitle directly from the Overview h2 — most reliable source
+  // (JSON-LD uses c.jsonLdName which may differ from c.eventTitle used in h2 headings)
+  let eventTitle = "";
+  const overviewH2Match = html.match(/<h2 class="h3">Overview: ([^<]+)<\/h2>/);
+  if (overviewH2Match) eventTitle = unesc(overviewH2Match[1]);
+
+  // Fallback: extract from JSON-LD
+  if (!eventTitle) {
+    const jldMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+    if (jldMatch) {
+      try {
+        const jld = JSON.parse(jldMatch[1]);
+        eventTitle = jld.about?.name || jld.headline?.split(" — ")[0] || "";
+      } catch { /* ignore */ }
+    }
+  }
+
+  // Extract <p> text from a named section (by its exact <h2> text)
+  const extractSectionParas = (h2Text) => {
+    const escaped = h2Text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp('<h2 class="h3">' + escaped + "<\\/h2>([\\s\\S]*?)(?:<\\/section>|<blockquote)");
+    const match = html.match(re);
+    if (!match) return [];
+    return [...match[1].matchAll(/<p>([\s\S]*?)<\/p>/g)].map((m) => unesc(m[1]));
+  };
+
+  const sections = [
+    { name: "overviewParagraphs",    h2: `Overview: ${eventTitle}` },
+    { name: "eyewitnessOrChronicle", h2: `Eyewitness Accounts of ${eventTitle}` },
+    { name: "aftermathParagraphs",   h2: `Aftermath of ${eventTitle}` },
+    { name: "conclusionParagraphs",  h2: `Legacy of ${eventTitle}` },
+  ].map((s) => ({ ...s, paras: extractSectionParas(s.h2) }));
+
+  if (!sections[0].paras.length) {
+    console.warn(`patchBodyParagraphs: no overview paragraphs found (eventTitle="${eventTitle}") — skipping`);
+    return { updatedHtml: html, changed: [] };
+  }
+
+  // Humanize each section sequentially — one focused AI call per section
+  let updatedHtml = html;
+  const changed = [];
+
+  for (const section of sections) {
+    if (!section.paras.length) continue;
+
+    const humanized = await humanizeSection(section.paras, section.name, eventTitle, env);
+
+    const oldBlock = section.paras.map((p) => `            <p>${esc(p)}</p>`).join("\n");
+    const newBlock = humanized.map((p) => `            <p>${esc(p)}</p>`).join("\n");
+
+    if (oldBlock === newBlock) {
+      console.log(`patchBodyParagraphs [${section.name}]: unchanged`);
+      continue;
+    }
+    if (!updatedHtml.includes(oldBlock)) {
+      console.warn(`patchBodyParagraphs [${section.name}]: block not found in HTML — skipping`);
+      continue;
+    }
+    updatedHtml = updatedHtml.replace(oldBlock, newBlock);
+    changed.push(section.name);
+  }
+
+  console.log(`patchBodyParagraphs: ${changed.length} section(s) humanized — ${changed.join(", ") || "none"}`);
+  return { updatedHtml, changed };
+}
+
 /**
  * Focused SEO-only AI call — improves only the 5 meta fields.
  * No paragraph rewriting. Falls back to original on any error.
@@ -2006,17 +2190,17 @@ async function reviewSEOMetaOnly(content, env) {
 async function reviewContentWithSEOExpert(content, env) {
   if (!env.AI && !env.GROQ_API_KEY) return content;
 
-  // Build a compact summary of what will be reviewed — avoid sending full HTML
-  const paragraphSample = [
-    ...(content.overviewParagraphs || []).slice(0, 2),
-    ...(content.eyewitnessOrChronicle || []).slice(0, 1),
-    ...(content.aftermathParagraphs || []).slice(0, 1),
-    ...(content.conclusionParagraphs || []).slice(0, 1),
-  ].join(" ").substring(0, 1200);
+  // Build full paragraph payload organized by field — sent as JSON so expert knows which belongs where
+  const allParagraphs = {
+    overviewParagraphs: content.overviewParagraphs || [],
+    eyewitnessOrChronicle: content.eyewitnessOrChronicle || [],
+    aftermathParagraphs: content.aftermathParagraphs || [],
+    conclusionParagraphs: content.conclusionParagraphs || [],
+  };
 
   const systemPrompt =
-    "You are a dual expert: a senior SEO editor AND a passionate, opinionated history writer. " +
-    "You receive a JSON content object for a historical blog post. Your two jobs are inseparable:\n\n" +
+    "You are a triple expert: a senior SEO editor, a passionate opinionated history writer, AND a human-voice specialist. " +
+    "You receive a JSON content object for a historical blog post. Your three jobs are inseparable:\n\n" +
     "JOB 1 — SEO QUALITY:\n" +
     "- description: 120–155 chars, open with the year and event, include location and a specific hook\n" +
     "- ogDescription: 100–130 chars, curiosity-driven — give readers a reason to click, not just a summary\n" +
@@ -2026,7 +2210,7 @@ async function reviewContentWithSEOExpert(content, env) {
     "- title: must stay in format 'Event Name — Month Day, Year'. Only touch the event name if it is vague or generic.\n\n" +
     "JOB 2 — VOICE AND CONTENT QUALITY:\n" +
     "You are a history obsessive. You find generic, hollow paragraph writing offensive. " +
-    "If any paragraph in the sample reads like a Wikipedia stub — vague, passive, free of specific facts — rewrite it.\n" +
+    "If any paragraph reads like a Wikipedia stub — vague, passive, free of specific facts — rewrite it.\n" +
     "Standards for a paragraph you would rewrite:\n" +
     "- It contains no specific names, numbers, dates, or places (pure generalization)\n" +
     "- It uses banned phrases: 'significant event', 'pivotal moment', 'changed history', 'shaped the course of', " +
@@ -2039,6 +2223,21 @@ async function reviewContentWithSEOExpert(content, env) {
     "- Mix sentence lengths: some long and layered (25-35 words), some short and punchy (under 10 words)\n" +
     "- Say what you actually think. If something was brutal, say brutal. If something was surprising, say surprising.\n" +
     "- Preserve paragraph count exactly. Do not add or remove paragraphs.\n\n" +
+    "JOB 3 — HUMAN VOICE (AI DETECTION SCORE MUST BE BELOW 50%):\n" +
+    "AI detectors flag text that is too uniform, too balanced, too clean. Every paragraph must pass as human.\n" +
+    "Rewrite ALL paragraphs to beat AI detection — do not skip any, even good-sounding ones.\n\n" +
+    "Mandatory humanization techniques — apply ALL of these across the full set of paragraphs:\n" +
+    "1. CONTRACTIONS: use them naturally — 'didn't', 'wasn't', 'couldn't', 'it's', 'that's', 'they'd'\n" +
+    "2. SENTENCE FRAGMENTS for emphasis. One word. Two words. Done.\n" +
+    "3. START sentences with 'And', 'But', 'So', or 'Because' where natural — AI avoids this\n" +
+    "4. RHETORICAL QUESTIONS mid-paragraph: 'What were they thinking?' 'Did it work? Barely.'\n" +
+    "5. SECOND PERSON sparingly: 'You have to understand the pressure he was under.' 'Picture the scene.'\n" +
+    "6. BREAK PARALLEL STRUCTURE: AI loves 'X did A, Y did B, Z did C' — destroy that pattern\n" +
+    "7. SENTENCE LENGTH CHAOS: mix 3-word sentences with 40-word sentences back to back\n" +
+    "8. AVOID consecutive sentences with the same grammatical opener (never 'The X... The Y... The Z...')\n" +
+    "9. DELETE these AI-signature connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
+    "'It is worth noting', 'It should be noted', 'Notably', 'Importantly', 'Significantly'\n" +
+    "10. ADD personality asides: 'Which, frankly, was insane.' 'Nobody expected that.' 'It almost worked.'\n\n" +
     "Rules:\n" +
     "- Keep all JSON field names exactly as given\n" +
     "- Do not change: historicalDate, historicalYear, historicalDateISO, location, country, quickFacts, " +
@@ -2054,7 +2253,9 @@ async function reviewContentWithSEOExpert(content, env) {
     `twitterDescription: ${content.twitterDescription || ""}\n` +
     `keywords: ${content.keywords || ""}\n` +
     `imageAlt: ${content.imageAlt || ""}\n\n` +
-    `Paragraph sample (check these for voice and substance — rewrite any that are hollow or vague):\n${paragraphSample}\n\n` +
+    `ALL paragraphs — apply JOB 2 + JOB 3 to every paragraph array:\n` +
+    `${JSON.stringify(allParagraphs, null, 2)}\n\n` +
+    `TARGET: AI detection score below 50%. Rewrite every paragraph to sound unmistakably human.\n` +
     `Return ONLY a JSON object with the fields that need improvement:\n` +
     `{"description":"improved...","keywords":"improved...","overviewParagraphs":["para1","para2","para3","para4"]}`;
 
@@ -2066,7 +2267,7 @@ async function reviewContentWithSEOExpert(content, env) {
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      { maxTokens: 3500, timeoutMs: 35_000 },
+      { maxTokens: 6000, timeoutMs: 50_000 },
     );
   } catch (err) {
     console.warn(`SEO expert: AI call failed (${err.message}) — using original content`);
@@ -2567,7 +2768,8 @@ ${overviewParas}
           <!-- Eyewitness / Chronicle Accounts -->
           ${
             eyewitnessParas
-              ? `<section class="mt-5">
+              ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
+          <section class="mt-5">
             <h2 class="h3">Eyewitness Accounts of ${esc(c.eventTitle)}</h2>
 ${eyewitnessParas}
 ${eyewitnessQuoteBlock}
@@ -2600,7 +2802,8 @@ ${aftermathParas}
           }
 
           <!-- Conclusion -->
-          ${conclusionParas ? `<section class="mt-5">
+          ${conclusionParas ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
+          <section class="mt-5">
             <h2 class="h3">Legacy of ${esc(c.eventTitle)}</h2>
 ${conclusionParas}
           </section>` : ""}
@@ -3084,12 +3287,13 @@ ${analysisBadItems}
   <script>
   (function(){
     if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;
-    var ins=document.querySelector('ins.adsbygoogle');
-    if(!ins)return;
-    function push(){if(!ins.getAttribute('data-adsbygoogle-status')){try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}}
+    var units=document.querySelectorAll('ins.adsbygoogle');
+    if(!units.length)return;
+    function pushIns(ins){if(ins.getAttribute('data-adsbygoogle-status')||ins.getAttribute('data-ad-pushed'))return;ins.setAttribute('data-ad-pushed','1');try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}
     if('IntersectionObserver' in window){
-      new IntersectionObserver(function(e,o){if(e[0].isIntersecting){push();o.disconnect();}},{threshold:0.1}).observe(ins);
-    } else { push(); }
+      var io=new IntersectionObserver(function(entries,obs){entries.forEach(function(e){if(e.isIntersecting){pushIns(e.target);obs.unobserve(e.target);}});},{threshold:0.1});
+      units.forEach(function(ins){io.observe(ins);});
+    } else { units.forEach(pushIns); }
   })();
   </script>
 ${supportPopupSnippet()}
@@ -3272,7 +3476,8 @@ ${JSON.stringify(
     });
     if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
       document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
-        if (!ins.getAttribute('data-adsbygoogle-status')) {
+        if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed')) {
+          ins.setAttribute('data-ad-pushed', '1');
           try { (adsbygoogle = window.adsbygoogle || []).push({}); } catch {}
         }
       });

@@ -137,16 +137,30 @@ export default {
       const regenAll = regenParams.get("all") === "true";
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
       const index = indexRaw ? JSON.parse(indexRaw) : [];
-      const slugs = targetSlug ? [targetSlug] : regenAll ? index.map((e) => e.slug) : [];
+      const slugs = targetSlug
+        ? [targetSlug]
+        : regenAll
+          ? index.map((e) => e.slug)
+          : [];
       if (slugs.length === 0) {
-        return jsonResponse({ status: "error", message: "Provide ?slug=X or ?all=true" }, 400);
+        return jsonResponse(
+          { status: "error", message: "Provide ?slug=X or ?all=true" },
+          400,
+        );
       }
       const results = [];
       for (const slug of slugs) {
         try {
           const html = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`);
-          if (!html) { results.push({ slug, status: "not_found" }); continue; }
-          const { updatedHtml, changed, newDescription } = await patchSEOMeta(html, slug, env);
+          if (!html) {
+            results.push({ slug, status: "not_found" });
+            continue;
+          }
+          const { updatedHtml, changed, newDescription } = await patchSEOMeta(
+            html,
+            slug,
+            env,
+          );
           await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, updatedHtml);
           // Sync description in the index if it changed
           if (newDescription) {
@@ -173,10 +187,17 @@ export default {
       const humanizeParams = new URL(request.url).searchParams;
       const targetSlug = humanizeParams.get("slug");
       if (!targetSlug) {
-        return jsonResponse({ status: "error", message: "Provide ?slug=X" }, 400);
+        return jsonResponse(
+          { status: "error", message: "Provide ?slug=X" },
+          400,
+        );
       }
       const html = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${targetSlug}`);
-      if (!html) return jsonResponse({ status: "error", message: "Post not found" }, 404);
+      if (!html)
+        return jsonResponse(
+          { status: "error", message: "Post not found" },
+          404,
+        );
       const { updatedHtml, changed } = await patchBodyParagraphs(html, env);
       await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${targetSlug}`, updatedHtml);
       return jsonResponse({ status: "ok", slug: targetSlug, changed });
@@ -1191,9 +1212,23 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
     .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
     .slice(0, 50)
     .map((e) => e.title)
-    .filter((t) => !forcedEvent || !t.toLowerCase().startsWith(forcedEvent.toLowerCase().split(" — ")[0].trim().toLowerCase()));
+    .filter(
+      (t) =>
+        !forcedEvent ||
+        !t
+          .toLowerCase()
+          .startsWith(
+            forcedEvent.toLowerCase().split(" — ")[0].trim().toLowerCase(),
+          ),
+    );
 
-  let content = await callWorkersAI(env.AI, now, takenAllTime, activeModel, forcedEvent);
+  let content = await callWorkersAI(
+    env.AI,
+    now,
+    takenAllTime,
+    activeModel,
+    forcedEvent,
+  );
 
   // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
   // sentence length before building HTML. Falls back to original on any error.
@@ -1405,7 +1440,9 @@ async function reviewQuizWithExpert(questions, content, env) {
     `Title: ${content.title}`,
     content.historicalDate ? `Date: ${content.historicalDate}` : "",
     ...(content.keyFacts || []).slice(0, 12).map((f) => `Fact: ${f}`),
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const systemPrompt =
     "You are a rigorous history quiz editor. You receive a 5-question multiple-choice quiz " +
@@ -1420,7 +1457,13 @@ async function reviewQuizWithExpert(questions, content, env) {
     "- At least 3 questions should require knowing a non-obvious fact, not just re-reading the title\n" +
     "- Never trick or mislead — every correct answer must be clearly supported by the facts provided\n" +
     "- Update the explanation to match any changes\n" +
-    "- Output ONLY valid JSON, no markdown: {\"questions\":[...]}";
+    '- Output ONLY valid JSON, no markdown: {"questions":[...]}';
+
+  // Punctuation guidance: ensure quiz text uses commas/semicolons rather than
+  // in-sentence hyphens or em dashes. If you find '-' or '—' inside a sentence,
+  // replace with a comma or rewrite for clarity.
+  systemPrompt +=
+    "\n\nPUNCTUATION NOTE: Do not use hyphens (-) or em dashes (—) inside sentences in questions or explanations. Use commas, semicolons, or rephrase the sentence instead.";
 
   const userMessage =
     `Historical context:\n${contextLines}\n\n` +
@@ -1438,18 +1481,27 @@ async function reviewQuizWithExpert(questions, content, env) {
       { maxTokens: 2000, timeoutMs: 25_000 },
     );
   } catch (err) {
-    console.warn(`Quiz expert: AI call failed (${err.message}) — using original questions`);
+    console.warn(
+      `Quiz expert: AI call failed (${err.message}) — using original questions`,
+    );
     return questions;
   }
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (!match) {
-    console.warn("Quiz expert: no JSON object in response — using original questions");
+    console.warn(
+      "Quiz expert: no JSON object in response — using original questions",
+    );
     return questions;
   }
 
   let parsed;
-  try { parsed = JSON.parse(match[0]); } catch {
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
     console.warn("Quiz expert: JSON parse error — using original questions");
     return questions;
   }
@@ -1460,11 +1512,16 @@ async function reviewQuizWithExpert(questions, content, env) {
     improved.length !== questions.length ||
     !improved.every(
       (q) =>
-        typeof q.q === "string" && q.q.trim().length > 10 &&
-        Array.isArray(q.options) && q.options.length === 4 &&
+        typeof q.q === "string" &&
+        q.q.trim().length > 10 &&
+        Array.isArray(q.options) &&
+        q.options.length === 4 &&
         q.options.every((o) => typeof o === "string" && o.trim().length > 2) &&
-        Number.isInteger(q.answer) && q.answer >= 0 && q.answer <= 3 &&
-        typeof q.explanation === "string" && q.explanation.trim().length > 8,
+        Number.isInteger(q.answer) &&
+        q.answer >= 0 &&
+        q.answer <= 3 &&
+        typeof q.explanation === "string" &&
+        q.explanation.trim().length > 8,
     )
   ) {
     console.warn("Quiz expert: validation failed — using original questions");
@@ -1692,6 +1749,7 @@ Sentence and paragraph rules:
 - Use active voice. Say who did what.
 - Start each paragraph with a sentence that makes the reader want to keep reading.
 - Use transition phrases between paragraphs: "What followed was even more remarkable.", "But the real damage was done quietly, in the years after.", "To understand why this mattered, you have to go back further."
+- When nuance or complication enters a paragraph, represent it at its strongest — give the best version of the opposing case, not the weakest. Do not signal you are doing this with phrases like "critics argue" or "some would say." Just write it directly as part of the narrative flow: "Nehru rejected the resolution not because he dismissed Muslim concerns, but because he believed division would harden them into interstate conflict." Strong nuance woven naturally is far more persuasive than a weak position you announce and dismiss.
 
 BANNED PHRASES — never write any of these:
 "significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
@@ -1737,27 +1795,22 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 2 to 3 sentences, minimum 40 words."
   ],
   "overviewParagraphs": [
-    "First paragraph (minimum 120 words): Open with a scene or striking detail that drops the reader into the moment — the place, the tension, the stakes. Then build the context: what forces had been building toward this event, who the key players were, and what made this date different from any other. Use specific names, numbers, and places. No vague scene-setting.",
-    "Second paragraph (minimum 120 words): The event itself in vivid detail. What actually happened, step by step, with the key actors named. What decisions were made and by whom. Where was the turning point? What did observers see? Make the reader feel the weight of the moment as it unfolded.",
-    "Third paragraph (minimum 100 words): How people reacted in the immediate aftermath — in the room, in the city, across the country. Quote or paraphrase specific reactions from named individuals or groups. What did those who were there think it meant? Were they right?",
-    "Fourth paragraph (minimum 100 words): Pull back and place this event in its larger historical context. What was happening in the world at the same time? What pressures, ideologies, or forces converged to make this possible? How does understanding that context change how we read the event?"
+    "Paragraph 1 (claim + strongest evidence; ~120+ words): Open with a striking scene or detail and state the core claim about why this event mattered. Include the single strongest, attributable piece of evidence (name, year, number, or place) that supports the claim. Be vivid, specific, and direct.",
+    "Paragraph 2 (nuance + synthesis; ~100 words): Introduce the strongest complication or contrary reality naturally, without announcing it as 'the opposing view' or 'critics argue'. Just write it as part of the narrative. Then synthesize: show where the complication holds and where it falls short. End with a brief assessment that links back to the opening claim."
   ],
   "eyewitnessOrChronicle": [
-    "First paragraph (minimum 100 words): Introduce the most vivid or authoritative contemporary account. Name the source — a diarist, journalist, official document, military report, or letter writer. Describe what they saw and how they described it. Let their words do some of the work. Convey the texture of the moment as a real person experienced it.",
-    "Second paragraph (minimum 90 words): Bring in a contrasting account or a different perspective on the same events — someone on the other side, a bystander, a critic. How did their version differ? What does the gap between accounts reveal about who controlled the narrative, and who did not?",
-    "Third paragraph (minimum 80 words): Address what historians now agree on, what remains genuinely disputed, and why. Be specific about what evidence exists and what is missing. If sources contradict each other, say so and explain why it matters."
+    "Paragraph 1 (vivid account; ~100+ words): Present the most vivid contemporary account with full attribution (name, role, source). Let the account show the texture of the moment — what a named eyewitness described and why their perspective matters.",
+    "Paragraph 2 (contrast + historical appraisal; ~100+ words): Offer a contrasting contemporary perspective or later scholarly appraisal, and explain what the gap between accounts reveals about narrative control, bias, or documentary limits. End with what historians now agree or still dispute."
   ],
   "eyewitnessQuote": "A direct or closely paraphrased quote from a named contemporary source, under 200 characters. Must be attributed to a real person or document.",
   "eyewitnessQuoteSource": "Full attribution: name, role, and source document with year — e.g. 'Ivan Turgenev, letter to a friend, March 1861'",
   "aftermathParagraphs": [
-    "First paragraph (minimum 120 words): The immediate aftermath — the first days and weeks. What changed on the ground? Who gained power, who lost it, what was destroyed or rebuilt? Use specific dates and numbers where possible. Do not skip straight to abstract consequences; describe what people were actually doing and experiencing.",
-    "Second paragraph (minimum 120 words): The medium-term fallout — over the following months and years. What reforms, conflicts, or institutional changes followed directly from this event? How did other nations, groups, or governments respond? What did those who had supported the event do next, and did it match their original intentions?",
-    "Third paragraph (minimum 100 words): The long view — how historians today assess the event's legacy, what aspects have been memorialized or forgotten, and what the event reveals that we still have not fully reckoned with. Be opinionated here. What do you think history got wrong about this?"
+    "Paragraph 1 (immediate aftermath; ~120+ words): Describe the first days and weeks after the event with concrete actions, dates, and effects on people and institutions. Focus on specific, attributable changes on the ground.",
+    "Paragraph 2 (medium-term + long view synthesis; ~120+ words): Combine medium-term consequences and the long historical assessment: reforms, responses, and how historians judge the legacy. Be specific and, where appropriate, opinionated."
   ],
   "conclusionParagraphs": [
-    "First paragraph (minimum 100 words): Place the event in its honest historical position — not inflated, not minimized. What did it actually change, and what did it leave untouched? Name the specific people, systems, or ideas it affected most. Avoid grand sweeping statements; be precise.",
-    "Second paragraph (minimum 80 words): The modern resonance. What parallel, tension, or question does this event raise that is still alive today? Be direct and specific — name the parallel, do not just gesture at it vaguely.",
-    "Third paragraph (minimum 80 words): A closing observation that leaves the reader with something to think about. A question that does not have an easy answer. A detail that reframes everything that came before. End on something that lingers."
+    "Paragraph 1 (honest assessment; ~100+ words): State plainly what the event changed and what remained. Be precise: name people, systems, or ideas affected. Avoid vague grandiosity.",
+    "Paragraph 2 (modern resonance + closing thought; ~80+ words): Draw a direct modern parallel or leave the reader with a pointed question or observation that lingers. End with a concise, memorable final sentence."
   ],
   "analysisGood": [
     { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who deserves credit and why. Describe the specific decision, action, or circumstance that worked, what the alternatives were, and why this outcome was not guaranteed. No generic praise." },
@@ -1871,30 +1924,50 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
 async function patchSEOMeta(html, _slug, env) {
   const getMeta = (re) => (html.match(re) || [])[1] || "";
 
-  const currentTitle       = getMeta(/<title>([^<]+) \| thisDay\.<\/title>/);
-  const currentDesc        = getMeta(/<meta name="description" content="([^"]*?)"\s*\/>/);
-  const currentOgDesc      = getMeta(/<meta property="og:description" content="([^"]*?)"\s*\/>/);
-  const currentTwitterDesc = getMeta(/<meta name="twitter:description" content="([^"]*?)"\s*\/>/);
-  const currentKeywords    = getMeta(/<meta name="keywords" content="([^"]*?)"\s*\/>/);
-  const currentImageAlt    = getMeta(/<meta name="twitter:image:alt" content="([^"]*?)"\s*\/>/);
+  const currentTitle = getMeta(/<title>([^<]+) \| thisDay\.<\/title>/);
+  const currentDesc = getMeta(
+    /<meta name="description" content="([^"]*?)"\s*\/>/,
+  );
+  const currentOgDesc = getMeta(
+    /<meta property="og:description" content="([^"]*?)"\s*\/>/,
+  );
+  const currentTwitterDesc = getMeta(
+    /<meta name="twitter:description" content="([^"]*?)"\s*\/>/,
+  );
+  const currentKeywords = getMeta(
+    /<meta name="keywords" content="([^"]*?)"\s*\/>/,
+  );
+  const currentImageAlt = getMeta(
+    /<meta name="twitter:image:alt" content="([^"]*?)"\s*\/>/,
+  );
 
   // Pull event context from first JSON-LD block
-  let eventName = "", eventDate = "", eventLocation = "";
-  const jldMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  let eventName = "",
+    eventDate = "",
+    eventLocation = "";
+  const jldMatch = html.match(
+    /<script type="application\/ld\+json">([\s\S]*?)<\/script>/,
+  );
   if (jldMatch) {
     try {
       const jld = JSON.parse(jldMatch[1]);
-      eventName     = jld.about?.name     || jld.headline || "";
-      eventDate     = jld.about?.startDate || "";
+      eventName = jld.about?.name || jld.headline || "";
+      eventDate = jld.about?.startDate || "";
       eventLocation = jld.about?.location?.name || "";
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   const minContent = {
-    title: currentTitle, eventTitle: eventName,
-    historicalDate: eventDate, location: eventLocation,
-    description: currentDesc, ogDescription: currentOgDesc,
-    twitterDescription: currentTwitterDesc, keywords: currentKeywords,
+    title: currentTitle,
+    eventTitle: eventName,
+    historicalDate: eventDate,
+    location: eventLocation,
+    description: currentDesc,
+    ogDescription: currentOgDesc,
+    twitterDescription: currentTwitterDesc,
+    keywords: currentKeywords,
     imageAlt: currentImageAlt,
   };
 
@@ -1910,41 +1983,60 @@ async function patchSEOMeta(html, _slug, env) {
     }
   };
 
-  patch(currentDesc, improved.description,
+  patch(
+    currentDesc,
+    improved.description,
     /<meta name="description" content="[^"]*?"\s*\/>/,
-    `<meta name="description" content="${esc(improved.description)}" />`);
+    `<meta name="description" content="${esc(improved.description)}" />`,
+  );
 
-  patch(currentOgDesc, improved.ogDescription,
+  patch(
+    currentOgDesc,
+    improved.ogDescription,
     /<meta property="og:description" content="[^"]*?"\s*\/>/,
-    `<meta property="og:description" content="${esc(improved.ogDescription)}" />`);
+    `<meta property="og:description" content="${esc(improved.ogDescription)}" />`,
+  );
 
-  patch(currentTwitterDesc, improved.twitterDescription,
+  patch(
+    currentTwitterDesc,
+    improved.twitterDescription,
     /<meta name="twitter:description" content="[^"]*?"\s*\/>/,
-    `<meta name="twitter:description" content="${esc(improved.twitterDescription)}" />`);
+    `<meta name="twitter:description" content="${esc(improved.twitterDescription)}" />`,
+  );
 
-  patch(currentImageAlt, improved.imageAlt,
+  patch(
+    currentImageAlt,
+    improved.imageAlt,
     /<meta name="twitter:image:alt" content="[^"]*?"\s*\/>/,
-    `<meta name="twitter:image:alt" content="${esc(improved.imageAlt)}" />`);
+    `<meta name="twitter:image:alt" content="${esc(improved.imageAlt)}" />`,
+  );
 
   // keywords + article:tag block
   if (improved.keywords && improved.keywords !== currentKeywords) {
     updatedHtml = updatedHtml.replace(
       /<meta name="keywords" content="[^"]*?"\s*\/>/,
-      `<meta name="keywords" content="${esc(improved.keywords)}" />`);
+      `<meta name="keywords" content="${esc(improved.keywords)}" />`,
+    );
     // Replace all article:tag lines with freshly generated ones
     const newTags = improved.keywords
-      .split(",").map((k) => k.trim()).filter(Boolean).slice(0, 6)
-      .map((k) => `<meta property="article:tag" content="${esc(k)}" />`).join("\n    ");
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean)
+      .slice(0, 6)
+      .map((k) => `<meta property="article:tag" content="${esc(k)}" />`)
+      .join("\n    ");
     updatedHtml = updatedHtml.replace(
       /(<meta property="article:tag" content="[^"]*?"\s*\/>\n?\s*)+/,
-      newTags + "\n    ");
+      newTags + "\n    ",
+    );
     changed.push("keywords");
   }
 
   return {
     updatedHtml,
     changed,
-    newDescription: improved.description !== currentDesc ? improved.description : null,
+    newDescription:
+      improved.description !== currentDesc ? improved.description : null,
   };
 }
 
@@ -1964,7 +2056,13 @@ function unesc(str) {
  * Focused JOB 3 only — one section at a time to stay within token limits.
  * Returns the rewritten array, or the original on any failure.
  */
-async function humanizeSection(paragraphs, sectionName, eventTitle, env) {
+async function humanizeSection(
+  paragraphs,
+  sectionName,
+  eventTitle,
+  env,
+  usedOpeners = [],
+) {
   if (!paragraphs.length) return paragraphs;
 
   const systemPrompt =
@@ -1974,20 +2072,22 @@ async function humanizeSection(paragraphs, sectionName, eventTitle, env) {
     "Authoritative narrator. Weighty subject, weighty prose. " +
     "Never open a paragraph with 'On [date],' or '[Place] was...' — start with the person, action, or consequence.\n\n" +
     "REVIEWER 1 — LINGUISTICS PROFESSOR (syntactic humanization):\n" +
-    "These are the exact techniques that make text pass AI detectors at the sentence level:\n" +
-    "- CHAIN RELATIVE CLAUSES with 'which' and 'and': " +
-    "'Jinnah read a formal statement, which became the Resolution, calling for a homeland, " +
-    "and this had consequences which led many to wonder...' — AI avoids this flowing structure.\n" +
+    "These techniques make text pass AI detectors at the sentence level. Apply them with restraint — " +
+    "overusing any single technique creates gibberish. Vary across sentences.\n" +
+    "- RELATIVE CLAUSES: at most 2 per sentence, and each must logically follow the previous. " +
+    "'Jinnah read a statement, which became known as the Pakistan Resolution.' — two clauses, coherent. " +
+    "Never chain 4+ clauses into a run-on. Each sentence must still make sense on its own.\n" +
     "- SWAP FORMAL VERBS for simpler colloquial ones: 'presented' → 'read', 'advocated' → 'fought for', " +
     "'electrified' → 'moved', 'deemed' → 'considered to be', 'recalled' → 'remembered'\n" +
     "- BREAK NOMINALIZATIONS: 'a carefully crafted document reflecting years of struggle' → " +
     "'a product of years of struggle'\n" +
     "- PARTICIPIAL OPENERS: 'being the leader of' instead of 'as the leader of'\n" +
-    "- CLOSE SENTENCES with dangling participials: '...which surprised no one, considering the circumstances'\n" +
-    "- USE 'and' as a mid-flow connector: 'and this had consequences', 'and they had finally realized'\n" +
+    "- CLOSE SENTENCES with short participial phrases: '...which surprised no one, considering the circumstances'\n" +
+    "- USE 'and' sparingly as a mid-flow connector: 'and this had consequences', 'and they knew it'\n" +
     "- SHIFT TO PRONOUNS once established: 'Jinnah's words' → 'his words'\n" +
-    "- ADVERB INTENSIFIERS: 'quite vehemently', 'rather quickly', 'fairly certain' — humans scatter these\n" +
+    "- ADVERB INTENSIFIERS used lightly: 'quite vehemently', 'rather quickly', 'fairly certain'\n" +
     "- SEMICOLONS in conversational flow: 'And that is exactly what it was; nobody would dispute it'\n" +
+    "- NEVER start two paragraphs in the same section with the same subject or the same grammatical pattern\n" +
     "- Remove AI connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
     "'It is worth noting', 'Notably', 'Importantly', 'Significantly'\n\n" +
     "REVIEWER 2 — COGNITIVE PSYCHOLOGIST (reasoning and voice texture):\n" +
@@ -2007,8 +2107,29 @@ async function humanizeSection(paragraphs, sectionName, eventTitle, env) {
     "- Preserve every fact. Do not invent, merge, or split paragraphs.\n" +
     "- No casual fillers: 'So,', 'Done.', 'It's crazy, really.', 'Nobody expected that.'";
 
+  // Explicit punctuation guidance: prefer commas over hyphens inside sentences
+  systemPrompt +=
+    "\n\nPUNCTUATION NOTE: Avoid using hyphens (-) inside sentences; prefer commas or restructure the sentence to maintain flow and clarity.";
+
+  // Append concise essay-writing guidance from Oxford's "Tips from my first year - essay writing".
+  // Keep all previous humanization rules intact; add planning/PEE/evidence-first reminders.
+  systemPrompt +=
+    "\n\nOXFORD ESSAY GUIDANCE (append):\n" +
+    "- Before rewriting, sketch a brief plan: claim, evidence, explanation.\n" +
+    "- Follow PEE at the paragraph level: state the claim, present one strongest piece of evidence, then explain why it matters.\n" +
+    "- Lead paragraphs with the clearest fact when possible (evidence-first).\n" +
+    "- Keep introductions and conclusions concise; define any technical term once and briefly.\n" +
+    "- When combining or trimming paragraphs, preserve the claim+evidence then the nuance/synthesis.\n" +
+    "- When a paragraph contains nuance or complication, give the strongest version of it, not the weakest. Write it naturally into the flow — never signal it with 'critics argue' or 'some would say'. Just state it as fact.\n" +
+    "- Each paragraph can work as: position, complication woven in, then synthesis.\n" +
+    "- Apply a 'why' test to every statement: if you cannot answer 'why does this matter?', cut or sharpen the sentence.";
+
+  const avoidLine = usedOpeners.length
+    ? `\nDo NOT start any paragraph with these already-used openers: ${usedOpeners.map((s) => `"${s}"`).join(", ")}\n`
+    : "";
+
   const userMessage =
-    `Event: ${eventTitle}\nSection: ${sectionName}\n\n` +
+    `Event: ${eventTitle}\nSection: ${sectionName}\n${avoidLine}\n` +
     `Rewrite these ${paragraphs.length} paragraphs to beat AI detection:\n` +
     `${JSON.stringify(paragraphs, null, 2)}\n\n` +
     `Return ONLY a JSON array of ${paragraphs.length} strings.`;
@@ -2017,15 +2138,23 @@ async function humanizeSection(paragraphs, sectionName, eventTitle, env) {
   try {
     raw = await callAI(
       env,
-      [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
       { maxTokens: 2500, timeoutMs: 45_000, temperature: 0.75 },
     );
   } catch (err) {
-    console.warn(`humanizeSection [${sectionName}]: AI call failed — ${err.message}`);
+    console.warn(
+      `humanizeSection [${sectionName}]: AI call failed — ${err.message}`,
+    );
     return paragraphs;
   }
 
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
   const arrMatch = cleaned.match(/\[[\s\S]*\]/);
   if (!arrMatch) {
     console.warn(`humanizeSection [${sectionName}]: no JSON array in response`);
@@ -2041,12 +2170,16 @@ async function humanizeSection(paragraphs, sectionName, eventTitle, env) {
   }
 
   if (!Array.isArray(result) || result.length !== paragraphs.length) {
-    console.warn(`humanizeSection [${sectionName}]: array length mismatch (got ${result?.length}, expected ${paragraphs.length})`);
+    console.warn(
+      `humanizeSection [${sectionName}]: array length mismatch (got ${result?.length}, expected ${paragraphs.length})`,
+    );
     return paragraphs;
   }
 
   if (!result.every((p) => typeof p === "string" && p.trim().length > 20)) {
-    console.warn(`humanizeSection [${sectionName}]: invalid paragraph strings in response`);
+    console.warn(
+      `humanizeSection [${sectionName}]: invalid paragraph strings in response`,
+    );
     return paragraphs;
   }
 
@@ -2067,61 +2200,98 @@ async function patchBodyParagraphs(html, env) {
 
   // Fallback: extract from JSON-LD
   if (!eventTitle) {
-    const jldMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+    const jldMatch = html.match(
+      /<script type="application\/ld\+json">([\s\S]*?)<\/script>/,
+    );
     if (jldMatch) {
       try {
         const jld = JSON.parse(jldMatch[1]);
         eventTitle = jld.about?.name || jld.headline?.split(" — ")[0] || "";
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }
 
   // Extract <p> text from a named section (by its exact <h2> text)
   const extractSectionParas = (h2Text) => {
     const escaped = h2Text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp('<h2 class="h3">' + escaped + "<\\/h2>([\\s\\S]*?)(?:<\\/section>|<blockquote)");
+    const re = new RegExp(
+      '<h2 class="h3">' +
+        escaped +
+        "<\\/h2>([\\s\\S]*?)(?:<\\/section>|<blockquote)",
+    );
     const match = html.match(re);
     if (!match) return [];
-    return [...match[1].matchAll(/<p>([\s\S]*?)<\/p>/g)].map((m) => unesc(m[1]));
+    return [...match[1].matchAll(/<p>([\s\S]*?)<\/p>/g)].map((m) =>
+      unesc(m[1]),
+    );
   };
 
   const sections = [
-    { name: "overviewParagraphs",    h2: `Overview: ${eventTitle}` },
-    { name: "eyewitnessOrChronicle", h2: `Eyewitness Accounts of ${eventTitle}` },
-    { name: "aftermathParagraphs",   h2: `Aftermath of ${eventTitle}` },
-    { name: "conclusionParagraphs",  h2: `Legacy of ${eventTitle}` },
+    { name: "overviewParagraphs", h2: `Overview: ${eventTitle}` },
+    {
+      name: "eyewitnessOrChronicle",
+      h2: `Eyewitness Accounts of ${eventTitle}`,
+    },
+    { name: "aftermathParagraphs", h2: `Aftermath of ${eventTitle}` },
+    { name: "conclusionParagraphs", h2: `Legacy of ${eventTitle}` },
   ].map((s) => ({ ...s, paras: extractSectionParas(s.h2) }));
 
   if (!sections[0].paras.length) {
-    console.warn(`patchBodyParagraphs: no overview paragraphs found (eventTitle="${eventTitle}") — skipping`);
+    console.warn(
+      `patchBodyParagraphs: no overview paragraphs found (eventTitle="${eventTitle}") — skipping`,
+    );
     return { updatedHtml: html, changed: [] };
   }
 
   // Humanize each section sequentially — one focused AI call per section
+  // Track first-word openers of each paragraph so later sections don't repeat them
   let updatedHtml = html;
   const changed = [];
+  const usedOpeners = [];
 
   for (const section of sections) {
     if (!section.paras.length) continue;
 
-    const humanized = await humanizeSection(section.paras, section.name, eventTitle, env);
+    const humanized = await humanizeSection(
+      section.paras,
+      section.name,
+      eventTitle,
+      env,
+      usedOpeners,
+    );
 
-    const oldBlock = section.paras.map((p) => `            <p>${esc(p)}</p>`).join("\n");
-    const newBlock = humanized.map((p) => `            <p>${esc(p)}</p>`).join("\n");
+    // Collect the first ~6 words of each humanized paragraph as an opener
+    for (const p of humanized) {
+      const opener = p.split(/\s+/).slice(0, 6).join(" ");
+      if (opener) usedOpeners.push(opener);
+    }
+
+    const oldBlock = section.paras
+      .map((p) => `            <p>${esc(p)}</p>`)
+      .join("\n");
+    const newBlock = humanized
+      .map((p) => `            <p>${esc(p)}</p>`)
+      .join("\n");
 
     if (oldBlock === newBlock) {
       console.log(`patchBodyParagraphs [${section.name}]: unchanged`);
       continue;
     }
     if (!updatedHtml.includes(oldBlock)) {
-      console.warn(`patchBodyParagraphs [${section.name}]: block not found in HTML — skipping`);
+      console.warn(
+        `patchBodyParagraphs [${section.name}]: block not found in HTML — skipping`,
+      );
       continue;
     }
     updatedHtml = updatedHtml.replace(oldBlock, newBlock);
     changed.push(section.name);
   }
 
-  console.log(`patchBodyParagraphs: ${changed.length} section(s) humanized — ${changed.join(", ") || "none"}`);
+  console.log(
+    `patchBodyParagraphs: ${changed.length} section(s) humanized — ${changed.join(", ") || "none"}`,
+  );
   return { updatedHtml, changed };
 }
 
@@ -2156,25 +2326,46 @@ async function reviewSEOMetaOnly(content, env) {
   try {
     raw = await callAI(
       env,
-      [{ role: "system", content: systemPrompt }, { role: "user", content: userMessage }],
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
       { maxTokens: 800, timeoutMs: 25_000 },
     );
   } catch (err) {
-    console.warn(`SEO meta patcher [${content.title}]: AI call failed — ${err.message}`);
+    console.warn(
+      `SEO meta patcher [${content.title}]: AI call failed — ${err.message}`,
+    );
     return content;
   }
 
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (!match) return content;
 
   let improvements;
-  try { improvements = JSON.parse(match[0]); } catch { return content; }
+  try {
+    improvements = JSON.parse(match[0]);
+  } catch {
+    return content;
+  }
 
-  const ALLOWED = ["description", "ogDescription", "twitterDescription", "keywords", "imageAlt"];
+  const ALLOWED = [
+    "description",
+    "ogDescription",
+    "twitterDescription",
+    "keywords",
+    "imageAlt",
+  ];
   const improved = { ...content };
   for (const f of ALLOWED) {
-    if (typeof improvements[f] === "string" && improvements[f].trim().length > 5) {
+    if (
+      typeof improvements[f] === "string" &&
+      improvements[f].trim().length > 5
+    ) {
       improved[f] = improvements[f];
     }
   }
@@ -2255,6 +2446,20 @@ async function reviewContentWithSEOExpert(content, env) {
     "- Do not change: historicalDate, historicalYear, historicalDateISO, location, country, quickFacts, " +
     "didYouKnowFacts, analysisGood, analysisBad, editorialNote, wikiUrl, youtubeSearchQuery\n" +
     "- Output ONLY valid JSON with the fields that need improvement. Omit fields that are already good.";
+  // Enforce punctuation guidance at the SEO/voice level as well
+  systemPrompt +=
+    "\n\nPUNCTUATION NOTE: Do not use hyphens (-) inside sentences. Use commas, semicolons, or restructure clauses instead to preserve readability and compliance with editorial style.";
+  // Add Oxford essay-writing notes so the SEO expert also enforces PEE and evidence-first
+  // while keeping existing SEO and voice rules.
+  systemPrompt +=
+    "\n\nOXFORD ESSAY GUIDANCE (append):\n" +
+    "- Encourage an editorial plan: for each section, name the core claim and the one fact that proves it.\n" +
+    "- Paragraph standard: claim + strongest evidence + brief explanation (PEE).\n" +
+    "- Favor leading with evidence in body paragraphs; keep intro/conclusion short and pointed.\n" +
+    "- Avoid jargon; when a technical term is necessary, provide a one-line definition.\n" +
+    "- When nuance or complication enters a paragraph, give the strongest version of it. Write it naturally into the narrative flow — never signal it with 'critics argue', 'some would say', or 'the opposing view is'. Just state it directly.\n" +
+    "- Each body paragraph can work as: position, complication woven in, then synthesis.\n" +
+    "- Apply a 'why' test: every factual claim must answer 'why does this matter to the reader?' — if it cannot, cut or sharpen it.\n";
 
   const userMessage =
     `Blog post to review:\n` +
@@ -2282,11 +2487,16 @@ async function reviewContentWithSEOExpert(content, env) {
       { maxTokens: 6000, timeoutMs: 50_000 },
     );
   } catch (err) {
-    console.warn(`SEO expert: AI call failed (${err.message}) — using original content`);
+    console.warn(
+      `SEO expert: AI call failed (${err.message}) — using original content`,
+    );
     return content;
   }
 
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (!match) {
     console.warn("SEO expert: no JSON in response — using original content");
@@ -2303,9 +2513,16 @@ async function reviewContentWithSEOExpert(content, env) {
 
   // Whitelist of fields the SEO expert is allowed to improve
   const ALLOWED_FIELDS = [
-    "title", "description", "ogDescription", "twitterDescription",
-    "keywords", "imageAlt",
-    "overviewParagraphs", "eyewitnessOrChronicle", "aftermathParagraphs", "conclusionParagraphs",
+    "title",
+    "description",
+    "ogDescription",
+    "twitterDescription",
+    "keywords",
+    "imageAlt",
+    "overviewParagraphs",
+    "eyewitnessOrChronicle",
+    "aftermathParagraphs",
+    "conclusionParagraphs",
   ];
 
   let changed = 0;
@@ -2316,9 +2533,18 @@ async function reviewContentWithSEOExpert(content, env) {
     if (Array.isArray(improved[field])) {
       if (!Array.isArray(improvements[field])) continue;
       if (improvements[field].length !== improved[field].length) continue;
-      if (!improvements[field].every((p) => typeof p === "string" && p.trim().length > 20)) continue;
+      if (
+        !improvements[field].every(
+          (p) => typeof p === "string" && p.trim().length > 20,
+        )
+      )
+        continue;
     } else {
-      if (typeof improvements[field] !== "string" || improvements[field].trim().length < 5) continue;
+      if (
+        typeof improvements[field] !== "string" ||
+        improvements[field].trim().length < 5
+      )
+        continue;
     }
     improved[field] = improvements[field];
     changed++;
@@ -2326,7 +2552,12 @@ async function reviewContentWithSEOExpert(content, env) {
 
   // Guard: if the expert changed the title, make sure format is still correct
   if (improved.title !== content.title) {
-    if (!improved.title.includes(" — ") || !improved.title.includes(content.historicalDate?.split(",")[1]?.trim() ?? "")) {
+    if (
+      !improved.title.includes(" — ") ||
+      !improved.title.includes(
+        content.historicalDate?.split(",")[1]?.trim() ?? "",
+      )
+    ) {
       improved.title = content.title; // revert bad title
     }
   }
@@ -2752,12 +2983,16 @@ ${JSON.stringify({
           </figure>
 
           <!-- Quick Facts -->
-          ${quickFactsRows ? `<h2 class="mt-4 h3">Quick Facts</h2>
+          ${
+            quickFactsRows
+              ? `<h2 class="mt-4 h3">Quick Facts</h2>
           <table class="site-table">
             <tbody>
 ${quickFactsRows}
             </tbody>
-          </table>` : ""}
+          </table>`
+              : ""
+          }
 
           <!-- Did You Know -->
           ${
@@ -2772,10 +3007,14 @@ ${didYouKnowItems}
           }
 
           <!-- Overview -->
-          ${overviewParas ? `<section class="mt-4">
+          ${
+            overviewParas
+              ? `<section class="mt-4">
             <h2 class="h3">Overview: ${esc(c.eventTitle)}</h2>
 ${overviewParas}
-          </section>` : ""}
+          </section>`
+              : ""
+          }
 
           <!-- Eyewitness / Chronicle Accounts -->
           ${
@@ -2814,11 +3053,15 @@ ${aftermathParas}
           }
 
           <!-- Conclusion -->
-          ${conclusionParas ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
+          ${
+            conclusionParas
+              ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
           <section class="mt-5">
             <h2 class="h3">Legacy of ${esc(c.eventTitle)}</h2>
 ${conclusionParas}
-          </section>` : ""}
+          </section>`
+              : ""
+          }
 
           <!-- Personal Analysis -->
           ${

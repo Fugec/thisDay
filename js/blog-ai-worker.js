@@ -2061,7 +2061,8 @@ async function humanizeSection(
 
   let systemPrompt =
     "You are a senior writer for serious history documentaries — think BBC, PBS, Ken Burns. " +
-    "Your draft is then reviewed by two specialists. Apply all three perspectives before output.\n\n" +
+    "Your draft is then reviewed by two specialists. Apply all three perspectives before output.\n" +
+    "Write like you are explaining it to a smart 16 year old who has never heard of this topic.\n\n" +
     "LEAD WRITER — BBC/PBS DOCUMENTARY VOICE:\n" +
     "Authoritative narrator. Weighty subject, weighty prose. " +
     "Never open a paragraph with 'On [date],' or '[Place] was...' — start with the person, action, or consequence.\n\n" +
@@ -2076,11 +2077,11 @@ async function humanizeSection(
     "- BREAK NOMINALIZATIONS: 'a carefully crafted document reflecting years of struggle' → " +
     "'a product of years of struggle'\n" +
     "- PARTICIPIAL OPENERS: 'being the leader of' instead of 'as the leader of'\n" +
-    "- CLOSE SENTENCES with short participial phrases: '...which surprised no one, considering the circumstances'\n" +
+    "- CLOSE SENTENCES with short participial phrases: '...which was hard to miss, given the circumstances'\n" +
     "- USE 'and' sparingly as a mid-flow connector: 'and this had consequences', 'and they knew it'\n" +
     "- SHIFT TO PRONOUNS once established: 'Jinnah's words' → 'his words'\n" +
     "- ADVERB INTENSIFIERS used lightly: 'quite vehemently', 'rather quickly', 'fairly certain'\n" +
-    "- SEMICOLONS in conversational flow: 'And that is exactly what it was; nobody would dispute it'\n" +
+    "- Avoid semicolons; prefer commas or rewrite\n" +
     "- NEVER start two paragraphs in the same section with the same subject or the same grammatical pattern\n" +
     "- Remove AI connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
     "'It is worth noting', 'Notably', 'Importantly', 'Significantly'\n\n" +
@@ -2099,7 +2100,8 @@ async function humanizeSection(
     "SHARED RULES:\n" +
     "- Return ONLY a JSON array with exactly the same number of strings as the input\n" +
     "- Preserve every fact. Do not invent, merge, or split paragraphs.\n" +
-    "- No casual fillers: 'So,', 'Done.', 'It's crazy, really.', 'Nobody expected that.'";
+    "- No casual fillers: 'So,', 'Done.', 'It's crazy, really.', 'Nobody expected that.'\n" +
+    "- Do NOT use phrases like 'surprised no one', 'surprising to no one', or similar.";
 
   // Explicit punctuation guidance: prefer commas over hyphens inside sentences
   systemPrompt +=
@@ -2222,6 +2224,14 @@ async function patchBodyParagraphs(html, env) {
     );
   };
 
+  const normalizeParas = (paras) => {
+    if (paras.length <= 2) return paras;
+    const mid = Math.ceil(paras.length / 2);
+    const first = paras.slice(0, mid).join(" ");
+    const second = paras.slice(mid).join(" ");
+    return [first, second];
+  };
+
   const sections = [
     { name: "overviewParagraphs", h2: `Overview: ${eventTitle}` },
     {
@@ -2230,7 +2240,7 @@ async function patchBodyParagraphs(html, env) {
     },
     { name: "aftermathParagraphs", h2: `Aftermath of ${eventTitle}` },
     { name: "conclusionParagraphs", h2: `Legacy of ${eventTitle}` },
-  ].map((s) => ({ ...s, paras: extractSectionParas(s.h2) }));
+  ].map((s) => ({ ...s, paras: normalizeParas(extractSectionParas(s.h2)) }));
 
   if (!sections[0].paras.length) {
     console.warn(

@@ -75,7 +75,7 @@ async function main() {
         : `  →  NO REPLACEMENT FOUND`;
     }
 
-    const ytLink = yt?.youtubeId ? ` https://youtube.com/shorts/${yt.youtubeId}` : "";
+    const ytLink = yt?.youtubeId ? ` https://www.youtube.com/shorts/${yt.youtubeId}` : "";
     console.log(`[${uploadStatus}] ${p.slug}`);
     console.log(`  image : ${p.imageUrl ?? "(none)"}`);
     console.log(`  status: ${imageStatus}`);

@@ -152,7 +152,7 @@ function buildCaption(post, youtubeId) {
     ``,
     post.description ? `${post.description.slice(0, 180)}…` : "",
     ``,
-    `▶️ Watch the full Short: https://youtube.com/shorts/${youtubeId}`,
+    `▶️ Watch the full Short: https://www.youtube.com/shorts/${youtubeId}`,
     `🌐 Read more: https://thisday.info/blog/${post.slug}/`,
     ``,
     `#OnThisDay #History #${tag} #HistoryShorts #LearnHistory`,

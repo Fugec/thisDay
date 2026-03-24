@@ -27,7 +27,7 @@ export async function notifyUpload(post, youtubeId) {
   const message =
     `✅ **New Short uploaded**\n` +
     `📺 ${post.title}\n` +
-    `🎬 https://youtube.com/shorts/${youtubeId}\n` +
+    `🎬 https://www.youtube.com/shorts/${youtubeId}\n` +
     `🌐 https://thisday.info/blog/${post.slug}/`;
 
   const sends = [];

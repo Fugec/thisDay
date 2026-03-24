@@ -108,7 +108,7 @@ function buildCaption(post, youtubeId) {
     "",
     post.description ? `${post.description.slice(0, 200)}…` : "",
     "",
-    `▶️ Watch on YouTube: https://youtube.com/shorts/${youtubeId}`,
+    `▶️ Watch on YouTube: https://www.youtube.com/shorts/${youtubeId}`,
     "",
     `#OnThisDay #History #${tag} #HistoryShorts #LearnHistory #TodayInHistory`,
   ];

@@ -113,7 +113,7 @@ async function main() {
       const dl = spawnSync(
         "yt-dlp",
         [
-          `https://youtube.com/shorts/${data.youtubeId}`,
+          `https://www.youtube.com/shorts/${data.youtubeId}`,
           "-o", videoPath,
           "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
           "--merge-output-format", "mp4",

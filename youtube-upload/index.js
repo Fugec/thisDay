@@ -255,7 +255,7 @@ async function main() {
       }
       console.log("  Uploading to YouTube...");
       const youtubeId = await uploadToYoutube(videoPath, post, videoCuts);
-      console.log(`  ✓ https://youtube.com/shorts/${youtubeId}`);
+      console.log(`  ✓ https://www.youtube.com/shorts/${youtubeId}`);
 
       // Record in KV tracker (overwrites previous entry for re-uploads)
       const privacy = privacyMode;

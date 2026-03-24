@@ -913,6 +913,11 @@ export default {
             /<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/,
             ytIframe,
           );
+          // Normalize older non-www Shorts links in stored HTML/JSON-LD.
+          ytHtml = ytHtml.replace(
+            /https:\/\/youtube\.com\/shorts\//g,
+            "https://www.youtube.com/shorts/",
+          );
           // Inject VideoObject JSON-LD schema for SEO
           if (!ytHtml.includes('"@type":"VideoObject"')) {
             // Extract title and description from existing NewsArticle schema or meta tags
@@ -1748,7 +1753,8 @@ Sentence and paragraph rules:
 - Every paragraph must contain at least one specific, verifiable fact: a real name, an exact year or number, a specific place, or a direct quote. No paragraph may consist entirely of vague generalizations.
 - Include at least one clear "what would need to be true for this to be wrong" check somewhere in the article when you make a strong claim.
 - Start with the takeaway, then walk backward to the evidence. Avoid "Picture..." and "This was not some minor accident." Write like a human: a little uneven, a little opinionated, and not overly polished.
-- Do not use dashes ("-" or "—") inside sentences. Use commas, semicolons, or rewrite.
+- Avoid semicolons. If absolutely necessary, use at most one semicolon in a paragraph.
+- Do not use dashes ("-" or "—") inside sentences. Use commas or rewrite.
 - Use active voice. Say who did what.
 - Start each paragraph with a sentence that makes the reader want to keep reading.
 - Use transition phrases between paragraphs: "What followed was even more remarkable.", "But the real damage was done quietly, in the years after.", "To understand why this mattered, you have to go back further."

@@ -8,7 +8,7 @@
  * Uses the /with-timestamps endpoint to get word-level timing data
  * so video.js can render animated synchronized captions.
  *
- * Voice: Adam — calm, deep, suitable for history documentaries.
+ * Voice: Max — e-learning + documentary tone.
  * Model: eleven_turbo_v2_5 — lowest character cost on the free plan.
  *
  * Free plan: 10 000 chars/month.
@@ -24,7 +24,7 @@ import { mkdirSync } from "fs";
 import { join } from "path";
 
 const ASSETS_DIR = "./assets";
-const VOICE_ID = "pNInz6obpgDQGcFmaJgB"; // Adam — deep, calm, documentary
+const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George — warm captivating storyteller
 const MODEL_ID = "eleven_turbo_v2_5"; // fastest + lowest character cost
 
 /**
@@ -96,9 +96,9 @@ async function callElevenLabsWithTimestamps(apiKey, script) {
         text: script,
         model_id: MODEL_ID,
         voice_settings: {
-          stability: 0.55,
-          similarity_boost: 0.75,
-          style: 0.3,
+          stability: 0.62,        // steadier, documentary cadence
+          similarity_boost: 0.78, // keep voice identity consistent
+          style: 0.25,            // lower style for e-learning clarity
           use_speaker_boost: true,
         },
       }),

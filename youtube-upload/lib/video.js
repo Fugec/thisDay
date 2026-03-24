@@ -267,7 +267,7 @@ export async function resolvePostImage(post) {
   );
 }
 
-const DURATION = 45; // seconds — within YouTube Shorts 60 s limit
+const DURATION = 45; // seconds — max 45 s
 const FPS = 30;
 
 // ---------------------------------------------------------------------------
@@ -828,11 +828,11 @@ async function generateMultiSceneVideo(
   const { slug, title } = post;
   const XF = 1.2; // crossfade duration in seconds — longer = gentler on the eyes
 
-  // Compute actual video duration from narration end + 3 s tail.
-  // Falls back to DURATION (45 s) when no word timestamps are available.
+  // Compute actual video duration from narration end + 3 s tail,
+  // capped at the 45 s max. Falls back to DURATION when no timestamps.
   const narrEnd = words?.length > 0 ? words[words.length - 1].end : null;
   const videoDuration = narrEnd
-    ? Math.max(Math.min(Math.ceil(narrEnd) + 3, 59), 10)
+    ? Math.max(Math.min(Math.ceil(narrEnd) + 3, DURATION), 10)
     : DURATION;
   console.log(
     narrEnd
@@ -1116,7 +1116,7 @@ export async function generateVideo(
   // Compute duration from narration end + 3 s tail (same logic as multi-scene)
   const narrEnd = words?.length > 0 ? words[words.length - 1].end : null;
   const videoDuration = narrEnd
-    ? Math.max(Math.min(Math.ceil(narrEnd) + 3, 59), 10)
+    ? Math.max(Math.min(Math.ceil(narrEnd) + 3, DURATION), 10)
     : DURATION;
   console.log(
     narrEnd

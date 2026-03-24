@@ -85,13 +85,16 @@ async function main() {
   const videoIds = candidates.map(([, d]) => d.youtubeId);
   const ytInfo = await getYouTubePublishTimes(videoIds);
 
-  const pending = candidates.filter(([, data]) => {
+  // Always post the latest upload only — but only if it's public and past delay
+  candidates.sort((a, b) => new Date(b[1].uploadedAt) - new Date(a[1].uploadedAt));
+  const latest = candidates.find(([, data]) => {
     const info = ytInfo[data.youtubeId];
-    if (!info?.publishedAt) return false;                              // not found / not public yet
-    if (info.privacyStatus !== "public") return false;                // still private/unlisted
+    if (!info?.publishedAt) return false;                       // not found / not public yet
+    if (info.privacyStatus !== "public") return false;          // still private/unlisted
     const publishedMs = new Date(info.publishedAt).getTime();
-    return now - publishedMs >= POST_DELAY_MS;                        // 5+ min since YouTube publish
+    return now - publishedMs >= POST_DELAY_MS;                  // 5+ min since YouTube publish
   });
+  const pending = latest ? [latest] : [];
 
   if (!pending.length) {
     console.log(`[social-cron] ${new Date().toISOString()} — ${candidates.length} tracked, none ready yet`);
@@ -100,9 +103,9 @@ async function main() {
 
   for (const [slug, data] of pending) {
     const post = posts.find((p) => p.slug === slug) ?? { slug, title: slug, description: "" };
-    const info = ytInfo[data.youtubeId];
     console.log(`\n[social-cron] → ${post.title}`);
-    console.log(`[social-cron]   YouTube published: ${info.publishedAt}`);
+    const info = ytInfo[data.youtubeId];
+    console.log(`[social-cron]   YouTube published: ${info?.publishedAt ?? "unknown"}`);
 
     const videoPath = new URL(`../tmp/${slug}.mp4`, import.meta.url).pathname;
     try {

@@ -1223,7 +1223,7 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
     );
 
   let content = await callWorkersAI(
-    env.AI,
+    env,
     now,
     takenAllTime,
     activeModel,
@@ -1249,7 +1249,7 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
       console.warn(
         `Blog AI: no valid image for \"${content.title}\". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
       );
-      content = await callWorkersAI(env.AI, now, avoid, activeModel);
+      content = await callWorkersAI(env, now, avoid, activeModel);
       continue;
     }
 
@@ -1705,7 +1705,7 @@ async function generateBlogQuiz(env, content, _slug) {
 // ---------------------------------------------------------------------------
 
 async function callWorkersAI(
-  ai,
+  env,
   date,
   takenThisMonth = [],
   model = CF_AI_MODEL,
@@ -1733,6 +1733,7 @@ The article must be substantial — at least 1,500 words of body content across 
 
 VOICE AND PERSONALITY — this is the most important instruction:
 Write like a passionate history obsessive who has spent weeks researching this event and genuinely cannot believe more people do not know about it. You have opinions. You find things surprising, tragic, infuriating, or inspiring, and you say so. You are not a textbook. You are not a Wikipedia summary. You are a storyteller who happens to know an enormous amount of history.
+Write this like you are explaining it to a smart 16 year old who has never heard of this topic.
 
 Specific voice qualities:
 - Open sections with a scene, a striking detail, or a provocative question — not with "The event was..."
@@ -1745,6 +1746,8 @@ Sentence and paragraph rules:
 - Mix sentence lengths deliberately for rhythm. Some sentences can be 30+ words when building a complex, layered point. Use short sentences (under 10 words) for emphasis and dramatic beats. Never write five consecutive sentences of the same length.
 - Target an average of 18-22 words per sentence across each paragraph. This creates readable depth without choppiness.
 - Every paragraph must contain at least one specific, verifiable fact: a real name, an exact year or number, a specific place, or a direct quote. No paragraph may consist entirely of vague generalizations.
+- Include at least one clear "what would need to be true for this to be wrong" check somewhere in the article when you make a strong claim.
+- Start with the takeaway, then walk backward to the evidence. Avoid "Picture..." and "This was not some minor accident." Write like a human: a little uneven, a little opinionated, and not overly polished.
 - Do not use dashes ("-" or "—") inside sentences. Use commas, semicolons, or rewrite.
 - Use active voice. Say who did what.
 - Start each paragraph with a sentence that makes the reader want to keep reading.
@@ -1828,8 +1831,9 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "youtubeSearchQuery": "specific event name year history documentary"
 }`;
 
-  const result = await ai.run(model, {
-    messages: [
+  const rawValue = await callAI(
+    env,
+    [
       {
         role: "system",
         content:
@@ -1837,49 +1841,33 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
       },
       { role: "user", content: prompt },
     ],
-    max_tokens: 4096,
-  });
+    { maxTokens: 4096, timeoutMs: 60_000, cfModel: model },
+  );
 
-  // Handle different response shapes across CF AI models:
-  // - Some models return { response: "string" }
-  // - Chat models return { choices: [{ message: { content: "string" } }] }
-  // - Some models return the parsed JSON object directly
-  const rawValue =
-    result.response ?? result.choices?.[0]?.message?.content ?? result;
-  if (
-    !rawValue ||
-    (typeof rawValue === "string" && rawValue.trim().length < 100)
-  ) {
+  if (!rawValue || rawValue.trim().length < 100) {
     throw new Error(
-      `AI response too short or empty (${String(rawValue).length} chars)`,
+      `AI response too short or empty (${rawValue.length} chars)`,
     );
   }
 
+  // Strip any accidental markdown code fences the model may add
+  const cleaned = rawValue
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
+
+  // Extract the first {...} block in case the model adds surrounding text
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!jsonMatch)
+    throw new Error(`No JSON found in model output: ${rawValue.slice(0, 200)}`);
+
   let parsed;
-  if (rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)) {
-    parsed = rawValue; // Model already returned parsed JSON object
-  } else {
-    const raw = (
-      typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)
-    ).trim();
-    // Strip any accidental markdown code fences the model may add
-    const cleaned = raw
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```\s*$/, "")
-      .trim();
-
-    // Extract the first {...} block in case the model adds surrounding text
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch)
-      throw new Error(`No JSON found in model output: ${raw.slice(0, 200)}`);
-
-    try {
-      parsed = JSON.parse(jsonMatch[0]);
-    } catch (e) {
-      throw new Error(
-        `JSON parse failed: ${e.message} — Raw: ${raw.slice(0, 300)}`,
-      );
-    }
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    throw new Error(
+      `JSON parse failed: ${e.message} — Raw: ${rawValue.slice(0, 300)}`,
+    );
   }
 
   // Enforce that the title always follows the format "Event Name — Month Day, Year".

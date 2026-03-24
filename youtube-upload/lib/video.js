@@ -267,7 +267,7 @@ export async function resolvePostImage(post) {
   );
 }
 
-const DURATION = 45; // seconds — within YouTube Shorts 60 s limit
+const DURATION = 30; // seconds — max 30 s for TikTok/Reels/Shorts compatibility
 const FPS = 30;
 
 // ---------------------------------------------------------------------------

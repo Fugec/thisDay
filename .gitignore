@@ -16,3 +16,8 @@ package.json
 .wrangler-xdg/
 node_modules/
 node_modules/.mf/
+.dev.vars
+
+# Ignore generated/older blog HTML files so edits don't get committed
+# Adjust this pattern if you want to keep specific posts tracked.
+/blog/**/index.html

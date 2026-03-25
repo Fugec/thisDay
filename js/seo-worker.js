@@ -7,7 +7,12 @@
 // Adds various security headers to enhance protection.
 // Injects Schema.org JSON-LD for better SEO.
 
-import { siteNav, siteFooter, SITE_DESCRIPTION } from "./shared/layout.js";
+import {
+  siteNav,
+  siteFooter,
+  SITE_DESCRIPTION,
+  NAV_CSS_FALLBACK,
+} from "./shared/layout.js";
 import { callAI } from "./shared/ai-call.js";
 
 // --- Configuration Constants ---
@@ -637,83 +642,78 @@ function buildDynamicOverview(featured, events, mDisplay, day) {
 }
 
 function getSharedPageStyles() {
-  return `:root{--pb:#3b82f6;--sb:#fff;--tc:#1e293b;--htc:#fff;--fb:#3b82f6;--ftc:#fff;--lc:#2563eb;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b}
-body.dark-theme{--pb:#020617;--sb:#1e293b;--tc:#f8fafc;--fb:#020617;--lc:#60a5fa;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#cbd5e1}
-body{font-family:Inter,sans-serif;min-height:100vh;display:flex;flex-direction:column;background:var(--sb);color:var(--tc);transition:background .3s,color .3s}
-.navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
+  return (
+    `:root{--pb:#ffffff;--sb:#fff;--tc:#1e293b;--htc:#1a1a1a;--fb:#1e1e1e;--ftc:#fff;--lc:#1a1a1a;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b}
+
+body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--sb);color:var(--tc);transition:background .3s,color .3s}
+.navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030;box-shadow:0 1px 4px rgba(0,0,0,.1)}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
 main{flex:1;padding:20px 0}
 .footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:30px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
 .footer .container.d-flex.justify-content-center.my-2{gap:20px}
-h1,h2,h3,h4{color:var(--tc)}body.dark-theme h1,body.dark-theme h2,body.dark-theme h3,body.dark-theme h4{color:#f8fafc}
+h1,h2,h3,h4{color:var(--tc)}
 a{color:var(--lc)}a:hover{text-decoration:underline}
 .text-muted{color:var(--mu)!important}
 .breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--mu)}
-body.dark-theme .breadcrumb-item a{color:#93c5fd}body.dark-theme .breadcrumb-item.active{color:#e2e8f0}
-.form-check-input:checked{background-color:#2563eb!important;border-color:#2563eb!important}
-.form-check-input{background:#e2e8f0;border-color:#e2e8f0}body.dark-theme .form-check-input{background:#334155;border-color:#334155}
+
+.form-check-input:checked{background-color:#1a1a1a!important;border-color:#1a1a1a!important}
+.form-check-input{background:#e2e8f0;border-color:#e2e8f0}
 .form-switch .form-check-input{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e")}
 .card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
-.commentary{border-left:4px solid #3b82f6;padding:10px 14px;background:rgba(59,130,246,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--mu);margin:18px 0}
-body.dark-theme .commentary{background:rgba(59,130,246,.15)}
+.commentary{border-left:4px solid #1a1a1a;padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--mu);margin:18px 0}
+
 .did-you-know{background:rgba(245,158,11,.07);border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
-body.dark-theme .did-you-know{background:rgba(245,158,11,.13)}
-.yr{background:#3b82f6;color:#fff;padding:2px 7px;border-radius:4px;font-size:.78rem;font-weight:600;margin-right:6px;white-space:nowrap}
+
+.yr{color:#1a1a1a;font-size:.95rem;font-weight:700;margin-right:8px;white-space:nowrap;font-family:Georgia,serif}
 .ev-scroll-wrap{max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--cbr) transparent;border:1px solid var(--cbr);border-radius:8px;padding:0 8px 0 0}.ev-scroll-wrap::-webkit-scrollbar{width:4px}.ev-scroll-wrap::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:4px}.ev-scroll-wrap .ev-row,.ev-scroll-wrap .person-row{padding-left:10px}
 .ev-row{padding:11px 0;border-bottom:1px solid var(--cbr)}.ev-row:last-child{border-bottom:none}
 .person-row{padding:9px 0;border-bottom:1px solid var(--cbr)}.person-row:last-child{border-bottom:none}
 .p-thumb{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
 .p-thumb-blank{width:44px;height:44px;border-radius:50%;background:#e2e8f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#6c757d}
-body.dark-theme .p-thumb-blank{background:#334155;color:#94a3b8}
-.auto-tag{display:inline-block;background:rgba(59,130,246,.12);color:#3b82f6;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
-body.dark-theme .auto-tag{background:rgba(96,165,250,.15);color:#60a5fa}
+
+.auto-tag{display:inline-block;background:rgba(0,0,0,.12);color:#1a1a1a;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
+
 .ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:.68rem;font-weight:600;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
 .tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
-.tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+.tdq-opt:hover{border-color:#1a1a1a;background:rgba(0,0,0,.07)}.tdq-opt-selected{border-color:#1a1a1a!important;background:rgba(0,0,0,.1)!important;font-weight:500}
 .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
 .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
-.tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
-body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15)}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
-body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
-body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}
-body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
-.tdq-explanation{font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0;color:var(--tc)}
-body.dark-theme .tdq-explanation{background:rgba(59,130,246,.18);border-left-color:#60a5fa;color:#e2e8f0}
+.tdq-opt-selected .tdq-opt-key{background:#1a1a1a;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+
+.tdq-explanation{font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(0,0,0,.07);border-left:3px solid #1a1a1a;border-radius:0 6px 6px 0;color:var(--tc)}
+
 .tdq-feedback{font-size:.85rem;margin-top:5px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
 .tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.2rem}
 .site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--cbr);border-radius:10px;overflow:hidden;margin-top:1rem;font-size:.9rem}
 .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--cbr);text-align:left;color:var(--tc)}
 .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
-.site-table th{background:rgba(59,130,246,.07);font-weight:600;white-space:nowrap;width:40%}
-body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}
-body.dark-theme .site-table th{background:rgba(96,165,250,.1)}
-body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}
-.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--cbr);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--tc);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
-.site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07);color:var(--tc);text-decoration:none}
-.site-btn-primary{border-color:#3b82f6;color:#2563eb}
-.site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}
-body.dark-theme .site-btn{border-color:rgba(255,255,255,.18);color:var(--tc)}
-body.dark-theme .site-btn:hover{border-color:#60a5fa;background:rgba(96,165,250,.1);color:#f8fafc}
-body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}
-body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}
-#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}
-body.dark-theme #read-progress{background:#60a5fa}
+.site-table th{background:rgba(0,0,0,.07);font-weight:600;white-space:nowrap;width:40%}
+
+.site-btn{display:inline-flex;align-items:center;gap:8px;padding:.5rem 1.1rem;background:transparent;color:#1a1a1a;border:1.5px solid #d4d4d0;border-radius:4px;font-size:.875rem;font-family:Lora,serif;font-weight:500;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s;user-select:none;white-space:nowrap}
+.site-btn:hover{background:#f5f5f3;color:#1a1a1a;border-color:#a0a09c;text-decoration:none}
+.site-btn-primary{background:transparent;color:#1a1a1a;border-color:#d4d4d0}
+.site-btn-primary:hover{background:#f5f5f3;color:#1a1a1a;border-color:#a0a09c}
+
+#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#1a1a1a;z-index:9999;transition:width .1s linear;pointer-events:none}
+
 .explore-actions{display:flex;flex-direction:column;gap:.5rem}
 @media(min-width:576px){.explore-actions{flex-direction:row;flex-wrap:wrap;gap:.5rem}}
 .explore-action-btn{display:flex;align-items:center;width:100%;padding:.6rem 1rem;font-size:.875rem;font-weight:500;border:1.5px solid var(--cbr);border-radius:8px;text-decoration:none;color:var(--tc);background:transparent;transition:background .15s,border-color .15s}
 @media(min-width:576px){.explore-action-btn{width:auto}}
-.explore-action-btn:hover{background:rgba(59,130,246,.06);border-color:rgba(59,130,246,.35);color:#3b82f6;text-decoration:none}
-.explore-action-quiz{border-color:rgba(59,130,246,.3);color:#3b82f6}
-.explore-action-quiz:hover{background:rgba(59,130,246,.1);border-color:#3b82f6}
-body.dark-theme .explore-action-btn{border-color:rgba(255,255,255,.18);color:var(--tc)}
-body.dark-theme .explore-action-btn:hover{background:rgba(96,165,250,.08);border-color:#60a5fa;color:#93c5fd}
+.explore-action-btn:hover{background:rgba(0,0,0,.06);border-color:rgba(0,0,0,.35);color:#1a1a1a;text-decoration:none}
+.explore-action-quiz{border-color:rgba(0,0,0,.3);color:#1a1a1a}
+.explore-action-quiz:hover{background:rgba(0,0,0,.1);border-color:#1a1a1a}
+
 #supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}
 #supportPopup.show{display:flex;opacity:1}
 .support-popup-content{background:var(--cb,#fff);color:var(--tc,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--cbr,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}
 @keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
 .support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--mu,#64748b);line-height:1;padding:0}
-.support-close-btn:hover{color:var(--tc,#1e293b)}`;
+.support-close-btn:hover{color:var(--tc,#1e293b)}` +
+    "\n" +
+    NAV_CSS_FALLBACK
+  );
 }
 
 function getSharedPageScripts() {
@@ -721,14 +721,8 @@ function getSharedPageScripts() {
 <script>
 const yrEl=document.getElementById('yr');
 if(yrEl)yrEl.textContent=new Date().getFullYear();
-const ds=document.getElementById('tsd'),ms=document.getElementById('tsm');
-const ap=d=>document.body.classList.toggle('dark-theme',d);
 const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
 const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
-const dk=gt('darkTheme')!=='false';
-ap(dk);if(ds)ds.checked=dk;if(ms)ms.checked=dk;
-if(ds)ds.addEventListener('change',()=>{ap(ds.checked);st('darkTheme',String(ds.checked));if(ms)ms.checked=ds.checked;});
-if(ms)ms.addEventListener('change',()=>{ap(ms.checked);st('darkTheme',String(ms.checked));if(ds)ds.checked=ms.checked;});
 const syncAdUnitVisibility=(ins)=>{if(!ins)return;const unit=ins.closest('.ad-unit');if(!unit)return;const status=ins.getAttribute('data-ad-status');if(status==='unfilled')unit.style.display='none';if(status==='filled')unit.style.display='';};
 const adObserver=new MutationObserver((mutations)=>{for(const m of mutations){if(m.type==='attributes'&&m.attributeName==='data-ad-status'){syncAdUnitVisibility(m.target);}}});
 document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{syncAdUnitVisibility(ins);adObserver.observe(ins,{attributes:true,attributeFilter:['data-ad-status']});});
@@ -740,7 +734,7 @@ setTimeout(initAds,1200);
 <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
 <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
 <script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
-<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:#3b82f6;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
+<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:#1a1a1a;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
 <script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{var _t=localStorage.getItem('supportPopupClosed');if(_t&&Date.now()-Number(_t)<86400000)return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed',String(Date.now()));}catch(e){}});})();</script>`;
 }
 
@@ -1010,7 +1004,7 @@ function generateBlogPostHTML(
     const yrStyle = isDeaths ? ' style="background:#6c757d"' : "";
     return `<div class="col-12 col-md-4">
   <div class="card-box h-100 d-flex flex-column" style="padding:16px">
-    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(59,130,246,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
+    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(0,0,0,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
     <div class="flex-grow-1">
       <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
       ${desc ? `<p class="text-muted mb-0" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
@@ -1083,7 +1077,7 @@ ${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
 <style>${getSharedPageStyles()}</style>
@@ -1114,7 +1108,7 @@ ${siteNav()}
     ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
-    ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:#f59e0b"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#3b82f6"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:#f59e0b"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <table class="site-table">
       <tbody><tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
       <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
@@ -1138,7 +1132,7 @@ ${siteNav()}
     others.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-2"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
+    <h2 class="h4 mb-2"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
       <span class="auto-tag"><i class="bi bi-list-ul me-1"></i>${others.length} events</span>
       ${evEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
@@ -1166,7 +1160,7 @@ ${siteNav()}
     topBirths.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-2"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
+    <h2 class="h4 mb-2"><i class="bi bi-person-heart me-2" style="color:#1a1a1a"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
       <span class="auto-tag"><i class="bi bi-people me-1"></i>${topBirths.length} people</span>
       ${birthEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(birthEraRange)}</span>` : ""}
@@ -1193,7 +1187,7 @@ ${siteNav()}
       : ""
   }
   <div class="card-box">
-    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="explore-actions">
       <a href="/quiz/${monthName}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
       <a href="/born/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
@@ -1249,7 +1243,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
   const DD = String(day).padStart(2, "0");
   const canonical = `${siteUrl}/born/${monthName}/${day}/`;
 
-  const births = (eventsData?.births || []);
+  const births = eventsData?.births || [];
   const featured =
     births.find((b) => b.pages?.[0]?.thumbnail?.source) || births[0] || null;
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
@@ -1372,12 +1366,16 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
         : "";
       const rawExtract = b.pages?.[0]?.extract || "";
       const extract = rawExtract
-        ? escapeHtml(rawExtract.length > 160 ? rawExtract.slice(0, 160).replace(/\s\S*$/, "") + "…" : rawExtract)
+        ? escapeHtml(
+            rawExtract.length > 160
+              ? rawExtract.slice(0, 160).replace(/\s\S*$/, "") + "…"
+              : rawExtract,
+          )
         : "";
       const year = escapeHtml(String(b.year));
       return `<div class="col-12 col-md-4">
   <div class="card-box h-100 d-flex flex-column" style="padding:16px">
-    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(59,130,246,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
+    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(0,0,0,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
     <div class="flex-grow-1">
       <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
       ${desc ? `<p class="text-muted mb-1" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
@@ -1464,7 +1462,7 @@ ${personListSchema ? `<script type="application/ld+json">${personListSchema}</sc
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
 <style>${getSharedPageStyles()}</style>
@@ -1498,7 +1496,7 @@ ${siteNav()}
     gridBirths.length > 0
       ? `
   <div class="card-box" style="padding:16px 20px">
-    <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>All Birthdays on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${births.length})</small></h2>
+    <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#1a1a1a"></i>All Birthdays on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${births.length})</small></h2>
     <div class="row g-0">${gridHtml}</div>
     ${
       hiddenGrid.length > 0
@@ -1513,7 +1511,7 @@ ${siteNav()}
     topEvents.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
+    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
     ${eventsSnippetHtml}
     <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
@@ -1526,7 +1524,7 @@ ${siteNav()}
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
   <div class="card-box">
-    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="d-flex flex-wrap gap-2">
       <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
       <a href="/died/${monthName}/${day}/" class="site-btn"><i class="bi bi-flower1"></i>Notable Deaths</a>
@@ -1556,7 +1554,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
   const DD = String(day).padStart(2, "0");
   const canonical = `${siteUrl}/died/${monthName}/${day}/`;
 
-  const deaths = (eventsData?.deaths || []);
+  const deaths = eventsData?.deaths || [];
   const featured =
     deaths.find((d) => d.pages?.[0]?.thumbnail?.source) || deaths[0] || null;
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
@@ -1679,7 +1677,11 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
         : "";
       const rawExtract = d.pages?.[0]?.extract || "";
       const extract = rawExtract
-        ? escapeHtml(rawExtract.length > 160 ? rawExtract.slice(0, 160).replace(/\s\S*$/, "") + "…" : rawExtract)
+        ? escapeHtml(
+            rawExtract.length > 160
+              ? rawExtract.slice(0, 160).replace(/\s\S*$/, "") + "…"
+              : rawExtract,
+          )
         : "";
       const year = escapeHtml(String(d.year));
       return `<div class="col-12 col-md-4">
@@ -1771,7 +1773,7 @@ ${personListSchema ? `<script type="application/ld+json">${personListSchema}</sc
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
 <style>${getSharedPageStyles()}</style>
@@ -1820,7 +1822,7 @@ ${siteNav()}
     topEvents.length > 0
       ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#3b82f6"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
+    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
     ${eventsSnippetHtml}
     <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
@@ -1833,7 +1835,7 @@ ${siteNav()}
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
   <div class="card-box">
-    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="d-flex flex-wrap gap-2">
       <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
       <a href="/born/${monthName}/${day}/" class="site-btn"><i class="bi bi-person-heart"></i>Famous Birthdays</a>
@@ -1854,6 +1856,90 @@ ${siteNav()}
 ${siteFooter("yr")}
 ${getSharedPageScripts()}
 </body></html>`;
+}
+
+async function handleBlogIndex(env, url) {
+  const index = env.BLOG_AI_KV
+    ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
+    : null;
+  const posts = Array.isArray(index) ? index.slice(0, 3) : [];
+
+  const postsHtml =
+    posts.length > 0
+      ? posts
+          .map((post) => {
+            const slug = escapeHtml(post.slug || "");
+            const title = escapeHtml(post.title || slug);
+            const img = post.imageUrl ? escapeHtml(post.imageUrl) : "";
+            const desc = escapeHtml(post.description || "");
+            const rawDate = post.publishedAt || "";
+            const dateStr = rawDate
+              ? escapeHtml(
+                  new Date(rawDate).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  }),
+                )
+              : "";
+            return (
+              `<div class="card-box mb-4"><div class="row g-0 align-items-center">` +
+              (img
+                ? `<div class="col-4 col-md-3"><a href="/blog/${slug}/"><img src="${img}" alt="${title}" style="width:100%;height:120px;object-fit:cover;border-radius:8px" loading="lazy"></a></div>`
+                : "") +
+              `<div class="${img ? "col-8 col-md-9 ps-3" : "col-12"}">` +
+              `<h2 class="h5 mb-1"><a href="/blog/${slug}/" style="color:inherit;text-decoration:none">${title}</a></h2>` +
+              (dateStr
+                ? `<div class="text-muted mb-2" style="font-size:.8rem">${dateStr}</div>`
+                : "") +
+              (desc
+                ? `<p class="mb-2" style="font-size:.9rem">${desc}</p>`
+                : "") +
+              `<a href="/blog/${slug}/" class="site-btn" style="padding:6px 12px;font-size:.8rem"><i class="bi bi-arrow-right me-1"></i>Read More</a>` +
+              `</div></div></div>`
+            );
+          })
+          .join("")
+      : `<div class="card-box text-center py-5"><p class="text-muted mb-0">No posts available yet.</p></div>`;
+
+  const pageTitle = "Blog | thisDay.";
+  const canonical = `${url.origin}/blog/`;
+
+  const html = `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${pageTitle}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="Latest historical articles from thisDay.info"/>
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<style>${getSharedPageStyles()}</style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Blog</li>
+    </ol>
+  </nav>
+  <h1 class="mb-4">Latest Posts</h1>
+  ${postsHtml}
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts()}
+</body></html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=600",
+    },
+  });
 }
 
 async function handleBornPage(request, env, ctx, url) {
@@ -2369,7 +2455,9 @@ async function generateEventCommentary(env, mm, dd) {
   let eventsData = { events: [], births: [], deaths: [] };
   if (env.EVENTS_KV) {
     try {
-      const kv = await env.EVENTS_KV.get(`events-data:${mm}-${dd}`, { type: "json" });
+      const kv = await env.EVENTS_KV.get(`events-data:${mm}-${dd}`, {
+        type: "json",
+      });
       if (kv?.events?.length) eventsData = kv;
     } catch (_) {}
   }
@@ -2393,7 +2481,9 @@ async function generateEventCommentary(env, mm, dd) {
     if (!items.length) return;
     const batch = items.slice(0, 30);
     const lines = batch
-      .map((e, i) => `${i + 1}. [${e.year}] ${(e.text || "").substring(0, 120)}`)
+      .map(
+        (e, i) => `${i + 1}. [${e.year}] ${(e.text || "").substring(0, 120)}`,
+      )
       .join("\n");
     try {
       const raw = await callAI(
@@ -2550,7 +2640,9 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   // AI commentary endpoint — generates & caches per-event editorial insights
-  const commentaryMatch = url.pathname.match(/^\/api\/commentary\/(\d{2})\/(\d{2})$/);
+  const commentaryMatch = url.pathname.match(
+    /^\/api\/commentary\/(\d{2})\/(\d{2})$/,
+  );
   if (commentaryMatch) {
     const mm = commentaryMatch[1];
     const dd = commentaryMatch[2];
@@ -2563,7 +2655,13 @@ async function handleFetchRequest(request, env, ctx) {
       try {
         const cached = await env.EVENTS_KV.get(commentaryKvKey);
         // KV hit: real data — cache at edge for 1 day
-        if (cached) return new Response(cached, { headers: { ...corsBase, "Cache-Control": "public, max-age=3600, s-maxage=86400" } });
+        if (cached)
+          return new Response(cached, {
+            headers: {
+              ...corsBase,
+              "Cache-Control": "public, max-age=3600, s-maxage=86400",
+            },
+          });
       } catch (_) {}
     }
     const commentary = await generateEventCommentary(env, mm, dd);
@@ -2571,11 +2669,20 @@ async function handleFetchRequest(request, env, ctx) {
     const hasData = Object.keys(commentary).length > 0;
     if (env.EVENTS_KV && hasData) {
       ctx.waitUntil(
-        env.EVENTS_KV.put(commentaryKvKey, json, { expirationTtl: 7 * 24 * 60 * 60 }).catch(() => {}),
+        env.EVENTS_KV.put(commentaryKvKey, json, {
+          expirationTtl: 7 * 24 * 60 * 60,
+        }).catch(() => {}),
       );
     }
     // Don't cache empty responses at the edge — AI may have timed out, allow retry
-    return new Response(json, { headers: { ...corsBase, "Cache-Control": hasData ? "public, max-age=300, s-maxage=3600" : "no-store" } });
+    return new Response(json, {
+      headers: {
+        ...corsBase,
+        "Cache-Control": hasData
+          ? "public, max-age=300, s-maxage=3600"
+          : "no-store",
+      },
+    });
   }
 
   // Legacy generated URLs -> /events (SEO-friendly permanent redirect)
@@ -2692,6 +2799,27 @@ async function handleFetchRequest(request, env, ctx) {
     const monthSlug = diedPageMatch[1];
     const day = parseInt(diedPageMatch[2], 10);
     return handleDiedPage(request, env, ctx, url, monthSlug, day);
+  }
+
+  // Blog index page
+  if (url.pathname === "/blog" || url.pathname === "/blog/") {
+    return handleBlogIndex(env, url);
+  }
+
+  // Serve KV blog index as /blog/archive.json so the homepage carousel
+  // can load latest posts without scanning individual day URLs
+  if (url.pathname === "/blog/archive.json") {
+    const index = env.BLOG_AI_KV
+      ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
+      : null;
+    const data = Array.isArray(index) ? index : [];
+    return new Response(JSON.stringify(data), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=300, s-maxage=3600",
+      },
+    });
   }
 
   // Events pages — must be before the HTML pass-through guard
@@ -4151,7 +4279,7 @@ function buildCarouselQuizHTML(
     `document.body.appendChild(c);` +
     `c.width=innerWidth;c.height=innerHeight;` +
     `var ctx=c.getContext('2d');` +
-    `var cols=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];` +
+    `var cols=['#1a1a1a','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];` +
     `var pts=[];` +
     `for(var i=0;i<90;i++)pts.push({x:Math.random()*c.width,y:Math.random()*-c.height*.6,r:3+Math.random()*6,` +
     `col:cols[i%cols.length],vx:(Math.random()-.5)*4,vy:3+Math.random()*5,a:1,rot:Math.random()*360,rv:(Math.random()-.5)*8});` +
@@ -4370,7 +4498,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   });
   const recSliderHtml =
     `<div class="mt-4 mb-2">` +
-    `<h2 class="qsc-rec-heading"><i class="bi bi-calendar3-range me-2" style="color:#3b82f6"></i>More Daily Quizzes</h2>` +
+    `<h2 class="qsc-rec-heading"><i class="bi bi-calendar3-range me-2" style="color:#1a1a1a"></i>More Daily Quizzes</h2>` +
     `<div class="qsc-rec-slider">${adjCards.join("")}</div>` +
     `</div>`;
 
@@ -4447,55 +4575,52 @@ ${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 <style>
-:root{--pb:#3b82f6;--sb:#f5f0e8;--tc:#1a1a1a;--htc:#fff;--fb:#1e293b;--ftc:#fff;--lc:#c0440a;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b;--badge:#c0440a}
-body.dark-theme{--pb:#020617;--sb:#0f172a;--tc:#f1f5f9;--fb:#020617;--lc:#f97316;--cb:#1e293b;--cbr:rgba(255,255,255,.1);--mu:#94a3b8;--badge:#f97316}
-body{font-family:Inter,sans-serif;background:var(--sb);color:var(--tc);min-height:100vh;display:flex;flex-direction:column}
+:root{--pb:#1a1a1a;--sb:#f5f0e8;--tc:#1a1a1a;--htc:#fff;--fb:#1e293b;--ftc:#fff;--lc:#c0440a;--cb:#fff;--cbr:rgba(0,0,0,.1);--mu:#64748b;--badge:#c0440a}
+
+body{font-family:Lora,serif;background:var(--sb);color:var(--tc);min-height:100vh;display:flex;flex-direction:column}
 .navbar{background:var(--pb)!important;position:sticky;top:0;z-index:1030}.navbar-brand,.nav-link{color:var(--htc)!important;font-weight:700!important}
 main{flex:1;padding:28px 0}
 .footer{background:var(--fb);color:var(--ftc);text-align:center;padding:20px;margin-top:40px;font-size:14px}.footer a{color:var(--ftc);text-decoration:underline}
 .footer .container.d-flex.justify-content-center.my-2{gap:20px}
 a{color:var(--lc)}.text-muted{color:var(--mu)!important}
 .breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--mu)}
-body.dark-theme .breadcrumb-item a{color:#93c5fd}body.dark-theme .breadcrumb-item.active{color:#e2e8f0}
-.form-check-input:checked{background-color:#2563eb!important;border-color:#2563eb!important}
-.form-check-input{background:#e2e8f0;border-color:#e2e8f0}body.dark-theme .form-check-input{background:#334155;border-color:#334155}
+
+.form-check-input:checked{background-color:#1a1a1a!important;border-color:#1a1a1a!important}
+.form-check-input{background:#e2e8f0;border-color:#e2e8f0}
 .form-switch .form-check-input{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e")}
 /* Base quiz option styles shared with events page */
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.92rem;transition:background .15s,border-color .15s,transform .1s;user-select:none;background:var(--cb)}
-.tdq-opt:hover{border-color:#3b82f6;background:rgba(59,130,246,.06);transform:translateX(2px)}.tdq-opt-selected{border-color:#3b82f6!important;background:rgba(59,130,246,.1)!important;font-weight:500}
+.tdq-opt:hover{border-color:#1a1a1a;background:rgba(0,0,0,.06);transform:translateX(2px)}.tdq-opt-selected{border-color:#1a1a1a!important;background:rgba(0,0,0,.1)!important;font-weight:500}
 .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
 .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
-.tdq-opt-selected .tdq-opt-key{background:#3b82f6;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
-body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);background:rgba(255,255,255,.04)}body.dark-theme .tdq-opt:hover{border-color:#60a5fa;background:rgba(96,165,250,.08)}
-body.dark-theme .tdq-opt-selected{border-color:#60a5fa!important;background:rgba(96,165,250,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
-body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}
-body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
-.tdq-explanation{font-size:.85rem;margin-top:8px;padding:10px 14px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 8px 8px 0;color:var(--tc);line-height:1.5}
-body.dark-theme .tdq-explanation{background:rgba(59,130,246,.15);border-left-color:#60a5fa;color:#e2e8f0}
+.tdq-opt-selected .tdq-opt-key{background:#1a1a1a;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+
+.tdq-explanation{font-size:.85rem;margin-top:8px;padding:10px 14px;background:rgba(0,0,0,.07);border-left:3px solid #1a1a1a;border-radius:0 8px 8px 0;color:var(--tc);line-height:1.5}
+
 .tdq-feedback{font-size:.88rem;margin-top:6px;font-weight:600}.tdq-correct{color:#10b981}.tdq-wrong{color:#ef4444}
 .tdq-score-box{font-size:1.05rem;font-weight:600;padding:14px 18px;background:rgba(245,158,11,.1);border-radius:10px;border-left:4px solid #f59e0b;text-align:left}.tdq-score-num{color:#f59e0b;font-size:1.3rem}
 /* === Carousel quiz layout === */
 /* Progress */
 .qsc-progress-wrap{text-align:center;margin-bottom:20px}
 .qsc-progress-track{height:5px;background:var(--cbr);border-radius:3px;overflow:hidden;margin-bottom:12px}
-.qsc-progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:3px;transition:width .4s ease}
+.qsc-progress-fill{height:100%;background:linear-gradient(90deg,#1a1a1a,#10b981);border-radius:3px;transition:width .4s ease}
 .qsc-dots-row{display:flex;justify-content:center;gap:10px;margin-bottom:8px}
 .qsc-dot{width:12px;height:12px;border-radius:50%;border:none;background:var(--cbr);cursor:pointer;padding:0;transition:all .2s;outline:none}
-.qsc-dot:hover{background:#94a3b8}.qsc-dot.qsc-dot-active{background:#3b82f6;transform:scale(1.3)}.qsc-dot.qsc-dot-done{background:#10b981}.qsc-dot.qsc-dot-wrong{background:#ef4444}
+.qsc-dot:hover{background:#94a3b8}.qsc-dot.qsc-dot-active{background:#1a1a1a;transform:scale(1.3)}.qsc-dot.qsc-dot-done{background:#10b981}.qsc-dot.qsc-dot-wrong{background:#ef4444}
 .qsc-progress-label{font-size:.82rem;color:var(--mu);margin:0}
 /* Nav row */
 .qsc-nav-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
 .qsc-back-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;font-size:.85rem;font-weight:500;color:var(--tc);cursor:pointer;transition:all .15s}
-.qsc-back-btn:hover:not(:disabled){border-color:#3b82f6;color:#3b82f6}.qsc-back-btn:disabled{opacity:.35;cursor:default}
+.qsc-back-btn:hover:not(:disabled){border-color:#1a1a1a;color:#1a1a1a}.qsc-back-btn:disabled{opacity:.35;cursor:default}
 .qsc-hint{font-size:.82rem;color:var(--mu);font-style:italic}
 /* Carousel wrapper */
 #qsc-wrapper{border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.12);background:var(--cb);margin-bottom:24px}
-body.dark-theme #qsc-wrapper{box-shadow:0 4px 24px rgba(0,0,0,.4)}
+
 /* Slides */
 .qsc-slide{display:none;animation:qscIn .3s ease}
 .qsc-slide.qsc-active{display:block}
@@ -4511,15 +4636,15 @@ body.dark-theme #qsc-wrapper{box-shadow:0 4px 24px rgba(0,0,0,.4)}
 /* Slide body */
 .qsc-slide-body{padding:18px 20px 22px;scroll-margin-top:60px}
 @media(min-width:600px){.qsc-slide-body{padding:22px 28px 28px}}
-.qsc-read-more-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 14px;padding:6px 14px;border:1.5px solid rgba(59,130,246,.35);border-radius:20px;font-size:.8rem;font-weight:500;color:#3b82f6;text-decoration:none;transition:all .2s;background:rgba(59,130,246,.06)}
-.qsc-read-more-btn:hover{background:rgba(59,130,246,.14);border-color:#3b82f6;color:#2563eb;text-decoration:none}
+.qsc-read-more-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 14px;padding:6px 14px;border:1.5px solid rgba(0,0,0,.35);border-radius:20px;font-size:.8rem;font-weight:500;color:#1a1a1a;text-decoration:none;transition:all .2s;background:rgba(0,0,0,.06)}
+.qsc-read-more-btn:hover{background:rgba(0,0,0,.14);border-color:#1a1a1a;color:#1a1a1a;text-decoration:none}
 .qsc-q-label{display:inline-flex;align-items:center;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--badge);margin-bottom:10px}
 .qsc-q-text{font-size:1.05rem;font-weight:700;color:var(--tc);margin-bottom:14px;line-height:1.45}
 .qsc-opts-wrap{display:flex;flex-direction:column;gap:9px}
 /* Next button */
 .qsc-next-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:12px;background:var(--badge);color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;animation:qscIn .25s ease}
 .qsc-next-btn:hover{background:#a03508;transform:translateY(-1px)}
-body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:hover{background:#ea6c0a}
+.
 /* Final score slide */
 .qsc-final-slide .qsc-final-body{padding:32px 24px;text-align:center}
 .qsc-trophy-wrap{margin-bottom:18px}
@@ -4530,7 +4655,7 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
 .qsc-rev-item{display:flex;align-items:center;gap:10px;padding:10px 14px;font-size:.9rem;border-bottom:1px solid var(--cbr)}.qsc-rev-item:last-child{border-bottom:none}
 .qsc-cta-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
 .qsc-cta-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:8px;font-size:.9rem;font-weight:600;text-decoration:none;border:1.5px solid var(--cbr);color:var(--tc);background:var(--cb);transition:all .15s}
-.qsc-cta-btn:hover{border-color:#3b82f6;color:#3b82f6;transform:translateY(-1px)}
+.qsc-cta-btn:hover{border-color:#1a1a1a;color:#1a1a1a;transform:translateY(-1px)}
 .qsc-cta-primary{background:var(--badge);color:#fff!important;border-color:var(--badge)}
 .qsc-cta-primary:hover{background:#a03508;border-color:#a03508;color:#fff!important}
 /* Page header */
@@ -4541,7 +4666,7 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
 .qsc-rec-heading{font-size:1rem;font-weight:700;color:var(--tc);margin-bottom:12px}
 .qsc-rec-slider{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.qsc-rec-slider::-webkit-scrollbar{height:4px}.qsc-rec-slider::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:2px}
 .qsc-rec-card{flex:0 0 130px;text-decoration:none;border-radius:12px;overflow:hidden;border:1.5px solid var(--cbr);background:var(--cb);transition:transform .15s,border-color .15s;display:block}
-.qsc-rec-card:hover{transform:translateY(-3px);border-color:#3b82f6;text-decoration:none}
+.qsc-rec-card:hover{transform:translateY(-3px);border-color:#1a1a1a;text-decoration:none}
 .qsc-rec-img-wrap{height:82px;overflow:hidden;position:relative;background:linear-gradient(135deg,#1e3a5f 0%,#2d1b69 100%)}
 .qsc-rec-img{width:100%;height:100%;object-fit:cover;display:block}
 .qsc-rec-overlay{position:absolute;inset:0;background:rgba(0,0,0,.25)}
@@ -4549,7 +4674,7 @@ body.dark-theme .qsc-next-btn{background:#f97316}.body.dark-theme .qsc-next-btn:
 .qsc-rec-body{padding:8px 10px}
 .qsc-rec-date{font-size:.85rem;font-weight:700;color:var(--tc);line-height:1.2}
 .qsc-rec-lbl{font-size:.72rem;color:var(--mu);margin-top:2px}
-body.dark-theme .qsc-rec-card{border-color:rgba(255,255,255,.1)}
+
 </style>
 </head>
 <body>
@@ -4569,7 +4694,7 @@ ${siteNav()}
   ${carouselHtml}
   ${recSliderHtml}
   <div style="background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:18px 20px;margin-bottom:20px">
-    <h3 style="font-size:1rem;font-weight:700;margin-bottom:12px;color:var(--tc)"><i class="bi bi-compass me-2" style="color:#3b82f6"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <h3 style="font-size:1rem;font-weight:700;margin-bottom:12px;color:var(--tc)"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="explore-actions">
       <a href="/events/${monthSlug}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-calendar-event me-2"></i>Historical Events</a>
       <a href="/born/${monthSlug}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>

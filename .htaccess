@@ -1,0 +1,17 @@
+RewriteEngine On
+
+# Local preview bridge for Devilbox/OrbStack.
+# Keep Apache/Devilbox serving the normal site, but proxy Worker-owned routes
+# to `wrangler dev` so generated pages can be previewed before publishing.
+#
+# Start the Worker locally first:
+#   npm run dev:worker
+#
+# Then browse your normal local Devilbox URL, for example:
+#   http://danas.loc/events/march/11/
+#
+# Notes:
+# - `host.internal` lets the Devilbox container reach services running on macOS.
+# - We only proxy Worker routes; the homepage calendar and all normal static
+#   assets remain served by Devilbox, preserving the site's main identity.
+RewriteRule ^(events|born|died|quiz|api|today|og-image|image-proxy|img|sitemap(?:-generated|-people)?\.xml|robots\.txt|llms\.txt|warmup|search-ping|generated)(.*)$ http://host.internal:8787/$1$2 [P,L]

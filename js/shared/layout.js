@@ -28,35 +28,32 @@ const FLIPBOARD_ICON =
  * Returns the canonical site navbar HTML.
  *
  * @param {object} opts
- * @param {string}  [opts.todayLink]         href for "Today's Events" — omit to hide
- * @param {string}  [opts.switchIdMobile]    id for the mobile dark-mode toggle  (default "tsm")
- * @param {string}  [opts.switchIdDesktop]   id for the desktop dark-mode toggle (default "tsd")
+ * @param {string}  [opts.todayLink]         href for "Today" (default "/today")
  */
-export function siteNav({
-  todayLink = "",
-  switchIdMobile = "tsm",
-  switchIdDesktop = "tsd",
-} = {}) {
-  const todayItem = todayLink
-    ? `<li class="nav-item"><a class="nav-link" href="${todayLink}">Today's Events</a></li>`
-    : "";
-
-  return `<nav class="navbar navbar-expand-lg navbar-dark">
+export function siteNav({ todayLink = "/today" } = {}) {
+  return `<nav class="navbar navbar-expand-lg navbar-light">
   <div class="container-fluid">
     <a class="navbar-brand" href="/">thisDay.</a>
-    <div class="form-check form-switch d-lg-none me-2">
-      <input class="form-check-input" type="checkbox" id="${switchIdMobile}" aria-label="Toggle dark mode"/>
-      <label class="form-check-label" for="${switchIdMobile}"><i class="bi bi-brightness-high-fill theme-icon-sun" style="color:#fff;font-size:1.1rem;margin-left:4px"></i><i class="bi bi-moon-fill theme-icon-moon" style="color:#fff;font-size:1.1rem;margin-left:4px"></i></label>
-    </div>
-    <div class="collapse navbar-collapse">
+    <button
+      class="navbar-toggler"
+      type="button"
+      data-bs-toggle="collapse"
+      data-bs-target="#siteNavbar"
+      aria-controls="siteNavbar"
+      aria-expanded="false"
+      aria-label="Toggle navigation"
+    >
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="siteNavbar">
       <ul class="navbar-nav ms-auto">
-        ${todayItem}
-        <li class="nav-item d-flex align-items-center">
-          <div class="form-check form-switch d-none d-lg-block me-2">
-            <input class="form-check-input" type="checkbox" id="${switchIdDesktop}" aria-label="Toggle dark mode"/>
-            <label class="form-check-label" for="${switchIdDesktop}" style="color:#fff"><i class="bi bi-brightness-high-fill theme-icon-sun" style="font-size:1.1rem"></i><i class="bi bi-moon-fill theme-icon-moon" style="font-size:1.1rem"></i></label>
-          </div>
-        </li>
+        <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
+        <li class="nav-item"><a class="nav-link" href="${todayLink}">Today</a></li>
+        <li class="nav-item"><a class="nav-link" href="/blog/">Blog</a></li>
+        <li class="nav-item"><a class="nav-link" href="/about/">About</a></li>
+        <li class="nav-item"><a class="nav-link" href="/contact/">Contact</a></li>
+        <li class="nav-item"><a class="nav-link" href="/terms/">Terms</a></li>
+        <li class="nav-item"><a class="nav-link" href="/privacy-policy/">Privacy</a></li>
       </ul>
     </div>
   </div>
@@ -65,8 +62,19 @@ export function siteNav({
 
 /** Navbar CSS — paste into the page <style> block. */
 export const NAV_CSS =
-  `.navbar{background:var(--pb,#1d4ed8)!important;position:sticky;top:0;z-index:1030}` +
-  `.navbar-brand,.nav-link{color:var(--htc,#fff)!important;font-weight:700!important}`;
+  `.navbar{background:var(--pb,var(--primary-bg,#ffffff))!important;position:sticky;top:0;z-index:1030}` +
+  `.navbar-brand,.nav-link{color:var(--htc,var(--header-text-color,#1f1f1f))!important;font-weight:700!important}` +
+  `.navbar-toggler{border-color:var(--card-border,#e2e8f0)}` +
+  `.navbar-toggler:focus{box-shadow:0 0 0 .15rem rgba(0,0,0,.12)}` +
+  `body.dark-theme .navbar-toggler{border-color:rgba(255,255,255,.35)}` +
+  `body.dark-theme .navbar-toggler-icon{filter:invert(1)}`;
+
+// Small fallback for the hamburger icon in case Bootstrap's icon styles are
+// not available (ensures a visible 3-bar icon on all pages).
+export const NAV_CSS_FALLBACK =
+  `.navbar-toggler-icon{background-image:none!important;position:relative;width:1.6rem;height:1rem;display:inline-block}` +
+  `.navbar-toggler-icon::before{content:'';position:absolute;left:0;right:0;top:50%;height:2px;background:currentColor;box-shadow:0 -6px 0 currentColor, 0 6px 0 currentColor;transform:translateY(-50%);border-radius:2px}` +
+  `@media (prefers-reduced-motion: reduce){.navbar-toggler{transition:none}}`;
 
 // ---------------------------------------------------------------------------
 // Footer

@@ -5,11 +5,13 @@
   "kv_namespaces": [
     {
       "binding": "EVENTS_KV",
-      "id": "39d7ce85d93a49c5bb42ee6f2416b1e0"
+      "id": "39d7ce85d93a49c5bb42ee6f2416b1e0",
+      "preview_id": "7e94191271854d90ae9f7a0cc13555d5"
     },
     {
       "binding": "BLOG_AI_KV",
-      "id": "5173c34a7bd04cde9988c0e89d77bb6e"
+      "id": "5173c34a7bd04cde9988c0e89d77bb6e",
+      "preview_id": "c1b308dd3ea14b36aa123f007a07b7de"
     }
   ],
   "ai": {

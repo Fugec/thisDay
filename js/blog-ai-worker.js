@@ -64,7 +64,7 @@ const MONTH_SLUGS = [
 // ---------------------------------------------------------------------------
 function supportPopupSnippet() {
   return `<style>#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}#supportPopup.show{display:flex;opacity:1}.support-popup-content{background:var(--card-bg,#fff);color:var(--text-color,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--card-border,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}@keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}.support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:#64748b;line-height:1;padding:0}.support-close-btn:hover{color:#1e293b}</style>
-<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:#3b82f6;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
+<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:#1f1f1f;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
 <script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{var _t=localStorage.getItem('supportPopupClosed');if(_t&&Date.now()-Number(_t)<86400000)return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed',String(Date.now()));}catch(e){}});})();<\/script>`;
 }
 
@@ -404,7 +404,7 @@ export default {
             .replaceAll('class="table table-bordered"', 'class="site-table"')
             .replaceAll('<th scope="row">', "<th>");
           if (!patchedHtml.includes(".site-table{")) {
-            const siteTableCss = `<style>.site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--card-border,#e2e8f0);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}.site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--card-border,#e2e8f0);text-align:left;color:var(--text-color)}.site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}.site-table th{background:rgba(59,130,246,.07);font-weight:600;white-space:nowrap;width:40%}body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}body.dark-theme .site-table th{background:rgba(96,165,250,.1)}body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}</style>`;
+            const siteTableCss = `<style>.site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--card-border,#e2e8f0);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}.site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--card-border,#e2e8f0);text-align:left;color:var(--text-color)}.site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}.site-table th{background:rgba(0,0,0,.035);font-weight:600;white-space:nowrap;width:40%}body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}body.dark-theme .site-table th{background:rgba(255,255,255,.06)}body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}</style>`;
             patchedHtml = patchedHtml.replace(
               "</head>",
               siteTableCss + "</head>",
@@ -485,7 +485,7 @@ export default {
     var container=document.getElementById('tdq-questions');
     container.innerHTML=quiz.questions.slice(0,total).map(function(q,qi){
       var optsHtml=(q.options||[]).map(function(opt,oi){return '<div class="tdq-opt" data-qi="'+qi+'" data-oi="'+oi+'"><span class="tdq-opt-key">'+String.fromCharCode(65+oi)+'</span>'+esc(String(opt))+'</div>';}).join('');
-      var expHtml=q.explanation?'<div class="tdq-explanation" id="tdq-e-'+qi+'" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">'+esc(String(q.explanation))+'</div>':'';
+      var expHtml=q.explanation?'<div class="tdq-explanation" id="tdq-e-'+qi+'" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid #1f1f1f;border-radius:0 6px 6px 0">'+esc(String(q.explanation))+'</div>':'';
       var actionBtn=qi<total-1?'<button class="tdq-next-btn" id="tdq-next-'+qi+'" data-qi="'+qi+'" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;gap:8px;align-items:center;justify-content:center">Next Question <i class="bi bi-arrow-right"></i></button>':'<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
       return '<div class="tdq-question" id="tdq-q-'+qi+'" style="display:'+(qi===0?'block':'none')+'"><p class="tdq-q-text"><strong>'+(qi+1)+'.</strong> '+esc(String(q.q))+'</p><div class="tdq-options">'+optsHtml+'</div><div class="tdq-feedback" id="tdq-f-'+qi+'" hidden></div>'+expHtml+actionBtn+'</div>';
     }).join('');
@@ -574,7 +574,7 @@ export default {
           const quizBlock = `
   <!-- Quiz popup -->
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
-  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;flex-direction:column;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Inter,sans-serif">
+  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;flex-direction:column;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
     <div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--card-border,#e2e8f0);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
       <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1;flex-shrink:0;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:flex-end">&times;</button>
@@ -637,7 +637,7 @@ export default {
         var optsHtml = (q.options || []).map(function(opt, oi) {
           return '<div class="tdq-opt" data-qi="' + qi + '" data-oi="' + oi + '"><span class="tdq-opt-key">' + String.fromCharCode(65 + oi) + '</span>' + esc(String(opt)) + '</div>';
         }).join("");
-        var expHtml = q.explanation ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>' : '';
+        var expHtml = q.explanation ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid #1f1f1f;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>' : '';
         var actionBtn = qi < total - 1
           ? '<button class="tdq-next-btn" id="tdq-next-' + qi + '" data-qi="' + qi + '" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer">Next Question <i class="bi bi-arrow-right ms-1"></i></button>'
           : '<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
@@ -720,7 +720,7 @@ export default {
           // Fix intermediate explore cards that have data-explore-injected but Bootstrap flex classes (no nowrap)
           patchedHtml = patchedHtml.replace(
             /(<div data-explore-injected="1" class="mt-4 p-3 rounded) d-flex[^"]*"([^>]*)>/g,
-            '$1" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">',
+            '$1" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">',
           );
           // Build "Explore in History" section
           const _sp = slugParsedForThumb;
@@ -730,7 +730,7 @@ export default {
               ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
               : "";
             exploreHtml = `
-          <div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+          <div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">
             ${_thumb}<div style="flex:1;min-width:0">
               <strong>Explore ${_sp.monthDisplay} ${_sp.day} in History</strong><br/>
               <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
@@ -740,7 +740,7 @@ export default {
           }
           // Inject quiz before Wikipedia source box (matching March 14 template order)
           const wikiAnchor =
-            '<div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08)';
+            '<div class="mt-4 p-3 rounded" style="background-color: rgba(0,0,0,0.04)';
           if (patchedHtml.includes(wikiAnchor)) {
             patchedHtml = patchedHtml.replace(
               wikiAnchor,
@@ -817,7 +817,7 @@ export default {
           const thumb = eventsThumb
             ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
             : "";
-          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
+          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
           const anchor = patchedHtml.includes("<!-- Quiz CTA -->")
             ? "<!-- Quiz CTA -->"
             : patchedHtml.includes("You Might Also Like")
@@ -830,7 +830,7 @@ export default {
         }
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
-          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}body.dark-theme #read-progress{background:#60a5fa}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}.site-btn-primary{border-color:#3b82f6;color:#2563eb}.site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}.tdq-cta-sub{color:#6c757d}body.dark-theme .tdq-cta-sub{color:#fff}</style>`;
+          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#1f1f1f;z-index:9999;transition:width .1s linear;pointer-events:none}body.dark-theme #read-progress{background:#d6d6d6}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:#1f1f1f;background:rgba(0,0,0,.035)}.site-btn-primary{border-color:#1f1f1f;color:#2b2b2b}.site-btn-primary:hover{background:rgba(0,0,0,.05);border-color:#2b2b2b;color:#111111}body.dark-theme .site-btn-primary{border-color:#d6d6d6;color:#e1e1e1}body.dark-theme .site-btn-primary:hover{background:rgba(255,255,255,.08);border-color:#e1e1e1;color:#f5f5f5}.tdq-cta-sub{color:#6c757d}body.dark-theme .tdq-cta-sub{color:#fff}</style>`;
           const progressHtml = `<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>`;
           const progressJs = `<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();<\/script>`;
           patchedHtml = patchedHtml
@@ -846,7 +846,7 @@ export default {
           }
         }
         // Patch old blue quiz option selection → amber (matches btn-warning on homepage)
-        if (patchedHtml.includes("tdq-opt-selected{border-color:#3b82f6")) {
+        if (patchedHtml.includes("tdq-opt-selected{border-color:#1f1f1f")) {
           patchedHtml = patchedHtml.replace(
             "</head>",
             "<style>.tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.07)!important}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important}.tdq-opt-selected .tdq-opt-key{background:#f59e0b!important}body.dark-theme .tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.08)!important}body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}</style></head>",
@@ -2634,7 +2634,7 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     .join("\n");
 
   const editorialNote = c.editorialNote
-    ? `          <p class="mt-4 fst-italic" style="font-size: 0.93rem; opacity: 0.85; border-left: 3px solid #3b82f6; padding-left: 1rem;">
+    ? `          <p class="mt-4 fst-italic" style="font-size: 0.93rem; opacity: 0.85; border-left: 3px solid #1f1f1f; padding-left: 1rem;">
             ${esc(c.editorialNote)}
           </p>`
     : "";
@@ -2797,7 +2797,7 @@ ${JSON.stringify({
     <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css" />
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
@@ -2819,19 +2819,19 @@ ${JSON.stringify({
 
     <style>
       :root {
-        --link-hover-color: #1d4ed8;
-        --primary-bg: #3b82f6;
+        --link-hover-color: #111111;
+        --primary-bg: #ffffff;
         --secondary-bg: #fff;
         --text-color: #6c757d;
-        --header-text-color: #ffffff;
+        --header-text-color: #1f1f1f;
         --card-bg: #ffffff;
         --card-border: #e2e8f0;
-        --footer-bg: #3b82f6;
-        --footer-text-color: #ffffff;
-        --link-color: #2563eb;
+        --footer-bg: #ffffff;
+        --footer-text-color: #1f1f1f;
+        --link-color: #2b2b2b;
         --switch-track-off: #e2e8f0;
         --switch-thumb-off: #cbd5e1;
-        --switch-track-on: #2563eb;
+        --switch-track-on: #2b2b2b;
         --switch-thumb-on: #ffffff;
         --border-radius: 0.5rem;
         background-color: var(--secondary-bg);
@@ -2846,16 +2846,16 @@ ${JSON.stringify({
         --card-border: #334155;
         --footer-bg: #020617;
         --footer-text-color: #ffffff;
-        --link-color: #60a5fa;
+        --link-color: #d6d6d6;
         --switch-track-off: #334155;
         --switch-thumb-off: #64748b;
-        --switch-track-on: #2563eb;
+        --switch-track-on: #2b2b2b;
         --switch-thumb-on: #f8fafc;
         background-color: var(--secondary-bg) !important;
         color: var(--text-color) !important;
       }
       body {
-        font-family: Inter, sans-serif;
+        font-family: Lora, serif;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
@@ -2877,18 +2877,18 @@ ${JSON.stringify({
       .article-meta { color: #6c757d; font-size: 0.875rem; }
       body.dark-theme .article-meta { color: #94a3b8; }
       .breadcrumb { background: transparent; padding: 0; margin-bottom: 1rem; }
-      body.dark-theme .breadcrumb-item a { color: #60a5fa; }
+      body.dark-theme .breadcrumb-item a { color: #d6d6d6; }
       body.dark-theme .breadcrumb-item.active { color: #94a3b8; }
       body.dark-theme .breadcrumb-item + .breadcrumb-item::before { color: #64748b; }
-      .did-you-know { background: rgba(59,130,246,0.08); border-left: 4px solid #3b82f6; border-radius: 0 0.5rem 0.5rem 0; }
-      body.dark-theme .did-you-know { background: rgba(59,130,246,0.15); }
+      .did-you-know { background: rgba(0,0,0,0.04); border-left: 4px solid #1f1f1f; border-radius: 0 0.5rem 0.5rem 0; }
+      body.dark-theme .did-you-know { background: rgba(0,0,0,0.06); }
       .analysis-good { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); }
       body.dark-theme .analysis-good { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25); }
       .analysis-bad { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); }
       body.dark-theme .analysis-bad { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); }
       .related-card { border: 1px solid var(--card-border); background: var(--card-bg); transition: transform 0.15s ease, box-shadow 0.15s ease; }
       .related-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-decoration: none; }
-      blockquote.historical-quote { border-left: 3px solid #3b82f6; padding-left: 1rem; margin-left: 0.5rem; font-style: italic; }
+      blockquote.historical-quote { border-left: 3px solid #1f1f1f; padding-left: 1rem; margin-left: 0.5rem; font-style: italic; }
       body.dark-theme blockquote.historical-quote footer { color: #94a3b8; }
       .border {
         border: 1px solid var(--card-border);
@@ -2918,23 +2918,21 @@ ${JSON.stringify({
         color: #f8fafc;
         background-color: #1d293b;
       }
-      .theme-switch-desktop label { color: var(--header-text-color); }
-      .theme-switch-mobile label i { color: var(--header-text-color); font-size: 1.2rem; margin-left: 0.5rem; }
-      #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#3b82f6;z-index:9999;transition:width .1s linear;pointer-events:none}
-      body.dark-theme #read-progress{background:#60a5fa}
+      #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#1f1f1f;z-index:9999;transition:width .1s linear;pointer-events:none}
+      body.dark-theme #read-progress{background:#d6d6d6}
       button#chatbotToggle,#chatbotWindow{display:none!important}
       .site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
-      .site-btn:hover{border-color:#3b82f6;background:rgba(59,130,246,.07)}
-      .site-btn-primary{border-color:#3b82f6;color:#2563eb}
-      .site-btn-primary:hover{background:rgba(59,130,246,.12);border-color:#2563eb;color:#1d4ed8}
-      body.dark-theme .site-btn-primary{border-color:#60a5fa;color:#93c5fd}
-      body.dark-theme .site-btn-primary:hover{background:rgba(96,165,250,.15);border-color:#93c5fd;color:#e0f2fe}
+      .site-btn:hover{border-color:#1f1f1f;background:rgba(0,0,0,.035)}
+      .site-btn-primary{border-color:#1f1f1f;color:#2b2b2b}
+      .site-btn-primary:hover{background:rgba(0,0,0,.05);border-color:#2b2b2b;color:#111111}
+      body.dark-theme .site-btn-primary{border-color:#d6d6d6;color:#e1e1e1}
+      body.dark-theme .site-btn-primary:hover{background:rgba(255,255,255,.08);border-color:#e1e1e1;color:#f5f5f5}
       .site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--card-border,#e2e8f0);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}
       .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--card-border,#e2e8f0);text-align:left;color:var(--text-color)}
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
-      .site-table th{background:rgba(59,130,246,.07);font-weight:600;white-space:nowrap;width:40%}
+      .site-table th{background:rgba(0,0,0,.035);font-weight:600;white-space:nowrap;width:40%}
       body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}
-      body.dark-theme .site-table th{background:rgba(96,165,250,.1)}
+      body.dark-theme .site-table th{background:rgba(255,255,255,.06)}
       body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}
       .tdq-cta-sub{color:#6c757d}
       body.dark-theme .tdq-cta-sub{color:#fff}
@@ -3096,7 +3094,7 @@ ${analysisBadItems}
           }
 
           <!-- Wikipedia source -->
-          <div class="mt-4 p-3 rounded" style="background-color: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);">
+          <div class="mt-4 p-3 rounded" style="background-color: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08);">
             <small class="article-meta">
               Want to learn more? Read the full article on
               <a href="${esc(c.wikiUrl || c.jsonLdUrl)}" target="_blank" rel="noopener noreferrer">Wikipedia</a>.
@@ -3125,7 +3123,7 @@ ${analysisBadItems}
               c.eventsImageUrl || c.imageUrl
                 ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="${esc(c.eventTitle)} historical image" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
                 : "";
-            return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18)">
+            return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">
               ${exploreThumb}
               <div style="flex:1;min-width:0">
                 <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
@@ -3203,23 +3201,16 @@ ${analysisBadItems}
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       ${footerYearScript()}
-      const tsd = document.getElementById("tsd");
-      const tsm = document.getElementById("tsm");
       const body = document.body;
       const DARK_THEME_KEY = "darkTheme";
 
       const setTheme = (isDark) => {
         isDark ? body.classList.add("dark-theme") : body.classList.remove("dark-theme");
         localStorage.setItem(DARK_THEME_KEY, String(isDark));
-        if (tsd) tsd.checked = isDark;
-        if (tsm) tsm.checked  = isDark;
       };
 
       const savedTheme = localStorage.getItem(DARK_THEME_KEY);
       setTheme(savedTheme !== "false"); // default: dark
-
-      if (tsd) tsd.addEventListener("change", (e) => setTheme(e.target.checked));
-      if (tsm) tsm.addEventListener("change",  (e) => setTheme(e.target.checked));
     });
   </script>
 
@@ -3240,7 +3231,7 @@ ${analysisBadItems}
 
   <!-- Quiz popup: load quiz data and show after scroll to bottom -->
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
-  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;padding:0 0 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Inter,sans-serif">
+  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;padding:0 0 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
     <div id="tdq-header" style="position:sticky;top:0;z-index:1;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;border-bottom:1px solid var(--card-border,#e2e8f0);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
       <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1;flex-shrink:0">&times;</button>
@@ -3308,7 +3299,7 @@ ${analysisBadItems}
     .tdq-question{margin-bottom:16px;display:none}.tdq-question.tdq-q-active{display:block}
     @keyframes tdq-slide-in{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:translateX(0)}}
     .tdq-q-enter{animation:tdq-slide-in .22s ease forwards}
-    @keyframes tdq-pulse-in{0%{background:rgba(59,130,246,.13)}60%{background:rgba(59,130,246,.06)}100%{background:transparent}}
+    @keyframes tdq-pulse-in{0%{background:rgba(0,0,0,.05)}60%{background:rgba(0,0,0,.03)}100%{background:transparent}}
     .tdq-q-pulse{animation:tdq-pulse-in .6s ease forwards}
     @media(prefers-reduced-motion:reduce){.tdq-q-pulse,.tdq-q-enter{animation:none;transition:none}}
     .tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
@@ -3405,7 +3396,7 @@ ${analysisBadItems}
         var isLast = qi === total - 1;
         var nextLabel = isLast ? '<i class="bi bi-check2-circle me-1"></i>See Results' : 'Next Question <i class="bi bi-arrow-right ms-1"></i>';
         var expHtml = q.explanation
-          ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(59,130,246,.07);border-left:3px solid #3b82f6;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>'
+          ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid #1f1f1f;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>'
           : '';
         return '<div class="tdq-question" id="tdq-q-' + qi + '">' +
           '<p class="tdq-q-text"><strong>' + (qi + 1) + ' / ' + total + '.</strong> ' + esc(String(q.q)) + '</p>' +
@@ -3640,7 +3631,7 @@ ${JSON.stringify(
     <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
@@ -3651,18 +3642,18 @@ ${JSON.stringify(
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
     <style>
       :root {
-        --primary-bg: #3b82f6; --secondary-bg: #fff; --text-color: #6c757d;
-        --header-text-color: #fff; --footer-bg: #3b82f6; --footer-text-color: #fff;
-        --link-color: #2563eb; --card-bg: #fff; --card-border: rgba(0,0,0,0.1);
+        --primary-bg: #1f1f1f; --secondary-bg: #fff; --text-color: #6c757d;
+        --header-text-color: #fff; --footer-bg: #1f1f1f; --footer-text-color: #fff;
+        --link-color: #2b2b2b; --card-bg: #fff; --card-border: rgba(0,0,0,0.1);
         background-color: var(--secondary-bg); color: var(--text-color);
       }
       body.dark-theme {
         --primary-bg: #020617; --secondary-bg: #1e293b; --text-color: #f8fafc;
         --header-text-color: #fff; --footer-bg: #020617; --footer-text-color: #fff;
-        --link-color: #60a5fa; --card-bg: #1e293b; --card-border: rgba(255,255,255,0.1);
+        --link-color: #d6d6d6; --card-bg: #1e293b; --card-border: rgba(255,255,255,0.1);
         background-color: var(--secondary-bg) !important; color: var(--text-color) !important;
       }
-      body { font-family: Inter, sans-serif; min-height: 100vh; display: flex; flex-direction: column; transition: background-color 0.3s ease, color 0.3s ease; }
+      body { font-family: Lora, serif; min-height: 100vh; display: flex; flex-direction: column; transition: background-color 0.3s ease, color 0.3s ease; }
       .navbar { background-color: var(--primary-bg) !important; position: sticky; top: 0; z-index: 1030; }
       .navbar-brand, .navbar-nav .nav-link { color: var(--header-text-color) !important; font-weight: bold !important; }
       main { flex: 1; padding: 20px 0; }
@@ -3679,10 +3670,10 @@ ${JSON.stringify(
         transition: transform 0.15s ease, box-shadow 0.15s ease; margin-bottom: 10px;
       }
       .blog-post-link:hover { transform: translateX(4px); box-shadow: 0 3px 12px rgba(0,0,0,0.08); text-decoration: none; color: var(--text-color); }
-      .post-icon { color: #3b82f6; font-size: 1.1rem; flex-shrink: 0; margin-top: 2px; }
+      .post-icon { color: #1f1f1f; font-size: 1.1rem; flex-shrink: 0; margin-top: 2px; }
       .post-title { font-weight: 600; font-size: 0.95rem; line-height: 1.4; color: var(--link-color); }
-      body.dark-theme .post-title { color: #60a5fa; }
-      .month-header { font-size: 1.3rem; font-weight: 700; color: #3b82f6 !important; border-bottom: 2px solid rgba(59,130,246,0.3); padding-bottom: 6px; margin-bottom: 14px; }
+      body.dark-theme .post-title { color: #d6d6d6; }
+      .month-header { font-size: 1.3rem; font-weight: 700; color: #1f1f1f !important; border-bottom: 2px solid rgba(122,70,50,0.3); padding-bottom: 6px; margin-bottom: 14px; }
       .ad-unit { text-align: center; }
       .ad-unit-label { font-size: 0.7rem; color: #adb5bd; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
     </style>
@@ -3721,17 +3712,12 @@ ${JSON.stringify(
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       ${footerYearScript()}
-      const tsd = document.getElementById("tsd");
-      const tsm = document.getElementById("tsm");
       const body = document.body;
       const setTheme = (d) => {
         d ? body.classList.add("dark-theme") : body.classList.remove("dark-theme");
         localStorage.setItem("darkTheme", String(d));
-        if (tsd) tsd.checked = d; if (tsm) tsm.checked = d;
       };
       setTheme(localStorage.getItem("darkTheme") !== "false");
-      if (tsd) tsd.addEventListener("change", (e) => setTheme(e.target.checked));
-      if (tsm) tsm.addEventListener("change",  (e) => setTheme(e.target.checked));
     });
     if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
       document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
@@ -3812,16 +3798,16 @@ async function serve404(env) {
   <link rel="icon" href="/images/favicon.ico" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
   <style>
-    body { font-family: Inter, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
-    .navbar { background-color: #3b82f6 !important; position: sticky; top: 0; z-index: 1030; }
+    body { font-family: Lora, serif; min-height: 100vh; display: flex; flex-direction: column; }
+    .navbar { background-color: #1f1f1f !important; position: sticky; top: 0; z-index: 1030; }
     .navbar-brand, .navbar-nav .nav-link { color: #fff !important; font-weight: bold !important; }
     main { flex: 1; }
-    .footer { background-color: #3b82f6; color: #fff; text-align: center; padding: 20px; margin-top: 30px; }
+    .footer { background-color: #1f1f1f; color: #fff; text-align: center; padding: 20px; margin-top: 30px; }
     .footer a { color: #fff; text-decoration: underline; }
-    .hero-code { font-size: 6rem; font-weight: 700; color: #3b82f6; line-height: 1; }
+    .hero-code { font-size: 6rem; font-weight: 700; color: #1f1f1f; line-height: 1; }
   </style>
 </head>
 <body>

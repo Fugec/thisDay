@@ -24,13 +24,51 @@ const KV_INDEX_KEY = "index";
 // ---------------------------------------------------------------------------
 
 const STATIC_PAGES = [
-  { loc: "/",               lastmod: "2026-03-17", changefreq: "daily",   priority: "1.0", dynamicLastmod: true },
-  { loc: "/about/",         lastmod: "2026-03-17", changefreq: "monthly", priority: "0.7" },
-  { loc: "/contact/",       lastmod: "2026-03-17", changefreq: "monthly", priority: "0.6" },
-  { loc: "/blog/",          lastmod: "2026-03-17", changefreq: "weekly",  priority: "0.8", dynamicLastmod: true },
-  { loc: "/blog/archive/",  lastmod: "2026-03-17", changefreq: "weekly",  priority: "0.8", dynamicLastmod: true },
-  { loc: "/privacy-policy/", lastmod: "2026-03-17", changefreq: "yearly", priority: "0.3" },
-  { loc: "/terms/",         lastmod: "2026-03-17", changefreq: "yearly",  priority: "0.3" },
+  {
+    loc: "/",
+    lastmod: "2026-03-17",
+    changefreq: "daily",
+    priority: "1.0",
+    dynamicLastmod: true,
+  },
+  {
+    loc: "/about/",
+    lastmod: "2026-03-17",
+    changefreq: "monthly",
+    priority: "0.7",
+  },
+  {
+    loc: "/contact/",
+    lastmod: "2026-03-17",
+    changefreq: "monthly",
+    priority: "0.6",
+  },
+  {
+    loc: "/blog/",
+    lastmod: "2026-03-17",
+    changefreq: "weekly",
+    priority: "0.8",
+    dynamicLastmod: true,
+  },
+  {
+    loc: "/blog/archive/",
+    lastmod: "2026-03-17",
+    changefreq: "weekly",
+    priority: "0.8",
+    dynamicLastmod: true,
+  },
+  {
+    loc: "/privacy-policy/",
+    lastmod: "2026-03-17",
+    changefreq: "yearly",
+    priority: "0.3",
+  },
+  {
+    loc: "/terms/",
+    lastmod: "2026-03-17",
+    changefreq: "yearly",
+    priority: "0.3",
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -58,10 +96,10 @@ const STATIC_BLOG_POSTS = [
   { loc: "/blog/july/26-2025/", lastmod: "2025-07-26" },
   { loc: "/blog/july/30-2025/", lastmod: "2025-07-30" },
   // August 2025
-  { loc: "/blog/august/1-2025/",  lastmod: "2025-08-01" },
-  { loc: "/blog/august/3-2025/",  lastmod: "2025-08-03" },
-  { loc: "/blog/august/7-2025/",  lastmod: "2025-08-07" },
-  { loc: "/blog/august/9-2025/",  lastmod: "2025-08-09" },
+  { loc: "/blog/august/1-2025/", lastmod: "2025-08-01" },
+  { loc: "/blog/august/3-2025/", lastmod: "2025-08-03" },
+  { loc: "/blog/august/7-2025/", lastmod: "2025-08-07" },
+  { loc: "/blog/august/9-2025/", lastmod: "2025-08-09" },
   { loc: "/blog/august/11-2025/", lastmod: "2025-08-11" },
   { loc: "/blog/august/13-2025/", lastmod: "2025-08-13" },
   { loc: "/blog/august/16-2025/", lastmod: "2025-08-16" },
@@ -71,9 +109,9 @@ const STATIC_BLOG_POSTS = [
   { loc: "/blog/august/26-2025/", lastmod: "2025-08-26" },
   { loc: "/blog/august/30-2025/", lastmod: "2025-08-30" },
   // September 2025
-  { loc: "/blog/september/2-2025/",  lastmod: "2025-09-02" },
-  { loc: "/blog/september/5-2025/",  lastmod: "2025-09-05" },
-  { loc: "/blog/september/8-2025/",  lastmod: "2025-09-08" },
+  { loc: "/blog/september/2-2025/", lastmod: "2025-09-02" },
+  { loc: "/blog/september/5-2025/", lastmod: "2025-09-05" },
+  { loc: "/blog/september/8-2025/", lastmod: "2025-09-08" },
   { loc: "/blog/september/11-2025/", lastmod: "2025-09-11" },
   { loc: "/blog/september/15-2025/", lastmod: "2025-09-15" },
   { loc: "/blog/september/18-2025/", lastmod: "2025-09-18" },
@@ -81,8 +119,8 @@ const STATIC_BLOG_POSTS = [
   { loc: "/blog/september/26-2025/", lastmod: "2025-09-26" },
   { loc: "/blog/september/29-2025/", lastmod: "2025-09-29" },
   // October 2025
-  { loc: "/blog/october/2-2025/",  lastmod: "2025-10-02" },
-  { loc: "/blog/october/6-2025/",  lastmod: "2025-10-06" },
+  { loc: "/blog/october/2-2025/", lastmod: "2025-10-02" },
+  { loc: "/blog/october/6-2025/", lastmod: "2025-10-06" },
   { loc: "/blog/october/13-2025/", lastmod: "2025-10-13" },
   { loc: "/blog/october/21-2025/", lastmod: "2025-10-21" },
   { loc: "/blog/october/28-2025/", lastmod: "2025-10-28" },
@@ -129,7 +167,9 @@ export default {
       console.error("Sitemap: failed to read KV index:", err);
     }
 
-    const xml = buildSitemap(aiPosts);
+    // Allow skipping legacy (static) blog posts via an environment flag
+    const ignoreLegacy = env && String(env.IGNORE_LEGACY_BLOG) === "true";
+    const xml = buildSitemap(aiPosts, ignoreLegacy);
 
     const response = new Response(xml, {
       headers: {
@@ -149,29 +189,30 @@ export default {
 // XML builder
 // ---------------------------------------------------------------------------
 
-function buildSitemap(aiPosts) {
+function buildSitemap(aiPosts, ignoreLegacy = false) {
   const entries = [];
 
-  const latestPostLastmod = computeLatestPostLastmod(aiPosts);
+  const latestPostLastmod = computeLatestPostLastmod(aiPosts, ignoreLegacy);
 
   // 1. Core static pages
   for (const page of STATIC_PAGES) {
-    entries.push(urlEntry(
-      `${DOMAIN}${page.loc}`,
-      page.dynamicLastmod ? latestPostLastmod : page.lastmod,
-      page.changefreq,
-      page.priority,
-    ));
+    entries.push(
+      urlEntry(
+        `${DOMAIN}${page.loc}`,
+        page.dynamicLastmod ? latestPostLastmod : page.lastmod,
+        page.changefreq,
+        page.priority,
+      ),
+    );
   }
 
   // 2. Legacy static blog posts (HTML files on disk)
-  for (const post of STATIC_BLOG_POSTS) {
-    entries.push(urlEntry(
-      `${DOMAIN}${post.loc}`,
-      post.lastmod,
-      "monthly",
-      "0.8",
-    ));
+  if (!ignoreLegacy) {
+    for (const post of STATIC_BLOG_POSTS) {
+      entries.push(
+        urlEntry(`${DOMAIN}${post.loc}`, post.lastmod, "monthly", "0.8"),
+      );
+    }
   }
 
   // 3. AI-generated blog posts from KV (newest first, already sorted by blog worker)
@@ -180,12 +221,9 @@ function buildSitemap(aiPosts) {
       ? post.publishedAt.slice(0, 10) // "YYYY-MM-DD"
       : latestPostLastmod;
 
-    entries.push(urlEntry(
-      `${DOMAIN}/blog/${post.slug}/`,
-      lastmod,
-      "monthly",
-      "0.8",
-    ));
+    entries.push(
+      urlEntry(`${DOMAIN}/blog/${post.slug}/`, lastmod, "monthly", "0.8"),
+    );
   }
 
   return (
@@ -207,15 +245,20 @@ function urlEntry(loc, lastmod, changefreq, priority) {
   );
 }
 
-function computeLatestPostLastmod(aiPosts) {
+function computeLatestPostLastmod(aiPosts, ignoreLegacy = false) {
   const candidates = [];
 
-  for (const post of STATIC_BLOG_POSTS) {
-    if (post?.lastmod) candidates.push(post.lastmod);
+  if (!ignoreLegacy) {
+    for (const post of STATIC_BLOG_POSTS) {
+      if (post?.lastmod) candidates.push(post.lastmod);
+    }
   }
 
   for (const post of aiPosts || []) {
-    if (typeof post?.publishedAt === "string" && post.publishedAt.length >= 10) {
+    if (
+      typeof post?.publishedAt === "string" &&
+      post.publishedAt.length >= 10
+    ) {
       candidates.push(post.publishedAt.slice(0, 10));
     }
   }

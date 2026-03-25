@@ -15,10 +15,21 @@ const loadingIndicator = document.getElementById("loadingIndicator");
 const carouselInner = document.getElementById("carouselInner");
 const carouselIndicators = document.getElementById("carouselIndicators");
 
-// Theme toggle elements (checkboxes)
-const themeSwitchMobile = document.getElementById("tsm");
-const themeSwitchDesktop = document.getElementById("tsd");
 const body = document.body;
+
+// Ensure site does not start in dark mode — remove any dark-theme markers
+try {
+  if (body && body.classList) {
+    body.classList.remove("dark-theme");
+    body.classList.remove("dark");
+  }
+  // Some pages may set a data-theme attribute — clear it to avoid CSS selectors
+  if (body && body.hasAttribute && body.hasAttribute("data-theme")) {
+    body.removeAttribute("data-theme");
+  }
+} catch (e) {
+  /* ignore */
+}
 
 let currentDate = new Date();
 let lastActiveCard = null;
@@ -814,12 +825,6 @@ async function renderCalendar() {
       );
       if (todayCard) {
         await loadDayEvents(todayCard, month, true);
-        setTimeout(() => {
-          todayCard.scrollIntoView({
-            behavior: "smooth",
-            block: "center",
-          });
-        }, 300);
       }
     }
     await carouselPromise;
@@ -1482,11 +1487,7 @@ const eventCategories = {
       "new territory",
       "geographical",
     ],
-    exclude: [
-      "oil exploration",
-      "space exploration",
-      "mineral exploration",
-    ],
+    exclude: ["oil exploration", "space exploration", "mineral exploration"],
   },
   "Famous Persons": {
     include: [
@@ -1541,21 +1542,21 @@ const eventCategories = {
 };
 
 const categoryEmojis = {
-  "All": "📅",
+  All: "📅",
   "War & Conflict": "⚔️",
   "Politics & Government": "🏛️",
   "Science & Technology": "🔬",
   "Arts & Culture": "🎭",
   "Disasters & Accidents": "🌋",
-  "Sports": "🏆",
+  Sports: "🏆",
   "Social & Human Rights": "✊",
   "Economy & Business": "📈",
   "Health & Medicine": "💊",
   "Exploration & Discovery": "🧭",
-  "Births": "👶",
-  "Deaths": "🕯️",
+  Births: "👶",
+  Deaths: "🕯️",
   "Famous Persons": "⭐",
-  "Miscellaneous": "📌",
+  Miscellaneous: "📌",
 };
 
 function showCopyToast(message = "Copied to clipboard!") {
@@ -1928,31 +1929,6 @@ function applyFilter() {
   if (modalBody) modalBody.scrollTop = prevScroll;
 }
 
-function initPopupExploreBar(month, day) {
-  const bar = document.getElementById("popupExploreBar");
-  // With modal-dialog-scrollable, the actual scroll container is .modal-body
-  const scrollEl = document.getElementById("modalBodyContent");
-  if (!bar || !scrollEl) return;
-  const mSlug = monthNames[month - 1].toLowerCase();
-  document.getElementById("popupExploreEvents").href = `/events/${mSlug}/${day}/`;
-  document.getElementById("popupExploreBirths").href = `/born/${mSlug}/${day}/`;
-  document.getElementById("popupExploreDied").href = `/died/${mSlug}/${day}/`;
-  // Show immediately; hide only when Explore section scrolls into view
-  bar.classList.add("visible");
-
-  if (scrollEl._exploreBarObserver) scrollEl._exploreBarObserver.disconnect();
-  const exploreSection = document.getElementById("modalExploreSection");
-  if (exploreSection && "IntersectionObserver" in window) {
-    scrollEl._exploreBarObserver = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) bar.classList.remove("visible");
-        else bar.classList.add("visible");
-      },
-      { root: scrollEl, threshold: 0.1 }
-    );
-    scrollEl._exploreBarObserver.observe(exploreSection);
-  }
-}
 
 async function showEventDetails(
   day,
@@ -2008,18 +1984,16 @@ async function showEventDetails(
     // "All" button — full width on mobile, rest in 2-col grid
     const allActive = currentActiveFilter === "all" ? "active" : "";
     let filterButtonsHtml = `<div id="eventFilterContainer">
-      <button class="btn btn-sm btn-outline-primary filter-btn filter-btn-all ${allActive}" data-category="all">📅 All</button>`;
+      <button class="btn btn-sm btn-outline-primary filter-btn filter-btn-all ${allActive}" data-category="all">All</button>`;
     sortedCategories.slice(1).forEach((category) => {
       const isActive =
         category.toLowerCase() === currentActiveFilter ? "active" : "";
-      const emoji = categoryEmojis[category] || "";
-      filterButtonsHtml += `<button class="btn btn-sm btn-outline-primary filter-btn ${isActive}" data-category="${category.toLowerCase()}">${emoji ? emoji + " " : ""}${category}</button>`;
+      filterButtonsHtml += `<button class="btn btn-sm btn-outline-primary filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
     });
     filterButtonsHtml += `</div>`;
     const totalEvents = currentDayAllItems.length;
     const exploredLabel =
       daysExplored === 1 ? "1 day explored" : `${daysExplored} days explored`;
-    const mSlug = monthNames[month - 1].toLowerCase();
     modalBodyContent.innerHTML = `
     <div class="modal-header-content">
         ${filterButtonsHtml}
@@ -2030,36 +2004,6 @@ async function showEventDetails(
     </div>
     <div id="modal-events-list">
         </div>
-    <div class="mt-3 pt-3 border-top">
-      <div class="born-died-toggle" id="toggleBorn" role="button" tabindex="0" aria-expanded="false"
-           data-section="born" data-month="${mSlug}" data-day="${day}">
-        <span><i class="bi bi-person-heart me-2" style="color:#3b82f6"></i>Famous Birthdays</span>
-        <span class="born-died-count" id="bornCount">
-          <i class="bi bi-chevron-down born-died-chevron"></i>
-        </span>
-      </div>
-      <div class="born-died-panel" id="panelBorn" hidden>
-        <div class="born-died-content" id="contentBorn"></div>
-      </div>
-      <div class="born-died-toggle" id="toggleDied" role="button" tabindex="0" aria-expanded="false"
-           data-section="died" data-month="${mSlug}" data-day="${day}">
-        <span><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Notable Deaths</span>
-        <span class="born-died-count" id="diedCount">
-          <i class="bi bi-chevron-down born-died-chevron"></i>
-        </span>
-      </div>
-      <div class="born-died-panel" id="panelDied" hidden>
-        <div class="born-died-content" id="contentDied"></div>
-      </div>
-    </div>
-    <div id="modalExploreSection" class="mt-3 pt-2 border-top">
-      <p class="text-muted mb-2" style="font-size:0.8rem;"><i class="bi bi-compass me-1"></i>Explore ${monthNames[month - 1]} ${day}</p>
-      <div class="explore-actions">
-        <a href="/quiz/${mSlug}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
-        <a href="/born/${mSlug}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
-        <a href="/died/${mSlug}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
-      </div>
-    </div>
 `;
     modalBodyContent.querySelectorAll(".filter-btn").forEach((button) => {
       button.addEventListener("click", (event) => {
@@ -2084,7 +2028,6 @@ async function showEventDetails(
       });
     });
     applyFilter();
-    initPopupExploreBar(month, day);
     fetchAndApplyCommentary(month, day);
 
     // Born / Died accordion wiring
@@ -2092,7 +2035,9 @@ async function showEventDetails(
       const toggle = modalBodyContent.querySelector(`#toggle${type}`);
       const panel = modalBodyContent.querySelector(`#panel${type}`);
       const content = modalBodyContent.querySelector(`#content${type}`);
-      const countEl = modalBodyContent.querySelector(`#${type.toLowerCase()}Count`);
+      const countEl = modalBodyContent.querySelector(
+        `#${type.toLowerCase()}Count`,
+      );
       if (!toggle || !panel || !content) return;
       let loaded = false;
 
@@ -2100,35 +2045,50 @@ async function showEventDetails(
         const isOpen = toggle.getAttribute("aria-expanded") === "true";
         toggle.setAttribute("aria-expanded", String(!isOpen));
         panel.hidden = isOpen;
-        toggle.querySelector(".born-died-chevron").classList.toggle("rotated", !isOpen);
+        toggle
+          .querySelector(".born-died-chevron")
+          .classList.toggle("rotated", !isOpen);
 
         if (!isOpen && !loaded) {
           loaded = true;
           const section = type.toLowerCase();
-          const people = (currentDayEventsData?.[section === "born" ? "births" : "deaths"] || []);
-          if (countEl) countEl.innerHTML = `<span>${people.length}</span> <i class="bi bi-chevron-down born-died-chevron${!isOpen ? " rotated" : ""}"></i>`;
+          const people =
+            currentDayEventsData?.[section === "born" ? "births" : "deaths"] ||
+            [];
+          if (countEl)
+            countEl.innerHTML = `<span>${people.length}</span> <i class="bi bi-chevron-down born-died-chevron${!isOpen ? " rotated" : ""}"></i>`;
           if (people.length === 0) {
             content.innerHTML = `<p class="text-muted text-center py-2" style="font-size:0.85rem;">No data available.</p>`;
             return;
           }
-          content.innerHTML = people.map((p) => `
+          content.innerHTML = people
+            .map(
+              (p) => `
             <div class="born-died-person">
-              ${p.thumbnailUrl
-                ? `<img src="${p.thumbnailUrl}" alt="${p.title || ""}" class="born-died-thumb" onerror="this.style.display='none'">`
-                : `<div class="born-died-thumb-placeholder"></div>`}
+              ${
+                p.thumbnailUrl
+                  ? `<img src="${p.thumbnailUrl}" alt="${p.title || ""}" class="born-died-thumb" onerror="this.style.display='none'">`
+                  : `<div class="born-died-thumb-placeholder"></div>`
+              }
               <div class="born-died-info">
                 <a href="${p.sourceUrl || "#"}" target="_blank" rel="noopener" class="born-died-name">${p.title || p.description?.substring(0, 40) || ""}</a>
                 <span class="born-died-year">${p.year ?? ""}</span>
               </div>
-            </div>`).join("");
-          content.insertAdjacentHTML("beforeend",
-            `<a href="/${section}/${toggle.dataset.month}/${toggle.dataset.day}/" class="born-died-view-all">See full page <i class="bi bi-arrow-right ms-1"></i></a>`
+            </div>`,
+            )
+            .join("");
+          content.insertAdjacentHTML(
+            "beforeend",
+            `<a href="/${section}/${toggle.dataset.month}/${toggle.dataset.day}/" class="born-died-view-all">See full page <i class="bi bi-arrow-right ms-1"></i></a>`,
           );
         }
       };
       toggle.addEventListener("click", activateToggle);
       toggle.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activateToggle(); }
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          activateToggle();
+        }
       });
     });
   } catch (error) {
@@ -2150,24 +2110,8 @@ async function showEventDetails(
   lastActiveCard?.setAttribute("aria-expanded", "true");
 }
 
-function setTheme(isDark) {
-  if (isDark) {
-    body.classList.add("dark-theme");
-    if (themeSwitchMobile) themeSwitchMobile.checked = true;
-    if (themeSwitchDesktop) themeSwitchDesktop.checked = true;
-    localStorage.setItem("darkTheme", "true");
-  } else {
-    body.classList.remove("dark-theme");
-    if (themeSwitchMobile) themeSwitchMobile.checked = false;
-    if (themeSwitchDesktop) themeSwitchDesktop.checked = false;
-    localStorage.setItem("darkTheme", "false");
-  }
-}
-
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    const savedTheme = localStorage.getItem("darkTheme");
-    setTheme(savedTheme !== "false"); // default: dark
     if (!calendarGrid) return;
     await renderCalendar();
   } catch (error) {
@@ -2184,18 +2128,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 });
-
-if (themeSwitchMobile) {
-  themeSwitchMobile.addEventListener("change", () => {
-    setTheme(themeSwitchMobile.checked);
-  });
-}
-
-if (themeSwitchDesktop) {
-  themeSwitchDesktop.addEventListener("change", () => {
-    setTheme(themeSwitchDesktop.checked);
-  });
-}
 
 const prevMonthBtn = document.getElementById("prevMonthBtn");
 const nextMonthBtn = document.getElementById("nextMonthBtn");
@@ -2343,12 +2275,6 @@ if (eventDetailModalElement) {
     currentActiveFilter = "all";
     lastActiveCard?.setAttribute("aria-expanded", "false");
     lastActiveCard = null;
-    document.getElementById("popupExploreBar")?.classList.remove("visible");
-    const scrollEl = document.getElementById("modalBodyContent");
-    if (scrollEl?._exploreBarObserver) {
-      scrollEl._exploreBarObserver.disconnect();
-      delete scrollEl._exploreBarObserver;
-    }
   });
 }
 

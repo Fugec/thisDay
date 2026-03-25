@@ -532,6 +532,60 @@
         }
       }
 
+      /* Today's Events CTA */
+      .todays-events-cta {
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        background: var(--btn-bg);
+        color: #fff;
+      }
+      .todays-events-cta-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 2rem;
+        padding: 2.5rem 2rem;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .todays-events-cta-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin: 0 0 0.35rem;
+      }
+      .todays-events-cta-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin: 0 0 0.5rem;
+        color: #fff;
+      }
+      .todays-events-cta-desc {
+        font-size: 0.9rem;
+        color: rgba(255,255,255,0.75);
+        margin: 0;
+        max-width: 480px;
+        line-height: 1.5;
+      }
+      .todays-events-cta .btn {
+        background: var(--accent);
+        color: #1b3a2d;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .todays-events-cta .btn:hover {
+        background: #b5d94a;
+        color: #1b3a2d;
+      }
+      @media (max-width: 640px) {
+        .todays-events-cta-inner {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+      }
+
       /* Quiz Section */
       .quiz-section {
         background: var(--bg-alt);
@@ -974,10 +1028,10 @@
           padding: 0.5rem 0.25rem;
         }
         .day-number {
-          font-size: 1.1rem;
+          font-size: 14.4px;
         }
         .event-summary {
-          font-size: 0.65rem;
+          font-size: 11px;
           display: -webkit-box;
           -webkit-line-clamp: 1;
           -webkit-box-orient: vertical;
@@ -1020,11 +1074,11 @@
           padding: 0.5rem 0.25rem;
         }
         .day-number {
-          font-size: 1rem;
+          font-size: 13px;
         }
         .event-summary {
           display: block;
-          font-size: 0.6rem;
+          font-size: 10px;
         }
         .event-count {
           display: block;
@@ -1123,6 +1177,18 @@
     <section class="blog-section">
       <div class="blog-grid" id="blogGrid">
         <!-- Populated by JavaScript -->
+      </div>
+    </section>
+
+    <!-- Today's Events CTA -->
+    <section class="todays-events-cta">
+      <div class="todays-events-cta-inner">
+        <div>
+          <p class="todays-events-cta-label">Explore the calendar</p>
+          <h2 class="todays-events-cta-title">Today's Events</h2>
+          <p class="todays-events-cta-desc">Browse every historical event, birth, and death recorded on today's date — sourced from Wikipedia.</p>
+        </div>
+        <a href="/" class="btn">View Today's Events</a>
       </div>
     </section>
 
@@ -1451,7 +1517,7 @@
               '<div class="events-slider-card-year">' + (e.year || "") + "</div>" +
               "<h4>" + (e.title || "") + "</h4>" +
               "<p>" + (e.description || "") + "</p>" +
-              (e.sourceUrl ? '<span class="slider-read-more">Read More</span>' : "") +
+              '<span class="slider-read-more">Read More</span>' +
               "</div>";
             slider.appendChild(card);
           });

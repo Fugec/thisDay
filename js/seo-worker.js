@@ -2849,6 +2849,14 @@ async function handleFetchRequest(request, env, ctx) {
     });
   }
 
+  // Test/staging pages — always serve fresh, never from edge cache
+  if (url.pathname === "/indexv2.html") {
+    const resp = await fetch(request, { cf: { cacheEverything: false } });
+    const fresh = new Response(resp.body, resp);
+    fresh.headers.set("Cache-Control", "no-store, no-cache");
+    return fresh;
+  }
+
   // Only handle requests for the root path or /index.html
   // Pass through all other requests (e.g., for JS, CSS, images) directly to the origin
   if (

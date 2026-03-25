@@ -386,6 +386,125 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   }
 }
 
+/* --- Event items in modal - 50/50 layout --- */
+
+.event-item {
+  list-style: none;
+}
+
+.event-item-inner {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.event-item-body {
+  flex: 1 1 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.event-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.event-year-text {
+  font-weight: 700;
+  color: var(--bs-body-color);
+}
+
+.event-years-ago {
+  font-size: 0.75rem;
+  color: #6c757d;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.15rem 0.5rem;
+  border-radius: 1rem;
+}
+
+.event-description {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.event-commentary {
+  font-size: 0.82rem;
+  border-left: 3px solid #174832;
+  padding-left: 8px;
+  color: #6c757d;
+  margin: 0;
+}
+
+.event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+.event-item-thumb {
+  flex: 1 1 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 120px;
+}
+
+.event-item-thumb img {
+  max-width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  width: 100%;
+}
+
+/* Mobile: stack vertically */
+@media (max-width: 575.98px) {
+  .event-item-inner {
+    flex-direction: column-reverse;
+  }
+  .event-item-body,
+  .event-item-thumb {
+    flex: 1 1 100%;
+  }
+  .event-item-thumb img {
+    max-height: 180px;
+  }
+}
+
+/* Dark green button style */
+.btn-contrast {
+  background: #174832 !important;
+  color: #fff !important;
+  border-color: #174832 !important;
+}
+
+.btn-contrast:hover,
+.btn-contrast:focus {
+  background: #0e2c1c !important;
+  color: #fff !important;
+  border-color: #0e2c1c !important;
+}
+
+/* Share and WhatsApp outline buttons - dark green */
+.btn-outline-dark {
+  border-color: #174832 !important;
+  color: #174832 !important;
+}
+
+.btn-outline-dark:hover,
+.btn-outline-dark:focus {
+  background: #174832 !important;
+  color: #fff !important;
+  border-color: #174832 !important;
+}
+
 /* --- Born / Died accordion in event popup --- */
 
 .born-died-toggle {
@@ -969,7 +1088,8 @@ article iframe {
   color: #fff;
 }
 
-[data-page="v2"] button.btn.btn-sm.btn-outline-primary.filter-btn.filter-btn-all.active {
+[data-page="v2"]
+  button.btn.btn-sm.btn-outline-primary.filter-btn.filter-btn-all.active {
   background-color: var(--btn-bg) !important;
   border-color: var(--btn-bg) !important;
   color: #fff !important;

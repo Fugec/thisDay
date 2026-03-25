@@ -1864,28 +1864,28 @@ function renderFilteredItems(itemsToRender) {
             <li class="mb-3 p-3 border rounded event-item${event.thumbnailUrl ? " event-item-has-thumb" : ""}" data-ckey="${`${event.year}:${(event.description || "").substring(0, 30)}`}">
                 <div class="event-item-inner">
                     <div class="event-item-body">
-                        <div class="d-flex align-items-center flex-wrap gap-1 mb-1">
-                          <strong class="event-year-text">${event.year}</strong>
+                        <div class="event-meta">
+                          <span class="event-year-text">${event.year}</span>
                           ${anniversaryBadge}
                         </div>
-                        <p class="mb-1">${specialEmphasis}${event.description}</p>
-                        ${event.commentary ? `<p class="mb-2 fst-italic event-commentary"><i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${event.commentary}</span></p>` : ""}
+                        <p class="mb-2 event-description">${specialEmphasis}${event.description}</p>
+                        ${event.commentary ? `<p class="mb-2 fst-italic event-commentary"><span class="commentary-text">${event.commentary}</span></p>` : ""}
                         <div class="event-actions">
                           ${
                             event.sourceUrl
-                              ? `<a href="${event.sourceUrl}" class="event-action-btn event-action-read btn btn-contrast btn-sm"
+                              ? `<a href="${event.sourceUrl}" class="btn btn-contrast btn-sm"
                                  target="_blank" rel="noopener noreferrer">
-                                   Read More About ${event.title.length > 20 ? `${event.title.substring(0, 20)}...` : event.title}
+                                   Read More
                                  </a>`
                               : ""
                           }
-                          <button class="event-action-btn event-action-share share-copy-btn btn btn-contrast btn-sm"
+                          <button class="btn btn-outline-dark btn-sm share-copy-btn"
                             data-desc="${(event.description || "").replace(/"/g, "&quot;")}"
                             data-year="${event.year}"
                             data-url="${event.sourceUrl || ""}">
                             Share
                           </button>
-                          <a href="${waUrl}" class="event-action-btn event-action-wa btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">
+                          <a href="${waUrl}" class="btn btn-outline-dark btn-sm" target="_blank" rel="noopener noreferrer">
                             WhatsApp
                           </a>
                         </div>

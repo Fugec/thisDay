@@ -961,3 +961,81 @@ article iframe {
   color: #b45309;
   text-decoration: none;
 }
+
+/* ==========================================================
+   indexv2 overrides — loaded via versioned style.css?v=4
+   so these apply even when the HTML page is edge-cached
+   ========================================================== */
+
+/* Nav: items right on desktop */
+[data-page="v2"] .nav-links {
+  margin-left: auto !important;
+}
+
+/* Nav: hamburger right on mobile, items hidden */
+@media (max-width: 768px) {
+  [data-page="v2"] .nav-links {
+    display: none !important;
+  }
+  [data-page="v2"] .btn#navToggle {
+    display: flex !important;
+    margin-left: auto !important;
+  }
+}
+
+/* Calendar: base font sizes */
+[data-page="v2"] .day-number {
+  font-size: 17.6px !important;
+}
+[data-page="v2"] .event-summary {
+  font-size: 14.4px !important;
+}
+
+/* Calendar: mobile font sizes */
+@media (max-width: 768px) {
+  [data-page="v2"] .day-number {
+    font-size: 14.4px !important;
+  }
+  [data-page="v2"] .event-summary {
+    font-size: 11px !important;
+  }
+}
+@media (max-width: 480px) {
+  [data-page="v2"] .day-number {
+    font-size: 13px !important;
+  }
+  [data-page="v2"] .event-summary {
+    font-size: 10px !important;
+  }
+}
+
+/* Quiz cards: left-aligned on mobile */
+@media (max-width: 768px) {
+  [data-page="v2"] .quiz-card-body {
+    text-align: left !important;
+  }
+  [data-page="v2"] .quiz-card-body .btn {
+    align-self: flex-start;
+  }
+}
+
+/* Events slider Read More — same style as .btn */
+[data-page="v2"] .slider-read-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #fff !important;
+  background: #1b3a2d !important;
+  padding: 0.7rem 1.5rem;
+  border-radius: 4px;
+  border: none !important;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-top: 0.25rem;
+}
+[data-page="v2"] .slider-read-more:hover {
+  background: #2a4d3a !important;
+}

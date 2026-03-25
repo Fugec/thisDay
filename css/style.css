@@ -21,6 +21,10 @@
   --mu: #64748b;
 }
 
+.modal-image {
+  display: none;
+}
+
 /* Force body/navbar/footer to use light values even when dark-theme present */
 body,
 body.dark-theme,
@@ -969,7 +973,8 @@ article iframe {
   color: #fff;
 }
 
-[data-page="v2"] button.btn.btn-sm.btn-outline-primary.filter-btn.filter-btn-all.active {
+[data-page="v2"]
+  button.btn.btn-sm.btn-outline-primary.filter-btn.filter-btn-all.active {
   background-color: var(--btn-bg) !important;
   border-color: var(--btn-bg) !important;
   color: #fff !important;

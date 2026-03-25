@@ -1,13 +1,9 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- thisDay. is an interactive web application that allows users to explore significant historical events for any day of the year. It features a calendar view, daily highlights carousel, history quizzes, a daily blog, YouTube Shorts, dark mode, and responsive design. Data is sourced from Wikipedia and presented for educational and entertainment purposes.-->
-    <!-- Designed and Developed by: Armin Kapetanović  -->
-    <!-- Contact: kapetanovic.armin@gmail.com -->
-    <!-- Project: thisDay. | Historical Events Calendar -->
+    <!-- thisDay. | Historical Events Calendar -->
+    <!-- Designed and Developed by: Armin Kapetanović -->
     <!-- License: CC BY-SA 4.0 -->
-    <!-- GitHub:  https://github.com/Fugec/thisDay. -->
-    <!-- Support the project: coff.ee/Fugec -->
 
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -17,28 +13,21 @@
     <meta name="color-scheme" content="light dark" />
     <meta
       name="keywords"
-      content="thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history, educational, timeline, trivia, historical figures, history quiz, daily quiz, history blog, history articles, YouTube Shorts history, this day in history, what happened today, historical milestones"
+      content="thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history"
     />
     <meta
       name="description"
-      content="Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history. Browse by date and learn about wars, inventions, discoveries, and the lives of notable people. Make history come alive - one day at a time."
+      content="Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history."
     />
     <meta property="og:title" content="thisDay. | Historical Events" />
     <meta
       property="og:description"
-      content="Uncover the most fascinating historical events and milestones from any date. Dive into the past and share the stories that shaped our world!"
+      content="Uncover the most fascinating historical events and milestones from any date."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://thisday.info/" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:image" content="https://thisday.info/images/logo.png" />
-    <meta property="og:image:type" content="image/png" />
-    <meta
-      property="og:image:alt"
-      content="thisDay. — What Happened on This Day in History"
-    />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
     <meta name="author" content="Armin Kapetanović" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta
@@ -47,11 +36,7 @@
     />
     <meta
       name="twitter:description"
-      content="Discover what happened today in history. Explore famous events,
-        birthdays, milestones, and key moments that happened on this day throughout the
-        history. Browse by date and learn about wars, inventions, discoveries,
-        and the lives of notable people. Make history come alive - one day at
-        a time."
+      content="Discover what happened today in history."
     />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
     <meta name="twitter:creator" content="@thisday_info" />
@@ -63,7 +48,7 @@
           "@type": "WebSite",
           "name": "thisDay.",
           "url": "https://thisday.info/",
-          "description": "Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history.",
+          "description": "Explore historical events, milestones, and notable figures from past and present.",
           "potentialAction": {
             "@type": "SearchAction",
             "target": "https://thisday.info/?date={date}",
@@ -87,57 +72,27 @@
       ]
     </script>
 
-    <link rel="alternate" hreflang="en" href="https://thisday.info/" />
-
     <link rel="dns-prefetch" href="//api.wikimedia.org" />
     <link rel="preconnect" href="https://api.wikimedia.org" crossorigin />
-
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-
     <link
       rel="preload"
       as="style"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap"
     />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap"
       rel="stylesheet"
     />
-
-    <link
-      rel="preload"
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-      as="style"
-    />
-    <link
-      rel="preload"
-      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
-      as="style"
-    />
-    <link
-      rel="preload"
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
-      as="script"
-    />
-    <link rel="preload" href="js/script.js?v=1" as="script" />
-
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-      media="print"
-      onload="this.media = 'all'"
     />
-    <noscript
-      ><link
-        rel="stylesheet"
-        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    /></noscript>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
     />
-
     <link rel="icon" href="images/favicon.ico" type="image/x-icon" />
     <link
       rel="apple-touch-icon"
@@ -158,549 +113,1098 @@
     />
 
     <style>
-      /* Light Theme (Default) - Critical Variables */
       :root {
-        --link-hover-color: #1d4ed8; /* blue-700 */
-        --button-outline-color: #e2e8f0;
-        --button-outline-text: #6c757d;
-        --button-outline-hover-bg: #2563eb;
-        --button-outline-hover-text: #ffffff;
-
-        /* Original base colors and their application */
-        --primary-bg: #3b82f6; /* blue-500 */
-        --secondary-bg: #fff !important; /* white */
-        --text-color: #6c757d; /* slate-900 */
-        --header-text-color: #ffffff; /* white */
-        --card-bg: #ffffff; /* white */
-        --card-border: #e2e8f0; /* gray-200 */
-        --footer-bg: #3b82f6;
-        --footer-text-color: #ffffff; /* slate-100 */
-        --modal-bg: #ffffff; /* white */
-        --modal-text-color: #6c757d; /* slate-900 */
-        --link-color: #2563eb; /* blue-600 */
-        --switch-track-off: #e2e8f0; /* gray-200 */
-        --switch-thumb-off: #cbd5e1; /* gray-300 */
-        --switch-track-on: #2563eb; /* blue-600 */
-        --switch-thumb-on: #ffffff; /* white */
-        --card-bg-no-events: #ffffff; /* slate-100 */
-        --card-border-no-events: #e2e8f0; /* gray-200 */
-        --text-color-light: #64748b; /* slate-400 */
-        --border-radius: 0.5rem;
-
-        /* Apply default body colors */
-        background-color: var(--secondary-bg);
-        color: var(--text-color);
-
-        .display-4 {
-          background: linear-gradient(
-            to right,
-            #60a5fa 0%,
-            #fff 50%,
-            #60a5fa 100%
-          );
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
+        --bg: #ffffff;
+        --bg-alt: #f2f7f2;
+        --text: #1a2e20;
+        --text-muted: #5c7a65;
+        --border: #cfe0cf;
+        --btn-bg: #1b3a2d;
+        --btn-text: #ffffff;
+        --btn-hover: #2a4d3a;
+        --accent: #9dc43a;
+        --radius: 4px;
+        --shadow: 0 16px 32px -8px rgba(27, 58, 45, 0.08);
       }
 
-      /* Dark Theme - Critical Variables and Applications */
-      body.dark-theme {
-        --link-hover-color: #3b82f6; /* blue-500 */
-        --button-outline-color: #60a5fa;
-        --button-outline-text: #60a5fa;
-        --button-outline-hover-bg: #2563eb;
-        --button-outline-hover-text: #ffffff;
-
-        /* Original dark theme colors and their application */
-        --primary-bg: #020617; /* slate-950 */
-        --secondary-bg: #1e293b; /* slate-800 */
-        --text-color: #f8fafc; /* slate-50 */
-        --header-text-color: #ffffff; /* white */
-        --card-bg: #1e293b; /* slate-800 */
-        --card-border: #334155; /* slate-700 */
-        --footer-bg: #020617; /* slate-950 */
-        --footer-text-color: #ffffff; /* slate-100 */
-        --modal-bg: #1e293b; /* slate-800 */
-        --modal-text-color: #f8fafc; /* slate-50 */
-        --link-color: #60a5fa; /* blue-400 */
-        --switch-track-off: #334155; /* slate-700 */
-        --switch-thumb-off: #64748b; /* slate-400 */
-        --switch-track-on: #2563eb; /* blue-600 */
-        --switch-thumb-on: #f8fafc; /* slate-50 */
-        --dark-card-bg-no-events: #0f172a; /* slate-900 */
-        --dark-card-border-no-events: #334155; /* slate-700 */
-        --dark-text-color-light: #64748b; /* slate-400 */
-
-        /* Apply dark theme colors directly to body and navbar when dark-theme is active */
-        background-color: var(--secondary-bg) !important;
-        color: var(--text-color) !important;
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
       }
 
-      body.dark-theme .border {
-        border: 1px solid #334255 !important;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-
-      a.btn.btn-sm.btn-outline-primary {
-        border: 1px solid #0e6efd;
-      }
-
-      body.dark-theme a.btn.btn-sm.btn-outline-primary {
-        border: 1px solid #334255;
-      }
-
-      .border {
-        border: 1px solid var(--card-border);
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-
-      /* Base styles for body and navbar - these will be overridden by dark-theme if present */
       body {
-        font-family: Inter, sans-serif;
+        font-family: "Lora", Georgia, serif;
+        font-size: 1.05rem;
+        line-height: 1.7;
+        color: var(--text);
+        background: var(--bg);
+        margin: 0;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
-        transition:
-          background-color 0.3s ease,
-          color 0.3s ease;
+        -webkit-font-smoothing: antialiased;
       }
 
-      .navbar {
-        background-color: var(--primary-bg) !important;
-        transition: background-color 0.3s ease;
+      a {
+        color: var(--text);
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      a:hover {
+        color: var(--text);
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+
+      /* Nav */
+      .nav {
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+        padding: 1rem 0;
         position: sticky;
         top: 0;
-        z-index: 1030;
+        z-index: 100;
       }
-
-      .navbar-brand,
-      .navbar-nav .nav-link {
-        color: var(--header-text-color) !important;
-        font-weight: bold !important;
-      }
-
-      .carousel-header {
-        background-color: var(--primary-bg);
-        color: var(--header-text-color);
-        text-align: center;
-        transition: background-color 0.3s ease;
-      }
-
-      body.dark-theme .carousel-header h1 {
-        background: linear-gradient(
-          90deg,
-          #f8fafc 0%,
-          #60a5fa 50%,
-          #1e293b 100%
-        );
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        color: transparent;
-        font-weight: bold !important;
-      }
-
-      .display-4 {
-        font-size: 45px;
-        font-weight: bolder !important;
-        padding: 10px;
-      }
-
-      .carousel-header .text-muted {
-        color: #fff !important;
-      }
-
-      #historicalCarousel {
-        margin: 0 auto;
-        overflow: hidden;
-        transition: background-color 0.3s ease;
-        display: none;
-      }
-
-      #historicalCarousel .carousel-item img {
-        height: 350px;
-        object-fit: cover;
-        filter: brightness(70%);
-        transition: filter 0.3s ease;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-
-      .carousel-caption {
-        padding: 4rem;
-        box-sizing: border-box;
-        transition: background-color 0.3s ease;
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        text-align: center;
-        background-color: rgba(
-          0,
-          0,
-          0,
-          0.6
-        ); /* Black background with 60% opacity */
-        margin: 0;
-      }
-
-      .carousel-caption.no-events {
-        background: #ff000054;
-        border: 1px solid red;
-      }
-
-      .carousel-caption h5 {
-        color: #e3e6ea;
-        z-index: 1;
-        padding: 10px;
-        font-size: 24px;
-        font-weight: bold;
-      }
-
-      .form-check-input:checked {
-        background-color: var(--switch-track-on) !important;
-        border-color: var(--switch-track-on) !important;
-      }
-
-      .form-check-input {
-        background-color: var(--switch-track-off);
-        border-color: var(--switch-track-off);
-        transition:
-          background-color 0.3s ease,
-          border-color 0.3s ease;
-      }
-
-      .form-switch .form-check-input {
-        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
-        background-color: var(--switch-thumb-off); /* Unchecked thumb color */
-        transition:
-          background-color 0.3s ease,
-          transform 0.3s ease;
-      }
-
-      .form-switch .form-check-input:checked {
-        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
-        background-color: var(--switch-thumb-on); /* Checked thumb color */
-      }
-
-      .theme-switch-mobile label i {
-        color: var(--header-text-color); /* Icon color */
-        font-size: 1.2rem;
-        margin-left: 0.5rem;
-      }
-
-      .theme-switch-desktop label {
-        color: var(--header-text-color);
-      }
-
-      main {
-        flex: 1;
-        margin-top: 20px;
-      }
-
-      .month-navigation {
+      .nav-inner {
+        padding: 0 2rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 20px;
-        margin-top: 20px;
+      }
+      .brand {
+        font-family: "Lora", Georgia, serif;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--text);
+        text-decoration: none;
+      }
+      .nav-links {
+        display: flex;
+        gap: 1.5rem;
+        font-size: 0.9rem;
+        margin-left: auto;
+      }
+      .nav-links a {
+        color: var(--text-muted);
+        text-decoration: none;
+        font-weight: 500;
+      }
+      .nav-links a:hover {
+        color: var(--text);
+      }
+      .nav-toggle {
+        display: none;
+        background: none;
+        border: none;
+        padding: 0.5rem;
+        cursor: pointer;
+        color: var(--text);
+      }
+      .nav-toggle svg {
+        width: 24px;
+        height: 24px;
+      }
+      .btn#navToggle {
+        display: none;
+        background: none;
+        color: var(--text);
+        padding: 0.4rem;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        margin-left: auto;
+      }
+      .btn#navToggle:hover {
+        background: var(--bg-alt);
+        color: var(--text);
+      }
+      .btn#navToggle svg {
+        width: 20px;
+        height: 20px;
+        display: block;
+      }
+      .nav-mobile {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+        padding: 0 1.5rem;
+      }
+      .nav-mobile.active {
+        display: block;
+      }
+      .nav-mobile a {
+        display: block;
+        padding: 1rem 0;
+        color: var(--text);
+        text-decoration: none;
+        font-size: 1rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .nav-mobile a:last-child {
+        border-bottom: none;
+      }
+      @media (max-width: 768px) {
+        .nav-links {
+          display: none;
+        }
+        .btn#navToggle {
+          display: flex;
+        }
+        .nav {
+          position: relative;
+        }
       }
 
-      .month-navigation h2 {
-        color: var(--text-color);
-        transition: color 0.3s ease;
-        font-size: 28.8px;
-        font-weight: bold;
+      /* Marquee */
+      .marquee-bar {
+        background: var(--btn-bg);
+        color: #fff;
+        overflow: hidden;
+        white-space: nowrap;
+        padding: 0.5rem 0;
+        font-size: 0.82rem;
+      }
+      .marquee-track {
+        display: inline-flex;
+        gap: 0;
+        animation: marquee-scroll 40s linear infinite;
+        will-change: transform;
+      }
+      .marquee-track:hover {
+        animation-play-state: paused;
+      }
+      .marquee-item {
+        padding: 0 2.5rem;
+        border-right: 1px solid rgba(255,255,255,0.2);
+      }
+      .marquee-item span {
+        color: var(--accent);
+        font-weight: 700;
+        margin-right: 0.5rem;
+      }
+      @keyframes marquee-scroll {
+        from { transform: translateX(0); }
+        to   { transform: translateX(-50%); }
       }
 
-      body.dark-theme h2#currentMonthYear {
-        color: #f8fafc;
+      /* Hero */
+      .hero {
+        text-align: center;
+        padding: 3rem 1.5rem 2rem;
+        background: var(--bg);
+      }
+      .eyebrow {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--text-muted);
+        margin-bottom: 0.75rem;
+      }
+      .hero h1 {
+        font-family: "Lora", Georgia, serif;
+        font-size: 2.75rem;
+        font-weight: 700;
+        line-height: 1.15;
+        margin: 0 0 1rem;
+        letter-spacing: -0.02em;
+      }
+      .hero p {
+        font-size: 1.1rem;
+        color: #4a4a4a;
+        max-width: 640px;
+        margin: 0 auto 1rem;
+        font-style: italic;
+        line-height: 1.75;
+      }
+      .hero-meta {
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        margin: 1.25rem auto 1.75rem;
+        max-width: 560px;
+        font-size: 0.82rem;
+        font-style: normal;
+        color: var(--text-muted);
+        font-weight: 500;
+        letter-spacing: 0.01em;
+      }
+      .hero-meta span {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .hero-meta i {
+        color: var(--accent);
+        font-size: 1rem;
       }
 
-      .btn-outline-primary {
-        color: #6f787f;
-        border-color: #e2e8f0;
-        transition:
-          color 0.3s ease,
-          background-color 0.3s ease,
-          border-color 0.3s ease;
-        background: #fff;
+      /* Events Section - Grid layout like Quiz */
+      .events-section {
+        padding: 0;
+      }
+      .events-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+      }
+      .events-featured {
+        background: var(--bg);
+        border-right: 1px solid var(--border);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .events-featured img {
+        width: 100%;
+        height: 380px;
+        object-fit: cover;
+        filter: brightness(72%);
+      }
+      .events-featured-body {
+        padding: 2rem;
+        flex: 1;
+      }
+      .events-featured-year {
+        font-size: 0.875rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+      }
+      .events-featured-body h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 0 0 0.75rem;
+        line-height: 1.3;
+      }
+      .events-featured-body p {
+        font-size: 0.95rem;
+        color: var(--text-muted);
+        margin: 0 0 1.25rem;
+        line-height: 1.5;
+      }
+      .events-slider-wrap {
+        display: flex;
+        flex-direction: column;
+        background: var(--bg-alt);
+        border-top: 1px solid var(--border);
+      }
+      .events-slider-title {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin: 0;
+        color: var(--text-muted);
+        padding: 1.25rem 1.5rem 0.75rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .events-slider {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+      }
+      .events-slider-card {
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        transition: background 0.15s;
+        cursor: pointer;
+        text-decoration: none;
+        color: inherit;
+      }
+      .events-slider-card:hover {
+        background: var(--bg-alt);
+      }
+      .events-slider-card img {
+        width: 100%;
+        height: 160px;
+        object-fit: cover;
+        filter: brightness(78%);
+        display: block;
+      }
+      .events-slider-card-body {
+        padding: 1rem 1.5rem;
+        flex: 1;
+      }
+      .events-slider-card-year {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: var(--accent);
+        margin-bottom: 0.3rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .events-slider-card-body h4 {
+        font-size: 0.92rem;
+        font-weight: 600;
+        margin: 0 0 0.35rem;
+        line-height: 1.35;
+      }
+      .events-slider-card-body p {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin: 0 0 0.75rem;
+        line-height: 1.4;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .slider-read-more {
+        display: inline-block;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--btn-bg);
+        border: 1.5px solid var(--btn-bg);
+        border-radius: var(--radius);
+        padding: 0.35rem 0.85rem;
+        margin-top: 0.25rem;
+        text-decoration: none;
+        transition: background 0.15s, color 0.15s;
+      }
+      .events-slider-card:hover .slider-read-more {
+        background: var(--btn-bg);
+        color: #fff;
+      }
+      @media (max-width: 768px) {
+        .events-grid {
+          grid-template-columns: 1fr;
+        }
+        .events-featured img {
+          height: 220px;
+        }
+        .events-slider-card img {
+          height: 120px;
+        }
       }
 
-      body.dark-theme .btn-outline-primary {
-        border-color: #334255;
-        color: #f8fafc;
-        background-color: #1d293b;
+      /* Blog Posts Section */
+      .blog-section {
+        padding: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .blog-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr) 280px;
+      }
+      .blog-cta-col {
+        background: var(--btn-bg);
+        color: #fff;
+        padding: 2rem 1.75rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 1rem;
+      }
+      .blog-cta-col p {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin: 0;
+      }
+      .blog-cta-col h3 {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #fff;
+        margin: 0;
+        line-height: 1.35;
+      }
+      .blog-cta-col .btn {
+        background: var(--accent);
+        color: #1b3a2d;
+        align-self: flex-start;
+      }
+      .blog-cta-col .btn:hover {
+        background: #b5d94a;
+        color: #1b3a2d;
+      }
+      .blog-card {
+        background: var(--bg);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        transition: background 0.15s;
+      }
+      .blog-card:last-child {
+        border-right: none;
+      }
+      .blog-card:hover {
+        background: var(--bg-alt);
+      }
+      .blog-card-img {
+        width: 100%;
+        height: 200px;
+        object-fit: cover;
+        display: block;
+        filter: brightness(88%);
+      }
+      .blog-card-body {
+        padding: 1.5rem 2rem;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      .blog-card-date {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin-bottom: 0.5rem;
+      }
+      .blog-card-body h3 {
+        font-size: 1rem;
+        font-weight: 700;
+        margin: 0 0 0.6rem;
+        line-height: 1.35;
+      }
+      .blog-card-body p {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        margin: 0 0 1.25rem;
+        line-height: 1.6;
+        flex: 1;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      @media (max-width: 900px) {
+        .blog-grid {
+          grid-template-columns: 1fr;
+        }
+        .blog-card {
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+        .blog-card:last-child {
+          border-bottom: none;
+        }
+        .blog-cta-col {
+          border-top: 1px solid var(--border);
+        }
       }
 
+      /* Today's Events CTA */
+      .todays-events-cta {
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        background: var(--btn-bg);
+        color: #fff;
+      }
+      .todays-events-cta-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 2rem;
+        padding: 2.5rem 2rem;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .todays-events-cta-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin: 0 0 0.35rem;
+      }
+      .todays-events-cta-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin: 0 0 0.5rem;
+        color: #fff;
+      }
+      .todays-events-cta-desc {
+        font-size: 0.9rem;
+        color: rgba(255,255,255,0.75);
+        margin: 0;
+        max-width: 480px;
+        line-height: 1.5;
+      }
+      .todays-events-cta .btn {
+        background: var(--accent);
+        color: #1b3a2d;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .todays-events-cta .btn:hover {
+        background: #b5d94a;
+        color: #1b3a2d;
+      }
+      @media (max-width: 640px) {
+        .todays-events-cta-inner {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+      }
+
+      /* Quiz Section */
+      .quiz-section {
+        background: var(--bg-alt);
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+      .quiz-wrap {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .quiz-card-events {
+        background: var(--btn-bg);
+        color: #fff;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 2rem;
+        gap: 0.75rem;
+        border-right: none;
+      }
+      .quiz-card-events-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin: 0;
+      }
+      .quiz-card-events h3 {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #fff;
+        margin: 0;
+        line-height: 1.3;
+      }
+      .quiz-card-events p {
+        font-size: 0.9rem;
+        color: rgba(255,255,255,0.75);
+        margin: 0;
+        line-height: 1.5;
+      }
+      .quiz-card-events .btn {
+        background: var(--accent);
+        color: #1b3a2d;
+        align-self: flex-start;
+      }
+      .quiz-card-events .btn:hover {
+        background: #b5d94a;
+        color: #1b3a2d;
+      }
+      .quiz-card {
+        background: var(--bg-alt);
+        border-right: 1px solid var(--border);
+        overflow: hidden;
+      }
+      .quiz-card:last-child {
+        border-right: none;
+      }
+      .quiz-card-img {
+        width: 100%;
+        height: 200px;
+        object-fit: cover;
+      }
+      .quiz-card-body {
+        padding: 1.75rem 2rem;
+        text-align: center;
+      }
+      .quiz-card-body h3 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+      }
+      .quiz-card-body p {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        margin: 0 0 1.25rem;
+        line-height: 1.5;
+      }
+
+      /* Buttons */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        font-family: "Lora", Georgia, serif;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--btn-text);
+        background: var(--btn-bg);
+        padding: 0.7rem 1.5rem;
+        border-radius: var(--radius);
+        border: none;
+        cursor: pointer;
+        text-decoration: none;
+        transition: background 0.2s;
+      }
+      .btn:hover {
+        background: var(--btn-hover);
+        color: var(--btn-text);
+      }
+
+      /* Calendar */
+      .calendar-section {
+        padding: 2.5rem 1.5rem;
+      }
+      .month-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .month-nav h2 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin: 0;
+      }
       .calendar-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-        gap: 15px;
-        padding: 20px 0;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 10px;
       }
-
       .day-card {
-        background-color: var(--card-bg);
-        border: 1px solid var(--card-border);
-        border-radius: var(--border-radius);
-        padding: 15px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 1rem 0.75rem;
         text-align: center;
         min-height: 100px;
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        transition:
-          background-color 0.3s ease,
-          border-color 0.3s ease;
+        box-shadow: var(--shadow);
+        cursor: pointer;
+        transition: all 0.2s;
+        position: relative;
       }
-
-      .day-card .spinner-border {
-        margin: auto; /* Center the spinner */
+      .day-card:hover {
+        box-shadow: 0 16px 32px -8px rgba(0, 0, 0, 0.06);
+        transform: translateY(-2px);
       }
-
       .day-card.no-events {
-        background-color: var(--card-bg-no-events);
-        border-color: var(--card-border-no-events);
-        color: var(--text-color-light);
+        background: var(--bg-alt);
+        color: var(--text-muted);
         cursor: default;
       }
-
-      .dark-theme .day-card.no-events {
-        background-color: var(--dark-card-bg-no-events);
-        border-color: var(--dark-card-border-no-events);
-        color: var(--dark-text-color-light);
+      .day-card.no-events:hover {
+        box-shadow: var(--shadow);
+        transform: none;
       }
-
-      .day-number {
-        font-size: 1.8em;
-        font-weight: bold;
-        color: var(--text-color);
-        transition: color 0.3s ease;
-      }
-
-      .event-summary {
-        font-size: 0.9em;
-        color: var(--text-color);
-        margin-top: 10px;
-        transition: color 0.3s ease;
-      }
-
-      .loading-indicator {
-        grid-column: 1 / -1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        color: var(--text-color);
-        transition: color 0.3s ease;
-      }
-
-      .loading-indicator p {
-        color: var(--text-color);
-      }
-
-      .footer {
-        background-color: var(--footer-bg);
-        color: var(--footer-text-color);
-        text-align: center;
-        padding: 20px 0;
-        margin-top: 30px;
-        transition:
-          background-color 0.3s ease,
-          color 0.3s ease;
-        padding: 20px;
-      }
-
-      .footer a {
-        color: var(--footer-text-color);
-        text-decoration: underline;
-        transition: color 0.3s ease;
-      }
-
-      .modal-content {
-        background-color: var(--modal-bg);
-        color: var(--modal-text-color);
-        border: 1px solid var(--card-border);
-        transition:
-          background-color 0.3s ease,
-          color 0.3s ease,
-          border-color 0.3s ease;
-      }
-
-      .modal-header {
-        background-color: var(--modal-bg);
-        border-bottom-color: var(--card-border);
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-
-      .modal-title {
-        color: var(--modal-text-color);
-        font-size: 20px;
-        font-weight: bold;
-      }
-
-      body.dark-theme h5#eventDetailModalLabel {
-        color: #60a5fa;
-      }
-
-      .btn-close {
-        filter: var(--bs-btn-close-white, invert(0)) grayscale(100%)
-          brightness(var(--close-btn-brightness, 1));
-        opacity: 0.7;
-        transition:
-          filter 0.3s ease,
-          opacity 0.3s ease;
-      }
-
-      .dark-theme .btn-close {
-        filter: var(--bs-btn-close-white, invert(1)) grayscale(100%)
-          brightness(var(--close-btn-brightness, 0.8));
-      }
-
-      .text-primary {
-        --bs-text-opacity: 1;
-        font-size: 20px;
-      }
-
-      body.dark-theme .text-primary {
-        color: #60a5fa !important;
-      }
-
       .day-card.today-highlight {
-        position: relative;
-        overflow: hidden;
-        transition: all 0.3s ease-in-out;
-        border-radius: 0px !important;
+        border: 2px solid var(--accent);
+        background: rgba(45, 106, 106, 0.05);
       }
-
-      .day-card.today-highlight::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 123, 255, 0.2);
-        z-index: 1;
-        pointer-events: none;
-        border: 2px solid #007bff;
-        box-sizing: border-box;
+      .day-number {
+        font-size: 17.6px;
+        font-weight: 700;
+        line-height: 1;
+        margin-bottom: 0.5rem;
       }
-
-      #scrollToTopBtn {
-        position: fixed;
-        bottom: 10px;
-        left: 10px;
-        z-index: 1050;
-        min-width: 40px;
-        height: 40px;
-        border-radius: 6px;
-        background: #0d6efd;
-        color: #fff;
-        border: none;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        opacity: 0.92;
-        font-weight: bold;
-        font-size: 16px;
-        padding: 0 18px;
-      }
-
-      .year-label {
-        position: absolute;
-        top: 12px;
-        right: 18px;
-        z-index: 10;
-        background: #0d6efd;
-        color: #fff;
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-size: 16px;
+      .day-card.no-events .day-number {
+        color: var(--text-muted);
         font-weight: 600;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        pointer-events: none;
       }
-      /* Fullscreen overlay */
-      .support-popup-overlay {
+      .event-summary {
+        font-size: 14.4px;
+        color: var(--text-muted);
+        line-height: 1.3;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .event-count {
+        font-size: 0.65rem;
+        color: var(--accent);
+        font-weight: 600;
+        margin-top: 0.35rem;
+      }
+      .day-card .spinner-border {
+        width: 1.5rem;
+        height: 1.5rem;
+        border-width: 2px;
+        color: var(--text-muted);
+      }
+
+      /* Footer */
+      .footer {
+        background: var(--bg-alt);
+        color: var(--text);
+        padding: 2.5rem 1.5rem;
+        margin-top: auto;
+        border-top: 1px solid var(--border);
+      }
+      .footer-inner {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .footer-social {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .footer-social a {
+        color: var(--text);
+        font-size: 1.4rem;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+      }
+      .footer-social a:hover {
+        opacity: 1;
+        color: var(--text);
+      }
+      .footer-text {
+        text-align: center;
+        font-size: 0.85rem;
+        line-height: 1.8;
+        color: var(--text-muted);
+      }
+      .footer-text p {
+        margin: 0.25rem 0;
+      }
+      .footer-text a {
+        color: var(--text);
+        text-decoration: underline;
+      }
+      .footer-bottom {
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border);
+        text-align: center;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+      .footer-bottom a {
+        color: var(--text);
+        text-decoration: none;
+        margin: 0 0.75rem;
+      }
+      .footer-bottom a:hover {
+        text-decoration: underline;
+      }
+
+      /* Modal filter buttons — green theme + layout */
+      #eventFilterContainer {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+      #eventFilterContainer .filter-btn-all {
+        grid-column: 1 / -1;
+      }
+      @media (min-width: 576px) {
+        #eventFilterContainer {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+        #eventFilterContainer .filter-btn-all {
+          width: 100%;
+        }
+        #eventFilterContainer .filter-btn:not(.filter-btn-all) {
+          flex: 1;
+        }
+      }
+      .filter-btn {
+        font-family: "Lora", Georgia, serif !important;
+        font-size: 0.875rem !important;
+        font-weight: 500 !important;
+        border-radius: var(--radius) !important;
+        border-color: var(--btn-bg) !important;
+        color: var(--btn-bg) !important;
+        background: transparent !important;
+      }
+      .filter-btn:hover {
+        background: var(--btn-bg) !important;
+        color: var(--btn-text) !important;
+        border-color: var(--btn-bg) !important;
+      }
+      .filter-btn.active {
+        background: var(--btn-bg) !important;
+        color: var(--btn-text) !important;
+        border-color: var(--btn-bg) !important;
+        box-shadow: none !important;
+      }
+      .filter-btn.active:hover {
+        background: var(--btn-hover) !important;
+        border-color: var(--btn-hover) !important;
+      }
+
+      /* Modal — theme overrides only, Bootstrap CSS handles display/positioning */
+      .modal-content {
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      .modal-header {
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+      }
+      .modal-title {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+      .modal-body {
+        background: var(--bg);
+      }
+
+      /* Cookie */
+      .cookie-banner {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: #1a1a1a;
+        color: #fff;
+        padding: 1rem 1.5rem;
+        display: none;
+        justify-content: center;
+        align-items: center;
+        gap: 1.5rem;
+        z-index: 1000;
+        font-size: 0.85rem;
+      }
+      .cookie-banner p {
+        margin: 0;
+      }
+      .cookie-banner a {
+        color: #fff;
+        text-decoration: underline;
+      }
+
+      /* Support Popup */
+      .support-overlay {
         position: fixed;
         inset: 0;
         background: rgba(0, 0, 0, 0.35);
-        display: none;
+        display: flex;
         justify-content: center;
         align-items: center;
         backdrop-filter: blur(2px);
         z-index: 9999;
         opacity: 0;
-        transition: opacity 0.4s ease;
+        pointer-events: none;
+        transition: opacity 0.3s;
       }
-
-      /* Show state */
-      .support-popup-overlay.show {
-        display: flex;
+      .support-overlay.show {
         opacity: 1;
+        pointer-events: auto;
       }
-
-      /* Popup box */
-      .support-popup-content {
-        background: var(--card-bg);
-        color: var(--text-color);
-        padding: 25px 28px;
-        border-radius: 12px;
-        max-width: 300px;
+      .support-box {
+        background: var(--bg);
+        color: var(--text);
+        padding: 1.75rem;
+        border-radius: 6px;
+        max-width: 320px;
         text-align: center;
-        border: 1px solid var(--card-border);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        border: 1px solid var(--border);
+        box-shadow: 0 16px 32px -8px rgba(0, 0, 0, 0.06);
         position: relative;
-        animation: popupFadeIn 0.35s ease;
+        animation: fadeIn 0.35s;
       }
-
-      /* Close button */
-      .support-close-btn {
+      .support-box h4 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0 0 0.75rem;
+        line-height: 1.4;
+      }
+      .support-box p {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        margin: 0 0 1.25rem;
+      }
+      .support-close {
         position: absolute;
-        top: 8px;
-        right: 10px;
+        top: 0.75rem;
+        right: 0.75rem;
         border: none;
         background: transparent;
-        color: var(--text-color);
-        font-size: 22px;
+        color: var(--text-muted);
+        font-size: 1.5rem;
         cursor: pointer;
         padding: 0;
+        line-height: 1;
       }
-
-      /* Smooth scale/fade animation */
-      @keyframes popupFadeIn {
-        0% {
+      .support-close:hover {
+        color: var(--text);
+      }
+      @keyframes fadeIn {
+        from {
           transform: scale(0.8);
           opacity: 0;
         }
-        100% {
+        to {
           transform: scale(1);
           opacity: 1;
+        }
+      }
+
+      /* Skip */
+      .skip-link {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      .skip-link:focus {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 9999;
+        width: auto;
+        height: auto;
+        padding: 0.75rem 1rem;
+        background: var(--text);
+        color: var(--bg);
+        clip: auto;
+        text-decoration: none;
+        font-weight: 500;
+        border-radius: 0 0 var(--radius) 0;
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
+        .nav-links {
+          display: none;
+        }
+        .btn#navToggle {
+          display: flex;
+        }
+        .nav {
+          position: relative;
+        }
+        .hero h1 {
+          font-size: 2rem;
+        }
+        .hero p {
+          font-size: 1rem;
+        }
+        #historicalCarousel .carousel-item img {
+          height: 320px;
+        }
+        .caption-text {
+          font-size: 1.2rem;
+        }
+        .quiz-wrap {
+          grid-template-columns: 1fr;
+        }
+        .quiz-card,
+        .quiz-card-events {
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+        .quiz-card:last-child,
+        .quiz-card-events:last-child {
+          border-bottom: none;
+        }
+        .calendar-grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 6px;
+        }
+        .month-nav {
+          margin: 0 0 1.5rem;
+          padding: 0 0 1rem;
+        }
+        .day-card {
+          min-height: 70px;
+          padding: 0.5rem 0.25rem;
+        }
+        .day-number {
+          font-size: 14.4px;
+        }
+        .event-summary {
+          font-size: 11px;
+          display: -webkit-box;
+          -webkit-line-clamp: 1;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .event-count {
+          font-size: 0.6rem;
+        }
+        .cookie-banner {
+          flex-direction: column;
+          gap: 0.75rem;
+          text-align: center;
+        }
+      }
+      @media (max-width: 480px) {
+        .hero {
+          padding: 2rem 1rem 1.5rem;
+        }
+        .hero h1 {
+          font-size: 1.75rem;
+        }
+        #historicalCarousel .carousel-item img {
+          height: 260px;
+        }
+        .carousel-caption {
+          padding: 1.5rem 1rem;
+        }
+        .caption-text {
+          font-size: 1rem;
+        }
+        .month-nav h2 {
+          font-size: 1.1rem;
+        }
+        .calendar-grid {
+          grid-template-columns: repeat(2, 1fr);
+          gap: 6px;
+        }
+        .day-card {
+          min-height: 70px;
+          padding: 0.5rem 0.25rem;
+        }
+        .day-number {
+          font-size: 13px;
+        }
+        .event-summary {
+          display: block;
+          font-size: 10px;
+        }
+        .event-count {
+          display: block;
+          font-size: 0.55rem;
         }
       }
     </style>
 
     <link rel="manifest" href="/manifest.json" />
-
     <link
       rel="stylesheet"
-      href="css/style.css?v=1"
+      href="css/style.css?v=6"
       media="print"
       onload="this.media = 'all'"
     />
-    <noscript><link rel="stylesheet" href="css/style.css?v=1" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.css?v=6" /></noscript>
 
     <script
       async
@@ -712,25 +1216,8 @@
         dataLayer.push(arguments);
       }
       gtag("js", new Date());
-      // Google Analytics configuration
       gtag("config", "G-WXEZ3868VN");
-      // Google Ads configuration
       gtag("config", "AW-17262488503");
-    </script>
-
-    <script>
-      function gtag_report_conversion(url) {
-        var callback = function () {
-          if (typeof url != "undefined") {
-            window.location = url;
-          }
-        };
-        gtag("event", "conversion", {
-          send_to: "AW-17262488503/WsLuCMLVweEaELfXsqdA",
-          event_callback: callback,
-        });
-        return false;
-      }
     </script>
     <script
       async
@@ -739,156 +1226,120 @@
     ></script>
   </head>
 
-  <body>
-    <a
-      href="#calendarGrid"
-      class="visually-hidden-focusable position-absolute top-0 start-0 p-2 bg-primary text-white fw-semibold"
-      style="z-index: 9999; border-radius: 0 0 6px 0"
-      >Skip to calendar</a
-    >
-    <nav class="navbar navbar-expand-lg navbar-dark">
-      <div class="container-fluid">
-        <a class="navbar-brand" href="/">thisDay.</a>
-        <div class="form-check form-switch d-lg-none me-2">
-          <input
-            class="form-check-input"
-            type="checkbox"
-            id="tsm"
-            aria-label="Toggle dark mode"
-          />
-          <label class="form-check-label" for="tsm"
-            ><i
-              class="bi bi-brightness-high-fill theme-icon-sun"
-              style="color: #fff; font-size: 1.1rem; margin-left: 4px"
-            ></i
-            ><i
-              class="bi bi-moon-fill theme-icon-moon"
-              style="color: #fff; font-size: 1.1rem; margin-left: 4px"
-            ></i
-          ></label>
+  <body data-page="v2">
+    <a href="#calendarGrid" class="skip-link">Skip to calendar</a>
+
+    <!-- Nav -->
+    <nav class="nav">
+      <div class="nav-inner">
+        <a href="/" class="brand">thisDay.</a>
+        <div class="nav-links">
+          <a href="/blog/">Blog</a>
+          <a href="/quiz/">Quiz</a>
+          <a href="/about/">About</a>
+          <a href="/contact/">Contact</a>
+          <a href="#" id="supportNavBtn" style="color:var(--accent);font-weight:600;" aria-label="Support this project">☕ Support</a>
         </div>
-        <div class="collapse navbar-collapse">
-          <ul class="navbar-nav ms-auto">
-            <li class="nav-item d-flex align-items-center">
-              <div class="form-check form-switch d-none d-lg-block me-2">
-                <input
-                  class="form-check-input"
-                  type="checkbox"
-                  id="tsd"
-                  aria-label="Toggle dark mode"
-                />
-                <label class="form-check-label" for="tsd" style="color: #fff"
-                  ><i
-                    class="bi bi-brightness-high-fill theme-icon-sun"
-                    style="font-size: 1.1rem"
-                  ></i
-                  ><i
-                    class="bi bi-moon-fill theme-icon-moon"
-                    style="font-size: 1.1rem"
-                  ></i
-                ></label>
-              </div>
-            </li>
-          </ul>
-        </div>
+        <button class="btn" id="navToggle" aria-label="Toggle menu">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="nav-mobile" id="navMobile">
+        <a href="/blog/">Blog</a>
+        <a href="/quiz/">Quiz</a>
+        <a href="/about/">About</a>
+        <a href="/contact/">Contact</a>
       </div>
     </nav>
 
-    <header class="carousel-header">
-      <!--      <div class="container text-center my-4">
-        <h1 class="display-4">What happened on this day?</h1>
-        <p class="text-muted">
-          Browse by date and learn about notable events, wars, inventions,
-          discoveries, and the lives of great people. Make history come alive -
-          one day at a time.
-        </p>
-      </div> -->
-      <div
-        id="historicalCarousel"
-        class="carousel slide"
-        data-bs-ride="carousel"
-        aria-label="Historical Carousel"
-      >
-        <div class="carousel-indicators" id="carouselIndicators"></div>
-        <div class="carousel-inner" id="carouselInner">
-          <div class="carousel-item active">
-            <div class="carousel-caption">
-              <div class="text header-text"></div>
-              <div class="button"></div>
-            </div>
-          </div>
-        </div>
-        <button
-          class="carousel-control-prev"
-          type="button"
-          data-bs-target="#historicalCarousel"
-          data-bs-slide="prev"
-        >
-          <span class="carousel-control-prev-icon" aria-hidden="true"></span>
-          <span class="visually-hidden">Previous</span>
-        </button>
-        <button
-          class="carousel-control-next"
-          type="button"
-          data-bs-target="#historicalCarousel"
-          data-bs-slide="next"
-        >
-          <span class="carousel-control-next-icon" aria-hidden="true"></span>
-          <span class="visually-hidden">Next</span>
-        </button>
-        <button
-          id="carouselPauseBtn"
-          type="button"
-          aria-label="Pause carousel"
-          aria-pressed="false"
-          style="
-            position: absolute;
-            bottom: 10px;
-            right: 10px;
-            z-index: 10;
-            background: rgba(0, 0, 0, 0.45);
-            border: none;
-            color: #fff;
-            border-radius: 6px;
-            padding: 4px 8px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            display: none !important;
-          "
-        >
-          <i class="bi bi-pause-fill" aria-hidden="true"></i>
-        </button>
-      </div>
-    </header>
-
-    <div class="quiz-cta-strip py-3">
-      <div class="container d-flex gap-3">
-        <!-- Events Quiz -->
-        <div class="quiz-cta-col">
-          <strong>Today's Events Quiz</strong>
-          <div class="quiz-cta-sub">
-            5 questions on today's historical events
-          </div>
-          <a href="/quiz/" class="btn btn-warning fw-semibold w-100 mt-2"
-            >Take the Quiz <i class="bi bi-arrow-right ms-1"></i
-          ></a>
-        </div>
-
-        <div class="vr" style="opacity: 0.25"></div>
-
-        <!-- Blog Article Quiz -->
-        <div class="quiz-cta-col">
-          <strong>Latest Article Quiz</strong>
-          <div class="quiz-cta-sub">Read it. Quiz yourself at the end.</div>
-          <a
-            id="blog-quiz-btn"
-            href="/blog/archive/"
-            class="btn btn-warning fw-semibold w-100 mt-2"
-            >Read &amp; Quiz <i class="bi bi-arrow-right ms-1"></i
-          ></a>
-        </div>
-      </div>
+    <!-- Marquee -->
+    <div class="marquee-bar" id="marqueeBar" style="display:none;">
+      <div class="marquee-track" id="marqueeTrack"></div>
     </div>
+
+    <!-- Hero -->
+    <section class="hero">
+      <p class="eyebrow">On This Day</p>
+      <h1>What Happened in History?</h1>
+      <p>
+        Every date hides a story. thisDay. surfaces the wars declared, inventions patented,
+        leaders born, and empires fallen on this exact calendar day — across thousands of years
+        of recorded human history.
+      </p>
+      <div class="hero-meta">
+        <span><i class="bi bi-calendar3"></i> Any date, any year</span>
+        <span><i class="bi bi-book"></i> Sourced from Wikipedia</span>
+        <span><i class="bi bi-person-heart"></i> Births &amp; deaths</span>
+      </div>
+      <a href="#calendarGrid" class="btn" id="todayBtn">
+        What happened today <i class="bi bi-arrow-down"></i>
+      </a>
+    </section>
+
+    <!-- Blog Posts Section -->
+    <section class="blog-section">
+      <div class="blog-grid" id="blogGrid">
+        <!-- Populated by JavaScript -->
+      </div>
+      <div class="blog-cta-col">
+        <p>Our blog</p>
+        <h3>Want to read more? Check out our blog</h3>
+        <a href="/blog/archive/" class="btn">Visit the Blog</a>
+      </div>
+    </section>
+
+    <!-- Quiz Section -->
+    <section class="quiz-section">
+      <div class="quiz-wrap">
+        <div class="quiz-card">
+          <img
+            src="https://thisday.info/images/blog/21.7.jpg"
+            alt="Today's Events Quiz"
+            class="quiz-card-img"
+          />
+          <div class="quiz-card-body">
+            <h3>Today's Events Quiz</h3>
+            <p>5 questions on today's historical events</p>
+            <a href="/quiz/" class="btn"
+              >Take the Quiz <i class="bi bi-arrow-right"></i
+            ></a>
+          </div>
+        </div>
+        <div class="quiz-card">
+          <img
+            src="https://thisday.info/images/blog/22.7.jpg"
+            alt="Latest Article Quiz"
+            class="quiz-card-img"
+          />
+          <div class="quiz-card-body">
+            <h3>Latest Article Quiz</h3>
+            <p>Read it. Quiz yourself at the end.</p>
+            <a id="blog-quiz-btn" href="/blog/archive/" class="btn"
+              >Read &amp; Quiz <i class="bi bi-arrow-right"></i
+            ></a>
+          </div>
+        </div>
+        <div class="quiz-card-events">
+          <p class="quiz-card-events-label">Calendar</p>
+          <h3>Today's Events</h3>
+          <p>Every historical event, birth, and death recorded on this exact date — across thousands of years.</p>
+          <a href="/" class="btn">View Today's Events <i class="bi bi-arrow-right"></i></a>
+        </div>
+      </div>
+    </section>
+
     <script>
       (function () {
         var btn = document.getElementById("blog-quiz-btn");
@@ -905,123 +1356,141 @@
       })();
     </script>
 
-    <main class="container my-2">
-      <div class="container mt-2">
-        <div
-          class="month-navigation mb-2 d-flex justify-content-between align-items-center"
-        >
-          <button
-            class="btn btn-outline-primary px-3"
-            id="prevMonthBtn"
-            aria-label="Previous month"
-          >
-            <i class="bi bi-chevron-left" aria-hidden="true"></i>
-            <span class="d-none d-sm-inline ms-1">Prev</span>
-          </button>
-          <h2 id="currentMonthYear" class="mb-0"></h2>
-          <button
-            class="btn btn-outline-primary px-3"
-            id="nextMonthBtn"
-            aria-label="Next month"
-          >
-            <span class="d-none d-sm-inline me-1">Next</span>
-            <i class="bi bi-chevron-right" aria-hidden="true"></i>
-          </button>
-        </div>
+    <!-- Calendar -->
+    <main class="calendar-section">
+      <div class="month-nav">
+        <button class="btn" id="prevMonthBtn" aria-label="Previous month">
+          <i class="bi bi-chevron-left"></i>
+          <span class="d-none d-sm-inline">Prev</span>
+        </button>
+        <h2 id="currentMonthYear"></h2>
+        <button class="btn" id="nextMonthBtn" aria-label="Next month">
+          <span class="d-none d-sm-inline">Next</span>
+          <i class="bi bi-chevron-right"></i>
+        </button>
       </div>
 
       <div class="calendar-grid" id="calendarGrid">
         <div id="loadingIndicator" class="col-12 text-center py-5">
-          <div class="spinner-border text-primary" role="status">
+          <div class="spinner-border" role="status">
             <span class="visually-hidden">Loading...</span>
           </div>
-          <p class="mt-3">Loading...</p>
+          <p style="margin-top: 1rem; color: var(--text-muted)">Loading...</p>
         </div>
       </div>
     </main>
-    <script src="/js/chatbot.js"></script>
-    <footer class="footer">
-      <div
-        class="container d-flex justify-content-center flex-wrap my-2"
-        style="gap: 1.25rem"
-      >
-        <a
-          href="https://github.com/Fugec"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="GitHub"
-          ><i class="bi bi-github h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://www.facebook.com/profile.php?id=61578009082537"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Facebook"
-          ><i class="bi bi-facebook h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://www.instagram.com/thisday.info/"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Instagram"
-          ><i class="bi bi-instagram h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://www.tiktok.com/@this__day"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="TikTok"
-          ><i class="bi bi-tiktok h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://www.youtube.com/@thisDay_info/shorts"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="YouTube"
-          ><i class="bi bi-youtube h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://flipboard.com/@ArminKapetanovi/magazines/"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Flipboard"
-          ><svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="white"
-            style="width: 1.6rem; height: 1.6rem; vertical-align: -0.15em"
-            aria-hidden="true"
-          >
-            <path d="M0 0h11v11H0zM13 0h11v11H13zM0 13h11v11H0z" /></svg
-        ></a>
+
+    <!-- Events Section -->
+    <section class="events-section">
+      <div class="events-grid">
+        <div class="events-featured" id="eventsFeatured">
+          <img src="" alt="" id="featuredEventImage" />
+          <div class="events-featured-body">
+            <div class="events-featured-year" id="featuredEventYear"></div>
+            <h3 id="featuredEventTitle"></h3>
+            <p id="featuredEventDesc"></p>
+            <a href="#" class="btn" id="featuredEventBtn"
+              >Read More <i class="bi bi-arrow-right"></i
+            ></a>
+          </div>
+        </div>
+        <div class="events-slider-wrap">
+          <h4 class="events-slider-title">More Events This Month</h4>
+          <div class="events-slider" id="eventsSlider">
+          </div>
+        </div>
       </div>
-      <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
-      <p>
-        Historical data sourced from Wikipedia.org under
-        <a
-          href="https://creativecommons.org/licenses/by-sa/4.0/"
-          target="_blank"
-          rel="noopener noreferrer"
-          >CC BY-SA 4.0</a
-        >
-        license. Data is for informational purposes and requires verification.
-      </p>
-      <p>
-        This website is not affiliated with any official historical
-        organization. Content is for educational and entertainment purposes
-        only.
-      </p>
-      <p class="footer-bottom">
-        <a href="https://buymeacoffee.com/fugec?new=1" target="_blank"
-          >Support This Project</a
-        >
-        | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> |
-        <a href="/contact/">Contact</a> |
-        <a href="/terms/">Terms and Conditions</a> |
-        <a href="/privacy-policy/">Privacy Policy</a>
-      </p>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-inner">
+        <div class="footer-social">
+          <a
+            href="https://github.com/Fugec"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub"
+            ><i class="bi bi-github"></i
+          ></a>
+          <a
+            href="https://www.facebook.com/profile.php?id=61578009082537"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Facebook"
+            ><i class="bi bi-facebook"></i
+          ></a>
+          <a
+            href="https://www.instagram.com/thisday.info/"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram"
+            ><i class="bi bi-instagram"></i
+          ></a>
+          <a
+            href="https://www.tiktok.com/@this__day"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="TikTok"
+            ><i class="bi bi-tiktok"></i
+          ></a>
+          <a
+            href="https://www.youtube.com/@thisDay_info/shorts"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="YouTube"
+            ><i class="bi bi-youtube"></i
+          ></a>
+          <a
+            href="https://flipboard.com/@ArminKapetanovi/magazines/"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Flipboard"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="white"
+              style="width: 1.4rem; height: 1.4rem; vertical-align: -0.15em"
+            >
+              <path d="M0 0h11v11H0zM13 0h11v11H13zM0 13h11v11H0z" />
+            </svg>
+          </a>
+        </div>
+        <div class="footer-text">
+          <p>
+            &copy; <span id="currentYear"></span> thisDay. All rights reserved.
+          </p>
+          <p>
+            Historical data sourced from
+            <a
+              href="https://creativecommons.org/licenses/by-sa/4.0/"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Wikipedia.org under CC BY-SA 4.0</a
+            >
+            license.
+          </p>
+          <p>
+            This website is not affiliated with any official historical
+            organization. Content is for educational and entertainment purposes
+            only.
+          </p>
+        </div>
+        <div class="footer-bottom">
+          <a href="#" id="supportFooterBtn"
+            >Support This Project</a
+          >
+          <a href="/blog/">Blog</a>
+          <a href="/about/">About</a>
+          <a href="/contact/">Contact</a>
+          <a href="/terms/">Terms</a>
+          <a href="/privacy-policy/">Privacy</a>
+        </div>
+      </div>
     </footer>
 
+    <!-- Modal -->
     <div
       class="modal fade"
       id="eventDetailModal"
@@ -1030,12 +1499,12 @@
       aria-modal="true"
       aria-labelledby="modalDate"
     >
-      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+      <div
+        class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"
+      >
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title" id="eventDetailModalLabel">
-              Events for <span id="modalDate"></span>
-            </h5>
+            <h5 class="modal-title">Events for <span id="modalDate"></span></h5>
             <button
               type="button"
               class="btn-close"
@@ -1044,222 +1513,300 @@
             ></button>
           </div>
           <div class="modal-body" id="modalBodyContent"></div>
-          <div id="popupExploreBar" class="popup-explore-bar">
-            <a href="#" id="popupExploreEvents" class="popup-explore-chip popup-explore-chip-events">
-              <i class="bi bi-calendar-event"></i>
-              <span>All Events</span>
-            </a>
-            <a href="#" id="popupExploreBirths" class="popup-explore-chip popup-explore-chip-born">
-              <i class="bi bi-person-heart"></i>
-              <span>Birthdays</span>
-            </a>
-            <a href="#" id="popupExploreDied" class="popup-explore-chip popup-explore-chip-died">
-              <i class="bi bi-flower1"></i>
-              <span>Deaths</span>
-            </a>
-          </div>
         </div>
       </div>
     </div>
 
+    <!-- Cookie -->
     <div id="cookieBanner" class="cookie-banner">
       <p>
-        thisday.info uses cookies to ensure you get the best experience. By
-        continuing to use the site, you agree to our use of cookies.
-        <a
-          href="/privacy-policy/"
-          style="color: #fff; text-decoration: underline; white-space: nowrap"
-          >Learn more</a
-        >.
+        thisday.info uses cookies to ensure you get the best experience.
+        <a href="/privacy-policy/">Learn more</a>.
       </p>
-      <button id="acceptCookies" class="btn btn-primary btn-sm">OK</button>
+      <button id="acceptCookies" class="btn">OK</button>
+    </div>
+
+    <!-- Support Popup -->
+    <div id="supportPopup" class="support-overlay">
+      <div class="support-box">
+        <button class="support-close">&times;</button>
+        <h4>History runs on facts, and this project runs on coffee!</h4>
+        <p>Your support is incredibly helpful and genuinely appreciated.</p>
+        <a
+          href="https://buymeacoffee.com/fugec?new=1"
+          target="_blank"
+          class="btn"
+          >Support with a coffee</a
+        >
+      </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="js/script.js?v=1"></script>
-    <script>
-      document.addEventListener("DOMContentLoaded", () => {
-        // --- Carousel: pause-on-hover + pause/play button (WCAG 2.2.2) ---
-        const carouselEl = document.getElementById("historicalCarousel");
-        const pauseBtn = document.getElementById("carouselPauseBtn");
-        if (carouselEl && pauseBtn) {
-          let isPaused = false;
-          const bsCarousel = bootstrap.Carousel.getOrCreateInstance(carouselEl);
+    <script src="js/script.js?v=3"></script>
+    <script src="/js/chatbot.js"></script>
 
-          const setPaused = (paused) => {
+    <script>
+      // Populate latest 3 blog posts
+      (function () {
+        fetch("/blog/archive.json")
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (posts) {
+            var grid = document.getElementById("blogGrid");
+            if (!grid || !posts.length) return;
+            grid.innerHTML = "";
+            posts.slice(0, 3).forEach(function (post) {
+              var slug = post.slug || "";
+              var title = post.title || "Untitled";
+              var excerpt = post.excerpt || post.description || "";
+              var img = post.imageUrl || "";
+              var dateStr = post.date || post.publishedAt || "";
+              var dateLabel = dateStr
+                ? new Date(dateStr).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+                : "";
+              var card = document.createElement("a");
+              card.className = "blog-card";
+              card.href = "/blog/" + slug + "/";
+              card.style.cssText = "text-decoration:none;color:inherit;";
+              card.innerHTML =
+                (img ? '<img src="' + img + '" alt="' + title.replace(/"/g, "&quot;") + '" class="blog-card-img" loading="lazy" />' : "") +
+                '<div class="blog-card-body">' +
+                (dateLabel ? '<div class="blog-card-date">' + dateLabel + "</div>" : "") +
+                "<h3>" + title + "</h3>" +
+                (excerpt ? "<p>" + excerpt + "</p>" : "") +
+                '<span class="btn" style="align-self:flex-start;margin-top:auto">Read More <i class="bi bi-arrow-right"></i></span>' +
+                "</div>";
+              grid.appendChild(card);
+            });
+          })
+          .catch(function () {});
+      })();
+    </script>
+
+    <script>
+      // Populate featured event + 2-card sidebar from today's Wikipedia events
+      document.addEventListener("DOMContentLoaded", async function () {
+        var now = new Date();
+        try {
+          var data = await fetchWikipediaEvents(now.getMonth() + 1, now.getDate());
+          var events = (data && data.events) || [];
+          if (!events.length) return;
+
+          // Featured (first event)
+          var ev = events[0];
+          var featImg = document.getElementById("featuredEventImage");
+          if (featImg) {
+            featImg.src = ev.thumbnailUrl
+              ? getOptimizedImageUrl(ev.thumbnailUrl, 900)
+              : "";
+            featImg.alt = ev.title || "";
+            if (!ev.thumbnailUrl) featImg.style.display = "none";
+          }
+          var featYear = document.getElementById("featuredEventYear");
+          if (featYear) featYear.textContent = ev.year || "";
+          var featTitle = document.getElementById("featuredEventTitle");
+          if (featTitle) featTitle.textContent = ev.title || "";
+          var featDesc = document.getElementById("featuredEventDesc");
+          if (featDesc) featDesc.textContent = ev.description || "";
+          var featBtn = document.getElementById("featuredEventBtn");
+          if (featBtn && ev.sourceUrl) featBtn.href = ev.sourceUrl;
+
+          // Marquee: first 5 event titles
+          var marqueeTrack = document.getElementById("marqueeTrack");
+          var marqueeBar = document.getElementById("marqueeBar");
+          if (marqueeTrack && marqueeBar) {
+            var items = events.slice(0, 5).map(function (e) {
+              return '<span class="marquee-item"><span>' + (e.year || "") + '</span>' + (e.title || e.description || "") + '</span>';
+            }).join("");
+            // Duplicate for seamless loop
+            marqueeTrack.innerHTML = items + items;
+            marqueeBar.style.display = "";
+          }
+
+          // Sidebar: next 2 events
+          var slider = document.getElementById("eventsSlider");
+          if (!slider) return;
+          slider.innerHTML = "";
+          events.slice(1, 3).forEach(function (e) {
+            var card = document.createElement("a");
+            card.className = "events-slider-card";
+            card.href = e.sourceUrl || "#";
+            card.target = e.sourceUrl ? "_blank" : "";
+            card.rel = "noopener noreferrer";
+            var imgSrc = e.thumbnailUrl
+              ? getOptimizedImageUrl(e.thumbnailUrl, 600)
+              : "";
+            card.innerHTML =
+              (imgSrc
+                ? '<img src="' + imgSrc + '" alt="' + (e.title || "") + '" loading="lazy" />'
+                : "") +
+              '<div class="events-slider-card-body">' +
+              '<div class="events-slider-card-year">' + (e.year || "") + "</div>" +
+              "<h4>" + (e.title || "") + "</h4>" +
+              "<p>" + (e.description || "") + "</p>" +
+              '<span class="slider-read-more">Read More</span>' +
+              "</div>";
+            slider.appendChild(card);
+          });
+        } catch (err) {}
+      });
+    </script>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        // Year
+        document.getElementById("currentYear").textContent =
+          new Date().getFullYear();
+
+        // Mobile nav toggle
+        var navToggle = document.getElementById("navToggle");
+        var navMobile = document.getElementById("navMobile");
+        if (navToggle && navMobile) {
+          navToggle.addEventListener("click", function () {
+            navMobile.classList.toggle("active");
+          });
+        }
+
+        // Carousel controls
+        var carouselEl = document.getElementById("historicalCarousel");
+        var pauseBtn = document.getElementById("carouselPauseBtn");
+        if (carouselEl && pauseBtn) {
+          var isPaused = false;
+          var bsCarousel = bootstrap.Carousel.getOrCreateInstance(carouselEl);
+          var setPaused = function (paused) {
             isPaused = paused;
             if (paused) {
               bsCarousel.pause();
               pauseBtn.setAttribute("aria-pressed", "true");
-              pauseBtn.setAttribute("aria-label", "Play carousel");
-              pauseBtn.innerHTML =
-                '<i class="bi bi-play-fill" aria-hidden="true"></i>';
+              pauseBtn.innerHTML = '<i class="bi bi-play-fill"></i>';
             } else {
               bsCarousel.cycle();
               pauseBtn.setAttribute("aria-pressed", "false");
-              pauseBtn.setAttribute("aria-label", "Pause carousel");
-              pauseBtn.innerHTML =
-                '<i class="bi bi-pause-fill" aria-hidden="true"></i>';
+              pauseBtn.innerHTML = '<i class="bi bi-pause-fill"></i>';
             }
           };
-
-          carouselEl.addEventListener("mouseenter", () => {
+          carouselEl.addEventListener("mouseenter", function () {
             if (!isPaused) bsCarousel.pause();
           });
-          carouselEl.addEventListener("mouseleave", () => {
+          carouselEl.addEventListener("mouseleave", function () {
             if (!isPaused) bsCarousel.cycle();
           });
-          carouselEl.addEventListener("focusin", () => {
+          carouselEl.addEventListener("focusin", function () {
             if (!isPaused) bsCarousel.pause();
           });
-          carouselEl.addEventListener("focusout", () => {
+          carouselEl.addEventListener("focusout", function () {
             if (!isPaused) bsCarousel.cycle();
           });
-          pauseBtn.addEventListener("click", () => setPaused(!isPaused));
-
-          // Show pause button once carousel is visible
-          const carouselObserver = new IntersectionObserver((entries) => {
-            entries.forEach((e) => {
+          pauseBtn.addEventListener("click", function () {
+            setPaused(!isPaused);
+          });
+          var observer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (e) {
               pauseBtn.style.display = e.isIntersecting ? "block" : "none";
             });
           });
-          carouselObserver.observe(carouselEl);
+          observer.observe(carouselEl);
         }
 
-        // --- Chatbot nudge: fire once after 3s, only if never interacted, respect reduced-motion ---
-        const chatbotToggle = document.querySelector(".chatbot-toggle");
+        // Chatbot nudge
+        var chatbotToggle = document.querySelector(".chatbot-toggle");
         if (
           chatbotToggle &&
           !localStorage.getItem("chatbotUsed") &&
           !window.matchMedia("(prefers-reduced-motion: reduce)").matches
         ) {
-          setTimeout(() => chatbotToggle.classList.add("nudge-once"), 3000);
+          setTimeout(function () {
+            chatbotToggle.classList.add("nudge-once");
+          }, 3000);
         }
 
-        const cookieBanner = document.getElementById("cookieBanner");
-        const acceptCookiesBtn = document.getElementById("acceptCookies");
-        const COOKIE_ACCEPTED_KEY = "cookieBannerAccepted";
-
-        // Check if the user has already accepted cookies
-        if (localStorage.getItem(COOKIE_ACCEPTED_KEY) !== "true") {
-          cookieBanner.style.display = "flex"; // Show the banner if not accepted
+        // Cookie banner
+        var cookieBanner = document.getElementById("cookieBanner");
+        var acceptBtn = document.getElementById("acceptCookies");
+        if (localStorage.getItem("cookieBannerAccepted") !== "true") {
+          cookieBanner.style.display = "flex";
+        }
+        if (acceptBtn) {
+          acceptBtn.addEventListener("click", function () {
+            localStorage.setItem("cookieBannerAccepted", "true");
+            cookieBanner.style.display = "none";
+          });
         }
 
-        // Add event listener for the "OK" button
-        if (acceptCookiesBtn) {
-          acceptCookiesBtn.addEventListener("click", () => {
-            localStorage.setItem(COOKIE_ACCEPTED_KEY, "true"); // Set flag in localStorage
-            cookieBanner.style.display = "none"; // Hide the banner
+        // "What happened today" button — scroll to today's card or calendar
+        var todayBtn = document.getElementById("todayBtn");
+        if (todayBtn) {
+          todayBtn.addEventListener("click", function (e) {
+            e.preventDefault();
+            var todayCard = document.querySelector(".day-card.today-highlight");
+            var target = todayCard || document.getElementById("calendarGrid");
+            if (target) {
+              target.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          });
+        }
+
+      });
+    </script>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        var popup = document.getElementById("supportPopup");
+        var closeBtn = document.querySelector(".support-close");
+        var navBtn = document.getElementById("supportNavBtn");
+        var footerBtn = document.getElementById("supportFooterBtn");
+
+        function showPopup(e) {
+          if (e) e.preventDefault();
+          popup.classList.add("show");
+        }
+        function hidePopup() {
+          popup.classList.remove("show");
+        }
+
+        if (navBtn) navBtn.addEventListener("click", showPopup);
+        if (footerBtn) footerBtn.addEventListener("click", showPopup);
+        if (closeBtn) closeBtn.addEventListener("click", hidePopup);
+        if (popup) {
+          popup.addEventListener("click", function (e) {
+            if (e.target === popup) hidePopup();
           });
         }
       });
     </script>
-  </body>
 
-  <div id="supportPopup" class="support-popup-overlay">
-    <div class="support-popup-content">
-      <button class="support-close-btn">&times;</button>
-
-      <h4>History runs on facts, and this project runs on coffee!</h4>
-      <p>Your support is incredibly helpful and genuinely appreciated.</p>
-
-      <a
-        href="https://buymeacoffee.com/fugec?new=1"
-        target="_blank"
-        class="btn btn-primary btn-sm"
-      >
-        Support with a coffee
-      </a>
-    </div>
-  </div>
-
-  <script>
-    function initSupportPopup() {
-      const popup = document.getElementById("supportPopup");
-      const closeBtn = document.querySelector(".support-close-btn");
-
-      if (!popup || !closeBtn) return;
-
-      // Show popup at 70% scroll depth (only if not previously closed)
-      // Falls back to 5s timer on short pages where 70% is never reached
-      const _bmcTs = localStorage.getItem("supportPopupClosed");
-      if (!_bmcTs || Date.now() - Number(_bmcTs) > 86400000) {
-        let dismissed = false;
-        const showPopup = () => { if (!dismissed) popup.classList.add("show"); };
-        let ready = false;
-        let scrolledPast70 = false;
-
-        // Unlock after 1 minute minimum
-        setTimeout(() => {
-          ready = true;
-          if (scrolledPast70) showPopup();
-        }, 60000);
-
-        // Fallback: show at 90s even if user never scrolled deep enough
-        setTimeout(() => { if (!popup.classList.contains("show")) showPopup(); }, 90000);
-
-        const onScroll = () => {
-          const scrolled = window.scrollY + window.innerHeight;
-          const total = document.documentElement.scrollHeight;
-          if (scrolled / total >= 0.7) {
-            scrolledPast70 = true;
-            if (ready) showPopup();
-          }
-        };
-
-        window.addEventListener("scroll", onScroll, { passive: true });
-
-        // Handle close button click
-        closeBtn.addEventListener("click", () => {
-          dismissed = true;
-          popup.classList.remove("show");
-          localStorage.setItem("supportPopupClosed", String(Date.now()));
-          window.removeEventListener("scroll", onScroll);
-        });
-      } else {
-        // Handle close button click (popup won't show, but keep handler clean)
-        closeBtn.addEventListener("click", () => {
-          popup.classList.remove("show");
-          localStorage.setItem("supportPopupClosed", String(Date.now()));
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register("/sw.js").catch(function () {});
         });
       }
-    }
+    </script>
 
-    document.addEventListener("DOMContentLoaded", initSupportPopup);
-  </script>
-
-  <script>
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js").catch(() => {});
-      });
-    }
-  </script>
-  <!-- Google Ads: 60 Seconds on Site -->
-  <script>
-    (function () {
-      var fired = false;
-      var timer = null;
-      function fireConversion() {
-        if (fired) return;
-        fired = true;
-        gtag("event", "conversion", {
-          send_to: "AW-17262488503/pnJhCPrptfsbELfXsqdA",
-        });
-      }
-      function startTimer() {
-        if (!timer) timer = setTimeout(fireConversion, 60000);
-      }
-      function stopTimer() {
-        if (timer) {
-          clearTimeout(timer);
+    <script>
+      (function () {
+        var fired = false,
           timer = null;
+        function fire() {
+          if (fired) return;
+          fired = true;
+          gtag("event", "conversion", {
+            send_to: "AW-17262488503/pnJhCPrptfsbELfXsqdA",
+          });
         }
-      }
-      document.addEventListener("visibilitychange", function () {
-        document.hidden ? stopTimer() : !fired && startTimer();
-      });
-      if (!document.hidden) startTimer();
-    })();
-  </script>
+        function start() {
+          if (!timer) timer = setTimeout(fire, 60000);
+        }
+        function stop() {
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+        }
+        document.addEventListener("visibilitychange", function () {
+          document.hidden ? stop() : !fired && start();
+        });
+        if (!document.hidden) start();
+      })();
+    </script>
+  </body>
 </html>

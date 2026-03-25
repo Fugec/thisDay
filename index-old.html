@@ -1,0 +1,1114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- thisDay. is an interactive web application that allows users to explore significant historical events for any day of the year. It features a calendar view, daily highlights carousel, history quizzes, a daily blog, YouTube Shorts, and responsive design. Data is sourced from Wikipedia and presented for educational and entertainment purposes.-->
+    <!-- Designed and Developed by: Armin Kapetanović  -->
+    <!-- Contact: kapetanovic.armin@gmail.com -->
+    <!-- Project: thisDay. | Historical Events Calendar -->
+    <!-- License: CC BY-SA 4.0 -->
+    <!-- GitHub:  https://github.com/Fugec/thisDay. -->
+    <!-- Support the project: coff.ee/Fugec -->
+
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>thisDay. | What Happened on This Day? | Historical Events</title>
+    <link rel="canonical" href="https://thisday.info/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="keywords"
+      content="thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history, educational, timeline, trivia, historical figures, history quiz, daily quiz, history blog, history articles, YouTube Shorts history, this day in history, what happened today, historical milestones"
+    />
+    <meta
+      name="description"
+      content="Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history. Browse by date and learn about wars, inventions, discoveries, and the lives of notable people. Make history come alive - one day at a time."
+    />
+    <meta property="og:title" content="thisDay. | Historical Events" />
+    <meta
+      property="og:description"
+      content="Uncover the most fascinating historical events and milestones from any date. Dive into the past and share the stories that shaped our world!"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://thisday.info/" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content="https://thisday.info/images/logo.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta
+      property="og:image:alt"
+      content="thisDay. — What Happened on This Day in History"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="author" content="Armin Kapetanović" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:title"
+      content="What Happened on This Day? | Historical Events"
+    />
+    <meta
+      name="twitter:description"
+      content="Discover what happened today in history. Explore famous events,
+        birthdays, milestones, and key moments that happened on this day throughout the
+        history. Browse by date and learn about wars, inventions, discoveries,
+        and the lives of notable people. Make history come alive - one day at
+        a time."
+    />
+    <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
+    <meta name="twitter:creator" content="@thisday_info" />
+
+    <script type="application/ld+json">
+      [
+        {
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          "name": "thisDay.",
+          "url": "https://thisday.info/",
+          "description": "Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history.",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://thisday.info/?date={date}",
+            "query-input": "required name=date"
+          }
+        },
+        {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          "name": "thisDay.info",
+          "url": "https://thisday.info/",
+          "logo": "https://thisday.info/images/logo.png",
+          "sameAs": [
+            "https://github.com/Fugec",
+            "https://www.facebook.com/profile.php?id=61578009082537",
+            "https://www.instagram.com/thisday.info/",
+            "https://www.tiktok.com/@this__day",
+            "https://www.youtube.com/@thisDay_info/shorts"
+          ]
+        }
+      ]
+    </script>
+
+    <link rel="alternate" hreflang="en" href="https://thisday.info/" />
+
+    <link rel="dns-prefetch" href="//api.wikimedia.org" />
+    <link rel="preconnect" href="https://api.wikimedia.org" crossorigin />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <link
+      rel="preload"
+      as="style"
+      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <link
+      rel="preload"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      as="style"
+    />
+    <link
+      rel="preload"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+      as="style"
+    />
+    <link
+      rel="preload"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"
+      as="script"
+    />
+    <link rel="preload" href="js/script.js?v=1" as="script" />
+
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      media="print"
+      onload="this.media = 'all'"
+    />
+    <noscript
+      ><link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    /></noscript>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+    />
+
+    <link rel="icon" href="images/favicon.ico" type="image/x-icon" />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="images/apple-touch-icon.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="images/favicon-32x32.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="images/favicon-16x16.png"
+    />
+
+    <style>
+      /* Light Theme (Default) - Critical Variables */
+      :root {
+        --link-hover-color: #1a1a1a; /* charcoal - same as text */
+
+        /* Original base colors and their application */
+        --primary-bg: #ffffff; /* white */
+        --secondary-bg: #f8f9fa; /* very light gray - barely off-white */
+        --text-color: #1a1a1a; /* near-black charcoal */
+        --header-text-color: #1a1a1a; /* charcoal */
+        --card-bg: #ffffff; /* white */
+        --card-border: #e4e4e0; /* neutral warm gray */
+        --footer-bg: #1a1a1a; /* charcoal */
+        --footer-text-color: #ffffff; /* white */
+        --modal-bg: #ffffff; /* white */
+        --modal-text-color: #1a1a1a; /* charcoal */
+        --link-color: #1a1a1a; /* charcoal with underline */
+        --card-bg-no-events: #f8f9fa; /* very light gray */
+        --card-border-no-events: #e4e4e0; /* neutral warm gray */
+        --text-color-light: #6b6b6b; /* muted gray */
+        --border-radius: 0.5rem;
+
+        /* Apply default body colors */
+        background-color: var(--secondary-bg);
+        color: var(--text-color);
+
+        .display-4 {
+          background: linear-gradient(
+            to right,
+            #1a1a1a 0%,
+            #6b6b6b 50%,
+            #1a1a1a 100%
+          );
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+        }
+      }
+
+      a.btn.btn-sm.btn-outline-primary {
+        border: 1px solid #0e6efd;
+      }
+
+      .border {
+        border: 1px solid var(--card-border);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      /* Base styles for body and navbar */
+      body {
+        font-family: "Lora", Georgia, serif;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
+      }
+
+      .navbar {
+        background-color: var(--primary-bg) !important;
+        transition: background-color 0.3s ease;
+        position: sticky;
+        top: 0;
+        z-index: 1030;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+
+      .navbar-brand,
+      .navbar-nav .nav-link {
+        color: var(--header-text-color) !important;
+        font-weight: bold !important;
+      }
+
+      .carousel-header {
+        background-color: var(--primary-bg);
+        color: var(--header-text-color);
+        text-align: center;
+        transition: background-color 0.3s ease;
+      }
+
+      .display-4 {
+        font-size: 45px;
+        font-weight: bolder !important;
+        padding: 10px;
+      }
+
+      .carousel-header .text-muted {
+        color: #fff !important;
+      }
+
+      #historicalCarousel {
+        margin: 0 auto;
+        overflow: hidden;
+        transition: background-color 0.3s ease;
+        display: none;
+      }
+
+      #historicalCarousel .carousel-item img {
+        height: 350px;
+        object-fit: cover;
+        filter: brightness(70%);
+        transition: filter 0.3s ease;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .carousel-caption {
+        padding: 4rem;
+        box-sizing: border-box;
+        transition: background-color 0.3s ease;
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        background-color: rgba(
+          0,
+          0,
+          0,
+          0.6
+        ); /* Black background with 60% opacity */
+        margin: 0;
+      }
+
+      .carousel-caption.no-events {
+        background: #ff000054;
+        border: 1px solid red;
+      }
+
+      .carousel-caption h5 {
+        color: #e3e6ea;
+        z-index: 1;
+        padding: 10px;
+        font-size: 24px;
+        font-weight: bold;
+      }
+
+      main {
+        flex: 1;
+        margin-top: 20px;
+      }
+
+      .month-navigation {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        margin-top: 20px;
+      }
+
+      .month-navigation h2 {
+        color: var(--text-color);
+        transition: color 0.3s ease;
+        font-size: 28.8px;
+        font-weight: bold;
+      }
+
+      .btn-outline-primary {
+        color: #6f787f;
+        border-color: #e2e8f0;
+        transition:
+          color 0.3s ease,
+          background-color 0.3s ease,
+          border-color 0.3s ease;
+        background: #fff;
+      }
+
+      .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+        gap: 15px;
+        padding: 20px 0;
+      }
+
+      .day-card {
+        background-color: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: var(--border-radius);
+        padding: 15px;
+        text-align: center;
+        min-height: 100px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        transition:
+          background-color 0.3s ease,
+          border-color 0.3s ease;
+      }
+
+      .day-card .spinner-border {
+        margin: auto; /* Center the spinner */
+      }
+
+      .day-card.no-events {
+        background-color: var(--card-bg-no-events);
+        border-color: var(--card-border-no-events);
+        color: var(--text-color-light);
+        cursor: default;
+      }
+
+      .day-number {
+        font-size: 1.8em;
+        font-weight: bold;
+        color: var(--text-color);
+        transition: color 0.3s ease;
+      }
+
+      .event-summary {
+        font-size: 0.9em;
+        color: var(--text-color);
+        margin-top: 10px;
+        transition: color 0.3s ease;
+      }
+
+      .loading-indicator {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-color);
+        transition: color 0.3s ease;
+      }
+
+      .loading-indicator p {
+        color: var(--text-color);
+      }
+
+      .footer {
+        background-color: var(--footer-bg);
+        color: var(--footer-text-color);
+        text-align: center;
+        padding: 20px 0;
+        margin-top: 30px;
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease;
+        padding: 20px;
+        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+      }
+
+      .footer a {
+        color: var(--footer-text-color);
+        text-decoration: underline;
+        transition: color 0.3s ease;
+      }
+
+      .modal-content {
+        background-color: var(--modal-bg);
+        color: var(--modal-text-color);
+        border: 1px solid var(--card-border);
+        transition:
+          background-color 0.3s ease,
+          color 0.3s ease,
+          border-color 0.3s ease;
+      }
+
+      .modal-header {
+        background-color: var(--modal-bg);
+        border-bottom-color: var(--card-border);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+
+      .modal-title {
+        color: var(--modal-text-color);
+        font-size: 20px;
+        font-weight: bold;
+      }
+
+      .btn-close {
+        filter: var(--bs-btn-close-white, invert(0)) grayscale(100%)
+          brightness(var(--close-btn-brightness, 1));
+        opacity: 0.7;
+        transition:
+          filter 0.3s ease,
+          opacity 0.3s ease;
+      }
+
+      .text-primary {
+        --bs-text-opacity: 1;
+        font-size: 20px;
+      }
+
+      .day-card.today-highlight {
+        position: relative;
+        overflow: hidden;
+        transition: all 0.3s ease-in-out;
+        border-radius: 0px !important;
+      }
+
+      .day-card.today-highlight::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 123, 255, 0.2);
+        z-index: 1;
+        pointer-events: none;
+        border: 2px solid #007bff;
+        box-sizing: border-box;
+      }
+
+      #scrollToTopBtn {
+        position: fixed;
+        bottom: 10px;
+        left: 10px;
+        z-index: 1050;
+        min-width: 40px;
+        height: 40px;
+        border-radius: 6px;
+        background: #0d6efd;
+        color: #fff;
+        border: none;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.92;
+        font-weight: bold;
+        font-size: 16px;
+        padding: 0 18px;
+      }
+
+      .year-label {
+        position: absolute;
+        top: 12px;
+        right: 18px;
+        z-index: 10;
+        background: #0d6efd;
+        color: #fff;
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 16px;
+        font-weight: 600;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        pointer-events: none;
+      }
+      /* Fullscreen overlay */
+      .support-popup-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.35);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(2px);
+        z-index: 9999;
+        opacity: 0;
+        transition: opacity 0.4s ease;
+      }
+
+      /* Show state */
+      .support-popup-overlay.show {
+        display: flex;
+        opacity: 1;
+      }
+
+      /* Popup box */
+      .support-popup-content {
+        background: var(--card-bg);
+        color: var(--text-color);
+        padding: 25px 28px;
+        border-radius: 12px;
+        max-width: 300px;
+        text-align: center;
+        border: 1px solid var(--card-border);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        position: relative;
+        animation: popupFadeIn 0.35s ease;
+      }
+
+      /* Close button */
+      .support-close-btn {
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        border: none;
+        background: transparent;
+        color: var(--text-color);
+        font-size: 22px;
+        cursor: pointer;
+        padding: 0;
+      }
+
+      /* Smooth scale/fade animation */
+      @keyframes popupFadeIn {
+        0% {
+          transform: scale(0.8);
+          opacity: 0;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+    </style>
+
+    <link rel="manifest" href="/manifest.json" />
+
+    <link
+      rel="stylesheet"
+      href="css/style.css?v=1"
+      media="print"
+      onload="this.media = 'all'"
+    />
+    <noscript><link rel="stylesheet" href="css/style.css?v=1" /></noscript>
+
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag("js", new Date());
+      // Google Analytics configuration
+      gtag("config", "G-WXEZ3868VN");
+      // Google Ads configuration
+      gtag("config", "AW-17262488503");
+    </script>
+
+    <script>
+      function gtag_report_conversion(url) {
+        var callback = function () {
+          if (typeof url != "undefined") {
+            window.location = url;
+          }
+        };
+        gtag("event", "conversion", {
+          send_to: "AW-17262488503/WsLuCMLVweEaELfXsqdA",
+          event_callback: callback,
+        });
+        return false;
+      }
+    </script>
+    <script
+      async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+
+  <body>
+    <a
+      href="#calendarGrid"
+      class="visually-hidden-focusable position-absolute top-0 start-0 p-2 bg-primary text-white fw-semibold"
+      style="z-index: 9999; border-radius: 0 0 6px 0"
+      >Skip to calendar</a
+    >
+    <nav class="navbar navbar-expand-lg">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/">thisDay.</a>
+      </div>
+    </nav>
+
+    <header class="carousel-header">
+      <!--      <div class="container text-center my-4">
+        <h1 class="display-4">What happened on this day?</h1>
+        <p class="text-muted">
+          Browse by date and learn about notable events, wars, inventions,
+          discoveries, and the lives of great people. Make history come alive -
+          one day at a time.
+        </p>
+      </div> -->
+      <div
+        id="historicalCarousel"
+        class="carousel slide"
+        data-bs-ride="carousel"
+        aria-label="Historical Carousel"
+      >
+        <div class="carousel-indicators" id="carouselIndicators"></div>
+        <div class="carousel-inner" id="carouselInner">
+          <div class="carousel-item active">
+            <div class="carousel-caption">
+              <div class="text header-text"></div>
+              <div class="button"></div>
+            </div>
+          </div>
+        </div>
+        <button
+          class="carousel-control-prev"
+          type="button"
+          data-bs-target="#historicalCarousel"
+          data-bs-slide="prev"
+        >
+          <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+          <span class="visually-hidden">Previous</span>
+        </button>
+        <button
+          class="carousel-control-next"
+          type="button"
+          data-bs-target="#historicalCarousel"
+          data-bs-slide="next"
+        >
+          <span class="carousel-control-next-icon" aria-hidden="true"></span>
+          <span class="visually-hidden">Next</span>
+        </button>
+        <button
+          id="carouselPauseBtn"
+          type="button"
+          aria-label="Pause carousel"
+          aria-pressed="false"
+          style="
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.45);
+            border: none;
+            color: #fff;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            display: none !important;
+          "
+        >
+          <i class="bi bi-pause-fill" aria-hidden="true"></i>
+        </button>
+      </div>
+    </header>
+
+    <div class="quiz-cta-strip py-3">
+      <div class="container d-flex gap-3">
+        <!-- Events Quiz -->
+        <div class="quiz-cta-col">
+          <strong>Today's Events Quiz</strong>
+          <div class="quiz-cta-sub">
+            5 questions on today's historical events
+          </div>
+          <a href="/quiz/" class="btn btn-warning fw-semibold w-100 mt-2"
+            >Take the Quiz <i class="bi bi-arrow-right ms-1"></i
+          ></a>
+        </div>
+
+        <div class="vr" style="opacity: 0.25"></div>
+
+        <!-- Blog Article Quiz -->
+        <div class="quiz-cta-col">
+          <strong>Latest Article Quiz</strong>
+          <div class="quiz-cta-sub">Read it. Quiz yourself at the end.</div>
+          <a
+            id="blog-quiz-btn"
+            href="/blog/archive/"
+            class="btn btn-warning fw-semibold w-100 mt-2"
+            >Read &amp; Quiz <i class="bi bi-arrow-right ms-1"></i
+          ></a>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var btn = document.getElementById("blog-quiz-btn");
+        if (!btn) return;
+        fetch("/blog/archive.json")
+          .then(function (r) {
+            return r.ok ? r.json() : null;
+          })
+          .then(function (d) {
+            if (d && d.length && d[0].slug)
+              btn.href = "/blog/" + d[0].slug + "/#quiz";
+          })
+          .catch(function () {});
+      })();
+    </script>
+
+    <main class="container my-2">
+      <div class="container mt-2">
+        <div
+          class="month-navigation mb-2 d-flex justify-content-between align-items-center"
+        >
+          <button
+            class="btn btn-outline-primary px-3"
+            id="prevMonthBtn"
+            aria-label="Previous month"
+          >
+            <i class="bi bi-chevron-left" aria-hidden="true"></i>
+            <span class="d-none d-sm-inline ms-1">Prev</span>
+          </button>
+          <h2 id="currentMonthYear" class="mb-0"></h2>
+          <button
+            class="btn btn-outline-primary px-3"
+            id="nextMonthBtn"
+            aria-label="Next month"
+          >
+            <span class="d-none d-sm-inline me-1">Next</span>
+            <i class="bi bi-chevron-right" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="calendar-grid" id="calendarGrid">
+        <div id="loadingIndicator" class="col-12 text-center py-5">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="mt-3">Loading...</p>
+        </div>
+      </div>
+    </main>
+    <script src="/js/chatbot.js"></script>
+    <footer class="footer">
+      <div
+        class="container d-flex justify-content-center flex-wrap my-2"
+        style="gap: 1.25rem"
+      >
+        <a
+          href="https://github.com/Fugec"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="GitHub"
+          ><i class="bi bi-github h3 mb-0"></i
+        ></a>
+        <a
+          href="https://www.facebook.com/profile.php?id=61578009082537"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Facebook"
+          ><i class="bi bi-facebook h3 mb-0"></i
+        ></a>
+        <a
+          href="https://www.instagram.com/thisday.info/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Instagram"
+          ><i class="bi bi-instagram h3 mb-0"></i
+        ></a>
+        <a
+          href="https://www.tiktok.com/@this__day"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="TikTok"
+          ><i class="bi bi-tiktok h3 mb-0"></i
+        ></a>
+        <a
+          href="https://www.youtube.com/@thisDay_info/shorts"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="YouTube"
+          ><i class="bi bi-youtube h3 mb-0"></i
+        ></a>
+        <a
+          href="https://flipboard.com/@ArminKapetanovi/magazines/"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Flipboard"
+          ><svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="white"
+            style="width: 1.6rem; height: 1.6rem; vertical-align: -0.15em"
+            aria-hidden="true"
+          >
+            <path d="M0 0h11v11H0zM13 0h11v11H13zM0 13h11v11H0z" /></svg
+        ></a>
+      </div>
+      <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
+      <p>
+        Historical data sourced from Wikipedia.org under
+        <a
+          href="https://creativecommons.org/licenses/by-sa/4.0/"
+          target="_blank"
+          rel="noopener noreferrer"
+          >CC BY-SA 4.0</a
+        >
+        license. Data is for informational purposes and requires verification.
+      </p>
+      <p>
+        This website is not affiliated with any official historical
+        organization. Content is for educational and entertainment purposes
+        only.
+      </p>
+      <p class="footer-bottom">
+        <a href="https://buymeacoffee.com/fugec?new=1" target="_blank"
+          >Support This Project</a
+        >
+        | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> |
+        <a href="/contact/">Contact</a> |
+        <a href="/terms/">Terms and Conditions</a> |
+        <a href="/privacy-policy/">Privacy Policy</a>
+      </p>
+    </footer>
+
+    <div
+      class="modal fade"
+      id="eventDetailModal"
+      tabindex="-1"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modalDate"
+    >
+      <div
+        class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"
+      >
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="eventDetailModalLabel">
+              Events for <span id="modalDate"></span>
+            </h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body" id="modalBodyContent"></div>
+          <div id="popupExploreBar" class="popup-explore-bar">
+            <a
+              href="#"
+              id="popupExploreEvents"
+              class="popup-explore-chip popup-explore-chip-events"
+            >
+              <i class="bi bi-calendar-event"></i>
+              <span>All Events</span>
+            </a>
+            <a
+              href="#"
+              id="popupExploreBirths"
+              class="popup-explore-chip popup-explore-chip-born"
+            >
+              <i class="bi bi-person-heart"></i>
+              <span>Birthdays</span>
+            </a>
+            <a
+              href="#"
+              id="popupExploreDied"
+              class="popup-explore-chip popup-explore-chip-died"
+            >
+              <i class="bi bi-flower1"></i>
+              <span>Deaths</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="cookieBanner" class="cookie-banner">
+      <p>
+        thisday.info uses cookies to ensure you get the best experience. By
+        continuing to use the site, you agree to our use of cookies.
+        <a
+          href="/privacy-policy/"
+          style="color: #fff; text-decoration: underline; white-space: nowrap"
+          >Learn more</a
+        >.
+      </p>
+      <button id="acceptCookies" class="btn btn-primary btn-sm">OK</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/script.js?v=1"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        // --- Carousel: pause-on-hover + pause/play button (WCAG 2.2.2) ---
+        const carouselEl = document.getElementById("historicalCarousel");
+        const pauseBtn = document.getElementById("carouselPauseBtn");
+        if (carouselEl && pauseBtn) {
+          let isPaused = false;
+          const bsCarousel = bootstrap.Carousel.getOrCreateInstance(carouselEl);
+
+          const setPaused = (paused) => {
+            isPaused = paused;
+            if (paused) {
+              bsCarousel.pause();
+              pauseBtn.setAttribute("aria-pressed", "true");
+              pauseBtn.setAttribute("aria-label", "Play carousel");
+              pauseBtn.innerHTML =
+                '<i class="bi bi-play-fill" aria-hidden="true"></i>';
+            } else {
+              bsCarousel.cycle();
+              pauseBtn.setAttribute("aria-pressed", "false");
+              pauseBtn.setAttribute("aria-label", "Pause carousel");
+              pauseBtn.innerHTML =
+                '<i class="bi bi-pause-fill" aria-hidden="true"></i>';
+            }
+          };
+
+          carouselEl.addEventListener("mouseenter", () => {
+            if (!isPaused) bsCarousel.pause();
+          });
+          carouselEl.addEventListener("mouseleave", () => {
+            if (!isPaused) bsCarousel.cycle();
+          });
+          carouselEl.addEventListener("focusin", () => {
+            if (!isPaused) bsCarousel.pause();
+          });
+          carouselEl.addEventListener("focusout", () => {
+            if (!isPaused) bsCarousel.cycle();
+          });
+          pauseBtn.addEventListener("click", () => setPaused(!isPaused));
+
+          // Show pause button once carousel is visible
+          const carouselObserver = new IntersectionObserver((entries) => {
+            entries.forEach((e) => {
+              pauseBtn.style.display = e.isIntersecting ? "block" : "none";
+            });
+          });
+          carouselObserver.observe(carouselEl);
+        }
+
+        // --- Chatbot nudge: fire once after 3s, only if never interacted, respect reduced-motion ---
+        const chatbotToggle = document.querySelector(".chatbot-toggle");
+        if (
+          chatbotToggle &&
+          !localStorage.getItem("chatbotUsed") &&
+          !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ) {
+          setTimeout(() => chatbotToggle.classList.add("nudge-once"), 3000);
+        }
+
+        const cookieBanner = document.getElementById("cookieBanner");
+        const acceptCookiesBtn = document.getElementById("acceptCookies");
+        const COOKIE_ACCEPTED_KEY = "cookieBannerAccepted";
+
+        // Check if the user has already accepted cookies
+        if (localStorage.getItem(COOKIE_ACCEPTED_KEY) !== "true") {
+          cookieBanner.style.display = "flex"; // Show the banner if not accepted
+        }
+
+        // Add event listener for the "OK" button
+        if (acceptCookiesBtn) {
+          acceptCookiesBtn.addEventListener("click", () => {
+            localStorage.setItem(COOKIE_ACCEPTED_KEY, "true"); // Set flag in localStorage
+            cookieBanner.style.display = "none"; // Hide the banner
+          });
+        }
+      });
+    </script>
+  </body>
+
+  <div id="supportPopup" class="support-popup-overlay">
+    <div class="support-popup-content">
+      <button class="support-close-btn">&times;</button>
+
+      <h4>History runs on facts, and this project runs on coffee!</h4>
+      <p>Your support is incredibly helpful and genuinely appreciated.</p>
+
+      <a
+        href="https://buymeacoffee.com/fugec?new=1"
+        target="_blank"
+        class="btn btn-primary btn-sm"
+      >
+        Support with a coffee
+      </a>
+    </div>
+  </div>
+
+  <script>
+    function initSupportPopup() {
+      const popup = document.getElementById("supportPopup");
+      const closeBtn = document.querySelector(".support-close-btn");
+
+      if (!popup || !closeBtn) return;
+
+      // Show popup at 70% scroll depth (only if not previously closed)
+      // Falls back to 5s timer on short pages where 70% is never reached
+      const _bmcTs = localStorage.getItem("supportPopupClosed");
+      if (!_bmcTs || Date.now() - Number(_bmcTs) > 86400000) {
+        let dismissed = false;
+        const showPopup = () => {
+          if (!dismissed) popup.classList.add("show");
+        };
+        let ready = false;
+        let scrolledPast70 = false;
+
+        // Unlock after 1 minute minimum
+        setTimeout(() => {
+          ready = true;
+          if (scrolledPast70) showPopup();
+        }, 60000);
+
+        // Fallback: show at 90s even if user never scrolled deep enough
+        setTimeout(() => {
+          if (!popup.classList.contains("show")) showPopup();
+        }, 90000);
+
+        const onScroll = () => {
+          const scrolled = window.scrollY + window.innerHeight;
+          const total = document.documentElement.scrollHeight;
+          if (scrolled / total >= 0.7) {
+            scrolledPast70 = true;
+            if (ready) showPopup();
+          }
+        };
+
+        window.addEventListener("scroll", onScroll, { passive: true });
+
+        // Handle close button click
+        closeBtn.addEventListener("click", () => {
+          dismissed = true;
+          popup.classList.remove("show");
+          localStorage.setItem("supportPopupClosed", String(Date.now()));
+          window.removeEventListener("scroll", onScroll);
+        });
+      } else {
+        // Handle close button click (popup won't show, but keep handler clean)
+        closeBtn.addEventListener("click", () => {
+          popup.classList.remove("show");
+          localStorage.setItem("supportPopupClosed", String(Date.now()));
+        });
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", initSupportPopup);
+  </script>
+
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      });
+    }
+  </script>
+  <!-- Google Ads: 60 Seconds on Site -->
+  <script>
+    (function () {
+      var fired = false;
+      var timer = null;
+      function fireConversion() {
+        if (fired) return;
+        fired = true;
+        gtag("event", "conversion", {
+          send_to: "AW-17262488503/pnJhCPrptfsbELfXsqdA",
+        });
+      }
+      function startTimer() {
+        if (!timer) timer = setTimeout(fireConversion, 60000);
+      }
+      function stopTimer() {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      }
+      document.addEventListener("visibilitychange", function () {
+        document.hidden ? stopTimer() : !fired && startTimer();
+      });
+      if (!document.hidden) startTimer();
+    })();
+  </script>
+</html>

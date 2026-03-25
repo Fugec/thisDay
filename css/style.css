@@ -22,7 +22,7 @@
 }
 
 .modal-image {
-  display: none;
+  display: none !important;
 }
 
 /* Force body/navbar/footer to use light values even when dark-theme present */

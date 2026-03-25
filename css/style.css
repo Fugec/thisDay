@@ -927,12 +927,29 @@ article iframe {
 
 /* --- indexv2 scoped overrides --- */
 
-/* Nav: links right on desktop */
-[data-page="v2"] .nav-links {
+/* Nav: links right on desktop — unscoped so it works even in cached HTML */
+.nav-inner {
+  justify-content: flex-start !important;
+}
+.nav-links {
   margin-left: auto !important;
 }
 
 /* Nav: hamburger right on mobile, links hidden */
+@media (max-width: 768px) {
+  .nav-links {
+    display: none !important;
+  }
+  .btn#navToggle {
+    display: flex !important;
+    margin-left: auto !important;
+  }
+}
+
+/* Scoped duplicates for specificity safety */
+[data-page="v2"] .nav-links {
+  margin-left: auto !important;
+}
 @media (max-width: 768px) {
   [data-page="v2"] .nav-links {
     display: none !important;

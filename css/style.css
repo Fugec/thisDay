@@ -927,6 +927,27 @@ article iframe {
 
 /* --- indexv2 scoped overrides --- */
 
+/* Nav: links right on desktop */
+[data-page="v2"] .nav-links {
+  margin-left: auto !important;
+}
+
+/* Nav: hamburger right on mobile, links hidden */
+@media (max-width: 768px) {
+  [data-page="v2"] .nav-links {
+    display: none !important;
+  }
+  [data-page="v2"] .btn#navToggle {
+    display: flex !important;
+    margin-left: auto !important;
+  }
+}
+
+/* Blog grid: 3 columns */
+[data-page="v2"] .blog-grid {
+  grid-template-columns: repeat(3, 1fr) !important;
+}
+
 [data-page="v2"] .modal-body a {
   color: #fff;
 }

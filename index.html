@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <!-- thisDay. is an interactive web application that allows users to explore significant historical events for any day of the year. It features a calendar view, daily highlights carousel, history quizzes, a daily blog, YouTube Shorts, and responsive design. Data is sourced from Wikipedia and presented for educational and entertainment purposes.-->
+    <!-- thisDay. is an interactive web application that allows users to explore significant historical events for any day of the year. It features a calendar view, daily highlights carousel, history quizzes, a daily blog, YouTube Shorts, dark mode, and responsive design. Data is sourced from Wikipedia and presented for educational and entertainment purposes.-->
     <!-- Designed and Developed by: Armin Kapetanović  -->
     <!-- Contact: kapetanovic.armin@gmail.com -->
     <!-- Project: thisDay. | Historical Events Calendar -->
@@ -98,7 +98,7 @@
     <link
       rel="preload"
       as="style"
-      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
     />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
@@ -160,23 +160,31 @@
     <style>
       /* Light Theme (Default) - Critical Variables */
       :root {
-        --link-hover-color: #1a1a1a; /* charcoal - same as text */
+        --link-hover-color: #1d4ed8; /* blue-700 */
+        --button-outline-color: #e2e8f0;
+        --button-outline-text: #6c757d;
+        --button-outline-hover-bg: #2563eb;
+        --button-outline-hover-text: #ffffff;
 
         /* Original base colors and their application */
-        --primary-bg: #ffffff; /* white */
-        --secondary-bg: #f8f9fa; /* very light gray - barely off-white */
-        --text-color: #1a1a1a; /* near-black charcoal */
-        --header-text-color: #1a1a1a; /* charcoal */
+        --primary-bg: #3b82f6; /* blue-500 */
+        --secondary-bg: #fff !important; /* white */
+        --text-color: #6c757d; /* slate-900 */
+        --header-text-color: #ffffff; /* white */
         --card-bg: #ffffff; /* white */
-        --card-border: #e4e4e0; /* neutral warm gray */
-        --footer-bg: #1a1a1a; /* charcoal */
-        --footer-text-color: #ffffff; /* white */
+        --card-border: #e2e8f0; /* gray-200 */
+        --footer-bg: #3b82f6;
+        --footer-text-color: #ffffff; /* slate-100 */
         --modal-bg: #ffffff; /* white */
-        --modal-text-color: #1a1a1a; /* charcoal */
-        --link-color: #1a1a1a; /* charcoal with underline */
-        --card-bg-no-events: #f8f9fa; /* very light gray */
-        --card-border-no-events: #e4e4e0; /* neutral warm gray */
-        --text-color-light: #6b6b6b; /* muted gray */
+        --modal-text-color: #6c757d; /* slate-900 */
+        --link-color: #2563eb; /* blue-600 */
+        --switch-track-off: #e2e8f0; /* gray-200 */
+        --switch-thumb-off: #cbd5e1; /* gray-300 */
+        --switch-track-on: #2563eb; /* blue-600 */
+        --switch-thumb-on: #ffffff; /* white */
+        --card-bg-no-events: #ffffff; /* slate-100 */
+        --card-border-no-events: #e2e8f0; /* gray-200 */
+        --text-color-light: #64748b; /* slate-400 */
         --border-radius: 0.5rem;
 
         /* Apply default body colors */
@@ -186,17 +194,59 @@
         .display-4 {
           background: linear-gradient(
             to right,
-            #1a1a1a 0%,
-            #6b6b6b 50%,
-            #1a1a1a 100%
+            #60a5fa 0%,
+            #fff 50%,
+            #60a5fa 100%
           );
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
         }
       }
 
+      /* Dark Theme - Critical Variables and Applications */
+      body.dark-theme {
+        --link-hover-color: #3b82f6; /* blue-500 */
+        --button-outline-color: #60a5fa;
+        --button-outline-text: #60a5fa;
+        --button-outline-hover-bg: #2563eb;
+        --button-outline-hover-text: #ffffff;
+
+        /* Original dark theme colors and their application */
+        --primary-bg: #020617; /* slate-950 */
+        --secondary-bg: #1e293b; /* slate-800 */
+        --text-color: #f8fafc; /* slate-50 */
+        --header-text-color: #ffffff; /* white */
+        --card-bg: #1e293b; /* slate-800 */
+        --card-border: #334155; /* slate-700 */
+        --footer-bg: #020617; /* slate-950 */
+        --footer-text-color: #ffffff; /* slate-100 */
+        --modal-bg: #1e293b; /* slate-800 */
+        --modal-text-color: #f8fafc; /* slate-50 */
+        --link-color: #60a5fa; /* blue-400 */
+        --switch-track-off: #334155; /* slate-700 */
+        --switch-thumb-off: #64748b; /* slate-400 */
+        --switch-track-on: #2563eb; /* blue-600 */
+        --switch-thumb-on: #f8fafc; /* slate-50 */
+        --dark-card-bg-no-events: #0f172a; /* slate-900 */
+        --dark-card-border-no-events: #334155; /* slate-700 */
+        --dark-text-color-light: #64748b; /* slate-400 */
+
+        /* Apply dark theme colors directly to body and navbar when dark-theme is active */
+        background-color: var(--secondary-bg) !important;
+        color: var(--text-color) !important;
+      }
+
+      body.dark-theme .border {
+        border: 1px solid #334255 !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
       a.btn.btn-sm.btn-outline-primary {
         border: 1px solid #0e6efd;
+      }
+
+      body.dark-theme a.btn.btn-sm.btn-outline-primary {
+        border: 1px solid #334255;
       }
 
       .border {
@@ -204,9 +254,9 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       }
 
-      /* Base styles for body and navbar */
+      /* Base styles for body and navbar - these will be overridden by dark-theme if present */
       body {
-        font-family: "Lora", Georgia, serif;
+        font-family: Inter, sans-serif;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
@@ -221,7 +271,6 @@
         position: sticky;
         top: 0;
         z-index: 1030;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
       }
 
       .navbar-brand,
@@ -235,6 +284,20 @@
         color: var(--header-text-color);
         text-align: center;
         transition: background-color 0.3s ease;
+      }
+
+      body.dark-theme .carousel-header h1 {
+        background: linear-gradient(
+          90deg,
+          #f8fafc 0%,
+          #60a5fa 50%,
+          #1e293b 100%
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        color: transparent;
+        font-weight: bold !important;
       }
 
       .display-4 {
@@ -298,6 +361,42 @@
         font-weight: bold;
       }
 
+      .form-check-input:checked {
+        background-color: var(--switch-track-on) !important;
+        border-color: var(--switch-track-on) !important;
+      }
+
+      .form-check-input {
+        background-color: var(--switch-track-off);
+        border-color: var(--switch-track-off);
+        transition:
+          background-color 0.3s ease,
+          border-color 0.3s ease;
+      }
+
+      .form-switch .form-check-input {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+        background-color: var(--switch-thumb-off); /* Unchecked thumb color */
+        transition:
+          background-color 0.3s ease,
+          transform 0.3s ease;
+      }
+
+      .form-switch .form-check-input:checked {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
+        background-color: var(--switch-thumb-on); /* Checked thumb color */
+      }
+
+      .theme-switch-mobile label i {
+        color: var(--header-text-color); /* Icon color */
+        font-size: 1.2rem;
+        margin-left: 0.5rem;
+      }
+
+      .theme-switch-desktop label {
+        color: var(--header-text-color);
+      }
+
       main {
         flex: 1;
         margin-top: 20px;
@@ -318,6 +417,10 @@
         font-weight: bold;
       }
 
+      body.dark-theme h2#currentMonthYear {
+        color: #f8fafc;
+      }
+
       .btn-outline-primary {
         color: #6f787f;
         border-color: #e2e8f0;
@@ -326,6 +429,12 @@
           background-color 0.3s ease,
           border-color 0.3s ease;
         background: #fff;
+      }
+
+      body.dark-theme .btn-outline-primary {
+        border-color: #334255;
+        color: #f8fafc;
+        background-color: #1d293b;
       }
 
       .calendar-grid {
@@ -361,6 +470,12 @@
         border-color: var(--card-border-no-events);
         color: var(--text-color-light);
         cursor: default;
+      }
+
+      .dark-theme .day-card.no-events {
+        background-color: var(--dark-card-bg-no-events);
+        border-color: var(--dark-card-border-no-events);
+        color: var(--dark-text-color-light);
       }
 
       .day-number {
@@ -401,7 +516,6 @@
           background-color 0.3s ease,
           color 0.3s ease;
         padding: 20px;
-        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
       }
 
       .footer a {
@@ -434,6 +548,10 @@
         font-weight: bold;
       }
 
+      body.dark-theme h5#eventDetailModalLabel {
+        color: #60a5fa;
+      }
+
       .btn-close {
         filter: var(--bs-btn-close-white, invert(0)) grayscale(100%)
           brightness(var(--close-btn-brightness, 1));
@@ -443,9 +561,18 @@
           opacity 0.3s ease;
       }
 
+      .dark-theme .btn-close {
+        filter: var(--bs-btn-close-white, invert(1)) grayscale(100%)
+          brightness(var(--close-btn-brightness, 0.8));
+      }
+
       .text-primary {
         --bs-text-opacity: 1;
         font-size: 20px;
+      }
+
+      body.dark-theme .text-primary {
+        color: #60a5fa !important;
       }
 
       .day-card.today-highlight {
@@ -619,9 +746,51 @@
       style="z-index: 9999; border-radius: 0 0 6px 0"
       >Skip to calendar</a
     >
-    <nav class="navbar navbar-expand-lg">
+    <nav class="navbar navbar-expand-lg navbar-dark">
       <div class="container-fluid">
         <a class="navbar-brand" href="/">thisDay.</a>
+        <div class="form-check form-switch d-lg-none me-2">
+          <input
+            class="form-check-input"
+            type="checkbox"
+            id="tsm"
+            aria-label="Toggle dark mode"
+          />
+          <label class="form-check-label" for="tsm"
+            ><i
+              class="bi bi-brightness-high-fill theme-icon-sun"
+              style="color: #fff; font-size: 1.1rem; margin-left: 4px"
+            ></i
+            ><i
+              class="bi bi-moon-fill theme-icon-moon"
+              style="color: #fff; font-size: 1.1rem; margin-left: 4px"
+            ></i
+          ></label>
+        </div>
+        <div class="collapse navbar-collapse">
+          <ul class="navbar-nav ms-auto">
+            <li class="nav-item d-flex align-items-center">
+              <div class="form-check form-switch d-none d-lg-block me-2">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="tsd"
+                  aria-label="Toggle dark mode"
+                />
+                <label class="form-check-label" for="tsd" style="color: #fff"
+                  ><i
+                    class="bi bi-brightness-high-fill theme-icon-sun"
+                    style="font-size: 1.1rem"
+                  ></i
+                  ><i
+                    class="bi bi-moon-fill theme-icon-moon"
+                    style="font-size: 1.1rem"
+                  ></i
+                ></label>
+              </div>
+            </li>
+          </ul>
+        </div>
       </div>
     </nav>
 
@@ -781,35 +950,35 @@
           target="_blank"
           rel="noopener noreferrer"
           aria-label="GitHub"
-          ><i class="bi bi-github h3 mb-0"></i
+          ><i class="bi bi-github h3 text-white mb-0"></i
         ></a>
         <a
           href="https://www.facebook.com/profile.php?id=61578009082537"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Facebook"
-          ><i class="bi bi-facebook h3 mb-0"></i
+          ><i class="bi bi-facebook h3 text-white mb-0"></i
         ></a>
         <a
           href="https://www.instagram.com/thisday.info/"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="Instagram"
-          ><i class="bi bi-instagram h3 mb-0"></i
+          ><i class="bi bi-instagram h3 text-white mb-0"></i
         ></a>
         <a
           href="https://www.tiktok.com/@this__day"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="TikTok"
-          ><i class="bi bi-tiktok h3 mb-0"></i
+          ><i class="bi bi-tiktok h3 text-white mb-0"></i
         ></a>
         <a
           href="https://www.youtube.com/@thisDay_info/shorts"
           target="_blank"
           rel="noopener noreferrer"
           aria-label="YouTube"
-          ><i class="bi bi-youtube h3 mb-0"></i
+          ><i class="bi bi-youtube h3 text-white mb-0"></i
         ></a>
         <a
           href="https://flipboard.com/@ArminKapetanovi/magazines/"
@@ -861,9 +1030,7 @@
       aria-modal="true"
       aria-labelledby="modalDate"
     >
-      <div
-        class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"
-      >
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="eventDetailModalLabel">
@@ -878,27 +1045,15 @@
           </div>
           <div class="modal-body" id="modalBodyContent"></div>
           <div id="popupExploreBar" class="popup-explore-bar">
-            <a
-              href="#"
-              id="popupExploreEvents"
-              class="popup-explore-chip popup-explore-chip-events"
-            >
+            <a href="#" id="popupExploreEvents" class="popup-explore-chip popup-explore-chip-events">
               <i class="bi bi-calendar-event"></i>
               <span>All Events</span>
             </a>
-            <a
-              href="#"
-              id="popupExploreBirths"
-              class="popup-explore-chip popup-explore-chip-born"
-            >
+            <a href="#" id="popupExploreBirths" class="popup-explore-chip popup-explore-chip-born">
               <i class="bi bi-person-heart"></i>
               <span>Birthdays</span>
             </a>
-            <a
-              href="#"
-              id="popupExploreDied"
-              class="popup-explore-chip popup-explore-chip-died"
-            >
+            <a href="#" id="popupExploreDied" class="popup-explore-chip popup-explore-chip-died">
               <i class="bi bi-flower1"></i>
               <span>Deaths</span>
             </a>
@@ -1030,9 +1185,7 @@
       const _bmcTs = localStorage.getItem("supportPopupClosed");
       if (!_bmcTs || Date.now() - Number(_bmcTs) > 86400000) {
         let dismissed = false;
-        const showPopup = () => {
-          if (!dismissed) popup.classList.add("show");
-        };
+        const showPopup = () => { if (!dismissed) popup.classList.add("show"); };
         let ready = false;
         let scrolledPast70 = false;
 
@@ -1043,9 +1196,7 @@
         }, 60000);
 
         // Fallback: show at 90s even if user never scrolled deep enough
-        setTimeout(() => {
-          if (!popup.classList.contains("show")) showPopup();
-        }, 90000);
+        setTimeout(() => { if (!popup.classList.contains("show")) showPopup(); }, 90000);
 
         const onScroll = () => {
           const scrolled = window.scrollY + window.innerHeight;

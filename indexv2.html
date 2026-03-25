@@ -280,7 +280,7 @@
       }
       .hero p {
         font-size: 1.1rem;
-        color: var(--text-muted);
+        color: #4a4a4a;
         max-width: 640px;
         margin: 0 auto 1rem;
         font-style: italic;
@@ -434,6 +434,80 @@
         }
       }
 
+      /* Blog Posts Section */
+      .blog-section {
+        padding: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .blog-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .blog-card {
+        background: var(--bg);
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        transition: background 0.15s;
+      }
+      .blog-card:last-child {
+        border-right: none;
+      }
+      .blog-card:hover {
+        background: var(--bg-alt);
+      }
+      .blog-card-img {
+        width: 100%;
+        height: 200px;
+        object-fit: cover;
+        display: block;
+        filter: brightness(88%);
+      }
+      .blog-card-body {
+        padding: 1.5rem 2rem;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      .blog-card-date {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin-bottom: 0.5rem;
+      }
+      .blog-card-body h3 {
+        font-size: 1rem;
+        font-weight: 700;
+        margin: 0 0 0.6rem;
+        line-height: 1.35;
+      }
+      .blog-card-body p {
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        margin: 0 0 1.25rem;
+        line-height: 1.6;
+        flex: 1;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      @media (max-width: 768px) {
+        .blog-grid {
+          grid-template-columns: 1fr;
+        }
+        .blog-card {
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+        .blog-card:last-child {
+          border-bottom: none;
+        }
+      }
+
       /* Quiz Section */
       .quiz-section {
         background: var(--bg-alt);
@@ -552,7 +626,7 @@
         background: rgba(45, 106, 106, 0.05);
       }
       .day-number {
-        font-size: 1.6rem;
+        font-size: 17.6px;
         font-weight: 700;
         line-height: 1;
         margin-bottom: 0.5rem;
@@ -562,7 +636,7 @@
         font-weight: 600;
       }
       .event-summary {
-        font-size: 0.7rem;
+        font-size: 14.4px;
         color: var(--text-muted);
         line-height: 1.3;
         display: -webkit-box;
@@ -1021,29 +1095,10 @@
       </a>
     </section>
 
-    <!-- Events Section -->
-    <section class="events-section">
-      <div class="events-grid">
-        <!-- Featured Event - Large card on left -->
-        <div class="events-featured" id="eventsFeatured">
-          <img src="" alt="" id="featuredEventImage" />
-          <div class="events-featured-body">
-            <div class="events-featured-year" id="featuredEventYear"></div>
-            <h3 id="featuredEventTitle"></h3>
-            <p id="featuredEventDesc"></p>
-            <a href="#" class="btn" id="featuredEventBtn"
-              >Read More <i class="bi bi-arrow-right"></i
-            ></a>
-          </div>
-        </div>
-
-        <!-- Events Slider - Other events on right -->
-        <div class="events-slider-wrap">
-          <h4 class="events-slider-title">More Events This Month</h4>
-          <div class="events-slider" id="eventsSlider">
-            <!-- Events populated by JavaScript -->
-          </div>
-        </div>
+    <!-- Blog Posts Section -->
+    <section class="blog-section">
+      <div class="blog-grid" id="blogGrid">
+        <!-- Populated by JavaScript -->
       </div>
     </section>
 
@@ -1120,6 +1175,28 @@
         </div>
       </div>
     </main>
+
+    <!-- Events Section -->
+    <section class="events-section">
+      <div class="events-grid">
+        <div class="events-featured" id="eventsFeatured">
+          <img src="" alt="" id="featuredEventImage" />
+          <div class="events-featured-body">
+            <div class="events-featured-year" id="featuredEventYear"></div>
+            <h3 id="featuredEventTitle"></h3>
+            <p id="featuredEventDesc"></p>
+            <a href="#" class="btn" id="featuredEventBtn"
+              >Read More <i class="bi bi-arrow-right"></i
+            ></a>
+          </div>
+        </div>
+        <div class="events-slider-wrap">
+          <h4 class="events-slider-title">More Events This Month</h4>
+          <div class="events-slider" id="eventsSlider">
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Footer -->
     <footer class="footer">
@@ -1263,6 +1340,43 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="js/script.js?v=2"></script>
     <script src="/js/chatbot.js"></script>
+
+    <script>
+      // Populate latest 3 blog posts
+      (function () {
+        fetch("/blog/archive.json")
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (posts) {
+            var grid = document.getElementById("blogGrid");
+            if (!grid || !posts.length) return;
+            grid.innerHTML = "";
+            posts.slice(0, 3).forEach(function (post) {
+              var slug = post.slug || "";
+              var title = post.title || "Untitled";
+              var excerpt = post.excerpt || post.description || "";
+              var img = post.imageUrl || "";
+              var dateStr = post.date || post.publishedAt || "";
+              var dateLabel = dateStr
+                ? new Date(dateStr).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+                : "";
+              var card = document.createElement("a");
+              card.className = "blog-card";
+              card.href = "/blog/" + slug + "/";
+              card.style.cssText = "text-decoration:none;color:inherit;";
+              card.innerHTML =
+                (img ? '<img src="' + img + '" alt="' + title.replace(/"/g, "&quot;") + '" class="blog-card-img" loading="lazy" />' : "") +
+                '<div class="blog-card-body">' +
+                (dateLabel ? '<div class="blog-card-date">' + dateLabel + "</div>" : "") +
+                "<h3>" + title + "</h3>" +
+                (excerpt ? "<p>" + excerpt + "</p>" : "") +
+                '<span class="btn" style="align-self:flex-start;margin-top:auto">Read More <i class="bi bi-arrow-right"></i></span>' +
+                "</div>";
+              grid.appendChild(card);
+            });
+          })
+          .catch(function () {});
+      })();
+    </script>
 
     <script>
       // Populate featured event + 2-card sidebar from today's Wikipedia events

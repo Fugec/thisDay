@@ -174,8 +174,8 @@
       .nav-inner {
         padding: 0 2rem;
         display: flex;
-        justify-content: space-between;
         align-items: center;
+        width: 100%;
       }
       .brand {
         font-family: "Lora", Georgia, serif;
@@ -585,18 +585,36 @@
         overflow: hidden;
       }
       @media (max-width: 900px) {
-        .blog-grid {
-          grid-template-columns: 1fr;
-        }
-        .blog-card {
-          border-right: none;
+        .blog-section {
+          display: flex;
+          flex-direction: row;
+          overflow-x: auto;
+          scroll-snap-type: x mandatory;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
           border-bottom: 1px solid var(--border);
         }
-        .blog-card:last-child {
+        .blog-section::-webkit-scrollbar {
+          display: none;
+        }
+        .blog-grid {
+          display: contents;
+        }
+        .blog-card {
+          flex: 0 0 80vw;
+          max-width: 320px;
+          border-right: 1px solid var(--border);
           border-bottom: none;
+          scroll-snap-align: start;
+        }
+        .blog-card:last-child {
+          border-right: 1px solid var(--border);
         }
         .blog-cta-col {
-          border-top: 1px solid var(--border);
+          flex: 0 0 72vw;
+          max-width: 280px;
+          scroll-snap-align: start;
+          border-top: none;
         }
       }
 

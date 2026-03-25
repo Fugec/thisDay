@@ -284,7 +284,7 @@
       }
       .marquee-item {
         padding: 0 2.5rem;
-        border-right: 1px solid rgba(255,255,255,0.2);
+        border-right: 1px solid rgba(255, 255, 255, 0.2);
       }
       .marquee-item span {
         color: var(--accent);
@@ -292,8 +292,12 @@
         margin-right: 0.5rem;
       }
       @keyframes marquee-scroll {
-        from { transform: translateX(0); }
-        to   { transform: translateX(-50%); }
+        from {
+          transform: translateX(0);
+        }
+        to {
+          transform: translateX(-50%);
+        }
       }
 
       /* Hero */
@@ -472,7 +476,9 @@
         padding: 0.35rem 0.85rem;
         margin-top: 0.25rem;
         text-decoration: none;
-        transition: background 0.15s, color 0.15s;
+        transition:
+          background 0.15s,
+          color 0.15s;
       }
       .events-slider-card:hover .slider-read-more {
         background: var(--btn-bg);
@@ -650,7 +656,7 @@
       }
       .todays-events-cta-desc {
         font-size: 0.9rem;
-        color: rgba(255,255,255,0.75);
+        color: rgba(255, 255, 255, 0.75);
         margin: 0;
         max-width: 480px;
         line-height: 1.5;
@@ -709,7 +715,7 @@
       }
       .quiz-card-events p {
         font-size: 0.9rem;
-        color: rgba(255,255,255,0.75);
+        color: rgba(255, 255, 255, 0.75);
         margin: 0;
         line-height: 1.5;
       }
@@ -988,6 +994,57 @@
       .modal-body {
         background: var(--bg);
       }
+      .modal-body-flex {
+        display: flex;
+        flex-direction: row;
+        gap: 0;
+        padding: 0;
+        min-height: 320px;
+      }
+      .modal-body-flex .modal-image {
+        flex: 1 1 50%;
+        background: #e9ecef;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 220px;
+        overflow: hidden;
+      }
+      .modal-body-flex .modal-image img {
+        max-width: 100%;
+        max-height: 320px;
+        object-fit: cover;
+        width: 100%;
+        height: auto;
+      }
+      .modal-body-flex .modal-text {
+        flex: 1 1 50%;
+        padding: 2rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      @media (max-width: 768px) {
+        .modal-body-flex {
+          flex-direction: column;
+        }
+        .modal-body-flex .modal-image,
+        .modal-body-flex .modal-text {
+          flex: 1 1 100%;
+          min-height: 160px;
+        }
+      }
+      .btn-contrast {
+        background: #174832 !important;
+        color: #fff !important;
+        border-color: #174832 !important;
+      }
+      .btn-contrast:hover,
+      .btn-contrast:focus {
+        background: #0e2c1c !important;
+        color: #fff !important;
+        border-color: #0e2c1c !important;
+      }
 
       /* Cookie */
       .cookie-banner {
@@ -1162,6 +1219,7 @@
           font-size: 11px;
           display: -webkit-box;
           -webkit-line-clamp: 1;
+          line-clamp: 1;
           -webkit-box-orient: vertical;
           overflow: hidden;
         }
@@ -1256,7 +1314,13 @@
           <a href="/quiz/">Quiz</a>
           <a href="/about/">About</a>
           <a href="/contact/">Contact</a>
-          <a href="#" id="supportNavBtn" style="color:var(--accent);font-weight:600;" aria-label="Support this project">☕ Support</a>
+          <a
+            href="#"
+            id="supportNavBtn"
+            style="color: var(--accent); font-weight: 600"
+            aria-label="Support this project"
+            >☕ Support</a
+          >
         </div>
         <button class="btn" id="navToggle" aria-label="Toggle menu">
           <svg
@@ -1283,7 +1347,7 @@
     </nav>
 
     <!-- Marquee -->
-    <div class="marquee-bar" id="marqueeBar" style="display:none;">
+    <div class="marquee-bar" id="marqueeBar" style="display: none">
       <div class="marquee-track" id="marqueeTrack"></div>
     </div>
 
@@ -1292,9 +1356,9 @@
       <p class="eyebrow">On This Day</p>
       <h1>What Happened in History?</h1>
       <p>
-        Every date hides a story. thisDay. surfaces the wars declared, inventions patented,
-        leaders born, and empires fallen on this exact calendar day — across thousands of years
-        of recorded human history.
+        Every date hides a story. thisDay. surfaces the wars declared,
+        inventions patented, leaders born, and empires fallen on this exact
+        calendar day — across thousands of years of recorded human history.
       </p>
       <div class="hero-meta">
         <span><i class="bi bi-calendar3"></i> Any date, any year</span>
@@ -1352,8 +1416,13 @@
         <div class="quiz-card-events">
           <p class="quiz-card-events-label">Calendar</p>
           <h3>Today's Events</h3>
-          <p>Every historical event, birth, and death recorded on this exact date — across thousands of years.</p>
-          <a href="/" class="btn">View Today's Events <i class="bi bi-arrow-right"></i></a>
+          <p>
+            Every historical event, birth, and death recorded on this exact date
+            — across thousands of years.
+          </p>
+          <a href="/" class="btn"
+            >View Today's Events <i class="bi bi-arrow-right"></i
+          ></a>
         </div>
       </div>
     </section>
@@ -1414,8 +1483,7 @@
         </div>
         <div class="events-slider-wrap">
           <h4 class="events-slider-title">More Events This Month</h4>
-          <div class="events-slider" id="eventsSlider">
-          </div>
+          <div class="events-slider" id="eventsSlider"></div>
         </div>
       </div>
     </section>
@@ -1496,9 +1564,7 @@
           </p>
         </div>
         <div class="footer-bottom">
-          <a href="#" id="supportFooterBtn"
-            >Support This Project</a
-          >
+          <a href="#" id="supportFooterBtn">Support This Project</a>
           <a href="/blog/">Blog</a>
           <a href="/about/">About</a>
           <a href="/contact/">Contact</a>
@@ -1515,22 +1581,14 @@
       tabindex="-1"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="modalDate"
     >
       <div
         class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"
       >
         <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">Events for <span id="modalDate"></span></h5>
-            <button
-              type="button"
-              class="btn-close"
-              data-bs-dismiss="modal"
-              aria-label="Close"
-            ></button>
+          <div class="modal-body modal-body-flex" id="modalBodyContent">
+            <!-- Content dynamically injected by JS -->
           </div>
-          <div class="modal-body" id="modalBodyContent"></div>
         </div>
       </div>
     </div>
@@ -1541,7 +1599,7 @@
         thisday.info uses cookies to ensure you get the best experience.
         <a href="/privacy-policy/">Learn more</a>.
       </p>
-      <button id="acceptCookies" class="btn">OK</button>
+      <button id="acceptCookies" class="btn btn-contrast">OK</button>
     </div>
 
     <!-- Support Popup -->
@@ -1553,7 +1611,7 @@
         <a
           href="https://buymeacoffee.com/fugec?new=1"
           target="_blank"
-          class="btn"
+          class="btn btn-contrast"
           >Support with a coffee</a
         >
       </div>
@@ -1567,7 +1625,9 @@
       // Populate latest 3 blog posts
       (function () {
         fetch("/blog/archive.json")
-          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (r) {
+            return r.ok ? r.json() : [];
+          })
           .then(function (posts) {
             var grid = document.getElementById("blogGrid");
             if (!grid || !posts.length) return;
@@ -1579,17 +1639,31 @@
               var img = post.imageUrl || "";
               var dateStr = post.date || post.publishedAt || "";
               var dateLabel = dateStr
-                ? new Date(dateStr).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+                ? new Date(dateStr).toLocaleDateString("en-US", {
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })
                 : "";
               var card = document.createElement("a");
               card.className = "blog-card";
               card.href = "/blog/" + slug + "/";
               card.style.cssText = "text-decoration:none;color:inherit;";
               card.innerHTML =
-                (img ? '<img src="' + img + '" alt="' + title.replace(/"/g, "&quot;") + '" class="blog-card-img" loading="lazy" />' : "") +
+                (img
+                  ? '<img src="' +
+                    img +
+                    '" alt="' +
+                    title.replace(/"/g, "&quot;") +
+                    '" class="blog-card-img" loading="lazy" />'
+                  : "") +
                 '<div class="blog-card-body">' +
-                (dateLabel ? '<div class="blog-card-date">' + dateLabel + "</div>" : "") +
-                "<h3>" + title + "</h3>" +
+                (dateLabel
+                  ? '<div class="blog-card-date">' + dateLabel + "</div>"
+                  : "") +
+                "<h3>" +
+                title +
+                "</h3>" +
                 (excerpt ? "<p>" + excerpt + "</p>" : "") +
                 '<span class="btn" style="align-self:flex-start;margin-top:auto">Read More <i class="bi bi-arrow-right"></i></span>' +
                 "</div>";
@@ -1605,7 +1679,10 @@
       document.addEventListener("DOMContentLoaded", async function () {
         var now = new Date();
         try {
-          var data = await fetchWikipediaEvents(now.getMonth() + 1, now.getDate());
+          var data = await fetchWikipediaEvents(
+            now.getMonth() + 1,
+            now.getDate(),
+          );
           var events = (data && data.events) || [];
           if (!events.length) return;
 
@@ -1632,9 +1709,18 @@
           var marqueeTrack = document.getElementById("marqueeTrack");
           var marqueeBar = document.getElementById("marqueeBar");
           if (marqueeTrack && marqueeBar) {
-            var items = events.slice(0, 5).map(function (e) {
-              return '<span class="marquee-item"><span>' + (e.year || "") + '</span>' + (e.title || e.description || "") + '</span>';
-            }).join("");
+            var items = events
+              .slice(0, 5)
+              .map(function (e) {
+                return (
+                  '<span class="marquee-item"><span>' +
+                  (e.year || "") +
+                  "</span>" +
+                  (e.title || e.description || "") +
+                  "</span>"
+                );
+              })
+              .join("");
             // Duplicate for seamless loop
             marqueeTrack.innerHTML = items + items;
             marqueeBar.style.display = "";
@@ -1655,13 +1741,23 @@
               : "";
             card.innerHTML =
               (imgSrc
-                ? '<img src="' + imgSrc + '" alt="' + (e.title || "") + '" loading="lazy" />'
+                ? '<img src="' +
+                  imgSrc +
+                  '" alt="' +
+                  (e.title || "") +
+                  '" loading="lazy" />'
                 : "") +
               '<div class="events-slider-card-body">' +
-              '<div class="events-slider-card-year">' + (e.year || "") + "</div>" +
-              "<h4>" + (e.title || "") + "</h4>" +
-              "<p>" + (e.description || "") + "</p>" +
-              '<span class="slider-read-more">Read More</span>' +
+              '<div class="events-slider-card-year">' +
+              (e.year || "") +
+              "</div>" +
+              "<h4>" +
+              (e.title || "") +
+              "</h4>" +
+              "<p>" +
+              (e.description || "") +
+              "</p>" +
+              '<span class="btn">Read More</span>' +
               "</div>";
             slider.appendChild(card);
           });
@@ -1762,7 +1858,6 @@
             }
           });
         }
-
       });
     </script>
 

@@ -1851,7 +1851,7 @@ function renderFilteredItems(itemsToRender) {
     const yearsAgo = currentYear - eventYear;
     let anniversaryBadge = "";
     if (yearsAgo > 0) {
-      anniversaryBadge = `<span class="badge bg-secondary ms-2">⏳ ${yearsAgo} years ago</span>`;
+      anniversaryBadge = `<span class="event-years-ago ms-2">${yearsAgo} years ago</span>`;
     }
 
     // WhatsApp share URL
@@ -1861,11 +1861,11 @@ function renderFilteredItems(itemsToRender) {
     const waUrl = `https://wa.me/?text=${shareText}`;
 
     htmlContent += `
-            <li class="mb-3 p-3 border rounded" data-ckey="${`${event.year}:${(event.description || "").substring(0, 30)}`}">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div class="flex-grow-1">
+            <li class="mb-3 p-3 border rounded event-item${event.thumbnailUrl ? " event-item-has-thumb" : ""}" data-ckey="${`${event.year}:${(event.description || "").substring(0, 30)}`}">
+                <div class="event-item-inner">
+                    <div class="event-item-body">
                         <div class="d-flex align-items-center flex-wrap gap-1 mb-1">
-                          <strong class="text-primary">${event.year}</strong>
+                          <strong class="event-year-text">${event.year}</strong>
                           ${anniversaryBadge}
                         </div>
                         <p class="mb-1">${specialEmphasis}${event.description}</p>
@@ -1873,30 +1873,29 @@ function renderFilteredItems(itemsToRender) {
                         <div class="event-actions">
                           ${
                             event.sourceUrl
-                              ? `<a href="${event.sourceUrl}" class="event-action-btn event-action-read"
+                              ? `<a href="${event.sourceUrl}" class="event-action-btn event-action-read btn btn-contrast btn-sm"
                                  target="_blank" rel="noopener noreferrer">
-                                   <i class="bi bi-book me-1"></i>Read More About ${event.title.length > 20 ? `${event.title.substring(0, 20)}...` : event.title}
+                                   Read More About ${event.title.length > 20 ? `${event.title.substring(0, 20)}...` : event.title}
                                  </a>`
                               : ""
                           }
-                          <button class="event-action-btn event-action-share share-copy-btn"
+                          <button class="event-action-btn event-action-share share-copy-btn btn btn-contrast btn-sm"
                             data-desc="${(event.description || "").replace(/"/g, "&quot;")}"
                             data-year="${event.year}"
                             data-url="${event.sourceUrl || ""}">
-                            <i class="bi bi-share me-1"></i>Share
+                            Share
                           </button>
-                          <a href="${waUrl}" class="event-action-btn event-action-wa" target="_blank" rel="noopener noreferrer">
-                            <i class="bi bi-whatsapp me-1"></i>WhatsApp
+                          <a href="${waUrl}" class="event-action-btn event-action-wa btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">
+                            WhatsApp
                           </a>
                         </div>
                     </div>
                     ${
                       event.thumbnailUrl
                         ? `
-                        <div class="modal-thumbnail-container ms-3">
+                        <div class="event-item-thumb">
                             <img src="${event.thumbnailUrl}" class="rounded"
-                                style="width: 40px; height: 40px; object-fit: cover;"
-                                alt="${event.title ? event.title.substring(0, 80) : ""}" onerror="this.style.display='none'">
+                                alt="${event.title ? event.title.substring(0, 80) : ""}" onerror="this.parentElement.remove()">
                         </div>
                         `
                         : ""
@@ -1928,7 +1927,6 @@ function applyFilter() {
   renderFilteredItems(filteredItems);
   if (modalBody) modalBody.scrollTop = prevScroll;
 }
-
 
 async function showEventDetails(
   day,
@@ -1984,27 +1982,34 @@ async function showEventDetails(
     // "All" button — full width on mobile, rest in 2-col grid
     const allActive = currentActiveFilter === "all" ? "active" : "";
     let filterButtonsHtml = `<div id="eventFilterContainer">
-      <button class="btn btn-sm btn-outline-primary filter-btn filter-btn-all ${allActive}" data-category="all">All</button>`;
+      <button class="btn btn-sm btn-contrast filter-btn filter-btn-all ${allActive}" data-category="all">All</button>`;
     sortedCategories.slice(1).forEach((category) => {
       const isActive =
         category.toLowerCase() === currentActiveFilter ? "active" : "";
-      filterButtonsHtml += `<button class="btn btn-sm btn-outline-primary filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
+      filterButtonsHtml += `<button class="btn btn-sm btn-contrast filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
     });
     filterButtonsHtml += `</div>`;
     const totalEvents = currentDayAllItems.length;
     const exploredLabel =
       daysExplored === 1 ? "1 day explored" : `${daysExplored} days explored`;
+    // 50/50 modal layout: left = image, right = text/controls
+    const firstEvent = currentDayAllItems[0] || {};
+    const eventImg = firstEvent.thumbnailUrl
+      ? `<img src="${firstEvent.thumbnailUrl}" alt="${firstEvent.title || firstEvent.description || ""}" />`
+      : `<div style='width:100%;height:220px;display:flex;align-items:center;justify-content:center;background:#e9ecef;color:#aaa;font-size:2rem;'>No Image</div>`;
     modalBodyContent.innerHTML = `
-    <div class="modal-header-content">
-        ${filterButtonsHtml}
-        <div class="d-flex justify-content-between align-items-center mb-3 px-1" style="font-size:0.8rem;opacity:0.75;">
-          <span>📖 ${totalEvents} event${totalEvents !== 1 ? "s" : ""} on this day</span>
-          <span>🗓️ ${exploredLabel}</span>
+      <div class="modal-image">${eventImg}</div>
+      <div class="modal-text">
+        <div class=\"modal-header-content\">
+          ${filterButtonsHtml}
+          <div class=\"d-flex justify-content-between align-items-center mb-3 px-1\" style=\"font-size:0.8rem;opacity:0.75;\">
+            <span>📖 ${totalEvents} event${totalEvents !== 1 ? "s" : ""} on this day</span>
+            <span>🗓️ ${exploredLabel}</span>
+          </div>
         </div>
-    </div>
-    <div id="modal-events-list">
-        </div>
-`;
+        <div id=\"modal-events-list\"></div>
+      </div>
+    `;
     modalBodyContent.querySelectorAll(".filter-btn").forEach((button) => {
       button.addEventListener("click", (event) => {
         const clickedCategory = event.target.dataset.category;

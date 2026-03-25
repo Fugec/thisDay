@@ -1002,7 +1002,7 @@
         min-height: 320px;
       }
       .modal-body-flex .modal-image {
-        flex: 1 1 40%;
+        flex: 1 1 50%;
         background: #e9ecef;
         display: flex;
         align-items: center;
@@ -1018,7 +1018,7 @@
         height: auto;
       }
       .modal-body-flex .modal-text {
-        flex: 1 1 60%;
+        flex: 1 1 50%;
         padding: 2rem 1.5rem;
         display: flex;
         flex-direction: column;
@@ -1035,28 +1035,29 @@
         }
       }
 
-      /* Event items 60/40 layout */
+      /* Event items 50/50 layout - simple inline */
       .event-item-inner {
         display: flex;
         flex-direction: row;
         gap: 1rem;
         width: 100%;
+        align-items: stretch;
       }
       .event-item-body {
-        flex: 1 1 60%;
+        flex: 1 1 50%;
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
       }
       .event-item-thumb {
-        flex: 1 1 40%;
+        flex: 1 1 50%;
         display: flex;
         align-items: center;
         justify-content: center;
       }
       .event-item-thumb img {
         max-width: 100%;
-        max-height: 160px;
+        max-height: 200px;
         object-fit: cover;
         border-radius: 8px;
       }

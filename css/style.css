@@ -367,8 +367,6 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
 
 .event-action-read {
   grid-column: 1 / -1;
-  color: #1b3a2d;
-  border-color: #1b3a2d;
 }
 
 @media (min-width: 576px) {
@@ -390,30 +388,23 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   font-size: 0.85rem;
   font-weight: 500;
   border-radius: var(--td-radius-sm);
-  border: 1.5px solid;
+  border: none;
   text-decoration: none;
   cursor: pointer;
-  background: transparent;
-  transition:
-    background 0.15s,
-    color 0.15s;
+  background: #1b3a2d;
+  color: #fff;
+  transition: background 0.15s;
   line-height: 1.4;
 }
 
-.event-action-read:hover {
-  background: #1b3a2d;
+.event-action-read,
+.event-action-share,
+.event-action-wa {
   color: #fff;
 }
 
-.event-action-share,
-.event-action-wa {
-  color: #1b3a2d;
-  border-color: #1b3a2d;
-}
-
-.event-action-share:hover,
-.event-action-wa:hover {
-  background: #1b3a2d;
+.event-action-btn:hover {
+  background: #2a4d3a;
   color: #fff;
 }
 

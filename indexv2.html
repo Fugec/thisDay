@@ -256,12 +256,44 @@
         .nav-links {
           display: none;
         }
-        .nav-toggle {
-          display: block;
+        .btn#navToggle {
+          display: flex;
         }
         .nav {
           position: relative;
         }
+      }
+
+      /* Marquee */
+      .marquee-bar {
+        background: var(--btn-bg);
+        color: #fff;
+        overflow: hidden;
+        white-space: nowrap;
+        padding: 0.5rem 0;
+        font-size: 0.82rem;
+      }
+      .marquee-track {
+        display: inline-flex;
+        gap: 0;
+        animation: marquee-scroll 40s linear infinite;
+        will-change: transform;
+      }
+      .marquee-track:hover {
+        animation-play-state: paused;
+      }
+      .marquee-item {
+        padding: 0 2.5rem;
+        border-right: 1px solid rgba(255,255,255,0.2);
+      }
+      .marquee-item span {
+        color: var(--accent);
+        font-weight: 700;
+        margin-right: 0.5rem;
+      }
+      @keyframes marquee-scroll {
+        from { transform: translateX(0); }
+        to   { transform: translateX(-50%); }
       }
 
       /* Hero */
@@ -465,7 +497,40 @@
       }
       .blog-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(3, 1fr) 280px;
+      }
+      .blog-cta-col {
+        background: var(--btn-bg);
+        color: #fff;
+        padding: 2rem 1.75rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 1rem;
+      }
+      .blog-cta-col p {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin: 0;
+      }
+      .blog-cta-col h3 {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #fff;
+        margin: 0;
+        line-height: 1.35;
+      }
+      .blog-cta-col .btn {
+        background: var(--accent);
+        color: #1b3a2d;
+        align-self: flex-start;
+      }
+      .blog-cta-col .btn:hover {
+        background: #b5d94a;
+        color: #1b3a2d;
       }
       .blog-card {
         background: var(--bg);
@@ -519,7 +584,7 @@
         -webkit-box-orient: vertical;
         overflow: hidden;
       }
-      @media (max-width: 768px) {
+      @media (max-width: 900px) {
         .blog-grid {
           grid-template-columns: 1fr;
         }
@@ -529,6 +594,9 @@
         }
         .blog-card:last-child {
           border-bottom: none;
+        }
+        .blog-cta-col {
+          border-top: 1px solid var(--border);
         }
       }
 
@@ -594,7 +662,47 @@
       }
       .quiz-wrap {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .quiz-card-events {
+        background: var(--btn-bg);
+        color: #fff;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 2rem;
+        gap: 0.75rem;
+        border-right: none;
+      }
+      .quiz-card-events-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent);
+        margin: 0;
+      }
+      .quiz-card-events h3 {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #fff;
+        margin: 0;
+        line-height: 1.3;
+      }
+      .quiz-card-events p {
+        font-size: 0.9rem;
+        color: rgba(255,255,255,0.75);
+        margin: 0;
+        line-height: 1.5;
+      }
+      .quiz-card-events .btn {
+        background: var(--accent);
+        color: #1b3a2d;
+        align-self: flex-start;
+      }
+      .quiz-card-events .btn:hover {
+        background: #b5d94a;
+        color: #1b3a2d;
       }
       .quiz-card {
         background: var(--bg-alt);
@@ -1008,11 +1116,13 @@
         .quiz-wrap {
           grid-template-columns: 1fr;
         }
-        .quiz-card {
+        .quiz-card,
+        .quiz-card-events {
           border-right: none;
           border-bottom: 1px solid var(--border);
         }
-        .quiz-card:last-child {
+        .quiz-card:last-child,
+        .quiz-card-events:last-child {
           border-bottom: none;
         }
         .calendar-grid {
@@ -1154,6 +1264,11 @@
       </div>
     </nav>
 
+    <!-- Marquee -->
+    <div class="marquee-bar" id="marqueeBar" style="display:none;">
+      <div class="marquee-track" id="marqueeTrack"></div>
+    </div>
+
     <!-- Hero -->
     <section class="hero">
       <p class="eyebrow">On This Day</p>
@@ -1178,17 +1293,10 @@
       <div class="blog-grid" id="blogGrid">
         <!-- Populated by JavaScript -->
       </div>
-    </section>
-
-    <!-- Today's Events CTA -->
-    <section class="todays-events-cta">
-      <div class="todays-events-cta-inner">
-        <div>
-          <p class="todays-events-cta-label">Explore the calendar</p>
-          <h2 class="todays-events-cta-title">Today's Events</h2>
-          <p class="todays-events-cta-desc">Browse every historical event, birth, and death recorded on today's date — sourced from Wikipedia.</p>
-        </div>
-        <a href="/" class="btn">View Today's Events</a>
+      <div class="blog-cta-col">
+        <p>Our blog</p>
+        <h3>Want to read more? Check out our blog</h3>
+        <a href="/blog/archive/" class="btn">Visit the Blog</a>
       </div>
     </section>
 
@@ -1222,6 +1330,12 @@
               >Read &amp; Quiz <i class="bi bi-arrow-right"></i
             ></a>
           </div>
+        </div>
+        <div class="quiz-card-events">
+          <p class="quiz-card-events-label">Calendar</p>
+          <h3>Today's Events</h3>
+          <p>Every historical event, birth, and death recorded on this exact date — across thousands of years.</p>
+          <a href="/" class="btn">View Today's Events <i class="bi bi-arrow-right"></i></a>
         </div>
       </div>
     </section>
@@ -1495,6 +1609,18 @@
           if (featDesc) featDesc.textContent = ev.description || "";
           var featBtn = document.getElementById("featuredEventBtn");
           if (featBtn && ev.sourceUrl) featBtn.href = ev.sourceUrl;
+
+          // Marquee: first 5 event titles
+          var marqueeTrack = document.getElementById("marqueeTrack");
+          var marqueeBar = document.getElementById("marqueeBar");
+          if (marqueeTrack && marqueeBar) {
+            var items = events.slice(0, 5).map(function (e) {
+              return '<span class="marquee-item"><span>' + (e.year || "") + '</span>' + (e.title || e.description || "") + '</span>';
+            }).join("");
+            // Duplicate for seamless loop
+            marqueeTrack.innerHTML = items + items;
+            marqueeBar.style.display = "";
+          }
 
           // Sidebar: next 2 events
           var slider = document.getElementById("eventsSlider");

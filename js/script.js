@@ -1992,24 +1992,46 @@ async function showEventDetails(
     const totalEvents = currentDayAllItems.length;
     const exploredLabel =
       daysExplored === 1 ? "1 day explored" : `${daysExplored} days explored`;
-    // 50/50 modal layout: left = image, right = text/controls
-    const firstEvent = currentDayAllItems[0] || {};
-    const eventImg = firstEvent.thumbnailUrl
-      ? `<img src="${firstEvent.thumbnailUrl}" alt="${firstEvent.title || firstEvent.description || ""}" />`
-      : `<div style='width:100%;height:220px;display:flex;align-items:center;justify-content:center;background:#e9ecef;color:#aaa;font-size:2rem;'>No Image</div>`;
-    modalBodyContent.innerHTML = `
-      <div class="modal-image">${eventImg}</div>
-      <div class="modal-text">
-        <div class=\"modal-header-content\">
-          ${filterButtonsHtml}
-          <div class=\"d-flex justify-content-between align-items-center mb-3 px-1\" style=\"font-size:0.8rem;opacity:0.75;\">
-            <span>📖 ${totalEvents} event${totalEvents !== 1 ? "s" : ""} on this day</span>
-            <span>🗓️ ${exploredLabel}</span>
-          </div>
+    // Filters always on top
+    let modalHtml = `
+      <div class="modal-header-content">
+        ${filterButtonsHtml}
+        <div class="d-flex justify-content-between align-items-center mb-3 px-1" style="font-size:0.8rem;opacity:0.75;">
+          <span>📖 ${totalEvents} event${totalEvents !== 1 ? "s" : ""} on this day</span>
+          <span>🗓️ ${exploredLabel}</span>
         </div>
-        <div id=\"modal-events-list\"></div>
       </div>
     `;
+    // First event as 50/50 split: left=text/buttons, right=image
+    if (currentDayAllItems.length > 0) {
+      const first = currentDayAllItems[0];
+      const eventImg = first.thumbnailUrl
+        ? `<img src="${first.thumbnailUrl}" alt="${first.title || first.description || ""}" style='max-width:100%;max-height:320px;object-fit:cover;width:100%;height:auto;' />`
+        : `<div style='width:100%;height:220px;display:flex;align-items:center;justify-content:center;background:#e9ecef;color:#aaa;font-size:2rem;'>No Image</div>`;
+      modalHtml += `
+        <div class="modal-body-flex">
+          <div class="modal-text" style="flex:1 1 50%;padding:2rem 1.5rem;display:flex;flex-direction:column;justify-content:center;">
+            <div class="event-item-body">
+              <div class="d-flex align-items-center flex-wrap gap-1 mb-1">
+                <strong class="event-year-text">${first.year}</strong>
+                <span class="event-years-ago ms-2">${new Date().getFullYear() - parseInt(first.year, 10)} years ago</span>
+              </div>
+              <p class="mb-1">${first.type === "birth" ? "<strong>Birth:</strong> " : first.type === "death" ? "<strong>Death:</strong> " : ""}${first.description}</p>
+              ${first.commentary ? `<p class="mb-2 fst-italic event-commentary"><i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${first.commentary}</span></p>` : ""}
+              <div class="event-actions">
+                ${first.sourceUrl ? `<a href="${first.sourceUrl}" class="event-action-btn event-action-read btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">Read More About ${first.title && first.title.length > 20 ? `${first.title.substring(0, 20)}...` : first.title || ""}</a>` : ""}
+                <button class="event-action-btn event-action-share share-copy-btn btn btn-contrast btn-sm" data-desc="${(first.description || "").replace(/"/g, "&quot;")}" data-year="${first.year}" data-url="${first.sourceUrl || ""}">Share</button>
+                <a href="https://wa.me/?text=${encodeURIComponent(`${first.year} — ${first.description}\n${first.sourceUrl || "https://thisday.info"}`)}" class="event-action-btn event-action-wa btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+              </div>
+            </div>
+          </div>
+          <div class="modal-image" style="flex:1 1 50%;background:#e9ecef;display:flex;align-items:center;justify-content:center;min-height:220px;overflow:hidden;">${eventImg}</div>
+        </div>
+      `;
+    }
+    // All other events full width below
+    modalHtml += `<div id="modal-events-list"></div>`;
+    modalBodyContent.innerHTML = modalHtml;
     modalBodyContent.querySelectorAll(".filter-btn").forEach((button) => {
       button.addEventListener("click", (event) => {
         const clickedCategory = event.target.dataset.category;

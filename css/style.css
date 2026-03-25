@@ -310,6 +310,52 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   }
 }
 
+/* --- Event year / badge --- */
+
+.event-year-text {
+  color: #1b3a2d;
+  font-weight: 700;
+}
+
+.event-years-ago {
+  font-size: 0.78rem;
+  color: #5c7a65;
+}
+
+/* --- Event list item 50/50 layout --- */
+
+.event-item-inner {
+  display: flex;
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.event-item-body {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+.event-item-thumb {
+  flex: 0 0 50%;
+  max-width: 50%;
+}
+
+.event-item-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+/* On very small screens keep image at a fixed max height */
+@media (max-width: 400px) {
+  .event-item-thumb {
+    flex: 0 0 40%;
+    max-width: 40%;
+  }
+}
+
 /* --- Event action buttons (Read More / Share / WhatsApp) --- */
 
 .event-actions {
@@ -321,8 +367,8 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
 
 .event-action-read {
   grid-column: 1 / -1;
-  color: #1a1a1a;
-  border-color: rgba(0, 0, 0, 0.4);
+  color: #1b3a2d;
+  border-color: #1b3a2d;
 }
 
 @media (min-width: 576px) {
@@ -355,20 +401,20 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
 }
 
 .event-action-read:hover {
-  background: rgba(0, 0, 0, 0.08);
-  color: #1a1a1a;
+  background: #1b3a2d;
+  color: #fff;
 }
 
 .event-action-share,
 .event-action-wa {
-  color: #6c757d;
-  border-color: #dee2e6;
+  color: #1b3a2d;
+  border-color: #1b3a2d;
 }
 
 .event-action-share:hover,
 .event-action-wa:hover {
-  background: #f8f9fa;
-  color: #495057;
+  background: #1b3a2d;
+  color: #fff;
 }
 
 /* --- Event popup explore section --- */

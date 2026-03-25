@@ -924,3 +924,38 @@ article iframe {
   color: #b45309;
   text-decoration: none;
 }
+
+/* --- indexv2 scoped overrides --- */
+
+[data-page="v2"] .modal-body a {
+  color: #fff;
+}
+
+[data-page="v2"] button.btn.btn-sm.btn-outline-primary.filter-btn.filter-btn-all.active {
+  background-color: var(--btn-bg) !important;
+  border-color: var(--btn-bg) !important;
+  color: #fff !important;
+}
+
+[data-page="v2"] .day-number {
+  font-size: 17.6px !important;
+}
+[data-page="v2"] .event-summary {
+  font-size: 14.4px !important;
+}
+@media (max-width: 768px) {
+  [data-page="v2"] .day-number {
+    font-size: 17.6px !important;
+  }
+  [data-page="v2"] .event-summary {
+    font-size: 14.4px !important;
+  }
+}
+@media (max-width: 480px) {
+  [data-page="v2"] .day-number {
+    font-size: 17.6px !important;
+  }
+  [data-page="v2"] .event-summary {
+    font-size: 14.4px !important;
+  }
+}

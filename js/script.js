@@ -1916,7 +1916,9 @@ function renderFilteredItems(itemsToRender) {
 function applyFilter() {
   const modalBody = document.getElementById("modalBodyContent");
   const prevScroll = modalBody ? modalBody.scrollTop : 0;
-  const filteredItems = currentDayAllItems.filter((item) => {
+  // Exclude the first (featured) item from the list rendered below
+  const listToFilter = currentDayAllItems.slice(1);
+  const filteredItems = listToFilter.filter((item) => {
     if (currentActiveFilter === "all") {
       return true;
     }

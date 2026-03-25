@@ -808,7 +808,7 @@
         border-radius: 6px;
         padding: 1rem 0.75rem;
         text-align: center;
-        min-height: 100px;
+        height: 100px;
         display: flex;
         flex-direction: column;
         justify-content: center;
@@ -1230,14 +1230,14 @@
         }
         .calendar-grid {
           grid-template-columns: repeat(2, 1fr);
-          gap: 6px;
+          gap: 10px;
         }
         .month-nav {
           margin: 0 0 1.5rem;
           padding: 0 0 1rem;
         }
         .day-card {
-          min-height: 70px;
+          height: 70px;
           padding: 0.5rem 0.25rem;
         }
         .day-number {
@@ -1281,10 +1281,10 @@
         }
         .calendar-grid {
           grid-template-columns: repeat(2, 1fr);
-          gap: 6px;
+          gap: 10px;
         }
         .day-card {
-          min-height: 70px;
+          height: 70px;
           padding: 0.5rem 0.25rem;
         }
         .day-number {
@@ -1367,6 +1367,7 @@
         </button>
       </div>
       <div class="nav-mobile" id="navMobile">
+        <a href="/events/">Events</a>
         <a href="/blog/">Blog</a>
         <a href="/quiz/">Quiz</a>
         <a href="/about/">About</a>
@@ -1393,8 +1394,8 @@
         <span><i class="bi bi-book"></i> Sourced from Wikipedia</span>
         <span><i class="bi bi-person-heart"></i> Births &amp; deaths</span>
       </div>
-      <a href="#calendarGrid" class="btn" id="todayBtn">
-        What happened today <i class="bi bi-arrow-down"></i>
+      <a href="https://thisday.info/events/" class="btn" id="todayBtn">
+        What happened today <i class="bi bi-arrow-right"></i>
       </a>
     </section>
 

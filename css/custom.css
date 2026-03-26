@@ -388,6 +388,9 @@ img {
   display: grid;
   grid-template-columns: repeat(3, 1fr) 280px;
 }
+#todaysEventsSection .blog-grid {
+  grid-template-columns: repeat(2, 1fr) 280px;
+}
 .blog-cta-col {
   background: var(--btn-bg);
   color: #fff;
@@ -816,7 +819,7 @@ img {
 /* Modal filter buttons — green theme + layout */
 #eventFilterContainer {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 0.5rem;
   margin-bottom: 1rem;
 }
@@ -833,7 +836,8 @@ img {
     width: 100%;
   }
   #eventFilterContainer .filter-btn:not(.filter-btn-all) {
-    flex: 1;
+    flex: 1 1 140px;
+    min-width: 120px;
   }
 }
 .filter-btn {

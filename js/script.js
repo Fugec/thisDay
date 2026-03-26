@@ -1916,8 +1916,7 @@ function renderFilteredItems(itemsToRender) {
 function applyFilter() {
   const modalBody = document.getElementById("modalBodyContent");
   const prevScroll = modalBody ? modalBody.scrollTop : 0;
-  // Exclude the first (featured) item from the list rendered below
-  const listToFilter = currentDayAllItems.slice(1);
+  const listToFilter = currentDayAllItems;
   const filteredItems = listToFilter.filter((item) => {
     if (currentActiveFilter === "all") {
       return true;
@@ -2004,35 +2003,7 @@ async function showEventDetails(
         </div>
       </div>
     `;
-    // First event as 50/50 split: left=text/buttons, right=image
-    if (currentDayAllItems.length > 0) {
-      const first = currentDayAllItems[0];
-      const yearsAgo = new Date().getFullYear() - parseInt(first.year, 10);
-      const eventImg = first.thumbnailUrl
-        ? `<img src="${first.thumbnailUrl}" alt="${first.title || first.description || ""}" />`
-        : `<div class="modal-image-placeholder"><i class="bi bi-image"></i></div>`;
-      modalHtml += `
-        <div class="modal-body-flex border">
-          <div class="modal-text">
-            <div class="event-item-body">
-              <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
-                <strong class="event-year-text">${first.year}</strong>
-                <span class="event-years-ago">${yearsAgo} years ago</span>
-              </div>
-              <p class="event-description">${first.type === "birth" ? "<strong>Birth:</strong> " : first.type === "death" ? "<strong>Death:</strong> " : ""}${first.description}</p>
-              ${first.commentary ? `<p class="event-commentary"><i class="bi bi-chat-quote me-2"></i>${first.commentary}</p>` : ""}
-              <div class="event-actions">
-                ${first.sourceUrl ? `<a href="${first.sourceUrl}" class="event-action-btn event-action-read" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Read More</a>` : ""}
-                <button class="event-action-btn event-action-share share-copy-btn" data-desc="${(first.description || "").replace(/"/g, "&quot;")}" data-year="${first.year}" data-url="${first.sourceUrl || ""}"><i class="bi bi-share"></i>Share</button>
-                <a href="https://wa.me/?text=${encodeURIComponent(`${first.year} — ${first.description}\n${first.sourceUrl || "https://thisday.info"}`)}" class="event-action-btn event-action-wa" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp"></i>WhatsApp</a>
-              </div>
-            </div>
-          </div>
-          <div class="modal-image">${eventImg}</div>
-        </div>
-      `;
-    }
-    // All other events full width below
+    // Everything is shown in one single filtered list, not a separate featured block.
     modalHtml += `<div id="modal-events-list"></div>`;
     modalBodyContent.innerHTML = modalHtml;
     modalBodyContent.querySelectorAll(".filter-btn").forEach((button) => {

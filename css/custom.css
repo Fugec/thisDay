@@ -637,10 +637,10 @@ img {
   line-height: 1.5;
 }
 
-/* Event Wrap - Desktop: 3 columns inline full width */
+/* Event Wrap - Desktop: 2 columns inline full width (quiz cards only) */
 .event-wrap {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
 }
 
 /* Buttons */

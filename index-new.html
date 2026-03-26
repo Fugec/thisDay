@@ -254,10 +254,18 @@
             ></a>
           </div>
         </div>
-        <div class="event-card-preview" id="eventsPreviewContainer">
-          <!-- Populated by JS with up to 10 latest events (styled like blog cards) -->
-          <div style="color: var(--text)">Loading events...</div>
-        </div>
+      </div>
+    </section>
+
+    <!-- Today's Events Section (identical style to blog-section) -->
+    <section class="blog-section" id="todaysEventsSection">
+      <div class="blog-grid" id="todaysEventsGrid">
+        <!-- Populated by JavaScript with today's Wikipedia events -->
+      </div>
+      <div class="blog-cta-col">
+        <p>Today's events</p>
+        <h3>Explore what happened on this day in history</h3>
+        <a href="/events/" class="btn">View All Events</a>
       </div>
     </section>
 
@@ -499,7 +507,7 @@
     </script>
 
     <script>
-      // Populate up to 10 latest events into the Event preview area
+      // Populate today's Wikipedia events into the events grid (identical to blog-section)
       (function () {
         document.addEventListener("DOMContentLoaded", async function () {
           try {
@@ -509,15 +517,15 @@
               now.getDate(),
             );
             var events = (data && data.events) || [];
-            var container = document.getElementById("eventsPreviewContainer");
-            if (!container) return;
-            container.innerHTML = "";
+            var grid = document.getElementById("todaysEventsGrid");
+            if (!grid) return;
+            grid.innerHTML = "";
             if (!events.length) {
-              container.innerHTML =
-                '<div style="color:var(--text);">No recent events available.</div>';
+              grid.innerHTML =
+                '<div style="padding:2rem;color:var(--text-muted);">No recent events available.</div>';
               return;
             }
-            // Render up to 10 events as blog-style cards inside this container
+            // Render up to 10 events as blog-style cards (same as blog-section)
             // Ensure newest → oldest ordering (left → right in sliders)
             var toRender = events.slice(0, 10).slice();
             toRender.sort(function (a, b) {
@@ -529,21 +537,20 @@
               return by - ay; // descending: newest (larger year) first
             });
             toRender.forEach(function (e) {
-              var slug = "";
               var title = e.title || "Untitled event";
               var excerpt = e.description || "";
               var img = e.thumbnailUrl
                 ? getOptimizedImageUrl(e.thumbnailUrl, 600)
                 : "";
               var link = e.sourceUrl || "#";
+              var yearLabel = e.year || "";
 
               var card = document.createElement("a");
               card.className = "blog-card";
               card.href = link;
               card.target = e.sourceUrl ? "_blank" : "";
               card.rel = e.sourceUrl ? "noopener noreferrer" : "";
-              card.style.cssText =
-                "text-decoration:none;color:inherit;display:block;margin-bottom:0.75rem;";
+              card.style.cssText = "text-decoration:none;color:inherit;";
 
               card.innerHTML =
                 (img
@@ -554,9 +561,9 @@
                     '" class="blog-card-img" loading="lazy" />'
                   : "") +
                 '<div class="blog-card-body">' +
-                '<div class="blog-card-date">' +
-                (e.year || "") +
-                "</div>" +
+                (yearLabel
+                  ? '<div class="blog-card-date">' + yearLabel + "</div>"
+                  : "") +
                 "<h3>" +
                 title +
                 "</h3>" +
@@ -564,13 +571,13 @@
                 '<span class="btn" style="align-self:flex-start;margin-top:auto">Read More <i class="bi bi-arrow-right"></i></span>' +
                 "</div>";
 
-              container.appendChild(card);
+              grid.appendChild(card);
             });
           } catch (err) {
-            var container = document.getElementById("eventsPreviewContainer");
-            if (container)
-              container.innerHTML =
-                '<div style="color:var(--text);">Events failed to load.</div>';
+            var grid = document.getElementById("todaysEventsGrid");
+            if (grid)
+              grid.innerHTML =
+                '<div style="padding:2rem;color:var(--text-muted);">Events failed to load.</div>';
           }
         });
       })();

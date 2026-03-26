@@ -556,6 +556,10 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   height: 20px;
 }
 
+.modal-body-flex {
+  display: none !important;
+}
+
 @media (max-width: 480px) {
   .floating-search-bar {
     padding: 10px 12px;

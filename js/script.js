@@ -2007,27 +2007,28 @@ async function showEventDetails(
     // First event as 50/50 split: left=text/buttons, right=image
     if (currentDayAllItems.length > 0) {
       const first = currentDayAllItems[0];
+      const yearsAgo = new Date().getFullYear() - parseInt(first.year, 10);
       const eventImg = first.thumbnailUrl
-        ? `<img src="${first.thumbnailUrl}" alt="${first.title || first.description || ""}" style='max-width:100%;max-height:320px;object-fit:cover;width:100%;height:auto;' />`
-        : `<div style='width:100%;height:220px;display:flex;align-items:center;justify-content:center;background:#e9ecef;color:#aaa;font-size:2rem;'>No Image</div>`;
+        ? `<img src="${first.thumbnailUrl}" alt="${first.title || first.description || ""}" />`
+        : `<div class="modal-image-placeholder"><i class="bi bi-image"></i></div>`;
       modalHtml += `
         <div class="modal-body-flex">
-          <div class="modal-text" style="flex:1 1 50%;padding:2rem 1.5rem;display:flex;flex-direction:column;justify-content:center;">
+          <div class="modal-text">
             <div class="event-item-body">
-              <div class="d-flex align-items-center flex-wrap gap-1 mb-1">
+              <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
                 <strong class="event-year-text">${first.year}</strong>
-                <span class="event-years-ago ms-2">${new Date().getFullYear() - parseInt(first.year, 10)} years ago</span>
+                <span class="event-years-ago">${yearsAgo} years ago</span>
               </div>
-              <p class="mb-1">${first.type === "birth" ? "<strong>Birth:</strong> " : first.type === "death" ? "<strong>Death:</strong> " : ""}${first.description}</p>
-              ${first.commentary ? `<p class="mb-2 fst-italic event-commentary"><i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${first.commentary}</span></p>` : ""}
+              <p class="event-description">${first.type === "birth" ? "<strong>Birth:</strong> " : first.type === "death" ? "<strong>Death:</strong> " : ""}${first.description}</p>
+              ${first.commentary ? `<p class="event-commentary"><i class="bi bi-chat-quote me-2"></i>${first.commentary}</p>` : ""}
               <div class="event-actions">
-                ${first.sourceUrl ? `<a href="${first.sourceUrl}" class="event-action-btn event-action-read btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">Read More About ${first.title && first.title.length > 20 ? `${first.title.substring(0, 20)}...` : first.title || ""}</a>` : ""}
-                <button class="event-action-btn event-action-share share-copy-btn btn btn-contrast btn-sm" data-desc="${(first.description || "").replace(/"/g, "&quot;")}" data-year="${first.year}" data-url="${first.sourceUrl || ""}">Share</button>
-                <a href="https://wa.me/?text=${encodeURIComponent(`${first.year} — ${first.description}\n${first.sourceUrl || "https://thisday.info"}`)}" class="event-action-btn event-action-wa btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+                ${first.sourceUrl ? `<a href="${first.sourceUrl}" class="event-action-btn event-action-read" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Read More</a>` : ""}
+                <button class="event-action-btn event-action-share share-copy-btn" data-desc="${(first.description || "").replace(/"/g, "&quot;")}" data-year="${first.year}" data-url="${first.sourceUrl || ""}"><i class="bi bi-share"></i>Share</button>
+                <a href="https://wa.me/?text=${encodeURIComponent(`${first.year} — ${first.description}\n${first.sourceUrl || "https://thisday.info"}`)}" class="event-action-btn event-action-wa" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp"></i>WhatsApp</a>
               </div>
             </div>
           </div>
-          <div class="modal-image" style="flex:1 1 50%;background:#e9ecef;display:flex;align-items:center;justify-content:center;min-height:220px;overflow:hidden;">${eventImg}</div>
+          <div class="modal-image">${eventImg}</div>
         </div>
       `;
     }

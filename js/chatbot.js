@@ -68,7 +68,7 @@ function parseUserDate(userInput) {
   const cleanInput = input
     .replace(
       /\b(on|the|of|in|at|for|about|what|happened|events|history|historical)\b/g,
-      ""
+      "",
     )
     .trim();
 
@@ -149,7 +149,7 @@ function getClosestMonth(input) {
 
 function levenshtein(a, b) {
   const dp = Array.from({ length: a.length + 1 }, () =>
-    Array(b.length + 1).fill(0)
+    Array(b.length + 1).fill(0),
   );
 
   for (let i = 0; i <= a.length; i++) dp[i][0] = i;
@@ -161,7 +161,7 @@ function levenshtein(a, b) {
       dp[i][j] = Math.min(
         dp[i - 1][j] + 1,
         dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + cost
+        dp[i - 1][j - 1] + cost,
       );
     }
   }
@@ -195,7 +195,7 @@ function validateDate(parsedDate) {
   const daysInMonth = new Date(
     parsedDate.year,
     parsedDate.month + 1,
-    0
+    0,
   ).getDate();
   if (parsedDate.day > daysInMonth) return false;
 
@@ -301,14 +301,18 @@ function createChatbotHTML() {
   return `
     <!-- Chatbot Toggle Button -->
     <button id="chatbotToggle" class="chatbot-toggle" aria-label="Open AI Assistant">
-      <i class="bi bi-chat-dots"></i>
+      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <path d="m21 21-4.35-4.35"></path>
+      </svg>
+      Ask me about any date
     </button>
     
     <!-- Chatbot Modal -->
     <div id="chatbotModal" class="chatbot-modal" style="display: none;">
       <div class="chatbot-header">
         <h6><i class="bi bi-robot" style="margin-right: 15px;"></i>thisDay Assistant</h6>
-        <span id="chatbotClose" style="font-size: 20px; margin-right: 10px;" aria-label="Close chat"">x</span>
+        <button id="chatbotClose" class="chatbot-close" aria-label="Close chat">&times;</button>
       </div>
       <div id="chatbotMessages" class="chatbot-messages">
         <div class="message bot-message">
@@ -396,7 +400,7 @@ async function navigateToDate(parsedDate) {
       typeof currentDate === "undefined"
     ) {
       console.warn(
-        "Calendar functions not available - not on main calendar page"
+        "Calendar functions not available - not on main calendar page",
       );
       return false;
     }
@@ -405,7 +409,7 @@ async function navigateToDate(parsedDate) {
     const targetDate = new Date(
       parsedDate.year,
       parsedDate.month,
-      parsedDate.day
+      parsedDate.day,
     );
 
     // Update current date
@@ -416,7 +420,7 @@ async function navigateToDate(parsedDate) {
 
     // Find and highlight the specific day if it exists
     const dayCard = document.querySelector(
-      `[data-day="${parsedDate.day}"][data-month="${parsedDate.month + 1}"]`
+      `[data-day="${parsedDate.day}"][data-month="${parsedDate.month + 1}"]`,
     );
     if (dayCard) {
       setTimeout(() => {
@@ -460,7 +464,7 @@ async function processUserMessage(userInput) {
 
     // Simulate processing delay
     await new Promise((resolve) =>
-      setTimeout(resolve, 1000 + Math.random() * 1000)
+      setTimeout(resolve, 1000 + Math.random() * 1000),
     );
 
     // Remove typing indicator
@@ -478,14 +482,14 @@ async function processUserMessage(userInput) {
           setTimeout(() => {
             addMessageToChat(
               "I've switched the calendar to show events for this date. You can scroll down to see the calendar or click on any day to explore more events!",
-              false
+              false,
             );
           }, 500);
         } else {
           setTimeout(() => {
             addMessageToChat(
               "I found the date but had trouble switching the calendar. Please try manually navigating to the date.",
-              false
+              false,
             );
           }, 500);
         }
@@ -494,7 +498,7 @@ async function processUserMessage(userInput) {
         setTimeout(() => {
           addMessageToChat(
             "Taking you to the main calendar page now...",
-            false
+            false,
           );
           setTimeout(() => {
             redirectToMainPage(parsedDate);
@@ -507,7 +511,7 @@ async function processUserMessage(userInput) {
     removeTypingIndicator();
     addMessageToChat(
       "I'm having some trouble right now. Please try again in a moment.",
-      false
+      false,
     );
   } finally {
     // Re-enable input

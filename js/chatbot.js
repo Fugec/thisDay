@@ -299,38 +299,15 @@ function generateChatbotResponse(userInput, parsedDate = null) {
 // --- CHATBOT UI FUNCTIONS ---
 function createChatbotHTML() {
   return `
-    <!-- Chatbot Toggle Button -->
-    <button id="chatbotToggle" class="chatbot-toggle" aria-label="Open AI Assistant">
-      <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="11" cy="11" r="8"></circle>
-        <path d="m21 21-4.35-4.35"></path>
-      </svg>
-      Ask me about any date
-    </button>
-    
-    <!-- Chatbot Modal -->
-    <div id="chatbotModal" class="chatbot-modal" style="display: none;">
-      <div class="chatbot-header">
-        <h6><i class="bi bi-robot" style="margin-right: 15px;"></i>thisDay Assistant</h6>
-        <button id="chatbotClose" class="chatbot-close" aria-label="Close chat">&times;</button>
-      </div>
-      <div id="chatbotMessages" class="chatbot-messages">
-        <div class="message bot-message">
-          <div class="message-content">
-            Hi! I'm your historical events assistant. Which date interests you? You can say something like "August 5", or just "August".
-          </div>
-          <div class="message-time">${new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}</div>
-        </div>
-      </div>
-      <div class="chatbot-input">
-        <input type="text" id="chatbotInput" placeholder="Ask about any date..." maxlength="200">
-        <button id="chatbotSend" aria-label="Send message">
-          <i class="bi bi-send"></i>
-        </button>
-      </div>
+    <!-- Floating Search Bar -->
+    <div class="floating-search-bar">
+      <input type="text" id="floatingSearchInput" class="floating-search-input" placeholder="Ask me about any date..." maxlength="100">
+      <button id="floatingSearchBtn" class="floating-search-btn" aria-label="Search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14"></path>
+          <path d="m12 5 7 7-7 7"></path>
+        </svg>
+      </button>
     </div>
   `;
 }
@@ -527,70 +504,33 @@ function initializeChatbot() {
   // Add HTML
   document.body.insertAdjacentHTML("beforeend", createChatbotHTML());
 
-  // Add highlight pulse animation
-  const pulseStyle = document.createElement("style");
-  pulseStyle.textContent = `
-    .highlight-pulse {
-      animation: highlightPulse 2s ease-in-out;
-    }
-    
-    @keyframes highlightPulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); box-shadow: 0 0 20px rgba(102, 126, 234, 0.5); }
-    }
-  `;
-  document.head.appendChild(pulseStyle);
-
   // Get elements
-  const chatbotToggle = document.getElementById("chatbotToggle");
-  const chatbotModal = document.getElementById("chatbotModal");
-  const chatbotClose = document.getElementById("chatbotClose");
-  const chatbotInput = document.getElementById("chatbotInput");
-  const chatbotSend = document.getElementById("chatbotSend");
+  const searchInput = document.getElementById("floatingSearchInput");
+  const searchBtn = document.getElementById("floatingSearchBtn");
 
-  // Toggle chatbot
-  chatbotToggle.addEventListener("click", () => {
-    chatbotOpen = !chatbotOpen;
-    chatbotModal.style.display = chatbotOpen ? "flex" : "none";
-
-    if (chatbotOpen) {
-      chatbotInput.focus();
-      localStorage.setItem("chatbotUsed", "1");
-    }
-  });
-
-  // Close chatbot
-  chatbotClose.addEventListener("click", () => {
-    chatbotOpen = false;
-    chatbotModal.style.display = "none";
-  });
-
-  // Send message
-  const sendMessage = () => {
-    const message = chatbotInput.value.trim();
-    if (message && !isProcessingMessage) {
-      processUserMessage(message);
-      chatbotInput.value = "";
+  // Search function
+  const performSearch = () => {
+    const query = searchInput.value.trim();
+    if (query) {
+      // Parse the date and navigate
+      const parsedDate = parseUserDate(query);
+      if (parsedDate && validateDate(parsedDate)) {
+        if (isMainCalendarPage()) {
+          navigateToDate(parsedDate);
+        } else {
+          redirectToMainPage(parsedDate);
+        }
+      }
     }
   };
 
-  chatbotSend.addEventListener("click", sendMessage);
+  // Button click
+  searchBtn.addEventListener("click", performSearch);
 
-  chatbotInput.addEventListener("keypress", (e) => {
+  // Enter key
+  searchInput.addEventListener("keypress", (e) => {
     if (e.key === "Enter") {
-      sendMessage();
-    }
-  });
-
-  // Close chatbot when clicking outside
-  document.addEventListener("click", (e) => {
-    if (
-      chatbotOpen &&
-      !chatbotModal.contains(e.target) &&
-      !chatbotToggle.contains(e.target)
-    ) {
-      chatbotOpen = false;
-      chatbotModal.style.display = "none";
+      performSearch();
     }
   });
 }

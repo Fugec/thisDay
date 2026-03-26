@@ -2526,6 +2526,47 @@ async function generateEventCommentary(env, mm, dd) {
 async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
 
+  // --- Maintenance Mode ---
+  // When maintenance mode is enabled, redirect to maintenance page
+  // except for preview parameter (?preview=secret) which allows viewing the live pages
+  const MAINTENANCE_ENABLED = true;
+  const PREVIEW_SECRET = "secret";
+  const isPreview = url.searchParams.get("preview") === PREVIEW_SECRET;
+  const isExcludedRoute =
+    url.pathname === "/index-new.html" ||
+    url.pathname === "/index-new" ||
+    url.pathname.startsWith("/css/") ||
+    url.pathname.startsWith("/images/") ||
+    url.pathname.startsWith("/icons/") ||
+    url.pathname === "/favicon.ico" ||
+    url.pathname === "/manifest.json" ||
+    url.pathname === "/robots.txt" ||
+    url.pathname === "/llms.txt";
+
+  if (MAINTENANCE_ENABLED && !isPreview && !isExcludedRoute) {
+    // Check if this is a worker route that should show maintenance
+    const workerRoutes = [
+      "/blog",
+      "/blog/",
+      "/blog/archive.json",
+      "/events/",
+      "/born/",
+      "/died/",
+      "/quiz/",
+    ];
+    const isWorkerRoute = workerRoutes.some(
+      (route) => url.pathname === route || url.pathname.startsWith(route),
+    );
+
+    if (isWorkerRoute) {
+      // Serve the maintenance page (index.html)
+      const maintenanceUrl = new URL(request.url);
+      maintenanceUrl.pathname = "/";
+      maintenanceUrl.search = "";
+      return Response.redirect(maintenanceUrl.toString(), 302);
+    }
+  }
+
   if (url.pathname === "/robots.txt") {
     return new Response(
       [

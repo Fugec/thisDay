@@ -1,6 +1,17 @@
 RewriteEngine On
 
+# Allow index-new.html for live testing
+RewriteRule ^index-new\.html$ - [L]
+
+# Allow preview parameter for maintenance bypass
+RewriteCond %{QUERY_STRING} ^preview=secret$
+RewriteRule ^(.*)$ $1 [QSD,L]
+
+# Redirect all traffic to maintenance page
+RewriteRule ^(.*)$ / [R=302,L]
+
 # Local preview bridge for Devilbox/OrbStack.
+
 # Keep Apache/Devilbox serving the normal site, but proxy Worker-owned routes
 # to `wrangler dev` so generated pages can be previewed before publishing.
 #

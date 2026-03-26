@@ -242,14 +242,16 @@
         </div>
         <div class="quiz-card">
           <img
-            src="https://thisday.info/images/blog/22.7.jpg"
-            alt="Latest Article Quiz"
+            id="latest-article-img"
+            src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+            alt="Loading..."
             class="quiz-card-img"
+            style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
-            <h3>Latest Article Quiz</h3>
+            <h3 id="latest-article-title">Loading...</h3>
             <p>Read it. Quiz yourself at the end.</p>
-            <a id="blog-quiz-btn" href="/blog/archive/" class="btn"
+            <a id="blog-quiz-btn" href="/blog/" class="btn"
               >Read &amp; Quiz <i class="bi bi-arrow-right"></i
             ></a>
           </div>
@@ -272,14 +274,32 @@
     <script>
       (function () {
         var btn = document.getElementById("blog-quiz-btn");
-        if (!btn) return;
+        var imgEl = document.getElementById("latest-article-img");
+        var titleEl = document.getElementById("latest-article-title");
+
         fetch("/blog/archive.json")
           .then(function (r) {
             return r.ok ? r.json() : null;
           })
           .then(function (d) {
-            if (d && d.length && d[0].slug)
-              btn.href = "/blog/" + d[0].slug + "/#quiz";
+            if (!d || !d.length) return;
+            var latest = d[0];
+            if (latest) {
+              if (btn && latest.slug) {
+                btn.href = "/blog/" + latest.slug + "/#quiz";
+              }
+              if (imgEl && latest.imageUrl) {
+                imgEl.src = latest.imageUrl;
+                imgEl.alt = latest.title || "Latest Article";
+              }
+              if (titleEl && latest.title) {
+                var shortTitle =
+                  latest.title.length > 40
+                    ? latest.title.substring(0, 40) + "..."
+                    : latest.title;
+                titleEl.textContent = shortTitle;
+              }
+            }
           })
           .catch(function () {});
       })();

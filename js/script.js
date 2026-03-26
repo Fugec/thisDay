@@ -2012,7 +2012,7 @@ async function showEventDetails(
         ? `<img src="${first.thumbnailUrl}" alt="${first.title || first.description || ""}" />`
         : `<div class="modal-image-placeholder"><i class="bi bi-image"></i></div>`;
       modalHtml += `
-        <div class="modal-body-flex">
+        <div class="modal-body-flex border">
           <div class="modal-text">
             <div class="event-item-body">
               <div class="d-flex align-items-center flex-wrap gap-2 mb-2">

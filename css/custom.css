@@ -1204,6 +1204,10 @@ img {
   display: flex;
   gap: 0;
   background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 1rem;
 }
 
 .modal-text {
@@ -1279,6 +1283,20 @@ img {
 
 .event-action-btn.event-action-read:hover {
   background: var(--btn-hover);
+}
+
+/* Share and WhatsApp buttons - gray style */
+.event-action-btn.event-action-share,
+.event-action-btn.event-action-wa {
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.event-action-btn.event-action-share:hover,
+.event-action-btn.event-action-wa:hover {
+  background: var(--text-muted);
+  color: #fff;
+  border-color: var(--text-muted);
 }
 
 /* Event item body */

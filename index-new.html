@@ -545,10 +545,14 @@
                 '<div style="padding:2rem;color:var(--text-muted);">No recent events available.</div>';
               return;
             }
-            // Render up to 10 events as blog-style cards (same as blog-section)
+            // Render up to 6 events with images as blog-style cards.
             // Ensure newest → oldest ordering (left → right in sliders)
-            var toRender = events.slice(0, 10).slice();
-            toRender.sort(function (a, b) {
+            var withImages = events
+              .filter(function (evt) {
+                return evt.thumbnailUrl && evt.thumbnailUrl.trim().length > 0;
+              })
+              .slice();
+            withImages.sort(function (a, b) {
               var ay = parseInt(a.year, 10);
               var by = parseInt(b.year, 10);
               if (isNaN(ay) && isNaN(by)) return 0;
@@ -556,6 +560,7 @@
               if (isNaN(by)) return -1;
               return by - ay; // descending: newest (larger year) first
             });
+            var toRender = withImages.slice(0, 6);
             toRender.forEach(function (e) {
               var title = e.title || "Untitled event";
               var excerpt = e.description || "";

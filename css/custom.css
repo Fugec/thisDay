@@ -885,46 +885,6 @@ img {
 .modal-body {
   background: var(--bg);
 }
-.modal-body-flex {
-  display: flex;
-  flex-direction: row;
-  gap: 0;
-  padding: 0;
-  min-height: 320px;
-}
-.modal-body-flex .modal-image {
-  flex: 1 1 50%;
-  background: #e9ecef;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 220px;
-  overflow: hidden;
-}
-.modal-body-flex .modal-image img {
-  max-width: 100%;
-  max-height: 320px;
-  object-fit: cover;
-  width: 100%;
-  height: auto;
-}
-.modal-body-flex .modal-text {
-  flex: 1 1 50%;
-  padding: 2rem 1.5rem;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-@media (max-width: 768px) {
-  .modal-body-flex {
-    flex-direction: column;
-  }
-  .modal-body-flex .modal-image,
-  .modal-body-flex .modal-text {
-    flex: 1 1 100%;
-    min-height: 160px;
-  }
-}
 
 /* Event items 50/50 layout - simple inline */
 .event-item-inner {

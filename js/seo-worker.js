@@ -709,7 +709,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .support-popup-content{background:var(--cb,#fff);color:var(--tc,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--cbr,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}
 @keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
 .support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--mu,#64748b);line-height:1;padding:0}
-.support-close-btn:hover{color:var(--tc,#1e293b)}` +
+.support-close-btn:hover{color:var(--tc,#1e293b)}`
   );
 }
 

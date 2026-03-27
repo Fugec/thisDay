@@ -17,7 +17,7 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-import { siteNav, siteFooter, footerYearScript } from "./shared/layout.js";
+import { siteNav, siteFooter, footerYearScript, NAV_CSS, FOOTER_CSS, navToggleScript } from "./shared/layout.js";
 import {
   resolveAiModel,
   checkAndUpdateAiModel,
@@ -63,8 +63,8 @@ const MONTH_SLUGS = [
 // Shared support popup (Buy Me a Coffee) — injected before </body> on all pages
 // ---------------------------------------------------------------------------
 function supportPopupSnippet() {
-  return `<style>#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}#supportPopup.show{display:flex;opacity:1}.support-popup-content{background:var(--card-bg,#fff);color:var(--text-color,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--card-border,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}@keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}.support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:#64748b;line-height:1;padding:0}.support-close-btn:hover{color:#1e293b}</style>
-<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:#1f1f1f;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
+  return `<style>#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}#supportPopup.show{display:flex;opacity:1}.support-popup-content{background:var(--bg,#fff);color:var(--text,#1a2e20);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--border,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}@keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}.support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--text-muted,#5c7a65);line-height:1;padding:0}.support-close-btn:hover{color:var(--text,#1a2e20)}</style>
+<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:var(--btn-bg,#1b3a2d);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
 <script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{var _t=localStorage.getItem('supportPopupClosed');if(_t&&Date.now()-Number(_t)<86400000)return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed',String(Date.now()));}catch(e){}});})();<\/script>`;
 }
 
@@ -404,7 +404,7 @@ export default {
             .replaceAll('class="table table-bordered"', 'class="site-table"')
             .replaceAll('<th scope="row">', "<th>");
           if (!patchedHtml.includes(".site-table{")) {
-            const siteTableCss = `<style>.site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--card-border,#e2e8f0);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}.site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--card-border,#e2e8f0);text-align:left;color:var(--text-color)}.site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}.site-table th{background:rgba(0,0,0,.035);font-weight:600;white-space:nowrap;width:40%}body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}body.dark-theme .site-table th{background:rgba(255,255,255,.06)}body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}</style>`;
+            const siteTableCss = `<style>.site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--border,#cfe0cf);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}.site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--border,#cfe0cf);text-align:left;color:var(--text,#1a2e20)}.site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}.site-table th{background:var(--bg-alt,#f2f7f2);font-weight:600;white-space:nowrap;width:40%}</style>`;
             patchedHtml = patchedHtml.replace(
               "</head>",
               siteTableCss + "</head>",
@@ -442,7 +442,7 @@ export default {
             // Wrap tdq-close + tdq-topic in sticky header div
             .replace(
               /(<button id="tdq-close"[\s\S]*?<\/button>)\s*(<div id="tdq-topic"[^>]*?><\/div>)/,
-              '<div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--card-border,#e2e8f0);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">$2$1</div>',
+              '<div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--border,#cfe0cf);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">$2$1</div>',
             )
             // Wrap body content in scrollable inner div
             .replace(
@@ -485,7 +485,7 @@ export default {
     var container=document.getElementById('tdq-questions');
     container.innerHTML=quiz.questions.slice(0,total).map(function(q,qi){
       var optsHtml=(q.options||[]).map(function(opt,oi){return '<div class="tdq-opt" data-qi="'+qi+'" data-oi="'+oi+'"><span class="tdq-opt-key">'+String.fromCharCode(65+oi)+'</span>'+esc(String(opt))+'</div>';}).join('');
-      var expHtml=q.explanation?'<div class="tdq-explanation" id="tdq-e-'+qi+'" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid #1f1f1f;border-radius:0 6px 6px 0">'+esc(String(q.explanation))+'</div>':'';
+      var expHtml=q.explanation?'<div class="tdq-explanation" id="tdq-e-'+qi+'" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid var(--btn-bg,#1b3a2d);border-radius:0 6px 6px 0">'+esc(String(q.explanation))+'</div>':'';
       var actionBtn=qi<total-1?'<button class="tdq-next-btn" id="tdq-next-'+qi+'" data-qi="'+qi+'" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;gap:8px;align-items:center;justify-content:center">Next Question <i class="bi bi-arrow-right"></i></button>':'<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
       return '<div class="tdq-question" id="tdq-q-'+qi+'" style="display:'+(qi===0?'block':'none')+'"><p class="tdq-q-text"><strong>'+(qi+1)+'.</strong> '+esc(String(q.q))+'</p><div class="tdq-options">'+optsHtml+'</div><div class="tdq-feedback" id="tdq-f-'+qi+'" hidden></div>'+expHtml+actionBtn+'</div>';
     }).join('');
@@ -564,7 +564,7 @@ export default {
           <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
             <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
             <div>
-              <strong style="color:var(--text-color)">Test Your Knowledge</strong><br/>
+              <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
               <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
               <button class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
                 Take the Quiz
@@ -574,14 +574,14 @@ export default {
           const quizBlock = `
   <!-- Quiz popup -->
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
-  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;flex-direction:column;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
-    <div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--card-border,#e2e8f0);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;flex-direction:column;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;background:var(--bg,#fff);border-radius:16px 16px 0 0;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
+    <div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--border,#cfe0cf);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
-      <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1;flex-shrink:0;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:flex-end">&times;</button>
+      <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-muted,#5c7a65);line-height:1;flex-shrink:0;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:flex-end">&times;</button>
     </div>
     <div id="tdq-scroll-body" style="overflow-y:auto;padding:16px 20px 32px">
-      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
-      <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
+      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text,#1a2e20)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
+      <p style="font-size:.85rem;color:var(--text-muted,#5c7a65);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
       <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:#f59e0b;margin-bottom:16px">0 of 5 answered</div>
       <div id="tdq-questions"></div>
       <button class="btn btn-warning mt-3" id="tdq-submit-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
@@ -590,22 +590,17 @@ export default {
   </div>
   <div id="tdq-sentinel" style="height:1px"></div>
   <style>
-    .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
-    .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
+    .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text,#1a2e20)}.tdq-options{display:flex;flex-direction:column;gap:7px}
+    .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text,#1a2e20)}
     .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.07)}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
-    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
+    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--border,#cfe0cf);font-size:.72rem;font-weight:700;flex-shrink:0}
     .tdq-opt-selected .tdq-opt-key{background:#f59e0b;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
-    body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.08)}
-    body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
-    body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
     .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
     #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important;display:flex!important}
     #tdq-scroll-body{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.2) transparent}#tdq-scroll-body::-webkit-scrollbar{width:4px}#tdq-scroll-body::-webkit-scrollbar-thumb{background:rgba(0,0,0,.2);border-radius:4px}
-    body.dark-theme #tdq-scroll-body{scrollbar-color:rgba(255,255,255,.15) transparent}body.dark-theme #tdq-scroll-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15)}
-    .tdq-cta-sub{color:#6c757d}body.dark-theme .tdq-cta-sub{color:#fff}
-    body.dark-theme #tdq-header{border-bottom-color:rgba(255,255,255,.1)}
+    .tdq-cta-sub{color:var(--text-muted,#5c7a65)}
   </style>
   <script>
   (function () {
@@ -637,7 +632,7 @@ export default {
         var optsHtml = (q.options || []).map(function(opt, oi) {
           return '<div class="tdq-opt" data-qi="' + qi + '" data-oi="' + oi + '"><span class="tdq-opt-key">' + String.fromCharCode(65 + oi) + '</span>' + esc(String(opt)) + '</div>';
         }).join("");
-        var expHtml = q.explanation ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid #1f1f1f;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>' : '';
+        var expHtml = q.explanation ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid var(--btn-bg,#1b3a2d);border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>' : '';
         var actionBtn = qi < total - 1
           ? '<button class="tdq-next-btn" id="tdq-next-' + qi + '" data-qi="' + qi + '" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer">Next Question <i class="bi bi-arrow-right ms-1"></i></button>'
           : '<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
@@ -830,7 +825,7 @@ export default {
         }
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
-          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#1f1f1f;z-index:9999;transition:width .1s linear;pointer-events:none}body.dark-theme #read-progress{background:#d6d6d6}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:#1f1f1f;background:rgba(0,0,0,.035)}.site-btn-primary{border-color:#1f1f1f;color:#2b2b2b}.site-btn-primary:hover{background:rgba(0,0,0,.05);border-color:#2b2b2b;color:#111111}body.dark-theme .site-btn-primary{border-color:#d6d6d6;color:#e1e1e1}body.dark-theme .site-btn-primary:hover{background:rgba(255,255,255,.08);border-color:#e1e1e1;color:#f5f5f5}.tdq-cta-sub{color:#6c757d}body.dark-theme .tdq-cta-sub{color:#fff}</style>`;
+          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg,#1b3a2d);z-index:9999;transition:width .1s linear;pointer-events:none}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text,#1a2e20);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:var(--btn-bg,#1b3a2d);background:var(--bg-alt,#f2f7f2)}.site-btn-primary{border-color:var(--btn-bg,#1b3a2d);color:var(--btn-bg,#1b3a2d)}.site-btn-primary:hover{background:var(--bg-alt,#f2f7f2);border-color:var(--btn-hover,#2a4d3a);color:var(--btn-hover,#2a4d3a)}.tdq-cta-sub{color:var(--text-muted,#5c7a65)}</style>`;
           const progressHtml = `<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>`;
           const progressJs = `<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();<\/script>`;
           patchedHtml = patchedHtml
@@ -849,7 +844,7 @@ export default {
         if (patchedHtml.includes("tdq-opt-selected{border-color:#1f1f1f")) {
           patchedHtml = patchedHtml.replace(
             "</head>",
-            "<style>.tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.07)!important}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important}.tdq-opt-selected .tdq-opt-key{background:#f59e0b!important}body.dark-theme .tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.08)!important}body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}</style></head>",
+            "<style>.tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.07)!important}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important}.tdq-opt-selected .tdq-opt-key{background:#f59e0b!important}</style></head>",
           );
         }
         // Inject floating quiz bar into stored posts that don't have it yet
@@ -2634,7 +2629,7 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     .join("\n");
 
   const editorialNote = c.editorialNote
-    ? `          <p class="mt-4 fst-italic" style="font-size: 0.93rem; opacity: 0.85; border-left: 3px solid #1f1f1f; padding-left: 1rem;">
+    ? `          <p class="mt-4 fst-italic" style="font-size: 0.93rem; opacity: 0.85; border-left: 3px solid var(--btn-bg,#1b3a2d); padding-left: 1rem;">
             ${esc(c.editorialNote)}
           </p>`
     : "";
@@ -2818,124 +2813,36 @@ ${JSON.stringify({
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 
     <style>
-      :root {
-        --link-hover-color: #111111;
-        --primary-bg: #ffffff;
-        --secondary-bg: #fff;
-        --text-color: #6c757d;
-        --header-text-color: #1f1f1f;
-        --card-bg: #ffffff;
-        --card-border: #e2e8f0;
-        --footer-bg: #ffffff;
-        --footer-text-color: #1f1f1f;
-        --link-color: #2b2b2b;
-        --switch-track-off: #e2e8f0;
-        --switch-thumb-off: #cbd5e1;
-        --switch-track-on: #2b2b2b;
-        --switch-thumb-on: #ffffff;
-        --border-radius: 0.5rem;
-        background-color: var(--secondary-bg);
-        color: var(--text-color);
-      }
-      body.dark-theme {
-        --primary-bg: #020617;
-        --secondary-bg: #1e293b;
-        --text-color: #f8fafc;
-        --header-text-color: #ffffff;
-        --card-bg: #1e293b;
-        --card-border: #334155;
-        --footer-bg: #020617;
-        --footer-text-color: #ffffff;
-        --link-color: #d6d6d6;
-        --switch-track-off: #334155;
-        --switch-thumb-off: #64748b;
-        --switch-track-on: #2b2b2b;
-        --switch-thumb-on: #f8fafc;
-        background-color: var(--secondary-bg) !important;
-        color: var(--text-color) !important;
-      }
-      body {
-        font-family: Lora, serif;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        transition: background-color 0.3s ease, color 0.3s ease;
-      }
-      .navbar {
-        background-color: var(--primary-bg) !important;
-        transition: background-color 0.3s ease;
-        position: sticky;
-        top: 0;
-        z-index: 1030;
-      }
-      .navbar-brand, .navbar-nav .nav-link {
-        color: var(--header-text-color) !important;
-        font-weight: bold !important;
-      }
-      main { flex: 1; margin-top: 20px; }
-      .footer .text-muted { color: rgba(255,255,255,0.85) !important; }
-      .article-meta { color: #6c757d; font-size: 0.875rem; }
-      body.dark-theme .article-meta { color: #94a3b8; }
-      .breadcrumb { background: transparent; padding: 0; margin-bottom: 1rem; }
-      body.dark-theme .breadcrumb-item a { color: #d6d6d6; }
-      body.dark-theme .breadcrumb-item.active { color: #94a3b8; }
-      body.dark-theme .breadcrumb-item + .breadcrumb-item::before { color: #64748b; }
-      .did-you-know { background: rgba(0,0,0,0.04); border-left: 4px solid #1f1f1f; border-radius: 0 0.5rem 0.5rem 0; }
-      body.dark-theme .did-you-know { background: rgba(0,0,0,0.06); }
-      .analysis-good { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.3); }
-      body.dark-theme .analysis-good { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.25); }
-      .analysis-bad { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.3); }
-      body.dark-theme .analysis-bad { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); }
-      .related-card { border: 1px solid var(--card-border); background: var(--card-bg); transition: transform 0.15s ease, box-shadow 0.15s ease; }
-      .related-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-decoration: none; }
-      blockquote.historical-quote { border-left: 3px solid #1f1f1f; padding-left: 1rem; margin-left: 0.5rem; font-style: italic; }
-      body.dark-theme blockquote.historical-quote footer { color: #94a3b8; }
-      .border {
-        border: 1px solid var(--card-border);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      }
-      body.dark-theme .border {
-        border: 1px solid #334255 !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      }
-      .footer {
-        background-color: var(--footer-bg);
-        color: var(--footer-text-color);
-        text-align: center;
-        padding: 20px;
-        margin-top: 30px;
-        transition: background-color 0.3s ease, color 0.3s ease;
-      }
-      .footer a { color: var(--footer-text-color); text-decoration: underline; }
-      .btn-outline-primary {
-        color: #6f787f;
-        border-color: #e2e8f0;
-        background: #fff;
-        transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease;
-      }
-      body.dark-theme .btn-outline-primary {
-        border-color: #334255;
-        color: #f8fafc;
-        background-color: #1d293b;
-      }
-      #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:#1f1f1f;z-index:9999;transition:width .1s linear;pointer-events:none}
-      body.dark-theme #read-progress{background:#d6d6d6}
+      :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
+      body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
+      main{flex:1;margin-top:20px}
+      a{color:var(--btn-bg)}a:hover{color:var(--accent);text-decoration:underline}
+      h1,h2,h3{color:var(--text)}
+      .article-meta{color:var(--text-muted);font-size:.875rem}
+      .breadcrumb{background:transparent;padding:0;margin-bottom:1rem}
+      .breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
+      .did-you-know{background:rgba(0,0,0,.04);border-left:4px solid var(--btn-bg);border-radius:0 .5rem .5rem 0}
+      .analysis-good{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
+      .analysis-bad{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
+      .related-card{border:1px solid var(--border);background:var(--bg);transition:transform .15s ease,box-shadow .15s ease}
+      .related-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1);text-decoration:none}
+      blockquote.historical-quote{border-left:3px solid var(--btn-bg);padding-left:1rem;margin-left:.5rem;font-style:italic}
+      .border{border:1px solid var(--border)!important;box-shadow:0 2px 4px rgba(0,0,0,.1)}
+      .btn-outline-primary{color:var(--text-muted);border-color:var(--border);background:var(--bg)}
+      .btn-outline-primary:hover{border-color:var(--btn-bg);color:var(--text);background:var(--bg-alt)}
+      #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg);z-index:9999;transition:width .1s linear;pointer-events:none}
       button#chatbotToggle,#chatbotWindow{display:none!important}
-      .site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text-color);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
-      .site-btn:hover{border-color:#1f1f1f;background:rgba(0,0,0,.035)}
-      .site-btn-primary{border-color:#1f1f1f;color:#2b2b2b}
-      .site-btn-primary:hover{background:rgba(0,0,0,.05);border-color:#2b2b2b;color:#111111}
-      body.dark-theme .site-btn-primary{border-color:#d6d6d6;color:#e1e1e1}
-      body.dark-theme .site-btn-primary:hover{background:rgba(255,255,255,.08);border-color:#e1e1e1;color:#f5f5f5}
-      .site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--card-border,#e2e8f0);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}
-      .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--card-border,#e2e8f0);text-align:left;color:var(--text-color)}
+      .site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
+      .site-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}
+      .site-btn-primary{border-color:var(--btn-bg);color:var(--text)}
+      .site-btn-primary:hover{background:var(--bg-alt);border-color:var(--btn-hover);color:var(--text)}
+      .site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--border);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}
+      .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--border);text-align:left;color:var(--text)}
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
-      .site-table th{background:rgba(0,0,0,.035);font-weight:600;white-space:nowrap;width:40%}
-      body.dark-theme .site-table{border-color:rgba(255,255,255,.15)}
-      body.dark-theme .site-table th{background:rgba(255,255,255,.06)}
-      body.dark-theme .site-table th,body.dark-theme .site-table td{border-bottom-color:rgba(255,255,255,.08)}
-      .tdq-cta-sub{color:#6c757d}
-      body.dark-theme .tdq-cta-sub{color:#fff}
+      .site-table th{background:var(--bg-alt);font-weight:600;white-space:nowrap;width:40%}
+      .tdq-cta-sub{color:var(--text-muted)}
+      ${NAV_CSS}
+      ${FOOTER_CSS}
     </style>
   </head>
   <body>
@@ -2955,7 +2862,7 @@ ${JSON.stringify({
           </ol>
         </nav>
 
-        <article class="p-4 rounded border shadow-sm" style="background-color: var(--card-bg); color: var(--text-color)">
+        <article class="p-4 rounded border shadow-sm" style="background-color: var(--bg); color: var(--text)">
 
           <header class="mb-4 text-center">
             <h1 class="mb-2 fw-bold">${esc(c.title)}</h1>
@@ -3140,13 +3047,13 @@ ${analysisBadItems}
               .map((p) => {
                 const thumb = p.imageUrl
                   ? `<img src="/image-proxy?src=${encodeURIComponent(p.imageUrl)}&w=80&q=75" alt="${esc(p.title)}" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
-                  : `<div style="width:56px;height:56px;border-radius:8px;flex-shrink:0;background:var(--card-border,#e2e8f0);display:flex;align-items:center;justify-content:center"><i class="bi bi-clock-history" style="color:#94a3b8;font-size:1.2rem"></i></div>`;
+                  : `<div style="width:56px;height:56px;border-radius:8px;flex-shrink:0;background:var(--border,#cfe0cf);display:flex;align-items:center;justify-content:center"><i class="bi bi-clock-history" style="color:var(--text-muted,#5c7a65);font-size:1.2rem"></i></div>`;
                 return `
               <div class="col-12 col-md-4">
                 <a href="/blog/${esc(p.slug)}/" class="related-card d-flex align-items-center gap-2 p-3 rounded text-decoration-none h-100">
                   ${thumb}
                   <div style="min-width:0">
-                    <p class="mb-0 fw-semibold" style="color:var(--text-color);font-size:.88rem;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(p.title)}</p>
+                    <p class="mb-0 fw-semibold" style="color:var(--text,#1a2e20);font-size:.88rem;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(p.title)}</p>
                     <small class="article-meta">${new Date(p.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</small>
                   </div>
                 </a>
@@ -3157,7 +3064,7 @@ ${analysisBadItems}
           <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
             <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
             <div>
-              <strong style="color:var(--text-color)">Test Your Knowledge</strong><br/>
+              <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
               <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
               <button class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
                 Take the Quiz
@@ -3199,19 +3106,8 @@ ${analysisBadItems}
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="/js/script.js"></script>
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      ${footerYearScript()}
-      const body = document.body;
-      const DARK_THEME_KEY = "darkTheme";
-
-      const setTheme = (isDark) => {
-        isDark ? body.classList.add("dark-theme") : body.classList.remove("dark-theme");
-        localStorage.setItem(DARK_THEME_KEY, String(isDark));
-      };
-
-      const savedTheme = localStorage.getItem(DARK_THEME_KEY);
-      setTheme(savedTheme !== "false"); // default: dark
-    });
+    ${footerYearScript()}
+    ${navToggleScript()}
   </script>
 
   <!-- Google Ads: 60 Seconds on Site -->
@@ -3231,14 +3127,14 @@ ${analysisBadItems}
 
   <!-- Quiz popup: load quiz data and show after scroll to bottom -->
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
-  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;padding:0 0 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
-    <div id="tdq-header" style="position:sticky;top:0;z-index:1;background:var(--card-bg,#fff);border-radius:16px 16px 0 0;border-bottom:1px solid var(--card-border,#e2e8f0);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--bg,#fff);border-radius:16px 16px 0 0;padding:0 0 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
+    <div id="tdq-header" style="position:sticky;top:0;z-index:1;background:var(--bg,#fff);border-radius:16px 16px 0 0;border-bottom:1px solid var(--border,#cfe0cf);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
-      <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-color,#6c757d);line-height:1;flex-shrink:0">&times;</button>
+      <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-muted,#5c7a65);line-height:1;flex-shrink:0">&times;</button>
     </div>
     <div style="padding:16px 20px 0">
-      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text-color,#1e293b)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
-      <p style="font-size:.85rem;color:var(--text-color,#6c757d);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
+      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text,#1a2e20)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
+      <p style="font-size:.85rem;color:var(--text-muted,#5c7a65);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
       <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:#f59e0b;margin-bottom:16px">0 of 5 answered</div>
       <div id="tdq-questions"></div>
       <button class="btn btn-warning mt-3" id="tdq-submit-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
@@ -3302,23 +3198,18 @@ ${analysisBadItems}
     @keyframes tdq-pulse-in{0%{background:rgba(0,0,0,.05)}60%{background:rgba(0,0,0,.03)}100%{background:transparent}}
     .tdq-q-pulse{animation:tdq-pulse-in .6s ease forwards}
     @media(prefers-reduced-motion:reduce){.tdq-q-pulse,.tdq-q-enter{animation:none;transition:none}}
-    .tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text-color,#1e293b)}.tdq-options{display:flex;flex-direction:column;gap:7px}
-    .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--card-border,#e2e8f0);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text-color,#1e293b)}
+    .tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text,#1a2e20)}.tdq-options{display:flex;flex-direction:column;gap:7px}
+    .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text,#1a2e20)}
     .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.07)}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
-    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e2e8f0;font-size:.72rem;font-weight:700;flex-shrink:0}
+    .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--border,#cfe0cf);font-size:.72rem;font-weight:700;flex-shrink:0}
     .tdq-opt-selected .tdq-opt-key{background:#f59e0b;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
-    body.dark-theme .tdq-opt{border-color:rgba(255,255,255,.15);color:#f8fafc}body.dark-theme .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.08)}
-    body.dark-theme .tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.15)!important}body.dark-theme .tdq-opt-key{background:#334155;color:#cbd5e1}
-    body.dark-theme .tdq-opt-correct{background:rgba(16,185,129,.2)!important;border-color:#10b981!important;color:#e2e8f0!important}body.dark-theme .tdq-opt-wrong{background:rgba(239,68,68,.2)!important;border-color:#ef4444!important;color:#e2e8f0!important}
     .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
     .tdq-next-btn{width:100%;margin-top:14px;padding:11px;border:none;border-radius:8px;background:#f59e0b;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:none;transition:background .15s}
     .tdq-next-btn:hover{background:#d97706}
     .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
     #tdq-popup{transition:transform .3s ease;transform:translateY(100%);scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.2) transparent}.tdq-popup-open{transform:translateY(0)!important}
     #tdq-popup::-webkit-scrollbar{width:4px}#tdq-popup::-webkit-scrollbar-thumb{background:rgba(0,0,0,.2);border-radius:4px}
-    body.dark-theme #tdq-popup{scrollbar-color:rgba(255,255,255,.15) transparent}body.dark-theme #tdq-popup::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15)}
-    body.dark-theme #tdq-header{background:var(--card-bg,#1e293b);border-bottom-color:rgba(255,255,255,.1)}
   </style>
 
   <script>
@@ -3396,7 +3287,7 @@ ${analysisBadItems}
         var isLast = qi === total - 1;
         var nextLabel = isLast ? '<i class="bi bi-check2-circle me-1"></i>See Results' : 'Next Question <i class="bi bi-arrow-right ms-1"></i>';
         var expHtml = q.explanation
-          ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid #1f1f1f;border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>'
+          ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid var(--btn-bg,#1b3a2d);border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>'
           : '';
         return '<div class="tdq-question" id="tdq-q-' + qi + '">' +
           '<p class="tdq-q-text"><strong>' + (qi + 1) + ' / ' + total + '.</strong> ' + esc(String(q.q)) + '</p>' +
@@ -3565,7 +3456,7 @@ async function buildListingHTML(index) {
           <i class="bi bi-clock-history post-icon"></i>
           <div>
             <div class="post-title">${esc(entry.title)}</div>
-            <small style="color: var(--text-color); opacity: 0.7">${esc(dateStr)}</small>
+            <small style="color: var(--text-muted,#5c7a65); opacity: 0.7">${esc(dateStr)}</small>
           </div>
         </a>`;
         })
@@ -3641,41 +3532,20 @@ ${JSON.stringify(
     </script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
     <style>
-      :root {
-        --primary-bg: #1f1f1f; --secondary-bg: #fff; --text-color: #6c757d;
-        --header-text-color: #fff; --footer-bg: #1f1f1f; --footer-text-color: #fff;
-        --link-color: #2b2b2b; --card-bg: #fff; --card-border: rgba(0,0,0,0.1);
-        background-color: var(--secondary-bg); color: var(--text-color);
-      }
-      body.dark-theme {
-        --primary-bg: #020617; --secondary-bg: #1e293b; --text-color: #f8fafc;
-        --header-text-color: #fff; --footer-bg: #020617; --footer-text-color: #fff;
-        --link-color: #d6d6d6; --card-bg: #1e293b; --card-border: rgba(255,255,255,0.1);
-        background-color: var(--secondary-bg) !important; color: var(--text-color) !important;
-      }
-      body { font-family: Lora, serif; min-height: 100vh; display: flex; flex-direction: column; transition: background-color 0.3s ease, color 0.3s ease; }
-      .navbar { background-color: var(--primary-bg) !important; position: sticky; top: 0; z-index: 1030; }
-      .navbar-brand, .navbar-nav .nav-link { color: var(--header-text-color) !important; font-weight: bold !important; }
-      main { flex: 1; padding: 20px 0; }
-      .footer { background-color: var(--footer-bg); color: var(--footer-text-color); text-align: center; padding: 20px; margin-top: 30px; font-size: 14px; }
-      .footer a { color: var(--footer-text-color); text-decoration: underline; }
-      h1, h2, h3 { color: var(--text-color); }
-      body.dark-theme h1, body.dark-theme h2, body.dark-theme h3 { color: #f8fafc; }
-      a { color: var(--link-color); text-decoration: none; }
-      a:hover { text-decoration: underline; }
-      .blog-post-link {
-        display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px;
-        border: 1px solid var(--card-border); border-radius: 8px;
-        background-color: var(--card-bg); text-decoration: none; color: var(--text-color);
-        transition: transform 0.15s ease, box-shadow 0.15s ease; margin-bottom: 10px;
-      }
-      .blog-post-link:hover { transform: translateX(4px); box-shadow: 0 3px 12px rgba(0,0,0,0.08); text-decoration: none; color: var(--text-color); }
-      .post-icon { color: #1f1f1f; font-size: 1.1rem; flex-shrink: 0; margin-top: 2px; }
-      .post-title { font-weight: 600; font-size: 0.95rem; line-height: 1.4; color: var(--link-color); }
-      body.dark-theme .post-title { color: #d6d6d6; }
-      .month-header { font-size: 1.3rem; font-weight: 700; color: #1f1f1f !important; border-bottom: 2px solid rgba(122,70,50,0.3); padding-bottom: 6px; margin-bottom: 14px; }
-      .ad-unit { text-align: center; }
-      .ad-unit-label { font-size: 0.7rem; color: #adb5bd; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+      :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
+      body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
+      main{flex:1;padding:20px 0}
+      h1,h2,h3{color:var(--text)}
+      a{color:var(--btn-bg);text-decoration:none}a:hover{text-decoration:underline}
+      .blog-post-link{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--border);border-radius:8px;background-color:var(--bg);text-decoration:none;color:var(--text);transition:transform .15s ease,box-shadow .15s ease;margin-bottom:10px}
+      .blog-post-link:hover{transform:translateX(4px);box-shadow:0 3px 12px rgba(0,0,0,.08);text-decoration:none;color:var(--text)}
+      .post-icon{color:var(--btn-bg);font-size:1.1rem;flex-shrink:0;margin-top:2px}
+      .post-title{font-weight:600;font-size:.95rem;line-height:1.4;color:var(--btn-bg)}
+      .month-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
+      .ad-unit{text-align:center}
+      .ad-unit-label{font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+      ${NAV_CSS}
+      ${FOOTER_CSS}
     </style>
   </head>
   <body>
@@ -3686,7 +3556,7 @@ ${JSON.stringify(
     <div class="row justify-content-center">
       <div class="col-lg-9 col-xl-7">
         <h1 class="fw-bold mb-1" style="font-size:1.8rem">History Blog</h1>
-        <p class="mb-4" style="color: var(--text-color); opacity: 0.8">
+        <p class="mb-4" style="color: var(--text-muted,#5c7a65); opacity: 0.8">
           In-depth articles covering fascinating historical events published regularly by thisDay.info.
           <a href="/blog/">View all posts</a>
         </p>
@@ -3710,15 +3580,8 @@ ${JSON.stringify(
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      ${footerYearScript()}
-      const body = document.body;
-      const setTheme = (d) => {
-        d ? body.classList.add("dark-theme") : body.classList.remove("dark-theme");
-        localStorage.setItem("darkTheme", String(d));
-      };
-      setTheme(localStorage.getItem("darkTheme") !== "false");
-    });
+    ${footerYearScript()}
+    ${navToggleScript()}
     if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
       document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
         if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed')) {
@@ -3801,25 +3664,16 @@ async function serve404(env) {
   <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
   <style>
-    body { font-family: Lora, serif; min-height: 100vh; display: flex; flex-direction: column; }
-    .navbar { background-color: #1f1f1f !important; position: sticky; top: 0; z-index: 1030; }
-    .navbar-brand, .navbar-nav .nav-link { color: #fff !important; font-weight: bold !important; }
-    main { flex: 1; }
-    .footer { background-color: #1f1f1f; color: #fff; text-align: center; padding: 20px; margin-top: 30px; }
-    .footer a { color: #fff; text-decoration: underline; }
-    .hero-code { font-size: 6rem; font-weight: 700; color: #1f1f1f; line-height: 1; }
+    :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
+    body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
+    main{flex:1}
+    .hero-code{font-size:6rem;font-weight:700;color:var(--btn-bg);line-height:1}
+    ${NAV_CSS}
+    ${FOOTER_CSS}
   </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="/">thisDay.</a>
-    <ul class="navbar-nav ms-auto">
-      <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
-      <li class="nav-item"><a class="nav-link" href="/blog/">Blog</a></li>
-    </ul>
-  </div>
-</nav>
+${siteNav()}
 
 <main class="container py-5">
   <div class="row justify-content-center">
@@ -3841,13 +3695,9 @@ async function serve404(env) {
   </div>
 </main>
 
-<footer class="footer">
-  <p class="mb-0">
-    &copy; ${year} <a href="/">thisDay.info</a> &middot;
-    <a href="/privacy-policy/">Privacy</a> &middot;
-    <a href="/contact/">Contact</a>
-  </p>
-</footer>
+${siteFooter()}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>${navToggleScript()}${footerYearScript()}</script>
 </body>
 </html>`;
 

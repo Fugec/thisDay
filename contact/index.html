@@ -26,7 +26,7 @@
       content="Get in touch with the thisDay.info team."
     />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
-    <meta name="author" content="Armin Kapetanović" />
+    <meta name="author" content="Armin Kapetanovic" />
 
     <script type="application/ld+json">
       {
@@ -72,7 +72,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap"
       rel="stylesheet"
     />
 
@@ -85,71 +85,12 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
     />
+    <link rel="stylesheet" href="/css/custom.css" />
     <link rel="stylesheet" href="/css/style.css" />
 
     <style>
-      :root {
-        --primary-bg: #3b82f6;
-        --secondary-bg: #fff;
-        --text-color: #6c757d;
-        --header-text-color: #ffffff;
-        --footer-bg: #3b82f6;
-        --footer-text-color: #ffffff;
-        --link-color: #2563eb;
-        --switch-track-off: #e2e8f0;
-        --switch-thumb-off: #cbd5e1;
-        --switch-track-on: #2563eb;
-        --switch-thumb-on: #ffffff;
-        --card-bg: #ffffff;
-        --card-border: rgba(0, 0, 0, 0.1);
-        --input-bg: #ffffff;
-        --input-border: #ced4da;
-        --input-color: #212529;
-      }
-
-      body.dark-theme {
-        --primary-bg: #020617;
-        --secondary-bg: #1e293b;
-        --text-color: #f8fafc;
-        --header-text-color: #ffffff;
-        --footer-bg: #020617;
-        --footer-text-color: #ffffff;
-        --link-color: #60a5fa;
-        --switch-track-off: #334155;
-        --switch-thumb-off: #64748b;
-        --switch-track-on: #2563eb;
-        --switch-thumb-on: #f8fafc;
-        --card-bg: #1e293b;
-        --card-border: rgba(255, 255, 255, 0.1);
-        --input-bg: #0f172a;
-        --input-border: #334155;
-        --input-color: #f8fafc;
-      }
-
-      body {
-        font-family: Inter, sans-serif;
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        transition:
-          background-color 0.3s ease,
-          color 0.3s ease;
-        background-color: var(--secondary-bg);
-        color: var(--text-color);
-      }
-
-      .navbar {
-        background-color: var(--primary-bg) !important;
-        transition: background-color 0.3s ease;
-        position: sticky;
-        top: 0;
-        z-index: 1030;
-      }
-
-      .navbar-brand,
-      .navbar-nav .nav-link {
-        color: var(--header-text-color) !important;
-        font-weight: bold !important;
+      .container {
+        max-width: 960px;
       }
 
       main {
@@ -157,121 +98,44 @@
         padding: 20px 0;
       }
 
-      .footer {
-        background-color: var(--footer-bg);
-        color: var(--footer-text-color);
-        text-align: center;
-        padding: 20px;
-        margin-top: 30px;
-        transition:
-          background-color 0.3s ease,
-          color 0.3s ease;
-        font-size: 14px;
-      }
-
-      .footer a {
-        color: var(--footer-text-color);
-        text-decoration: underline;
-        transition: color 0.3s ease;
-      }
-
-      h1,
-      h2,
-      h3,
-      h4,
-      h5,
-      h6 {
-        color: var(--text-color);
-        transition: color 0.3s ease;
-      }
-
-      body.dark-theme h1,
-      body.dark-theme h2,
-      body.dark-theme h3,
-      body.dark-theme h4,
-      body.dark-theme h5,
-      body.dark-theme h6 {
-        color: #f8fafc;
+      h1, h2, h3 {
+        color: var(--text);
       }
 
       a {
-        color: var(--link-color);
+        color: var(--btn-bg);
         text-decoration: none;
       }
-
       a:hover {
+        color: var(--accent);
         text-decoration: underline;
       }
 
-      .form-check-input:checked {
-        background-color: var(--switch-track-on) !important;
-        border-color: var(--switch-track-on) !important;
-      }
-
-      .form-check-input {
-        background-color: var(--switch-track-off);
-        border-color: var(--switch-track-off);
-        transition:
-          background-color 0.3s ease,
-          border-color 0.3s ease;
-      }
-
-      .form-switch .form-check-input {
-        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
-        background-color: var(--switch-thumb-off);
-        transition:
-          background-color 0.3s ease,
-          transform 0.3s ease;
-      }
-
-      .form-switch .form-check-input:checked {
-        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
-        background-color: var(--switch-thumb-on);
-      }
-
-      .theme-switch-mobile label i {
-        color: var(--header-text-color);
-        font-size: 1.2rem;
-        margin-left: 0.5rem;
-      }
-
-      .theme-switch-desktop label {
-        color: var(--header-text-color);
-      }
-
-      .container {
-        max-width: 960px;
-      }
-
       .contact-card {
-        background-color: var(--card-bg);
-        border: 1px solid var(--card-border);
+        background-color: var(--bg);
+        border: 1px solid var(--border);
         border-radius: 12px;
         padding: 36px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+        box-shadow: var(--shadow);
       }
 
       .form-control,
       .form-select {
-        background-color: var(--input-bg);
-        border-color: var(--input-border);
-        color: var(--input-color);
-        transition:
-          background-color 0.3s ease,
-          border-color 0.3s ease,
-          color 0.3s ease;
+        background-color: var(--bg);
+        border-color: var(--border);
+        color: var(--text);
       }
 
       .form-control:focus,
       .form-select:focus {
-        background-color: var(--input-bg);
-        color: var(--input-color);
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.25);
+        background-color: var(--bg);
+        color: var(--text);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 0.2rem rgba(27, 58, 45, 0.2);
       }
 
       .form-label {
-        color: var(--text-color);
+        color: var(--text);
         font-weight: 500;
       }
 
@@ -284,81 +148,82 @@
 
       .contact-info-icon {
         font-size: 1.4rem;
-        color: #3b82f6;
+        color: var(--accent);
         flex-shrink: 0;
         margin-top: 2px;
+      }
+
+      .btn-primary,
+      .btn-primary:hover,
+      .btn-primary:focus,
+      .btn-primary:active {
+        background-color: var(--btn-bg) !important;
+        border-color: var(--btn-bg) !important;
+        color: var(--btn-text) !important;
+      }
+      .btn-primary:hover {
+        background-color: var(--btn-hover) !important;
+        border-color: var(--btn-hover) !important;
       }
 
       .success-message {
         display: none;
         padding: 16px;
-        background-color: #d1fae5;
-        border: 1px solid #6ee7b7;
+        background-color: var(--bg-alt);
+        border: 1px solid var(--border);
         border-radius: 8px;
-        color: #065f46;
+        color: var(--text);
         margin-top: 16px;
       }
 
-      body.dark-theme .success-message {
-        background-color: #064e3b;
-        border-color: #059669;
-        color: #d1fae5;
+      .text-primary {
+        color: var(--accent) !important;
       }
     </style>
   </head>
 
   <body>
-    <nav class="navbar navbar-expand-lg navbar-dark">
-      <div class="container-fluid">
-        <a class="navbar-brand" href="/">thisDay.</a>
-        <div class="form-check form-switch d-lg-none me-2">
-          <input
-            class="form-check-input"
-            type="checkbox"
-            id="tsm"
-            aria-label="Toggle dark mode"
-          />
-          <label class="form-check-label" for="tsm"
-            ><i
-              class="bi bi-brightness-high-fill theme-icon-sun"
-              style="color: #fff; font-size: 1.1rem; margin-left: 4px"
-            ></i
-            ><i
-              class="bi bi-moon-fill theme-icon-moon"
-              style="color: #fff; font-size: 1.1rem; margin-left: 4px"
-            ></i
-          ></label>
+    <nav class="nav">
+      <div class="nav-inner">
+        <a href="/" class="brand">thisDay.</a>
+        <div class="nav-links">
+          <a href="/events/">Events on this day</a>
+          <a href="/births/">Born on this day</a>
+          <a href="/deaths/">Died on this day</a>
+          <a href="/blog/">Blog</a>
+          <a href="/quiz/">Quiz</a>
+          <a href="/about/">About</a>
+          <a href="/contact/">Contact</a>
+          <a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener noreferrer" style="color: var(--accent); font-weight: 600" aria-label="Support this project">☕ Support</a>
         </div>
-        <div class="collapse navbar-collapse">
-          <ul class="navbar-nav ms-auto">
-            <li class="nav-item d-flex align-items-center">
-              <div class="form-check form-switch d-none d-lg-block me-2">
-                <input
-                  class="form-check-input"
-                  type="checkbox"
-                  id="tsd"
-                  aria-label="Toggle dark mode"
-                />
-                <label class="form-check-label" for="tsd" style="color: #fff"
-                  ><i
-                    class="bi bi-brightness-high-fill theme-icon-sun"
-                    style="font-size: 1.1rem"
-                  ></i
-                  ><i
-                    class="bi bi-moon-fill theme-icon-moon"
-                    style="font-size: 1.1rem"
-                  ></i
-                ></label>
-              </div>
-            </li>
-          </ul>
+        <button class="btn" id="navToggle" aria-label="Toggle menu">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="nav-mobile" id="navMobile">
+        <a href="/events/">Events</a>
+        <a href="/blog/">Blog</a>
+        <a href="/quiz/">Quiz</a>
+        <a href="/about/">About</a>
+        <a href="/contact/">Contact</a>
+        <div class="nav-mobile-bottom">
+          <a href="/events/" class="mobile-menu-link">Events on this day</a>
+          <a href="/births/" class="mobile-menu-link">Born on this day</a>
+          <a href="/deaths/" class="mobile-menu-link">Died on this day</a>
+          <div class="mobile-menu-social">
+            <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github"></i></a>
+            <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook"></i></a>
+            <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram"></i></a>
+            <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok"></i></a>
+            <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube"></i></a>
+          </div>
         </div>
       </div>
     </nav>
 
     <main class="container my-5">
       <h1 class="mb-2">Contact Us</h1>
-      <p class="mb-5">
+      <p class="mb-5" style="color: var(--text-muted)">
         Have a question, spotted an error, or want to collaborate? We'd love to
         hear from you.
       </p>
@@ -500,10 +365,10 @@
               </div>
             </div>
 
-            <hr class="my-4" />
+            <hr class="my-4" style="border-color: var(--border)" />
 
             <h3 class="h6 mb-3">Common Reasons to Contact Us</h3>
-            <ul class="list-unstyled">
+            <ul class="list-unstyled" style="color: var(--text)">
               <li class="mb-2">
                 <i class="bi bi-check2 text-primary me-2"></i>Reporting an
                 inaccurate historical event
@@ -531,7 +396,8 @@
                 href="https://buymeacoffee.com/fugec?new=1"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="btn btn-warning btn-sm"
+                class="btn btn-sm"
+                style="background: var(--accent); color: #fff; font-weight: 600"
               >
                 <i class="bi bi-cup-hot-fill me-1"></i> Support This Project
               </a>
@@ -542,85 +408,28 @@
     </main>
 
     <footer class="footer">
-      <div
-        class="container d-flex justify-content-center flex-wrap my-2"
-        style="gap: 1.25rem"
-      >
-        <a
-          href="https://github.com/Fugec"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="GitHub"
-          ><i class="bi bi-github h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://www.facebook.com/profile.php?id=61578009082537"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Facebook"
-          ><i class="bi bi-facebook h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://www.instagram.com/thisday.info/"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Instagram"
-          ><i class="bi bi-instagram h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://www.tiktok.com/@this__day"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="TikTok"
-          ><i class="bi bi-tiktok h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://www.youtube.com/@thisDay_info/shorts"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="YouTube"
-          ><i class="bi bi-youtube h3 text-white mb-0"></i
-        ></a>
-        <a
-          href="https://flipboard.com/@ArminKapetanovi/magazines/"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Flipboard"
-          ><svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="white"
-            style="width: 1.6rem; height: 1.6rem; vertical-align: -0.15em"
-            aria-hidden="true"
-          >
-            <path d="M0 0h11v11H0zM13 0h11v11H13zM0 13h11v11H0z" /></svg
-        ></a>
+      <div class="footer-inner">
+        <div class="footer-social">
+          <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github"></i></a>
+          <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook"></i></a>
+          <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram"></i></a>
+          <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok"></i></a>
+          <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube"></i></a>
+        </div>
+        <div class="footer-text">
+          <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
+          <p>Historical data sourced from <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">Wikipedia.org under CC BY-SA 4.0</a> license.</p>
+          <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
+        </div>
+        <div class="footer-bottom">
+          <a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener noreferrer">Support This Project</a>
+          <a href="/blog/">Blog</a>
+          <a href="/about/">About</a>
+          <a href="/contact/">Contact</a>
+          <a href="/terms/">Terms</a>
+          <a href="/privacy-policy/">Privacy</a>
+        </div>
       </div>
-      <p>&copy; <span id="currentYear"></span> thisDay. All rights reserved.</p>
-      <p>
-        Historical data sourced from Wikipedia.org under
-        <a
-          href="https://creativecommons.org/licenses/by-sa/4.0/"
-          target="_blank"
-          rel="noopener noreferrer"
-          >CC BY-SA 4.0</a
-        >
-        license. Data is for informational purposes and requires verification.
-      </p>
-      <p>
-        This website is not affiliated with any official historical
-        organization. Content is for educational and entertainment purposes
-        only.
-      </p>
-      <p class="footer-bottom">
-        <a href="https://buymeacoffee.com/fugec?new=1" target="_blank"
-          >Support This Project</a
-        >
-        | <a href="/blog/">Blog</a> | <a href="/about/">About Us</a> |
-        <a href="/contact/">Contact</a> |
-        <a href="/terms/">Terms and Conditions</a> |
-        <a href="/privacy-policy/">Privacy Policy</a>
-      </p>
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -628,44 +437,15 @@
       document.getElementById("currentYear").textContent =
         new Date().getFullYear();
 
-      const themeSwitchDesktop = document.getElementById("tsd");
-      const themeSwitchMobile = document.getElementById("tsm");
-
-      const applyTheme = (isDark) => {
-        document.body.classList.toggle("dark-theme", isDark);
-      };
-
-      const isDark =
-        localStorage.getItem("darkTheme") !== "false" ||
-        (window.matchMedia &&
-          window.matchMedia("(prefers-color-scheme: dark)").matches &&
-          localStorage.getItem("darkTheme") !== "false");
-      applyTheme(isDark);
-      if (themeSwitchDesktop) themeSwitchDesktop.checked = isDark;
-      if (themeSwitchMobile) themeSwitchMobile.checked = isDark;
-
-      if (themeSwitchDesktop) {
-        themeSwitchDesktop.addEventListener("change", () => {
-          applyTheme(themeSwitchDesktop.checked);
-          localStorage.setItem(
-            "theme",
-            themeSwitchDesktop.checked ? "dark" : "light",
-          );
-          if (themeSwitchMobile)
-            themeSwitchMobile.checked = themeSwitchDesktop.checked;
-        });
-      }
-      if (themeSwitchMobile) {
-        themeSwitchMobile.addEventListener("change", () => {
-          applyTheme(themeSwitchMobile.checked);
-          localStorage.setItem(
-            "theme",
-            themeSwitchMobile.checked ? "dark" : "light",
-          );
-          if (themeSwitchDesktop)
-            themeSwitchDesktop.checked = themeSwitchMobile.checked;
-        });
-      }
+      // Nav toggle
+      (function () {
+        var t = document.getElementById("navToggle"),
+          m = document.getElementById("navMobile");
+        if (t && m)
+          t.addEventListener("click", function () {
+            m.classList.toggle("active");
+          });
+      })();
 
       // Handle contact form submission
       const contactForm = document.getElementById("contactForm");

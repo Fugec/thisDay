@@ -58,8 +58,6 @@ img {
 }
 
 .marquee-bar {
-  position: sticky;
-  top: 3.5rem;
   z-index: 900;
 }
 .nav-inner {

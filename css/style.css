@@ -1,65 +1,6 @@
-/* Light Theme (Default) */
-:root {
-  /* No additional light theme variables here as all coloring is now in critical CSS */
-}
-
-/* ------------------------------------------------------------------
-   FORCE LIGHT THEME OVERRIDES
-   These rules neutralize any dark-theme styles and ensure the site
-   displays using the light color variables regardless of body classes.
------------------------------------------------------------------- */
-:root {
-  --primary-bg: #ffffff;
-  --secondary-bg: #ffffff;
-  --text-color: #1e293b;
-  --header-text-color: #1f1f1f;
-  --card-bg: #ffffff;
-  --card-border: #e2e8f0;
-  --footer-bg: #ffffff;
-  --footer-text-color: #1f1f1f;
-  --link-color: #2b2b2b;
-  --mu: #64748b;
-}
-
 .modal-image {
   display: none !important;
 }
-
-/* Force body/navbar/footer to use light values even when dark-theme present */
-body,
-body.dark-theme,
-body[data-theme="dark"],
-.dark-theme {
-  background-color: var(--secondary-bg) !important;
-  color: var(--text-color) !important;
-}
-.navbar,
-.navbar.navbar-light,
-.navbar.navbar-dark,
-body .navbar {
-  background-color: var(--primary-bg) !important;
-  color: var(--header-text-color) !important;
-}
-.navbar .nav-link,
-.navbar-brand {
-  color: var(--header-text-color) !important;
-}
-.footer {
-  background-color: var(--footer-bg) !important;
-  color: var(--footer-text-color) !important;
-}
-
-/* Neutralize specific dark overlays */
-.carousel-caption,
-.carousel-caption.no-events {
-  background-color: transparent !important;
-}
-.cookie-banner {
-  background-color: #f8f9fa !important;
-  color: #1a1a1a !important;
-}
-
-/* Dark Theme */
 
 #prevMonthBtn,
 #nextMonthBtn {
@@ -136,16 +77,6 @@ button.carousel-control-prev {
   }
 }
 
-.form-check-input:focus {
-  box-shadow: 0 0 0 0.25rem rgba(var(--switch-track-on-rgb, 0, 123, 255), 0.25) !important; /* Use rgba for focus outline */
-}
-
-/* Update default Bootstrap variables for switch if needed */
-/* :root {
-    --bs-form-switch-bg: var(--switch-track-off);
-    --bs-form-switch-checked-bg: var(--switch-track-on);
-} */
-
 .day-card:hover {
   transform: translateY(-5px);
   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
@@ -157,16 +88,16 @@ button.carousel-control-prev {
 
 /* Modal Styles */
 .modal-footer {
-  border-top-color: var(--card-border);
+  border-top-color: var(--border);
 }
 
 .modal-body a {
-  color: var(--link-color);
+  color: var(--btn-bg);
   transition: color 0.3s ease;
 }
 
 .modal-body a:hover {
-  color: var(--link-hover-color);
+  color: var(--accent);
 }
 
 /* Prevent link-color from overriding btn styles inside modals */
@@ -278,10 +209,6 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   color: #fff !important;
   border-color: #1a1a1a !important;
   opacity: 0.9;
-}
-
-.form-check-label {
-  color: var(--bs-body-color);
 }
 
 #eventFilterContainer {
@@ -474,7 +401,7 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--link-color);
+  color: var(--btn-bg);
 }
 
 .born-died-year {
@@ -671,9 +598,9 @@ article iframe {
 
 /* Quiz CTA Strip */
 .quiz-cta-strip {
-  background: var(--card-bg, #ffffff);
-  border-top: 1px solid var(--card-border, #e2e8f0);
-  border-bottom: 1px solid var(--card-border, #e2e8f0);
+  background: var(--bg, #ffffff);
+  border-top: 1px solid var(--border, #cfe0cf);
+  border-bottom: 1px solid var(--border, #cfe0cf);
 }
 .quiz-cta-strip strong {
   font-size: 1rem;
@@ -699,8 +626,8 @@ article iframe {
 .ad-unit-container {
   margin: 32px 0;
   padding: 20px 0;
-  border-top: 1px solid var(--card-border);
-  border-bottom: 1px solid var(--card-border);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 .ad-unit-label {
   display: block;
@@ -716,8 +643,8 @@ article iframe {
   display: block !important;
   border-radius: 12px;
   overflow: hidden;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
+  background: var(--bg);
+  border: 1px solid var(--border);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 @media (max-width: 640px) {
@@ -738,8 +665,8 @@ article iframe {
   grid-template-columns: repeat(3, 1fr);
   gap: 0.5rem;
   padding: 0.75rem;
-  border-top: 1px solid var(--card-border, #e2e8f0);
-  background: color-mix(in srgb, var(--card-bg, #fff) 88%, transparent);
+  border-top: 1px solid var(--border, #cfe0cf);
+  background: color-mix(in srgb, var(--bg, #fff) 88%, transparent);
   backdrop-filter: blur(12px) saturate(1.4);
   -webkit-backdrop-filter: blur(12px) saturate(1.4);
   opacity: 0;
@@ -748,7 +675,7 @@ article iframe {
 
 @supports not (backdrop-filter: blur(1px)) {
   .popup-explore-bar {
-    background: var(--card-bg, #fff);
+    background: var(--bg, #fff);
   }
 }
 

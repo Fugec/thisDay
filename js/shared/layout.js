@@ -1,9 +1,9 @@
 /**
- * Shared site layout — canonical navbar, footer, CSS, and site description
+ * Shared site layout — canonical nav, footer, CSS, and site description
  * used across all Cloudflare Workers (seo-worker, blog-ai-worker).
  *
  * Import:
- *   import { siteNav, siteFooter, FOOTER_CSS, NAV_CSS, footerYearScript, SITE_DESCRIPTION } from "./shared/layout.js";
+ *   import { siteNav, siteFooter, NAV_CSS, FOOTER_CSS, footerYearScript, navToggleScript, SITE_DESCRIPTION } from "./shared/layout.js";
  */
 
 // ---------------------------------------------------------------------------
@@ -13,111 +13,138 @@
 export const SITE_DESCRIPTION =
   "Explore historical events, daily articles, quizzes, and YouTube Shorts. Discover what happened today in history — births, deaths, and milestones from every era.";
 
-// Flipboard has no Bootstrap Icon — use their 3-square brand mark as inline SVG.
-const FLIPBOARD_ICON =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" ` +
-  `style="width:1.6rem;height:1.6rem;vertical-align:-.15em" aria-hidden="true">` +
-  `<path d="M0 0h11v11H0zM13 0h11v11H13zM0 13h11v11H0z"/>` +
-  `</svg>`;
+// ---------------------------------------------------------------------------
+// Color palette (mirrors css/custom.css :root)
+// ---------------------------------------------------------------------------
+
+export const ROOT_VARS =
+  `:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;` +
+  `--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;` +
+  `--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}`;
 
 // ---------------------------------------------------------------------------
-// Navbar
+// Nav
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the canonical site navbar HTML.
- *
- * @param {object} opts
- * @param {string}  [opts.todayLink]         href for "Today" (default "/today")
+ * Returns the canonical site nav HTML (matches index-new.html).
  */
-export function siteNav({ todayLink = "/today" } = {}) {
-  return `<nav class="navbar navbar-expand-lg navbar-light">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="/">thisDay.</a>
-    <button
-      class="navbar-toggler"
-      type="button"
-      data-bs-toggle="collapse"
-      data-bs-target="#siteNavbar"
-      aria-controls="siteNavbar"
-      aria-expanded="false"
-      aria-label="Toggle navigation"
-    >
-      <span class="navbar-toggler-icon"></span>
+export function siteNav() {
+  return `<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="brand">thisDay.</a>
+    <div class="nav-links">
+      <a href="/events/">Events on this day</a>
+      <a href="/births/">Born on this day</a>
+      <a href="/deaths/">Died on this day</a>
+      <a href="/blog/">Blog</a>
+      <a href="/quiz/">Quiz</a>
+      <a href="/about/">About</a>
+      <a href="/contact/">Contact</a>
+      <a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:600" aria-label="Support this project">☕ Support</a>
+    </div>
+    <button class="btn" id="navToggle" aria-label="Toggle menu">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
     </button>
-    <div class="collapse navbar-collapse" id="siteNavbar">
-      <ul class="navbar-nav ms-auto">
-        <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
-        <li class="nav-item"><a class="nav-link" href="${todayLink}">Today</a></li>
-        <li class="nav-item"><a class="nav-link" href="/blog/">Blog</a></li>
-        <li class="nav-item"><a class="nav-link" href="/about/">About</a></li>
-        <li class="nav-item"><a class="nav-link" href="/contact/">Contact</a></li>
-        <li class="nav-item"><a class="nav-link" href="/terms/">Terms</a></li>
-        <li class="nav-item"><a class="nav-link" href="/privacy-policy/">Privacy</a></li>
-      </ul>
+  </div>
+  <div class="nav-mobile" id="navMobile">
+    <a href="/events/">Events</a>
+    <a href="/blog/">Blog</a>
+    <a href="/quiz/">Quiz</a>
+    <a href="/about/">About</a>
+    <a href="/contact/">Contact</a>
+    <div class="nav-mobile-bottom">
+      <a href="/events/" class="mobile-menu-link">Events on this day</a>
+      <a href="/births/" class="mobile-menu-link">Born on this day</a>
+      <a href="/deaths/" class="mobile-menu-link">Died on this day</a>
+      <div class="mobile-menu-social">
+        <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github"></i></a>
+        <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook"></i></a>
+        <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram"></i></a>
+        <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok"></i></a>
+        <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube"></i></a>
+      </div>
     </div>
   </div>
 </nav>`;
 }
 
-/** Navbar CSS — paste into the page <style> block. */
+/** Nav CSS — extracted from css/custom.css. Paste into the page <style> block. */
 export const NAV_CSS =
-  `.navbar{background:var(--pb,var(--primary-bg,#ffffff))!important;position:sticky;top:0;z-index:1030}` +
-  `.navbar-brand,.nav-link{color:var(--htc,var(--header-text-color,#1f1f1f))!important;font-weight:700!important}` +
-  `.navbar-toggler{border-color:var(--card-border,#e2e8f0)}` +
-  `.navbar-toggler:focus{box-shadow:0 0 0 .15rem rgba(0,0,0,.12)}` +
-  `body.dark-theme .navbar-toggler{border-color:rgba(255,255,255,.35)}` +
-  `body.dark-theme .navbar-toggler-icon{filter:invert(1)}`;
+  `.nav{background:var(--bg);border-bottom:1px solid var(--border);padding:1rem 0;position:sticky;top:0;z-index:1000}` +
+  `.nav-inner{padding:0 2rem;display:flex;align-items:center;width:100%}` +
+  `.brand{font-family:"Lora",Georgia,serif;font-size:1.5rem;font-weight:700;color:var(--text);text-decoration:none}` +
+  `.nav-links{display:flex;gap:1.5rem;font-size:.9rem;margin-left:auto}` +
+  `.nav-links a{color:var(--text-muted);text-decoration:none;font-weight:500}` +
+  `.nav-links a:hover{color:var(--text)}` +
+  `.btn#navToggle{display:none;background:none;color:var(--text);padding:.4rem;margin-left:auto}` +
+  `.btn#navToggle:hover{background:var(--bg-alt);color:var(--text)}` +
+  `.btn#navToggle svg{width:20px;height:20px;display:block}` +
+  `.nav-mobile{display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg);border-bottom:1px solid var(--border);padding:0 1.5rem}` +
+  `.nav-mobile.active{display:block}` +
+  `.nav-mobile a{display:block;padding:1rem 0;color:var(--text);text-decoration:none;font-size:1rem;border-bottom:1px solid var(--border)}` +
+  `.nav-mobile a:last-child{border-bottom:none}` +
+  `.mobile-menu-link{display:flex;align-items:center;gap:.5rem;padding:.75rem 0;color:var(--text);text-decoration:none;border-bottom:1px solid var(--border)}` +
+  `.mobile-menu-link:last-child{border-bottom:none}` +
+  `.mobile-menu-social{margin-top:.75rem;display:flex;gap:.6rem}` +
+  `.mobile-menu-social a{color:var(--text);font-size:1.1rem}` +
+  `@media(max-width:768px){.nav-links{display:none}.btn#navToggle{display:flex}.nav{position:relative}}`;
 
-// Small fallback for the hamburger icon in case Bootstrap's icon styles are
-// not available (ensures a visible 3-bar icon on all pages).
-export const NAV_CSS_FALLBACK =
-  `.navbar-toggler-icon{background-image:none!important;position:relative;width:1.6rem;height:1rem;display:inline-block}` +
-  `.navbar-toggler-icon::before{content:'';position:absolute;left:0;right:0;top:50%;height:2px;background:currentColor;box-shadow:0 -6px 0 currentColor, 0 6px 0 currentColor;transform:translateY(-50%);border-radius:2px}` +
-  `@media (prefers-reduced-motion: reduce){.navbar-toggler{transition:none}}`;
+/** @deprecated — kept for backward compat; will be removed when workers are updated. */
+export const NAV_CSS_FALLBACK = "";
 
 // ---------------------------------------------------------------------------
 // Footer
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the canonical site footer HTML.
+ * Returns the canonical site footer HTML (matches index-new.html).
  * @param {string} yearSpanId  id for the copyright year <span> (default "yr")
  */
 export function siteFooter(yearSpanId = "yr") {
   return `<footer class="footer">
-  <div class="container d-flex justify-content-center flex-wrap my-2" style="gap:1.25rem">
-    <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github h3 text-white mb-0"></i></a>
-    <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook h3 text-white mb-0"></i></a>
-    <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram h3 text-white mb-0"></i></a>
-    <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok h3 text-white mb-0"></i></a>
-    <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube h3 text-white mb-0"></i></a>
-    <a href="https://flipboard.com/@ArminKapetanovi/magazines/" target="_blank" rel="noopener noreferrer" aria-label="Flipboard">${FLIPBOARD_ICON}</a>
+  <div class="footer-inner">
+    <div class="footer-social">
+      <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github"></i></a>
+      <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook"></i></a>
+      <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram"></i></a>
+      <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok"></i></a>
+      <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube"></i></a>
+    </div>
+    <div class="footer-text">
+      <p>&copy; <span id="${yearSpanId}"></span> thisDay. All rights reserved.</p>
+      <p>Historical data sourced from <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">Wikipedia.org under CC BY-SA 4.0</a> license.</p>
+      <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
+    </div>
+    <div class="footer-bottom">
+      <a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener noreferrer">Support This Project</a>
+      <a href="/blog/">Blog</a>
+      <a href="/about/">About</a>
+      <a href="/contact/">Contact</a>
+      <a href="/terms/">Terms</a>
+      <a href="/privacy-policy/">Privacy</a>
+    </div>
   </div>
-  <p>&copy; <span id="${yearSpanId}"></span> thisDay. All rights reserved.</p>
-  <p>Historical data sourced from Wikipedia.org under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a> license. Data is for informational purposes and requires verification.</p>
-  <p>This website is not affiliated with any official historical organization. Content is for educational and entertainment purposes only.</p>
-  <p class="footer-bottom">
-    <a href="https://buymeacoffee.com/fugec?new=1" target="_blank">Support This Project</a>
-    | <a href="/blog/">Blog</a>
-    | <a href="/about/">About Us</a>
-    | <a href="/contact/">Contact</a>
-    | <a href="/terms/">Terms and Conditions</a>
-    | <a href="/privacy-policy/">Privacy Policy</a>
-  </p>
 </footer>`;
 }
 
-/**
- * Footer CSS — works with both workers' CSS variable schemes via fallbacks.
- * Paste into the page <style> block.
- */
+/** Footer CSS — extracted from css/custom.css. Paste into the page <style> block. */
 export const FOOTER_CSS =
-  `.footer{background:var(--footer-bg,var(--fb,#020617));color:var(--footer-text-color,var(--ftc,#fff));` +
-  `text-align:center;padding:20px;margin-top:30px;font-size:14px;` +
-  `transition:background-color .3s,color .3s}` +
-  `.footer a{color:var(--footer-text-color,var(--ftc,#fff));text-decoration:underline}` +
-  `.footer-bottom{font-size:.8rem;opacity:.8}`;
+  `.footer{background:var(--bg-alt);color:var(--text);padding:2.5rem 1.5rem;margin-top:auto;border-top:1px solid var(--border)}` +
+  `.footer-inner{max-width:1200px;margin:0 auto}` +
+  `.footer-social{display:flex;justify-content:center;gap:1.5rem;margin-bottom:1.5rem;padding-bottom:1.5rem;border-bottom:1px solid var(--border)}` +
+  `.footer-social a{color:var(--text);font-size:1.4rem;opacity:.7;transition:opacity .2s;text-decoration:none}` +
+  `.footer-social a:hover{opacity:1;color:var(--text)}` +
+  `.footer-text{text-align:center;font-size:.85rem;line-height:1.8;color:var(--text-muted)}` +
+  `.footer-text p{margin:.25rem 0}` +
+  `.footer-text a{color:var(--text);text-decoration:underline}` +
+  `.footer-bottom{margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid var(--border);text-align:center;font-size:.8rem;color:var(--text-muted)}` +
+  `.footer-bottom a{color:var(--text);text-decoration:none;margin:0 .75rem}` +
+  `.footer-bottom a:hover{text-decoration:underline}`;
+
+// ---------------------------------------------------------------------------
+// Inline scripts
+// ---------------------------------------------------------------------------
 
 /**
  * Inline JS snippet to populate the footer copyright year.
@@ -125,4 +152,11 @@ export const FOOTER_CSS =
  */
 export function footerYearScript(spanId = "yr") {
   return `(function(){var e=document.getElementById(${JSON.stringify(spanId)});if(e)e.textContent=new Date().getFullYear();})();`;
+}
+
+/**
+ * Inline JS snippet for the mobile nav hamburger toggle.
+ */
+export function navToggleScript() {
+  return `(function(){var t=document.getElementById("navToggle"),m=document.getElementById("navMobile");if(t&&m)t.addEventListener("click",function(){m.classList.toggle("active");});})();`;
 }

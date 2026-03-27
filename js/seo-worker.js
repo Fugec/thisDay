@@ -2527,7 +2527,7 @@ async function handleFetchRequest(request, env, ctx) {
   // --- Maintenance Mode ---
   // When maintenance mode is enabled, redirect to maintenance page
   // except for preview parameter (?preview=secret) which allows viewing the live pages
-  const MAINTENANCE_ENABLED = false;
+  const MAINTENANCE_ENABLED = true;
   const PREVIEW_SECRET = "secret";
   const isPreview = url.searchParams.get("preview") === PREVIEW_SECRET;
   const isExcludedRoute =

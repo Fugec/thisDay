@@ -239,7 +239,7 @@ button.carousel-control-prev {
   padding: 15px 20px;
   text-align: center;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.2);
-  z-index: 1000;
+  z-index: 2147483647;
   display: none;
   flex-wrap: wrap;
   justify-content: center;
@@ -296,7 +296,7 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   grid-column: 1 / -1;
 }
 
-/* Desktop: flex-wrap row */
+/* Desktop: flex-wrap row, All full width, rest 50% (2 in a row) */
 @media (min-width: 576px) {
   #eventFilterContainer {
     display: flex;
@@ -306,11 +306,11 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   }
   #eventFilterContainer .filter-btn-all {
     grid-column: unset;
-    width: auto;
+    width: 100%;
   }
-  #eventFilterContainer .filter-btn {
-    flex: 0 0 auto;
-    min-width: 110px;
+  #eventFilterContainer .filter-btn:not(.filter-btn-all) {
+    flex: 0 0 calc(50% - 0.25rem);
+    max-width: calc(50% - 0.25rem);
   }
 }
 
@@ -518,6 +518,7 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   outline: none;
   background: #ffffff;
   color: #1a1a1a !important;
+  text-align: center;
 }
 .floating-search-input::placeholder {
   color: #6c757d !important;
@@ -567,6 +568,7 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   .floating-search-input {
     padding: 10px 16px;
     font-size: 0.9rem;
+    text-align: center;
   }
   .floating-search-btn {
     width: 44px;

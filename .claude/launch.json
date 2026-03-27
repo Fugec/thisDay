@@ -1,0 +1,59 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "thisday-seo-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8787"],
+      "port": 8787
+    },
+    {
+      "name": "thisday-blog-ai-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler-blog.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8788"],
+      "port": 8788
+    },
+    {
+      "name": "thisday-og-image-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler-og.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8789"],
+      "port": 8789
+    },
+    {
+      "name": "thisday-redirect-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler-redirect.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8790"],
+      "port": 8790
+    },
+    {
+      "name": "thisday-rss-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler-rss.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8791"],
+      "port": 8791
+    },
+    {
+      "name": "thisday-sitemap-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler-sitemap.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8792"],
+      "port": 8792
+    },
+    {
+      "name": "thisday-news-sitemap-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler-news-sitemap.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8793"],
+      "port": 8793
+    },
+    {
+      "name": "thisday-search-ping-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler-search-ping.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8794"],
+      "port": 8794
+    },
+    {
+      "name": "thisday-warmup-worker",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler-warmup.jsonc", "--remote", "--ip", "0.0.0.0", "--port", "8795"],
+      "port": 8795
+    }
+  ]
+}

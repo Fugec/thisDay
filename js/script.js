@@ -828,6 +828,27 @@ async function renderCalendar() {
       }
     }
     await carouselPromise;
+
+    // Populate marquee on index-new using today's historical data.
+    try {
+      await populateMarquee();
+    } catch (marqueeError) {
+      console.warn("Marquee load failed:", marqueeError);
+    }
+
+    // Populate born/died people strip.
+    try {
+      await populatePeopleStrip();
+    } catch (e) {
+      console.warn("People strip load failed:", e);
+    }
+
+    // Populate today's event card (random event image, title).
+    try {
+      await populateTodayEventCard();
+    } catch (todayEventError) {
+      console.warn("Today event card load failed:", todayEventError);
+    }
   } catch (error) {
     console.error("Error during calendar rendering:", error);
     console.error(
@@ -841,6 +862,245 @@ async function renderCalendar() {
         </div>
       </div>
     `;
+  }
+}
+
+async function populateMarquee() {
+  const marqueeBar = document.getElementById("marqueeBar");
+  const marqueeTrack = document.getElementById("marqueeTrack");
+
+  if (!marqueeBar || !marqueeTrack) return;
+
+  marqueeTrack.innerHTML = "";
+
+  const today = new Date();
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+
+  let eventsData = { events: [], births: [], deaths: [] };
+
+  try {
+    eventsData = await fetchWikipediaEvents(month, day);
+  } catch (error) {
+    console.warn("Failed to fetch events for marquee:", error);
+  }
+
+  const entries = [];
+
+  // Use today's events first, as requested.
+  if (Array.isArray(eventsData.events)) {
+    entries.push(...eventsData.events.slice(0, 12));
+  }
+
+  if (!entries.length) {
+    marqueeBar.style.display = "none";
+    return;
+  }
+
+  const maxItems = 12;
+  const selected = entries.slice(0, maxItems);
+
+  selected.forEach((item) => {
+    const itemNode = document.createElement("div");
+    itemNode.className = "marquee-item";
+
+    const year = item.year || "Unknown";
+    const title = item.title || item.description || "Historical event";
+
+    const yearBadge = document.createElement("span");
+    yearBadge.textContent = `${year}`;
+    itemNode.appendChild(yearBadge);
+
+    const titleText = document.createElement("span");
+    titleText.textContent = ` ${title}`;
+    titleText.style.fontWeight = "600";
+
+    if (item.sourceUrl) {
+      const link = document.createElement("a");
+      link.href = item.sourceUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.style.color = "inherit";
+      link.style.textDecoration = "none";
+      link.textContent = title;
+      itemNode.appendChild(document.createTextNode(" "));
+      itemNode.appendChild(link);
+    } else {
+      itemNode.appendChild(titleText);
+    }
+
+    marqueeTrack.appendChild(itemNode);
+  });
+
+  // Duplicate for continuous scroll effect
+  marqueeTrack.innerHTML += marqueeTrack.innerHTML;
+  marqueeBar.style.display = "block";
+}
+
+async function populatePeopleStrip() {
+  const track = document.getElementById("peopleTrack");
+  const skeleton = document.getElementById("peopleSkeleton");
+  if (!track) return;
+
+  const today = new Date();
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+
+  const section = document.getElementById("peopleStrip");
+  let data = { births: [], deaths: [] };
+  try {
+    data = await fetchWikipediaEvents(month, day);
+  } catch (e) {
+    if (section) section.style.display = "none";
+    return;
+  }
+
+  const births = (data.births || []).filter(p => p && p.title).slice(0, 5);
+  const deaths = (data.deaths || []).filter(p => p && p.title).slice(0, 5);
+
+  if (!births.length && !deaths.length) {
+    if (section) section.style.display = "none";
+    return;
+  }
+
+  function makePill(person, href) {
+    const a = document.createElement("a");
+    a.className = "person-pill";
+    a.href = href;
+
+    const circle = document.createElement("div");
+    circle.className = "person-circle";
+
+    if (person.thumbnailUrl) {
+      const img = document.createElement("img");
+      img.src = person.thumbnailUrl;
+      img.alt = person.title || "";
+      img.onerror = () => {
+        circle.innerHTML = '<div class="person-circle-fallback"><i class="bi bi-person"></i></div>';
+      };
+      circle.appendChild(img);
+    } else {
+      circle.innerHTML = '<div class="person-circle-fallback"><i class="bi bi-person"></i></div>';
+    }
+
+    const name = document.createElement("div");
+    name.className = "person-pill-name";
+    name.textContent = person.title || "";
+
+    const year = document.createElement("div");
+    year.className = "person-pill-year";
+    year.textContent = person.year ? person.year : "";
+
+    a.appendChild(circle);
+    a.appendChild(name);
+    a.appendChild(year);
+    return a;
+  }
+
+  // Remove skeleton
+  if (skeleton) skeleton.remove();
+  track.innerHTML = "";
+
+  // Born group
+  if (births.length) {
+    const wrap = document.createElement("div");
+    wrap.className = "people-group-wrap";
+
+    const label = document.createElement("div");
+    label.className = "group-label born";
+    label.innerHTML = '<i class="bi bi-sunrise"></i> Born';
+
+    const group = document.createElement("div");
+    group.className = "people-group";
+    births.forEach(p => group.appendChild(makePill(p, "/births/")));
+
+    wrap.appendChild(label);
+    wrap.appendChild(group);
+    track.appendChild(wrap);
+  }
+
+  // Divider
+  if (births.length && deaths.length) {
+    const div = document.createElement("div");
+    div.className = "people-divider";
+    track.appendChild(div);
+  }
+
+  // Died group
+  if (deaths.length) {
+    const wrap = document.createElement("div");
+    wrap.className = "people-group-wrap";
+
+    const label = document.createElement("div");
+    label.className = "group-label died";
+    label.innerHTML = '<i class="bi bi-sunset"></i> Died';
+
+    const group = document.createElement("div");
+    group.className = "people-group";
+    deaths.forEach(p => group.appendChild(makePill(p, "/deaths/")));
+
+    wrap.appendChild(label);
+    wrap.appendChild(group);
+    track.appendChild(wrap);
+  }
+}
+
+async function populateTodayEventCard() {
+  const imgEl = document.getElementById("todayEventImg");
+  const titleEl = document.getElementById("todayEventTitle");
+  const descEl = document.getElementById("todayEventDesc");
+  const btnEl = document.getElementById("todayEventBtn");
+
+  if (!titleEl || !btnEl) return;
+
+  const today = new Date();
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+
+  let eventsData = { events: [], births: [], deaths: [] };
+
+  try {
+    eventsData = await fetchWikipediaEvents(month, day);
+  } catch (error) {
+    console.warn("Failed to fetch events for Today Event card:", error);
+  }
+
+  const todaysEvents = Array.isArray(eventsData.events)
+    ? eventsData.events.filter((item) => item && item.title)
+    : [];
+
+  if (!todaysEvents.length) {
+    titleEl.textContent = "Today's Events";
+    if (descEl)
+      descEl.textContent = "No event found for today. Browse all events.";
+    btnEl.href = "/events/";
+    if (imgEl) {
+      imgEl.src = "https://placehold.co/800x400?text=No+Image";
+      imgEl.alt = "No event image available";
+    }
+    return;
+  }
+
+  const randomEvent =
+    todaysEvents[Math.floor(Math.random() * todaysEvents.length)];
+
+  titleEl.textContent = randomEvent.title || "Today's Event";
+  if (descEl)
+    descEl.textContent =
+      (randomEvent.description || "Explore this historical event.").slice(
+        0,
+        100,
+      ) + "...";
+  btnEl.href = randomEvent.sourceUrl || "/events/";
+  btnEl.innerHTML = 'See all events <i class="bi bi-arrow-right"></i>';
+
+  if (imgEl) {
+    const rawUrl =
+      randomEvent.thumbnailUrl ||
+      randomEvent.featuredImage ||
+      "https://placehold.co/800x400?text=No+Image";
+    imgEl.src = getOptimizedImageUrl(rawUrl, 800);
+    imgEl.alt = randomEvent.title || "Today event image";
   }
 }
 
@@ -1915,7 +2175,6 @@ function renderFilteredItems(itemsToRender) {
 
 function applyFilter() {
   const modalBody = document.getElementById("modalBodyContent");
-  const prevScroll = modalBody ? modalBody.scrollTop : 0;
   const listToFilter = currentDayAllItems;
   const filteredItems = listToFilter.filter((item) => {
     if (currentActiveFilter === "all") {
@@ -1926,7 +2185,17 @@ function applyFilter() {
       .includes(currentActiveFilter);
   });
   renderFilteredItems(filteredItems);
-  if (modalBody) modalBody.scrollTop = prevScroll;
+
+  // Scroll slowly to the first event after filtering
+  setTimeout(() => {
+    const eventsListDiv = document.getElementById("modal-events-list");
+    if (eventsListDiv) {
+      const firstEvent = eventsListDiv.querySelector("li");
+      if (firstEvent) {
+        firstEvent.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+  }, 100);
 }
 
 async function showEventDetails(

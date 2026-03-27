@@ -24,7 +24,8 @@
   "kv_namespaces": [
     {
       "binding": "BLOG_AI_KV",
-      "id": "5173c34a7bd04cde9988c0e89d77bb6e"
+      "id": "5173c34a7bd04cde9988c0e89d77bb6e",
+      "preview_id": "c1b308dd3ea14b36aa123f007a07b7de"
     }
   ]
 }

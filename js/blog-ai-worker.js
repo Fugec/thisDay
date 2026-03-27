@@ -411,12 +411,44 @@ export default {
             );
           }
         }
-        // Patch old footer — replace any footer that lacks the shared layout (gap:1.25rem + Flipboard icon)
-        if (!patchedHtml.includes("gap:1.25rem")) {
+        // Patch old nav → new nav (detect old Bootstrap navbar)
+        if (patchedHtml.includes('class="navbar') && !patchedHtml.includes('class="nav"')) {
           patchedHtml = patchedHtml.replace(
-            /<footer class="footer">[\s\S]*?<\/footer>\s*(?=<\/body>|<\/html>|$)/,
+            /<nav class="navbar[\s\S]*?<\/nav>/,
+            siteNav(),
+          );
+        }
+        // Patch old footer → new footer (detect old footer without footer-inner)
+        if (patchedHtml.includes('class="footer"') && !patchedHtml.includes('footer-inner')) {
+          patchedHtml = patchedHtml.replace(
+            /<footer class="footer">[\s\S]*?<\/footer>/,
             siteFooter(),
           );
+        }
+        // Patch old CSS vars and dark-theme blocks
+        if (patchedHtml.includes('--primary-bg') || patchedHtml.includes('body.dark-theme')) {
+          // Replace old :root block with green palette
+          patchedHtml = patchedHtml.replace(
+            /:root\s*\{[^}]*--primary-bg[^}]*\}/,
+            `:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}`,
+          );
+          // Remove all body.dark-theme blocks
+          patchedHtml = patchedHtml.replace(/body\.dark-theme\s*\{[^}]*\}/g, '');
+          patchedHtml = patchedHtml.replace(/body\.dark-theme\s+[^{]*\{[^}]*\}/g, '');
+        }
+        // Patch old font-family: Inter → Lora
+        if (patchedHtml.includes('font-family:Inter') || patchedHtml.includes("font-family: Inter")) {
+          patchedHtml = patchedHtml.replace(/font-family:\s*Inter[^;]*/g, 'font-family:Lora,serif');
+        }
+        // Inject NAV_CSS + FOOTER_CSS if missing
+        if (!patchedHtml.includes('.nav-inner')) {
+          patchedHtml = patchedHtml.replace('</head>', `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
+        }
+        // Patch old theme toggle JS — remove setTheme/darkTheme localStorage blocks
+        patchedHtml = patchedHtml.replace(/<script>\s*\(function\(\)\s*\{[^<]*setTheme[^<]*\}\)\(\);\s*<\/script>/g, '');
+        // Add navToggle script if missing
+        if (!patchedHtml.includes('navToggle') && patchedHtml.includes('class="nav"')) {
+          patchedHtml = patchedHtml.replace('</body>', `<script>${navToggleScript()}</script></body>`);
         }
         // Patch image caption — replace any AI-generated caption with correct Wikimedia attribution
         patchedHtml = patchedHtml.replace(
@@ -1365,8 +1397,8 @@ async function runPostPublishExtras(env, slug, content) {
       if (sp) {
         const mPad = String(sp.monthIndex + 1).padStart(2, "0");
         const dPad = String(sp.day).padStart(2, "0");
-        await env.EVENTS_KV.delete(`quiz-page-v21:${mPad}-${dPad}`);
-        console.log(`Blog: busted quiz-page-v21:${mPad}-${dPad} cache`);
+        await env.EVENTS_KV.delete(`quiz-page-v22:${mPad}-${dPad}`);
+        console.log(`Blog: busted quiz-page-v22:${mPad}-${dPad} cache`);
       }
     } catch (e) {
       console.error("Blog: quiz page cache bust failed:", e);

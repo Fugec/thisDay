@@ -1951,7 +1951,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v3-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v4-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2034,7 +2034,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v3-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v4-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2265,7 +2265,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v26-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v27-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2527,7 +2527,7 @@ async function handleFetchRequest(request, env, ctx) {
   // --- Maintenance Mode ---
   // When maintenance mode is enabled, redirect to maintenance page
   // except for preview parameter (?preview=secret) which allows viewing the live pages
-  const MAINTENANCE_ENABLED = true;
+  const MAINTENANCE_ENABLED = false;
   const PREVIEW_SECRET = "secret";
   const isPreview = url.searchParams.get("preview") === PREVIEW_SECRET;
   const isExcludedRoute =
@@ -2839,6 +2839,18 @@ async function handleFetchRequest(request, env, ctx) {
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
     return Response.redirect(`${url.origin}/died/${mn}/${dd}/`, 302);
+  }
+
+  // /births/ → /born/ redirect (nav links use /births/, worker uses /born/)
+  if (url.pathname.startsWith("/births")) {
+    const newPath = url.pathname.replace(/^\/births/, "/born");
+    return Response.redirect(`${url.origin}${newPath}${url.search}`, 301);
+  }
+
+  // /deaths/ → /died/ redirect (nav links use /deaths/, worker uses /died/)
+  if (url.pathname.startsWith("/deaths")) {
+    const newPath = url.pathname.replace(/^\/deaths/, "/died");
+    return Response.redirect(`${url.origin}${newPath}${url.search}`, 301);
   }
 
   // Born pages: /born/{month}/{day}/
@@ -3713,7 +3725,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v21:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v22:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -4369,7 +4381,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v21:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v22:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);

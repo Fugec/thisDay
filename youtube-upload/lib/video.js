@@ -98,10 +98,12 @@ function buildKenBurns(sceneIdx, durationS, inLabel, outLabel) {
       y = `ih/2-(ih/zoom/2)`;
       break;
   }
-  // setpts resets timestamps so xfade offsets are always relative to stream start
+  // setpts resets timestamps so xfade offsets are always relative to stream start.
+  // fps=fps=N after zoompan forces a declared constant frame rate so xfade (which
+  // requires CFR input) does not reject the stream with "rate of 1/0 is invalid".
   return (
     `${inLabel}zoompan=z='${zoom}':x='${x}':y='${y}'` +
-    `:d=${d}:s=${W}x${H}:fps=${FPS},setpts=PTS-STARTPTS${outLabel}`
+    `:d=${d}:s=${W}x${H}:fps=${FPS},setpts=PTS-STARTPTS,fps=fps=${FPS}${outLabel}`
   );
 }
 

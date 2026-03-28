@@ -420,16 +420,18 @@ export default {
         if (patchedHtml.includes('class="navbar') && !patchedHtml.includes('class="nav"')) {
           patchedHtml = patchedHtml.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
         }
-        // Always inject correct green palette — overrides any stored :root, covers old var aliases too
+        // Always inject correct green palette — overrides any stored :root
         patchedHtml = patchedHtml.replace('</head>',
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08);--card-bg:var(--bg);--card-border:var(--border);--primary-bg:var(--btn-bg);--secondary-bg:var(--bg);--footer-bg:var(--bg-alt);--link-color:var(--btn-bg);--text-color:var(--text)}body{color:var(--text)!important;background:var(--bg)!important;font-family:Lora,serif!important}</style></head>`
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}</style></head>`
         );
         // Inject NAV_CSS + FOOTER_CSS if missing
         if (!patchedHtml.includes('.nav-inner')) {
           patchedHtml = patchedHtml.replace('</head>', `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
         }
-        // Remove old theme toggle JS
-        patchedHtml = patchedHtml.replace(/<script>\s*\(function\(\)\s*\{[^<]*setTheme[^<]*\}\)\(\);\s*<\/script>/g, '');
+        // Remove old dark theme JS and CSS
+        patchedHtml = patchedHtml.replace(/<script\b[^>]*>[\s\S]*?(?:setTheme|darkTheme|dark-theme|DARK_THEME)[\s\S]*?<\/script>/g, '');
+        patchedHtml = patchedHtml.replace(/body\.dark-theme\s*\{[^}]*\}/g, '');
+        patchedHtml = patchedHtml.replace(/body\.dark-theme[^{]*\{[^}]*\}/g, '');
         // Add navToggle script if missing
         if (!patchedHtml.includes('navToggle') && patchedHtml.includes('class="nav"')) {
           patchedHtml = patchedHtml.replace('</body>', `<script>${navToggleScript()}</script></body>`);

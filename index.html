@@ -189,7 +189,9 @@
         <a href="/contact/">Contact</a>
 
         <div class="nav-mobile-bottom">
-          <a href="/events/today/" class="mobile-menu-link">Events on this day</a>
+          <a href="/events/today/" class="mobile-menu-link"
+            >Events on this day</a
+          >
           <a href="/born/today/" class="mobile-menu-link">Born on this day</a>
           <a href="/died/today/" class="mobile-menu-link">Died on this day</a>
           <div class="mobile-menu-social">
@@ -263,11 +265,27 @@
         <div class="people-track" id="peopleTrack">
           <!-- Skeleton shown while loading -->
           <div class="people-group" id="peopleSkeleton">
-            <div class="person-pill-skeleton"><div class="skeleton skeleton-circle"></div><div class="skeleton skeleton-line" style="width:60px;"></div><div class="skeleton skeleton-line short"></div></div>
-            <div class="person-pill-skeleton"><div class="skeleton skeleton-circle"></div><div class="skeleton skeleton-line" style="width:60px;"></div><div class="skeleton skeleton-line short"></div></div>
+            <div class="person-pill-skeleton">
+              <div class="skeleton skeleton-circle"></div>
+              <div class="skeleton skeleton-line" style="width: 60px"></div>
+              <div class="skeleton skeleton-line short"></div>
+            </div>
+            <div class="person-pill-skeleton">
+              <div class="skeleton skeleton-circle"></div>
+              <div class="skeleton skeleton-line" style="width: 60px"></div>
+              <div class="skeleton skeleton-line short"></div>
+            </div>
             <div class="people-divider"></div>
-            <div class="person-pill-skeleton"><div class="skeleton skeleton-circle"></div><div class="skeleton skeleton-line" style="width:60px;"></div><div class="skeleton skeleton-line short"></div></div>
-            <div class="person-pill-skeleton"><div class="skeleton skeleton-circle"></div><div class="skeleton skeleton-line" style="width:60px;"></div><div class="skeleton skeleton-line short"></div></div>
+            <div class="person-pill-skeleton">
+              <div class="skeleton skeleton-circle"></div>
+              <div class="skeleton skeleton-line" style="width: 60px"></div>
+              <div class="skeleton skeleton-line short"></div>
+            </div>
+            <div class="person-pill-skeleton">
+              <div class="skeleton skeleton-circle"></div>
+              <div class="skeleton skeleton-line" style="width: 60px"></div>
+              <div class="skeleton skeleton-line short"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -304,20 +322,6 @@
           </div>
         </div>
 
-        <div class="quiz-card">
-          <img
-            src="https://thisday.info/images/blog/21.7.jpg"
-            alt="Today's Events Quiz"
-            class="quiz-card-img"
-          />
-          <div class="quiz-card-body">
-            <h3>Today's Events Quiz</h3>
-            <p>5 questions on today's historical events</p>
-            <a href="/quiz/" class="btn"
-              >Take the Quiz <i class="bi bi-arrow-right"></i
-            ></a>
-          </div>
-        </div>
         <div class="quiz-card">
           <img
             id="latest-article-img"
@@ -584,6 +588,8 @@
                 "</div>";
               grid.appendChild(card);
             });
+            var section = grid.closest('.blog-section');
+            if (section) section.scrollLeft = 0;
           })
           .catch(function () {});
       })();
@@ -661,6 +667,8 @@
 
               grid.appendChild(card);
             });
+            var section = grid.closest('.blog-section');
+            if (section) section.scrollLeft = 0;
           } catch (err) {
             var grid = document.getElementById("todaysEventsGrid");
             if (grid)

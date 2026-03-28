@@ -278,8 +278,8 @@ img {
   transform: scale(1.05);
 }
 .person-circle {
-  width: 110px;
-  height: 110px;
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
   border: 2px solid var(--border);
   overflow: hidden;
@@ -365,15 +365,16 @@ img {
     overflow-x: visible;
     flex-wrap: nowrap;
     justify-content: center;
-    gap: 2rem;
+    gap: 0;
   }
   .people-group-wrap {
     flex: 1;
     min-width: 0;
+    padding: 0 1.25rem;
   }
   .people-group {
     display: grid;
-    grid-template-columns: repeat(auto-fill, 80px);
+    grid-template-columns: repeat(auto-fit, 80px);
     gap: 1rem;
     justify-content: center;
   }
@@ -676,6 +677,7 @@ img {
     display: flex;
     flex-direction: row;
     overflow-x: auto;
+    overflow-anchor: none;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
@@ -685,20 +687,21 @@ img {
     display: none;
   }
   .blog-grid {
-    display: contents;
+    display: flex;
+    flex-direction: row;
+    flex-shrink: 0;
+    scroll-snap-align: start;
   }
   .blog-card {
     flex: 0 0 70vw;
     max-width: 70vw;
     border-right: 1px solid var(--border);
     border-bottom: none;
-    scroll-snap-align: start;
   }
   .blog-card:last-child {
     border-right: 1px solid var(--border);
   }
   .blog-cta-col {
-    order: 999;
     flex: 0 0 70vw;
     max-width: 70vw;
     scroll-snap-align: start;

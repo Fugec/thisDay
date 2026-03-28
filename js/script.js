@@ -1012,7 +1012,7 @@ async function populatePeopleStrip() {
 
     const group = document.createElement("div");
     group.className = "people-group";
-    births.forEach(p => group.appendChild(makePill(p, "/births/")));
+    births.forEach(p => group.appendChild(makePill(p, "/born/today/")));
 
     wrap.appendChild(label);
     wrap.appendChild(group);
@@ -1037,7 +1037,7 @@ async function populatePeopleStrip() {
 
     const group = document.createElement("div");
     group.className = "people-group";
-    deaths.forEach(p => group.appendChild(makePill(p, "/deaths/")));
+    deaths.forEach(p => group.appendChild(makePill(p, "/died/today/")));
 
     wrap.appendChild(label);
     wrap.appendChild(group);
@@ -1073,7 +1073,7 @@ async function populateTodayEventCard() {
     titleEl.textContent = "Today's Events";
     if (descEl)
       descEl.textContent = "No event found for today. Browse all events.";
-    btnEl.href = "/events/";
+    btnEl.href = "/events/today/";
     if (imgEl) {
       imgEl.src = "https://placehold.co/800x400?text=No+Image";
       imgEl.alt = "No event image available";
@@ -1091,7 +1091,7 @@ async function populateTodayEventCard() {
         0,
         100,
       ) + "...";
-  btnEl.href = randomEvent.sourceUrl || "/events/";
+  btnEl.href = "/events/today/";
   btnEl.innerHTML = 'See all events <i class="bi bi-arrow-right"></i>';
 
   if (imgEl) {

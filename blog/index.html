@@ -68,6 +68,7 @@
       .blog-post-link:hover{transform:translateX(4px);box-shadow:0 3px 12px rgba(0,0,0,.08);text-decoration:none;color:var(--text)}
       .blog-post-link .post-icon{color:var(--btn-bg);font-size:1.1rem;flex-shrink:0;margin-top:2px}
       .blog-post-link .post-title{font-weight:600;font-size:.95rem;line-height:1.4;color:var(--btn-bg)}
+      .blog-post-link .post-thumb{width:72px;height:56px;object-fit:cover;border-radius:6px;flex-shrink:0}
       .month-section{margin-bottom:40px}
       .month-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:8px;margin-bottom:16px}
       .blog-hero{background:var(--bg-alt);color:var(--text);padding:50px 20px;text-align:center;margin-bottom:40px;border-bottom:1px solid var(--border)}
@@ -130,31 +131,6 @@
       <p>Original in-depth articles about the events, people, and moments that shaped our world.</p>
     </div>
 
-    <div class="quiz-cta-strip py-3">
-      <div class="container d-flex gap-3">
-        <div class="quiz-cta-col">
-          <strong>Today's Events Quiz</strong>
-          <div class="quiz-cta-sub">5 questions on today's historical events</div>
-          <a href="/quiz/" class="btn btn-sm mt-2" style="background:var(--btn-bg);color:var(--btn-text);font-weight:600">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
-        </div>
-        <div class="vr" style="opacity:.25"></div>
-        <div class="quiz-cta-col">
-          <strong>Latest Article Quiz</strong>
-          <div class="quiz-cta-sub">Read it. Quiz yourself at the end.</div>
-          <a id="blog-quiz-btn" href="/blog/archive/" class="btn btn-sm mt-2" style="background:var(--btn-bg);color:var(--btn-text);font-weight:600">Read &amp; Quiz <i class="bi bi-arrow-right ms-1"></i></a>
-        </div>
-      </div>
-    </div>
-    <script>
-    (function(){
-      var btn=document.getElementById('blog-quiz-btn');
-      if(!btn)return;
-      fetch('/blog/archive.json')
-        .then(function(r){return r.ok?r.json():null;})
-        .then(function(d){if(d&&d.length&&d[0].slug)btn.href='/blog/'+d[0].slug+'/#quiz';})
-        .catch(function(){});
-    })();
-    </script>
 
     <main class="container my-2" style="max-width:860px">
       <div style="text-align:center">
@@ -295,13 +271,33 @@
             var a = document.createElement("a");
             a.href = "/blog/" + p.slug + "/";
             a.className = "blog-post-link";
-            a.innerHTML = '<span class="post-title">' + p.title.replace(/</g, "&lt;") + "</span>";
+            var imgHtml = p.imageUrl ? '<img src="' + p.imageUrl.replace(/"/g, "&quot;") + '" alt="" class="post-thumb" loading="lazy" onerror="this.style.display=\'none\'">' : '';
+            a.innerHTML = imgHtml + '<span class="post-title">' + p.title.replace(/</g, "&lt;") + "</span>";
             list.appendChild(a);
           });
           section.style.display = "";
           setTimeout(function(){ document.getElementById("month-header-blog").scrollIntoView({behavior:"smooth",block:"start"}); }, 100);
         })
         .catch(function () {});
+    })();
+    </script>
+    <script>
+    (function(){
+      var monthMap={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12};
+      document.querySelectorAll('.blog-post-link:not([data-thumb])').forEach(function(a){
+        var m=a.getAttribute('href').match(/\/blog\/(\w+)\/(\d+)-\d+\//);
+        if(!m)return;
+        var mn=monthMap[m[1]];
+        if(!mn)return;
+        var img=document.createElement('img');
+        img.src='/images/blog/'+m[2]+'.'+mn+'.jpg';
+        img.className='post-thumb';
+        img.loading='lazy';
+        img.alt='';
+        img.onerror=function(){this.style.display='none';};
+        a.insertBefore(img,a.firstChild);
+        a.setAttribute('data-thumb','1');
+      });
     })();
     </script>
     <script>

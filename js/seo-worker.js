@@ -661,7 +661,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
 
-.did-you-know{background:rgba(157,196,58,.07);border-left:4px solid var(--accent);border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
+.did-you-know{background:rgba(34,113,54,.08);border-left:4px solid #166534;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
 
 .yr{color:#1a1a1a;font-size:.95rem;font-weight:700;margin-right:8px;white-space:nowrap;font-family:Georgia,serif}
 .ev-scroll-wrap{max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--cbr) transparent;border:1px solid var(--cbr);border-radius:8px;padding:0 8px 0 0}.ev-scroll-wrap::-webkit-scrollbar{width:4px}.ev-scroll-wrap::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:4px}.ev-scroll-wrap .ev-row,.ev-scroll-wrap .person-row{padding-left:10px}
@@ -983,7 +983,7 @@ function generateBlogPostHTML(
     const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
     const th = e.pages?.[0]?.thumbnail?.source || "";
     return `<div class="ev-row d-flex align-items-start gap-3">
-  <div class="flex-grow-1"><span class="yr">${escapeHtml(String(e.year))}</span> ${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
+  <div class="flex-grow-1"><span class="yr event-years-ago ms-2">${escapeHtml(String(e.year))}</span> ${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
   ${th ? `<img src="${escapeHtml(th)}" alt="" width="44" height="44" style="border-radius:4px;object-fit:cover;flex-shrink:0" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : ""}
 </div>`;
   };
@@ -1008,7 +1008,7 @@ function generateBlogPostHTML(
       ${desc ? `<p class="text-muted mb-0" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
     </div>
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
-      <span class="yr"${yrStyle}>${year}</span>
+      <span class="yr event-years-ago ms-2"${yrStyle}>${year}</span>
       ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
     </div>
   </div>
@@ -1031,7 +1031,7 @@ function generateBlogPostHTML(
     <div style="min-width:0">
       <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
       ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
-      <span class="yr mt-1 d-inline-block"${yrStyle}>${year}</span>
+      <span class="yr mt-1 d-inline-block event-years-ago ms-2"${yrStyle}>${year}</span>
     </div>
   </div>
 </div>`;
@@ -1094,8 +1094,8 @@ ${siteNav()}
   </nav>
   <h1 class="mb-2">${escapeHtml(mDisplay)} ${day} in History</h1>
   <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-    ${events.length > 0 ? `<span class="auto-tag"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
-    ${evEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
+    ${events.length > 0 ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
+    ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
   </div>
   <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(eventsIntroLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
@@ -1132,8 +1132,8 @@ ${siteNav()}
   <div class="card-box">
     <h2 class="h4 mb-2"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-      <span class="auto-tag"><i class="bi bi-list-ul me-1"></i>${others.length} events</span>
-      ${evEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
+      <span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${others.length} events</span>
+      ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
     </div>
     ${othersVisibleHtml}
     ${
@@ -1160,8 +1160,8 @@ ${siteNav()}
   <div class="card-box">
     <h2 class="h4 mb-2"><i class="bi bi-person-heart me-2" style="color:#1a1a1a"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-      <span class="auto-tag"><i class="bi bi-people me-1"></i>${topBirths.length} people</span>
-      ${birthEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(birthEraRange)}</span>` : ""}
+      <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${topBirths.length} people</span>
+      ${birthEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(birthEraRange)}</span>` : ""}
     </div>
     <div class="row g-3 mb-3">${birthTop3Html}</div>
     ${birthGridHtml ? `<div style="padding:0 4px"><div class="row g-0">${birthGridHtml}</div></div>` : ""}
@@ -1175,8 +1175,8 @@ ${siteNav()}
   <div class="card-box">
     <h2 class="h4 mb-2"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day}</h2>
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-      <span class="auto-tag"><i class="bi bi-people me-1"></i>${topDeaths.length} people</span>
-      ${deathEraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(deathEraRange)}</span>` : ""}
+      <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${topDeaths.length} people</span>
+      ${deathEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(deathEraRange)}</span>` : ""}
     </div>
     <div class="row g-3 mb-3">${deathTop3Html}</div>
     ${deathGridHtml ? `<div style="padding:0 4px"><div class="row g-0">${deathGridHtml}</div></div>` : ""}
@@ -1380,7 +1380,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
       ${extract ? `<p class="mb-0" style="font-size:.78rem;line-height:1.45;opacity:.85">${extract}</p>` : ""}
     </div>
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
-      <span class="yr">${year}</span>
+      <span class="yr event-years-ago ms-2">${year}</span>
       ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
     </div>
   </div>
@@ -1407,7 +1407,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
     <div style="min-width:0">
       <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
       ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
-      <span class="yr mt-1 d-inline-block">${year}</span>
+      <span class="yr mt-1 d-inline-block event-years-ago ms-2">${year}</span>
     </div>
   </div>
 </div>`;
@@ -1429,7 +1429,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
     .map((e) => {
       const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
       return `<div class="d-flex gap-2 align-items-start mb-2 pb-2" style="border-bottom:1px solid var(--cbr)">
-  <span class="yr flex-shrink-0">${escapeHtml(String(e.year))}</span>
+  <span class="yr flex-shrink-0 event-years-ago ms-2">${escapeHtml(String(e.year))}</span>
   <div style="font-size:.88rem;line-height:1.45">${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
 </div>`;
     })
@@ -1479,8 +1479,8 @@ ${siteNav()}
   </nav>
   <h1 class="mb-2">Famous Birthdays on ${escapeHtml(mDisplay)} ${day}</h1>
   <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-    <span class="auto-tag"><i class="bi bi-people me-1"></i>${births.length} people</span>
-    ${eraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+    <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} people</span>
+    ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
   <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
@@ -1691,7 +1691,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
       ${extract ? `<p class="mb-0" style="font-size:.78rem;line-height:1.45;opacity:.85">${extract}</p>` : ""}
     </div>
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
-      <span class="yr" style="background:#6c757d">${year}</span>
+      <span class="yr event-years-ago ms-2" style="background:#6c757d">${year}</span>
       ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
     </div>
   </div>
@@ -1718,7 +1718,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
     <div style="min-width:0">
       <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
       ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
-      <span class="yr mt-1 d-inline-block" style="background:#6c757d">${year}</span>
+      <span class="yr mt-1 d-inline-block event-years-ago ms-2" style="background:#6c757d">${year}</span>
     </div>
   </div>
 </div>`;
@@ -1740,7 +1740,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
     .map((e) => {
       const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
       return `<div class="d-flex gap-2 align-items-start mb-2 pb-2" style="border-bottom:1px solid var(--cbr)">
-  <span class="yr flex-shrink-0">${escapeHtml(String(e.year))}</span>
+  <span class="yr flex-shrink-0 event-years-ago ms-2">${escapeHtml(String(e.year))}</span>
   <div style="font-size:.88rem;line-height:1.45">${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
 </div>`;
     })
@@ -1790,8 +1790,8 @@ ${siteNav()}
   </nav>
   <h1 class="mb-2">Notable Deaths on ${escapeHtml(mDisplay)} ${day}</h1>
   <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-    <span class="auto-tag"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
-    ${eraRange ? `<span class="auto-tag"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+    <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
+    ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
   <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
@@ -4168,7 +4168,7 @@ function buildCarouselQuizHTML(
         ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
         : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
 
-      const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${readMoreTarget}" rel="noopener" class="qsc-read-more-btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
+      const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${readMoreTarget}" rel="noopener" class="btn qsc-read-more-btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
 
       const optsHtml = (q.options || [])
         .map(
@@ -4751,14 +4751,6 @@ ${siteNav()}
   </div>
   ${carouselHtml}
   ${recSliderHtml}
-  <div style="background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:18px 20px;margin-bottom:20px">
-    <h3 style="font-size:1rem;font-weight:700;margin-bottom:12px;color:var(--tc)"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
-    <div class="explore-actions">
-      <a href="/events/${monthSlug}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-calendar-event me-2"></i>Historical Events</a>
-      <a href="/born/${monthSlug}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
-      <a href="/died/${monthSlug}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
-    </div>
-  </div>
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
   <div class="ad-unit" style="margin:24px 0">
     <div class="ad-unit-label">Advertisement</div>

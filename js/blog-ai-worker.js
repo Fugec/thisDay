@@ -379,11 +379,11 @@ export default {
         patchedHtml = patchedHtml
           .replaceAll(
             'class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"',
-            'class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" id="tdq-cta-btn"',
+            'class="btn" id="tdq-cta-btn"',
           )
           .replaceAll(
             'class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"',
-            'class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" id="tdq-cta-btn"',
+            'class="btn" id="tdq-cta-btn"',
           )
           .replaceAll(
             'class="btn btn-warning px-4 mt-3" id="tdq-submit-btn"',
@@ -611,8 +611,8 @@ export default {
             <div>
               <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
               <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
-                Take the Quiz
+              <button class="btn" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+                Take the Quiz <i class="bi bi-arrow-right ms-1"></i>
               </button>
             </div>
           </div>`;
@@ -774,7 +774,7 @@ export default {
             ${_thumb}<div style="flex:1;min-width:0">
               <strong>Explore ${_sp.monthDisplay} ${_sp.day} in History</strong><br/>
               <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
-              <a href="/events/${_sp.monthSlug}/${_sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${_sp.monthDisplay} ${_sp.day}</a>
+              <a href="/events/${_sp.monthSlug}/${_sp.day}/" class="btn mt-2">View ${_sp.monthDisplay} ${_sp.day} <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>`;
           }
@@ -857,7 +857,7 @@ export default {
           const thumb = eventsThumb
             ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
             : "";
-          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn btn-sm btn-outline-primary mt-2">View ${sp.monthDisplay} ${sp.day}</a></div></div>`;
+          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn mt-2">View ${sp.monthDisplay} ${sp.day} <i class="bi bi-arrow-right ms-1"></i></a></div></div>`;
           const anchor = patchedHtml.includes("<!-- Quiz CTA -->")
             ? "<!-- Quiz CTA -->"
             : patchedHtml.includes("You Might Also Like")
@@ -929,8 +929,8 @@ export default {
         // Patch old btn-warning quiz buttons → green
         if (patchedHtml.includes('btn-warning')) {
           patchedHtml = patchedHtml
-            .replaceAll('class="btn btn-warning fw-semibold w-100 mt-2"', 'class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none"')
-            .replaceAll('class="btn btn-warning mt-3"', 'class="btn mt-3" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none"');
+            .replaceAll('class="btn btn-warning fw-semibold w-100 mt-2"', 'class="btn"')
+            .replaceAll('class="btn btn-warning mt-3"', 'class="btn mt-3"');
         }
         // Patch old box-shadow on article border
         if (patchedHtml.includes('box-shadow:0 2px 4px rgba(0,0,0,.1)')) {
@@ -3113,7 +3113,7 @@ ${analysisBadItems}
               <div style="flex:1;min-width:0">
                 <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
                 <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
-                <a href="/events/${esc(hMonthSlug)}/${hDay}/" class="btn btn-sm btn-outline-primary mt-2">View ${esc(hMonthDisplay)} ${hDay}</a>
+                <a href="/events/${esc(hMonthSlug)}/${hDay}/" class="btn mt-2">View ${esc(hMonthDisplay)} ${hDay} <i class="bi bi-arrow-right ms-1"></i></a>
               </div>
             </div>`;
           })()}
@@ -3144,8 +3144,8 @@ ${analysisBadItems}
             <div>
               <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
               <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
-                Take the Quiz
+              <button class="btn" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+                Take the Quiz <i class="bi bi-arrow-right ms-1"></i>
               </button>
             </div>
           </div>
@@ -3726,8 +3726,6 @@ async function serve404(env) {
             .join("")}
         </div>`
       : "";
-
-  const year = new Date().getFullYear();
 
   const html = `<!DOCTYPE html>
 <html lang="en">

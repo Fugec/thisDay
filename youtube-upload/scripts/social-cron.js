@@ -81,18 +81,27 @@ async function main() {
     return;
   }
 
-  // Fetch real publish times from YouTube in one API call
+  // Try to fetch real publish times from YouTube — fall back to uploadedAt if API fails
   const videoIds = candidates.map(([, d]) => d.youtubeId);
-  const ytInfo = await getYouTubePublishTimes(videoIds);
+  let ytInfo = {};
+  try {
+    ytInfo = await getYouTubePublishTimes(videoIds);
+  } catch (err) {
+    console.warn(`[social-cron] ⚠ YouTube API unavailable (${err.message}) — using uploadedAt as publish time`);
+  }
 
-  // Always post the latest upload only — but only if it's public and past delay
+  // Always post the latest upload only — past the delay window
   candidates.sort((a, b) => new Date(b[1].uploadedAt) - new Date(a[1].uploadedAt));
   const latest = candidates.find(([, data]) => {
     const info = ytInfo[data.youtubeId];
-    if (!info?.publishedAt) return false;                       // not found / not public yet
-    if (info.privacyStatus !== "public") return false;          // still private/unlisted
-    const publishedMs = new Date(info.publishedAt).getTime();
-    return now - publishedMs >= POST_DELAY_MS;                  // 5+ min since YouTube publish
+    // If YouTube API worked, use real publish time + privacy check
+    if (info?.publishedAt) {
+      if (info.privacyStatus !== "public") return false;
+      return now - new Date(info.publishedAt).getTime() >= POST_DELAY_MS;
+    }
+    // Fallback: use uploadedAt — assume public if privacy field says public
+    if (data.privacy && data.privacy !== "public") return false;
+    return now - new Date(data.uploadedAt).getTime() >= POST_DELAY_MS;
   });
   const pending = latest ? [latest] : [];
 
@@ -105,7 +114,7 @@ async function main() {
     const post = posts.find((p) => p.slug === slug) ?? { slug, title: slug, description: "" };
     console.log(`\n[social-cron] → ${post.title}`);
     const info = ytInfo[data.youtubeId];
-    console.log(`[social-cron]   YouTube published: ${info?.publishedAt ?? "unknown"}`);
+    console.log(`[social-cron]   YouTube published: ${info?.publishedAt ?? data.uploadedAt + " (uploadedAt fallback)"}`);
 
     const videoPath = new URL(`../tmp/${slug}.mp4`, import.meta.url).pathname;
     try {

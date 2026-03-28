@@ -379,11 +379,11 @@ export default {
         patchedHtml = patchedHtml
           .replaceAll(
             'class="site-btn site-btn-primary mt-2" id="tdq-cta-btn"',
-            'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"',
+            'class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" id="tdq-cta-btn"',
           )
           .replaceAll(
             'class="btn btn-sm btn-warning mt-2" id="tdq-cta-btn"',
-            'class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn"',
+            'class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" id="tdq-cta-btn"',
           )
           .replaceAll(
             'class="btn btn-warning px-4 mt-3" id="tdq-submit-btn"',
@@ -396,7 +396,7 @@ export default {
         // Patch old site-btn-primary submit button back to btn-warning
         patchedHtml = patchedHtml.replaceAll(
           'class="site-btn site-btn-primary mt-3" id="tdq-submit-btn"',
-          'class="btn btn-warning mt-3" id="tdq-submit-btn"',
+          'class="btn mt-3" id="tdq-submit-btn" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none"',
         );
         // Patch old quick facts table style → site-table
         if (patchedHtml.includes('class="table table-bordered"')) {
@@ -607,11 +607,11 @@ export default {
           const quizCta = `
           <!-- Quiz CTA -->
           <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
-            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
+            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:var(--accent,#9dc43a);flex-shrink:0"></i>
             <div>
               <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
               <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+              <button class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
                 Take the Quiz
               </button>
             </div>
@@ -621,15 +621,15 @@ export default {
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
   <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;flex-direction:column;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;background:var(--bg,#fff);border-radius:16px 16px 0 0;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
     <div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--border,#cfe0cf);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+      <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:var(--accent,#9dc43a);text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
       <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-muted,#5c7a65);line-height:1;flex-shrink:0;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:flex-end">&times;</button>
     </div>
     <div id="tdq-scroll-body" style="overflow-y:auto;padding:16px 20px 32px">
-      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text,#1a2e20)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
+      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text,#1a2e20)"><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>Test Your Knowledge</h3>
       <p style="font-size:.85rem;color:var(--text-muted,#5c7a65);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
-      <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:#f59e0b;margin-bottom:16px">0 of 5 answered</div>
+      <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:var(--accent,#9dc43a);margin-bottom:16px">0 of 5 answered</div>
       <div id="tdq-questions"></div>
-      <button class="btn btn-warning mt-3" id="tdq-submit-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
+      <button class="btn mt-3" id="tdq-submit-btn" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
       <div id="tdq-score" class="mt-3" hidden></div>
     </div>
   </div>
@@ -637,12 +637,12 @@ export default {
   <style>
     .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text,#1a2e20)}.tdq-options{display:flex;flex-direction:column;gap:7px}
     .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text,#1a2e20)}
-    .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.07)}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important;font-weight:500}
+    .tdq-opt:hover{border-color:var(--accent,#9dc43a);background:rgba(157,196,58,.07)}.tdq-opt-selected{border-color:var(--accent,#9dc43a)!important;background:rgba(157,196,58,.15)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
     .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--border,#cfe0cf);font-size:.72rem;font-weight:700;flex-shrink:0}
-    .tdq-opt-selected .tdq-opt-key{background:#f59e0b;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+    .tdq-opt-selected .tdq-opt-key{background:var(--btn-bg,#1b3a2d);color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
     .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
-    .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
+    .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(157,196,58,.1);border-radius:8px;border-left:4px solid var(--accent,#9dc43a)}.tdq-score-num{color:var(--accent,#9dc43a);font-size:1.15rem}
     #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important;display:flex!important}
     #tdq-scroll-body{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.2) transparent}#tdq-scroll-body::-webkit-scrollbar{width:4px}#tdq-scroll-body::-webkit-scrollbar-thumb{background:rgba(0,0,0,.2);border-radius:4px}
     .tdq-cta-sub{color:var(--text-muted,#5c7a65)}
@@ -889,12 +889,12 @@ export default {
         if (patchedHtml.includes("tdq-opt-selected{border-color:#1f1f1f")) {
           patchedHtml = patchedHtml.replace(
             "</head>",
-            "<style>.tdq-opt:hover{border-color:#f59e0b!important;background:rgba(245,158,11,.07)!important}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important}.tdq-opt-selected .tdq-opt-key{background:#f59e0b!important}</style></head>",
+            "<style>.tdq-opt:hover{border-color:var(--accent,#9dc43a)!important;background:rgba(157,196,58,.07)!important}.tdq-opt-selected{border-color:var(--accent,#9dc43a)!important;background:rgba(157,196,58,.15)!important}.tdq-opt-selected .tdq-opt-key{background:var(--btn-bg,#1b3a2d)!important}</style></head>",
           );
         }
         // Inject floating quiz bar into stored posts that don't have it yet
         if (!patchedHtml.includes("tdq-float-bar")) {
-          const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:rgba(15,23,42,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(0,0,0,.3);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:linear-gradient(90deg,#f59e0b,#d97706);border:none;border-radius:100px;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(245,158,11,.35);max-width:320px;width:100%}#tdq-float-btn:hover{background:linear-gradient(90deg,#d97706,#b45309);box-shadow:0 2px 16px rgba(245,158,11,.5)}</style>`;
+          const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:rgba(27,58,45,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.3);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}#tdq-float-btn:hover{background:#8ab532;box-shadow:0 2px 16px rgba(157,196,58,.5)}</style>`;
           const floatHtml = `<div id="tdq-float-bar"><button id="tdq-float-btn"><i class="bi bi-patch-question-fill"></i> Quiz This Day</button></div>`;
           const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');}function hideBar(){bar.classList.remove('tdq-float-visible');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});var h2s=document.querySelectorAll('h2');var trigger=null;for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}if(trigger){function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else{hideBar();}}window.addEventListener('scroll',updateBar,{passive:true});}else{document.addEventListener('scroll',function onScroll(){var d=document.documentElement;var total=d.scrollHeight-d.clientHeight;if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}},{passive:true});}})();<\/script>`;
           const bodyClose = patchedHtml.includes("</body>")
@@ -903,6 +903,38 @@ export default {
           patchedHtml = patchedHtml
             .replace("</head>", floatCss + "</head>")
             .replace(bodyClose, floatHtml + "\n" + floatJs + "\n" + bodyClose);
+        }
+        // Patch old amber/orange quiz colors → green palette
+        if (patchedHtml.includes('linear-gradient(90deg,#f59e0b') || patchedHtml.includes('rgba(15,23,42,.96)') || patchedHtml.includes('background:#f59e0b')) {
+          patchedHtml = patchedHtml
+            .replaceAll('rgba(15,23,42,.96)', 'rgba(27,58,45,.96)')
+            .replaceAll('linear-gradient(90deg,#f59e0b,#d97706)', '#9dc43a')
+            .replaceAll('linear-gradient(90deg,#d97706,#b45309)', '#8ab532')
+            .replaceAll('rgba(245,158,11,.35)', 'rgba(157,196,58,.35)')
+            .replaceAll('rgba(245,158,11,.5)', 'rgba(157,196,58,.5)')
+            .replaceAll('background:#f59e0b', 'background:var(--btn-bg,#1b3a2d)')
+            .replaceAll('background:#d97706', 'background:var(--btn-hover,#2a4d3a)')
+            .replaceAll('color:#f59e0b', 'color:var(--accent,#9dc43a)')
+            .replaceAll('border-color:#f59e0b', 'border-color:var(--btn-bg,#1b3a2d)')
+            .replaceAll('rgba(245,158,11,.07)', 'rgba(157,196,58,.07)')
+            .replaceAll('rgba(245,158,11,.12)', 'rgba(157,196,58,.15)')
+            .replaceAll('rgba(245,158,11,.1)', 'rgba(157,196,58,.1)')
+            .replaceAll('border-left:4px solid #f59e0b', 'border-left:4px solid var(--accent,#9dc43a)');
+          // Fix float button text: white on light green → dark on light green
+          patchedHtml = patchedHtml.replace(
+            /#tdq-float-btn\{background:#9dc43a;border:none;border-radius:100px;color:#fff;/,
+            '#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;',
+          );
+        }
+        // Patch old btn-warning quiz buttons → green
+        if (patchedHtml.includes('btn-warning')) {
+          patchedHtml = patchedHtml
+            .replaceAll('class="btn btn-warning fw-semibold w-100 mt-2"', 'class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none"')
+            .replaceAll('class="btn btn-warning mt-3"', 'class="btn mt-3" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none"');
+        }
+        // Patch old box-shadow on article border
+        if (patchedHtml.includes('box-shadow:0 2px 4px rgba(0,0,0,.1)')) {
+          patchedHtml = patchedHtml.replaceAll('box-shadow:0 2px 4px rgba(0,0,0,.1)', 'box-shadow:none');
         }
         // Inject AdSense ad unit into stored posts that don't have one yet
         // Only inject for posts from March 2026 onwards — leave older posts alone
@@ -2872,7 +2904,8 @@ ${JSON.stringify({
       .related-card{border:1px solid var(--border);background:var(--bg);transition:transform .15s ease,box-shadow .15s ease}
       .related-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1);text-decoration:none}
       blockquote.historical-quote{border-left:3px solid var(--btn-bg);padding-left:1rem;margin-left:.5rem;font-style:italic}
-      .border{border:1px solid var(--border)!important;box-shadow:0 2px 4px rgba(0,0,0,.1)}
+      .border{border:1px solid var(--border)!important;box-shadow:none}
+      .shadow-sm{box-shadow:none!important}
       .btn-outline-primary{color:var(--text-muted);border-color:var(--border);background:var(--bg)}
       .btn-outline-primary:hover{border-color:var(--btn-bg);color:var(--text);background:var(--bg-alt)}
       #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg);z-index:9999;transition:width .1s linear;pointer-events:none}
@@ -3107,11 +3140,11 @@ ${analysisBadItems}
               .join("");
             return `<!-- Quiz CTA -->
           <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
-            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:#f59e0b;flex-shrink:0"></i>
+            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:var(--accent,#9dc43a);flex-shrink:0"></i>
             <div>
               <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
               <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn btn-warning fw-semibold w-100 mt-2" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
+              <button class="btn fw-semibold w-100 mt-2" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
                 Take the Quiz
               </button>
             </div>
@@ -3174,15 +3207,15 @@ ${analysisBadItems}
   <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
   <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;overflow-y:auto;background:var(--bg,#fff);border-radius:16px 16px 0 0;padding:0 0 32px;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
     <div id="tdq-header" style="position:sticky;top:0;z-index:1;background:var(--bg,#fff);border-radius:16px 16px 0 0;border-bottom:1px solid var(--border,#cfe0cf);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+      <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:var(--accent,#9dc43a);text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
       <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-muted,#5c7a65);line-height:1;flex-shrink:0">&times;</button>
     </div>
     <div style="padding:16px 20px 0">
-      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text,#1a2e20)"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge</h3>
+      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text,#1a2e20)"><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>Test Your Knowledge</h3>
       <p style="font-size:.85rem;color:var(--text-muted,#5c7a65);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
-      <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:#f59e0b;margin-bottom:16px">0 of 5 answered</div>
+      <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:var(--accent,#9dc43a);margin-bottom:16px">0 of 5 answered</div>
       <div id="tdq-questions"></div>
-      <button class="btn btn-warning mt-3" id="tdq-submit-btn" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
+      <button class="btn mt-3" id="tdq-submit-btn" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
       <div id="tdq-score" class="mt-3" hidden></div>
     </div>
   </div>
@@ -3191,10 +3224,10 @@ ${analysisBadItems}
 
   <!-- Floating quiz bar — slides up when user reaches Eyewitness section -->
   <style>
-    #tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:rgba(15,23,42,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(0,0,0,.3);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}
+    #tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:rgba(27,58,45,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.3);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}
     #tdq-float-bar.tdq-float-visible{transform:translateY(0)}
-    #tdq-float-btn{background:linear-gradient(90deg,#f59e0b,#d97706);border:none;border-radius:100px;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(245,158,11,.35);max-width:320px;width:100%}
-    #tdq-float-btn:hover{background:linear-gradient(90deg,#d97706,#b45309);box-shadow:0 2px 16px rgba(245,158,11,.5)}
+    #tdq-float-btn{background:var(--accent,#9dc43a);border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}
+    #tdq-float-btn:hover{background:#8ab532;box-shadow:0 2px 16px rgba(157,196,58,.5)}
   </style>
   <div id="tdq-float-bar">
     <button id="tdq-float-btn">
@@ -3245,14 +3278,14 @@ ${analysisBadItems}
     @media(prefers-reduced-motion:reduce){.tdq-q-pulse,.tdq-q-enter{animation:none;transition:none}}
     .tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text,#1a2e20)}.tdq-options{display:flex;flex-direction:column;gap:7px}
     .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;user-select:none;color:var(--text,#1a2e20)}
-    .tdq-opt:hover{border-color:#f59e0b;background:rgba(245,158,11,.07)}.tdq-opt-selected{border-color:#f59e0b!important;background:rgba(245,158,11,.12)!important;font-weight:500}
+    .tdq-opt:hover{border-color:var(--accent,#9dc43a);background:rgba(157,196,58,.07)}.tdq-opt-selected{border-color:var(--accent,#9dc43a)!important;background:rgba(157,196,58,.15)!important;font-weight:500}
     .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
     .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--border,#cfe0cf);font-size:.72rem;font-weight:700;flex-shrink:0}
-    .tdq-opt-selected .tdq-opt-key{background:#f59e0b;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+    .tdq-opt-selected .tdq-opt-key{background:var(--btn-bg,#1b3a2d);color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
     .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
-    .tdq-next-btn{width:100%;margin-top:14px;padding:11px;border:none;border-radius:8px;background:#f59e0b;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:none;transition:background .15s}
-    .tdq-next-btn:hover{background:#d97706}
-    .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.15rem}
+    .tdq-next-btn{width:100%;margin-top:14px;padding:11px;border:none;border-radius:8px;background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);font-weight:700;font-size:.95rem;cursor:pointer;display:none;transition:background .15s}
+    .tdq-next-btn:hover{background:var(--btn-hover,#2a4d3a)}
+    .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(157,196,58,.1);border-radius:8px;border-left:4px solid var(--accent,#9dc43a)}.tdq-score-num{color:var(--accent,#9dc43a);font-size:1.15rem}
     #tdq-popup{transition:transform .3s ease;transform:translateY(100%);scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.2) transparent}.tdq-popup-open{transform:translateY(0)!important}
     #tdq-popup::-webkit-scrollbar{width:4px}#tdq-popup::-webkit-scrollbar-thumb{background:rgba(0,0,0,.2);border-radius:4px}
   </style>

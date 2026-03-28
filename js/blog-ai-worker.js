@@ -203,6 +203,25 @@ export default {
       return jsonResponse({ status: "ok", slug: targetSlug, changed });
     }
 
+    // Admin: purge Cloudflare edge cache for all blog post pages
+    // POST /blog/purge-cache
+    if (path === "/blog/purge-cache" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const cache = caches.default;
+      const results = await Promise.allSettled(
+        index.map((e) =>
+          cache.delete(new Request(`https://thisday.info/blog/${e.slug}/`))
+        )
+      );
+      const purged = results.filter((r) => r.status === "fulfilled").length;
+      return jsonResponse({ status: "ok", purged, total: index.length });
+    }
+
     // Listing page: /blog/archive
     if (path === "/blog/archive") {
       return serveListing(env);

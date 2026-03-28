@@ -879,7 +879,9 @@
         <!-- Blog Article Quiz -->
         <div class="quiz-cta-col">
           <strong>Latest Article Quiz</strong>
-          <div class="quiz-cta-sub">Read it. Quiz yourself at the end.</div>
+          <div class="quiz-cta-sub">
+            Read Todays Article & Quiz yourself at the end.
+          </div>
           <a
             id="blog-quiz-btn"
             href="/blog/archive/"
@@ -1030,7 +1032,9 @@
       aria-modal="true"
       aria-labelledby="modalDate"
     >
-      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+      <div
+        class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg"
+      >
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title" id="eventDetailModalLabel">
@@ -1045,15 +1049,27 @@
           </div>
           <div class="modal-body" id="modalBodyContent"></div>
           <div id="popupExploreBar" class="popup-explore-bar">
-            <a href="#" id="popupExploreEvents" class="popup-explore-chip popup-explore-chip-events">
+            <a
+              href="#"
+              id="popupExploreEvents"
+              class="popup-explore-chip popup-explore-chip-events"
+            >
               <i class="bi bi-calendar-event"></i>
               <span>All Events</span>
             </a>
-            <a href="#" id="popupExploreBirths" class="popup-explore-chip popup-explore-chip-born">
+            <a
+              href="#"
+              id="popupExploreBirths"
+              class="popup-explore-chip popup-explore-chip-born"
+            >
               <i class="bi bi-person-heart"></i>
               <span>Birthdays</span>
             </a>
-            <a href="#" id="popupExploreDied" class="popup-explore-chip popup-explore-chip-died">
+            <a
+              href="#"
+              id="popupExploreDied"
+              class="popup-explore-chip popup-explore-chip-died"
+            >
               <i class="bi bi-flower1"></i>
               <span>Deaths</span>
             </a>
@@ -1185,7 +1201,9 @@
       const _bmcTs = localStorage.getItem("supportPopupClosed");
       if (!_bmcTs || Date.now() - Number(_bmcTs) > 86400000) {
         let dismissed = false;
-        const showPopup = () => { if (!dismissed) popup.classList.add("show"); };
+        const showPopup = () => {
+          if (!dismissed) popup.classList.add("show");
+        };
         let ready = false;
         let scrolledPast70 = false;
 
@@ -1196,7 +1214,9 @@
         }, 60000);
 
         // Fallback: show at 90s even if user never scrolled deep enough
-        setTimeout(() => { if (!popup.classList.contains("show")) showPopup(); }, 90000);
+        setTimeout(() => {
+          if (!popup.classList.contains("show")) showPopup();
+        }, 90000);
 
         const onScroll = () => {
           const scrolled = window.scrollY + window.innerHeight;

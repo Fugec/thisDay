@@ -63,8 +63,8 @@ const MONTH_SLUGS = [
 // Shared support popup (Buy Me a Coffee) — injected before </body> on all pages
 // ---------------------------------------------------------------------------
 function supportPopupSnippet() {
-  return `<style>#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}#supportPopup.show{display:flex;opacity:1}.support-popup-content{background:var(--bg,#fff);color:var(--text,#1a2e20);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--border,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}@keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}.support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--text-muted,#5c7a65);line-height:1;padding:0}.support-close-btn:hover{color:var(--text,#1a2e20)}</style>
-<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:var(--btn-bg,#1b3a2d);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
+  return `<style>#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}#supportPopup.show{display:flex;opacity:1}.support-popup-content{background:var(--btn-bg,#1b3a2d);color:#fff;padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid rgba(255,255,255,.15);box-shadow:0 8px 25px rgba(0,0,0,.35);position:relative;animation:popupFadeIn .35s ease}@keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}.support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:rgba(255,255,255,.7);line-height:1;padding:0}.support-close-btn:hover{color:#fff}</style>
+<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px;color:rgba(255,255,255,.85)">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:var(--btn-bg,#1b3a2d);color:var(--accent,#9dc43a);border:1.5px solid var(--accent,#9dc43a);border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
 <script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{var _t=localStorage.getItem('supportPopupClosed');if(_t&&Date.now()-Number(_t)<86400000)return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed',String(Date.now()));}catch(e){}});})();<\/script>`;
 }
 
@@ -313,7 +313,7 @@ export default {
     }
 
     // Blog quiz API: /blog/quiz/{slug}
-    const blogQuizMatch = path.match(/^\/blog\/quiz\/([^/]+)$/);
+    const blogQuizMatch = path.match(/^\/blog\/quiz\/(.+)$/);
     if (blogQuizMatch) {
       const slug = blogQuizMatch[1];
       const quizRaw = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
@@ -331,8 +331,10 @@ export default {
         const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
         const index = indexRaw ? JSON.parse(indexRaw) : [];
         const entry = index.find((p) => p.slug === slug);
-        if (entry && (env.AI || env.GROQ_API_KEY)) {
-          const content = await buildRichContent(entry, slug);
+        // Fall back to slug-only when entry not in index (covers old static posts)
+        const entryOrFallback = entry || { title: slug.replace(/[-/]/g, " "), description: "" };
+        if (env.AI || env.GROQ_API_KEY) {
+          const content = await buildRichContent(entryOrFallback, slug);
           const quiz = await generateBlogQuiz(env, content, slug);
           if (quiz) {
             await env.BLOG_AI_KV.put(
@@ -550,7 +552,7 @@ export default {
     container.innerHTML=quiz.questions.slice(0,total).map(function(q,qi){
       var optsHtml=(q.options||[]).map(function(opt,oi){return '<div class="tdq-opt" data-qi="'+qi+'" data-oi="'+oi+'"><span class="tdq-opt-key">'+String.fromCharCode(65+oi)+'</span>'+esc(String(opt))+'</div>';}).join('');
       var expHtml=q.explanation?'<div class="tdq-explanation" id="tdq-e-'+qi+'" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid var(--btn-bg,#1b3a2d);border-radius:0 6px 6px 0">'+esc(String(q.explanation))+'</div>':'';
-      var actionBtn=qi<total-1?'<button class="tdq-next-btn" id="tdq-next-'+qi+'" data-qi="'+qi+'" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;gap:8px;align-items:center;justify-content:center">Next Question <i class="bi bi-arrow-right"></i></button>':'<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
+      var actionBtn=qi<total-1?'<button class="tdq-next-btn" id="tdq-next-'+qi+'" data-qi="'+qi+'" style="display:none;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg,#1b3a2d);color:var(--accent,#9dc43a);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;gap:8px;align-items:center;justify-content:center">Next Question <i class="bi bi-arrow-right"></i></button>':'<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg,#1b3a2d);color:var(--accent,#9dc43a);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
       return '<div class="tdq-question" id="tdq-q-'+qi+'" style="display:'+(qi===0?'block':'none')+'"><p class="tdq-q-text"><strong>'+(qi+1)+'.</strong> '+esc(String(q.q))+'</p><div class="tdq-options">'+optsHtml+'</div><div class="tdq-feedback" id="tdq-f-'+qi+'" hidden></div>'+expHtml+actionBtn+'</div>';
     }).join('');
     container.querySelectorAll('.tdq-opt').forEach(function(opt){
@@ -698,8 +700,8 @@ export default {
         }).join("");
         var expHtml = q.explanation ? '<div class="tdq-explanation" id="tdq-e-' + qi + '" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid var(--btn-bg,#1b3a2d);border-radius:0 6px 6px 0">' + esc(String(q.explanation)) + '</div>' : '';
         var actionBtn = qi < total - 1
-          ? '<button class="tdq-next-btn" id="tdq-next-' + qi + '" data-qi="' + qi + '" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer">Next Question <i class="bi bi-arrow-right ms-1"></i></button>'
-          : '<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:#c2410c;color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
+          ? '<button class="tdq-next-btn" id="tdq-next-' + qi + '" data-qi="' + qi + '" style="display:none;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg,#1b3a2d);color:var(--accent,#9dc43a);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer">Next Question <i class="bi bi-arrow-right ms-1"></i></button>'
+          : '<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg,#1b3a2d);color:var(--accent,#9dc43a);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
         return '<div class="tdq-question" id="tdq-q-' + qi + '" style="display:' + (qi === 0 ? 'block' : 'none') + '"><p class="tdq-q-text"><strong>' + (qi + 1) + '.</strong> ' + esc(String(q.q)) + '</p><div class="tdq-options">' + optsHtml + '</div><div class="tdq-feedback" id="tdq-f-' + qi + '" hidden></div>' + expHtml + actionBtn + '</div>';
       }).join("");
       container.querySelectorAll(".tdq-opt").forEach(function(opt) {
@@ -1087,6 +1089,176 @@ export default {
         );
         return htmlResponse(patchedHtml);
       }
+    }
+
+    // Intercept old-format static blog posts (/blog/month/day-year) and inject quiz + patches
+    const staticBlogMatch = path.match(/^\/blog\/([a-z]+\/\d+-\d{4})$/);
+    if (staticBlogMatch) {
+      const slug = staticBlogMatch[1]; // e.g., "august/1-2025"
+      const originResp = await fetch(request);
+      if (!originResp.ok || !originResp.headers.get("Content-Type")?.includes("text/html")) {
+        return originResp;
+      }
+      let html = await originResp.text();
+      // Patch old Bootstrap navbar → new siteNav()
+      if (html.includes('class="navbar') && !html.includes('class="nav"')) {
+        html = html.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
+      }
+      // Patch old footer
+      if (html.includes('class="footer"') && !html.includes("footer-inner")) {
+        html = html.replace(
+          /<footer class="footer">[\s\S]*?<\/footer>\s*(?=<\/body>|<\/html>|$)/,
+          siteFooter(),
+        );
+      }
+      // Patch old CSS vars (blue palette) → green
+      if (html.includes("--primary-bg") || html.includes("--card-bg")) {
+        html = html.replace(
+          /:root\s*\{[^}]*--primary-bg[^}]*\}/,
+          `:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}`,
+        );
+        html = html.replace(/body\.dark-theme\s*\{[^}]*\}/g, "");
+        html = html
+          .replaceAll("var(--card-bg)", "var(--bg)")
+          .replaceAll("var(--text-color)", "var(--text)")
+          .replaceAll("var(--primary-bg)", "var(--btn-bg)")
+          .replaceAll("var(--footer-bg)", "var(--bg-alt)")
+          .replaceAll("var(--link-color)", "var(--btn-bg)");
+        html = html.replace(
+          /body\s*\{[^}]*font-family:\s*Inter[^}]*\}/,
+          "body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}",
+        );
+      }
+      // Patch Inter → Lora font
+      if (html.includes("font-family:Inter") || html.includes("font-family: Inter")) {
+        html = html.replace(/font-family:\s*['"]?Inter[^;]*/g, "font-family:Lora,serif");
+      }
+      // Inject NAV_CSS + FOOTER_CSS if missing
+      if (!html.includes(".nav-inner")) {
+        html = html.replace("</head>", `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
+      }
+      // Add navToggle script if missing
+      if (!html.includes("navToggle") && html.includes('class="nav"')) {
+        html = html.replace("</body>", `<script>${navToggleScript()}</script></body>`);
+      }
+      // Inject quiz CTA + popup if no quiz present
+      if (!html.includes("tdq-cta-btn")) {
+        const quizCta = `
+          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(157,196,58,.08);border:1px solid rgba(157,196,58,.25)">
+            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:var(--accent,#9dc43a);flex-shrink:0"></i>
+            <div>
+              <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
+              <small class="tdq-cta-sub" style="color:var(--text-muted,#5c7a65)">Can you answer 5 questions about this event?</small><br/>
+              <button class="btn mt-1" id="tdq-cta-btn" onclick="if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></button>
+            </div>
+          </div>`;
+        const quizBlock = `
+  <div id="tdq-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998" aria-hidden="true"></div>
+  <div id="tdq-popup" role="dialog" aria-modal="true" aria-label="History Quiz" style="display:none;flex-direction:column;position:fixed;bottom:0;left:0;right:0;z-index:9999;max-height:90dvh;background:var(--bg,#fff);border-radius:16px 16px 0 0;box-shadow:0 -4px 32px rgba(0,0,0,.18);font-family:Lora,serif">
+    <div id="tdq-header" style="flex-shrink:0;border-bottom:1px solid var(--border,#cfe0cf);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div id="tdq-topic" style="font-size:.72rem;font-weight:700;color:var(--accent,#9dc43a);text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+      <button id="tdq-close" aria-label="Close quiz" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-muted,#5c7a65);line-height:1;flex-shrink:0;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:flex-end">&times;</button>
+    </div>
+    <div id="tdq-scroll-body" style="overflow-y:auto;padding:16px 20px 32px">
+      <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:3px;color:var(--text,#1a2e20)"><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>Test Your Knowledge</h3>
+      <p style="font-size:.85rem;color:var(--text-muted,#5c7a65);margin-bottom:6px">Based on the article you just read — 5 questions, under a minute.</p>
+      <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:var(--accent,#9dc43a);margin-bottom:16px">0 of 5 answered</div>
+      <div id="tdq-questions"></div>
+      <div id="tdq-score" class="mt-3" hidden></div>
+    </div>
+  </div>
+  <style>
+    .tdq-question{margin-bottom:16px}.tdq-q-text{font-weight:600;margin-bottom:8px;font-size:.9rem;color:var(--text,#1a2e20)}.tdq-options{display:flex;flex-direction:column;gap:7px}
+    .tdq-opt{display:flex;align-items:center;gap:9px;padding:8px 12px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;cursor:pointer;font-size:.88rem;transition:background .15s,border-color .15s;color:var(--text,#1a2e20)}
+    .tdq-opt:hover{border-color:var(--accent,#9dc43a);background:rgba(157,196,58,.07)}.tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--border,#cfe0cf);font-size:.72rem;font-weight:700;flex-shrink:0}
+    .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
+    .tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+    .tdq-feedback{font-size:.82rem;margin-top:4px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
+    .tdq-score-box{font-size:1rem;font-weight:600;padding:12px 14px;background:rgba(157,196,58,.1);border-radius:8px;border-left:4px solid var(--accent,#9dc43a)}.tdq-score-num{color:var(--accent,#9dc43a);font-size:1.15rem}
+    #tdq-popup{transition:transform .3s ease;transform:translateY(100%)}.tdq-popup-open{transform:translateY(0)!important;display:flex!important}
+  </style>
+  <script>
+  (function(){
+    var slug="${slug}";
+    var quizLoaded=false,selected={},answers=[],total=0;
+    function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+    function openPopup(){var ol=document.getElementById("tdq-overlay"),pp=document.getElementById("tdq-popup");if(ol)ol.style.display="block";if(pp){pp.style.display="block";requestAnimationFrame(function(){pp.classList.add("tdq-popup-open");});}document.body.style.overflow="hidden";}
+    function closePopup(){var pp=document.getElementById("tdq-popup");pp.classList.remove("tdq-popup-open");setTimeout(function(){pp.style.display="none";var ol=document.getElementById("tdq-overlay");if(ol)ol.style.display="none";document.body.style.overflow="";},300);}
+    document.getElementById("tdq-close").addEventListener("click",closePopup);
+    document.getElementById("tdq-overlay").addEventListener("click",closePopup);
+    function renderQuiz(quiz){
+      answers=quiz.questions.map(function(q){return Number(q.answer);});
+      total=Math.min(quiz.questions.length,5);
+      var topicEl=document.getElementById("tdq-topic");
+      if(topicEl){var h1=document.querySelector("h1");if(h1)topicEl.textContent="Quiz: "+h1.textContent.trim();}
+      var container=document.getElementById("tdq-questions");
+      container.innerHTML=quiz.questions.slice(0,total).map(function(q,qi){
+        var optsHtml=(q.options||[]).map(function(opt,oi){return '<div class="tdq-opt" data-qi="'+qi+'" data-oi="'+oi+'"><span class="tdq-opt-key">'+String.fromCharCode(65+oi)+"</span>"+esc(String(opt))+"</div>";}).join("");
+        var expHtml=q.explanation?'<div id="tdq-e-'+qi+'" hidden style="font-size:.82rem;margin-top:6px;padding:7px 11px;background:rgba(0,0,0,.035);border-left:3px solid var(--btn-bg,#1b3a2d);border-radius:0 6px 6px 0">'+esc(String(q.explanation))+"</div>":"";
+        var actionBtn=qi<total-1?'<button class="tdq-next-btn" data-qi="'+qi+'" style="display:none;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg,#1b3a2d);color:var(--accent,#9dc43a);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer">Next Question <i class="bi bi-arrow-right"></i></button>':'<button id="tdq-finish-btn" style="display:none;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg,#1b3a2d);color:var(--accent,#9dc43a);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer"><i class="bi bi-check2-circle me-1"></i>See Results</button>';
+        return '<div class="tdq-question" id="tdq-q-'+qi+'" style="display:'+(qi===0?"block":"none")+'"><p class="tdq-q-text"><strong>'+(qi+1)+".</strong> "+esc(String(q.q))+"</p><div class=\"tdq-options\">"+optsHtml+"</div><div class=\"tdq-feedback\" id=\"tdq-f-"+qi+'" hidden></div>'+expHtml+actionBtn+"</div>";
+      }).join("");
+      container.querySelectorAll(".tdq-opt").forEach(function(opt){
+        opt.addEventListener("click",function(){
+          var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);
+          if(selected[qi]!==undefined)return;
+          selected[qi]=oi;
+          var correct=answers[qi];
+          container.querySelectorAll('[data-qi="'+qi+'"]').forEach(function(o){o.style.pointerEvents="none";});
+          container.querySelectorAll('[data-qi="'+qi+'"]')[correct].classList.add("tdq-opt-correct");
+          var fb=document.getElementById("tdq-f-"+qi);fb.hidden=false;
+          if(oi===correct){this.classList.add("tdq-opt-correct");fb.innerHTML='<span class="tdq-correct">✓ Correct!</span>';}
+          else{this.classList.add("tdq-opt-wrong");fb.innerHTML='<span class="tdq-wrong">✗ Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+correct)+"</strong>";}
+          var exp=document.getElementById("tdq-e-"+qi);if(exp)exp.hidden=false;
+          var progEl=document.getElementById("tdq-progress");if(progEl)progEl.textContent=Object.keys(selected).length+" of "+total+" answered";
+          var nb=container.querySelector('[data-qi="'+qi+'"].tdq-next-btn');if(nb)nb.style.display="";
+          var fb2=document.getElementById("tdq-finish-btn");if(fb2&&qi===total-1)fb2.style.display="";
+        });
+      });
+      container.addEventListener("click",function(e){
+        var btn=e.target.closest(".tdq-next-btn");if(!btn)return;
+        var qi=parseInt(btn.dataset.qi);
+        var inner=document.getElementById("tdq-scroll-body");if(inner)inner.scrollTop=0;
+        document.getElementById("tdq-q-"+qi).style.display="none";
+        document.getElementById("tdq-q-"+(qi+1)).style.display="block";
+      });
+      var finBtn=document.getElementById("tdq-finish-btn");
+      if(finBtn)finBtn.addEventListener("click",function(){
+        var score=0;answers.forEach(function(c,qi){if(selected[qi]===c)score++;});
+        this.hidden=true;
+        document.getElementById("tdq-q-"+(total-1)).style.display="none";
+        var pct=Math.round(score/answers.length*100);
+        var msg=pct===100?"Perfect score!":pct>=80?"Excellent!":pct>=60?"Good job!":"Keep learning!";
+        var el=document.getElementById("tdq-score");el.hidden=false;
+        el.innerHTML='<div class="tdq-score-box">You scored <span class="tdq-score-num">'+score+"/"+answers.length+"</span> ("+pct+"%) — "+msg+"</div>";
+        var inner=document.getElementById("tdq-scroll-body");if(inner)inner.scrollTop=0;
+      });
+    }
+    window.maybeLoadAndShowQuiz=function(){
+      if(quizLoaded){openPopup();return;}
+      quizLoaded=true;
+      fetch("/blog/quiz/"+slug).then(function(r){return r.ok?r.json():null;}).then(function(quiz){if(!quiz||!quiz.questions||quiz.questions.length<3)return;renderQuiz(quiz);openPopup();}).catch(function(){});
+    };
+  })();
+  <\/script>`;
+        // Inject quiz CTA before </article> or </body>
+        const insertBefore = html.includes("</article>") ? "</article>" : (html.includes("</body>") ? "</body>" : "</html>");
+        html = html.replace(insertBefore, quizCta + "\n" + insertBefore);
+        const bodyClose = html.includes("</body>") ? "</body>" : "</html>";
+        html = html.replace(bodyClose, quizBlock + "\n" + bodyClose);
+      }
+      // Inject support popup if not present
+      if (!html.includes("supportPopup")) {
+        const bodyClose = html.includes("</body>") ? "</body>" : "</html>";
+        html = html.replace(bodyClose, supportPopupSnippet() + "\n" + bodyClose);
+      }
+      return new Response(html, {
+        headers: {
+          "Content-Type": "text/html;charset=UTF-8",
+          "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+          "X-Patched": "static-blog",
+        },
+      });
     }
 
     // Pass through to origin; intercept 404 HTML responses with a helpful page.

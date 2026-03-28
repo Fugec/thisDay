@@ -578,15 +578,15 @@
         opacity: 1;
       }
       .support-popup-content {
-        background: var(--bg, #fff);
-        color: var(--text, #1a2e20);
+        background: var(--btn-bg, #1b3a2d);
+        color: #fff;
         padding: 25px 28px;
         border-radius: 12px;
         max-width: 300px;
         width: 90%;
         text-align: center;
-        border: 1px solid var(--border, rgba(0, 0, 0, 0.1));
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.35);
         position: relative;
         animation: popupFadeIn 0.35s ease;
       }
@@ -608,12 +608,12 @@
         background: transparent;
         font-size: 1.4rem;
         cursor: pointer;
-        color: var(--text-muted);
+        color: rgba(255, 255, 255, 0.7);
         line-height: 1;
         padding: 0;
       }
       .support-close-btn:hover {
-        color: var(--text);
+        color: #fff;
       }
     </style>
     <div id="supportPopup">
@@ -622,7 +622,7 @@
         <h4 style="font-size: 1rem; margin-bottom: 8px">
           History runs on facts, and this project runs on coffee!
         </h4>
-        <p style="font-size: 0.9rem; margin-bottom: 14px">
+        <p style="font-size: 0.9rem; margin-bottom: 14px; color: rgba(255,255,255,0.85)">
           Your support is incredibly helpful and genuinely appreciated.
         </p>
         <a
@@ -632,8 +632,9 @@
           style="
             display: inline-block;
             padding: 8px 18px;
-            background: var(--btn-bg);
-            color: #fff;
+            background: var(--btn-bg, #1b3a2d);
+            color: var(--accent, #9dc43a);
+            border: 1.5px solid var(--accent, #9dc43a);
             border-radius: 8px;
             text-decoration: none;
             font-weight: 600;

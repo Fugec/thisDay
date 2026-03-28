@@ -654,8 +654,10 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .text-muted{color:var(--text-muted)!important}
 .breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--text-muted)}
 ` +
-    NAV_CSS + "\n" +
-    FOOTER_CSS + "\n" +
+    NAV_CSS +
+    "\n" +
+    FOOTER_CSS +
+    "\n" +
     `
 .card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
@@ -2550,9 +2552,9 @@ async function handleFetchRequest(request, env, ctx) {
       "/events",
       "/events/",
       "/births",
-      "/births/",
+      "/born/today/",
       "/deaths",
-      "/deaths/",
+      "/died/today/",
       "/born/",
       "/died/",
       "/quiz",

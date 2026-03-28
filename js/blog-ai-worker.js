@@ -429,7 +429,7 @@ export default {
           patchedHtml = patchedHtml.replace('</head>', `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
         }
         // Remove old dark theme JS and CSS
-        patchedHtml = patchedHtml.replace(/<script\b[^>]*>[\s\S]*?(?:setTheme|darkTheme|dark-theme|DARK_THEME)[\s\S]*?<\/script>/g, '');
+        patchedHtml = patchedHtml.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*(?:setTheme|darkTheme|dark-theme|DARK_THEME)(?:(?!<\/script>)[\s\S])*<\/script>/g, '');
         patchedHtml = patchedHtml.replace(/body\.dark-theme\s*\{[^}]*\}/g, '');
         patchedHtml = patchedHtml.replace(/body\.dark-theme[^{]*\{[^}]*\}/g, '');
         // Add navToggle script if missing
@@ -1563,13 +1563,24 @@ async function runPostPublishExtras(env, slug, content) {
     }),
   ]);
 
-  // Generate and store a quiz for this blog post using rich context from the live post HTML
+  // Generate and store a quiz using the already-available content (no self-fetch round-trip that
+  // can fail due to KV replication delay right after publishing)
   try {
-    const richContent = await buildRichContent(
-      { title: content.title, description: content.description || "" },
-      slug,
-    );
-    const enrichedContent = { ...content, ...richContent };
+    const allParas = [
+      ...(content.overviewParagraphs || []),
+      ...(content.eyewitnessOrChronicle || []),
+      ...(content.aftermathParagraphs || []),
+      ...(content.conclusionParagraphs || []),
+    ];
+    const enrichedContent = {
+      ...content,
+      keyFacts: allParas
+        .filter((p) => p && p.length > 40 && p.length < 400)
+        .slice(0, 12),
+      description:
+        content.description ||
+        allParas.slice(0, 3).join(" ").substring(0, 800),
+    };
     const quiz = await generateBlogQuiz(env, enrichedContent, slug);
     if (quiz) {
       await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {

@@ -709,7 +709,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .support-popup-content{background:var(--cb,#fff);color:var(--tc,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--cbr,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}
 @keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}
 .support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:var(--mu,#64748b);line-height:1;padding:0}
-.support-close-btn:hover{color:var(--tc,#1e293b)}` +
+.support-close-btn:hover{color:var(--tc,#1e293b)}`
   );
 }
 
@@ -1951,7 +1951,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v3-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v4-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2034,7 +2034,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v3-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v4-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2265,7 +2265,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v26-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v27-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2527,7 +2527,7 @@ async function handleFetchRequest(request, env, ctx) {
   // --- Maintenance Mode ---
   // When maintenance mode is enabled, redirect to maintenance page
   // except for preview parameter (?preview=secret) which allows viewing the live pages
-  const MAINTENANCE_ENABLED = true;
+  const MAINTENANCE_ENABLED = false;
   const PREVIEW_SECRET = "secret";
   const isPreview = url.searchParams.get("preview") === PREVIEW_SECRET;
   const isExcludedRoute =
@@ -3713,7 +3713,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v21:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v24:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -4369,7 +4369,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v21:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v24:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -4645,7 +4645,8 @@ ${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 <style>
 :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08);--cb:var(--bg);--cbr:var(--border);--tc:var(--text);--mu:var(--text-muted);--lc:var(--btn-bg);--ftc:#fff;--fb:var(--bg-alt);--badge:var(--accent)}
-
+${NAV_CSS}
+${FOOTER_CSS}
 body{font-family:Lora,serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
 main{flex:1;padding:28px 0}
 a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}

@@ -661,7 +661,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
 
-.did-you-know{background:rgba(245,158,11,.07);border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
+.did-you-know{background:rgba(157,196,58,.07);border-left:4px solid var(--accent);border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
 
 .yr{color:#1a1a1a;font-size:.95rem;font-weight:700;margin-right:8px;white-space:nowrap;font-family:Georgia,serif}
 .ev-scroll-wrap{max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--cbr) transparent;border:1px solid var(--cbr);border-radius:8px;padding:0 8px 0 0}.ev-scroll-wrap::-webkit-scrollbar{width:4px}.ev-scroll-wrap::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:4px}.ev-scroll-wrap .ev-row,.ev-scroll-wrap .person-row{padding-left:10px}
@@ -675,15 +675,15 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:.68rem;font-weight:600;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
 .tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
-.tdq-opt:hover{border-color:#1a1a1a;background:rgba(0,0,0,.07)}.tdq-opt-selected{border-color:#1a1a1a!important;background:rgba(0,0,0,.1)!important;font-weight:500}
+.tdq-opt:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.tdq-opt-selected{border-color:var(--btn-bg)!important;background:rgba(157,196,58,.15)!important;font-weight:500}
 .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
 .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
-.tdq-opt-selected .tdq-opt-key{background:#1a1a1a;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+.tdq-opt-selected .tdq-opt-key{background:var(--btn-bg);color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
 
 .tdq-explanation{font-size:.85rem;margin-top:6px;padding:8px 12px;background:rgba(0,0,0,.07);border-left:3px solid var(--btn-bg);border-radius:0 6px 6px 0;color:var(--text)}
 
 .tdq-feedback{font-size:.85rem;margin-top:5px}.tdq-correct{color:#10b981;font-weight:600}.tdq-wrong{color:#ef4444;font-weight:600}
-.tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(245,158,11,.1);border-radius:8px;border-left:4px solid #f59e0b}.tdq-score-num{color:#f59e0b;font-size:1.2rem}
+.tdq-score-box{font-size:1.05rem;font-weight:600;padding:12px 16px;background:rgba(157,196,58,.1);border-radius:8px;border-left:4px solid var(--accent)}.tdq-score-num{color:var(--accent);font-size:1.2rem}
 .site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--cbr);border-radius:10px;overflow:hidden;margin-top:1rem;font-size:.9rem}
 .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--cbr);text-align:left;color:var(--tc)}
 .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
@@ -1106,7 +1106,7 @@ ${siteNav()}
     ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
     <h2>${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
-    ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:#f59e0b"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:var(--accent,#9dc43a)"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <table class="site-table">
       <tbody><tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
       <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
@@ -4069,7 +4069,7 @@ function buildQuizHTML(quiz, monthDisplay, day) {
 
   return (
     `<div class="card-box" id="tdq-widget">` +
-    `<h2 class="h4 mb-3"><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>Test Your Knowledge — ${escapeHtml(monthDisplay)} ${day}</h2>` +
+    `<h2 class="h4 mb-3"><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>Test Your Knowledge — ${escapeHtml(monthDisplay)} ${day}</h2>` +
     `<p class="text-muted mb-2" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out.</p>` +
     `<a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" class="site-btn mb-3"><i class="bi bi-list-check"></i>Full quiz page</a>` +
     `<div id="tdq-questions">${questionsHtml}</div>` +
@@ -4187,7 +4187,7 @@ function buildCarouselQuizHTML(
         `<div class="qsc-slide${qi === 0 ? " qsc-active" : ""}" data-slide="${qi}" id="qsc-slide-${qi}">` +
         imgHtml +
         `<div class="qsc-slide-body" id="qsc-body-${qi}">` +
-        `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:#f59e0b"></i>Question ${qi + 1} of ${total}</div>` +
+        `<div class="qsc-q-label"><i class="bi bi-patch-question-fill me-1" style="color:var(--accent,#9dc43a)"></i>Question ${qi + 1} of ${total}</div>` +
         `<p class="tdq-q-text qsc-q-text">${escapeHtml(String(q.q))}</p>` +
         `<div class="tdq-options qsc-opts-wrap">${optsHtml}</div>` +
         readMoreHtml +
@@ -4653,15 +4653,15 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--text-muted)}
 /* Base quiz option styles shared with events page */
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.92rem;transition:background .15s,border-color .15s,transform .1s;user-select:none;background:var(--cb)}
-.tdq-opt:hover{border-color:#1a1a1a;background:rgba(0,0,0,.06);transform:translateX(2px)}.tdq-opt-selected{border-color:#1a1a1a!important;background:rgba(0,0,0,.1)!important;font-weight:500}
+.tdq-opt:hover{border-color:var(--btn-bg);background:var(--bg-alt);transform:translateX(2px)}.tdq-opt-selected{border-color:var(--btn-bg)!important;background:rgba(157,196,58,.15)!important;font-weight:500}
 .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
 .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
-.tdq-opt-selected .tdq-opt-key{background:#1a1a1a;color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
+.tdq-opt-selected .tdq-opt-key{background:var(--btn-bg);color:#fff}.tdq-opt-correct .tdq-opt-key{background:#10b981;color:#fff}.tdq-opt-wrong .tdq-opt-key{background:#ef4444;color:#fff}
 
 .tdq-explanation{font-size:.85rem;margin-top:8px;padding:10px 14px;background:rgba(0,0,0,.07);border-left:3px solid var(--btn-bg);border-radius:0 8px 8px 0;color:var(--text);line-height:1.5}
 
 .tdq-feedback{font-size:.88rem;margin-top:6px;font-weight:600}.tdq-correct{color:#10b981}.tdq-wrong{color:#ef4444}
-.tdq-score-box{font-size:1.05rem;font-weight:600;padding:14px 18px;background:rgba(245,158,11,.1);border-radius:10px;border-left:4px solid #f59e0b;text-align:left}.tdq-score-num{color:#f59e0b;font-size:1.3rem}
+.tdq-score-box{font-size:1.05rem;font-weight:600;padding:14px 18px;background:rgba(157,196,58,.1);border-radius:10px;border-left:4px solid var(--accent);text-align:left}.tdq-score-num{color:var(--accent);font-size:1.3rem}
 /* === Carousel quiz layout === */
 /* Progress */
 .qsc-progress-wrap{text-align:center;margin-bottom:20px}
@@ -4700,13 +4700,13 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-q-text{font-size:1.05rem;font-weight:700;color:var(--tc);margin-bottom:14px;line-height:1.45}
 .qsc-opts-wrap{display:flex;flex-direction:column;gap:9px}
 /* Next button */
-.qsc-next-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:12px;background:var(--badge);color:#fff;border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;animation:qscIn .25s ease}
-.qsc-next-btn:hover{background:#a03508;transform:translateY(-1px)}
+.qsc-next-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg);color:var(--btn-text);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;animation:qscIn .25s ease}
+.qsc-next-btn:hover{background:var(--btn-hover);transform:translateY(-1px)}
 .
 /* Final score slide */
 .qsc-final-slide .qsc-final-body{padding:32px 24px;text-align:center}
 .qsc-trophy-wrap{margin-bottom:18px}
-.qsc-trophy-icon{font-size:3.5rem;color:#f59e0b;animation:qscPop .5s cubic-bezier(.34,1.56,.64,1)}
+.qsc-trophy-icon{font-size:3.5rem;color:var(--accent);animation:qscPop .5s cubic-bezier(.34,1.56,.64,1)}
 @keyframes qscPop{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
 .qsc-final-score{font-size:1.1rem;font-weight:600;text-align:left;margin-bottom:18px}
 .qsc-review-list{text-align:left;border:1px solid var(--cbr);border-radius:10px;overflow:hidden;margin-bottom:22px}
@@ -4746,7 +4746,7 @@ ${siteNav()}
     </ol>
   </nav>
   <div class="qsc-page-header">
-    <h1><i class="bi bi-patch-question-fill me-2" style="color:#f59e0b"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
+    <h1><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
     <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
   </div>
   ${carouselHtml}

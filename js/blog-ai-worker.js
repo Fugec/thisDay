@@ -411,40 +411,53 @@ export default {
             );
           }
         }
-        // Patch old nav → new nav (detect old Bootstrap navbar)
-        if (patchedHtml.includes('class="navbar') && !patchedHtml.includes('class="nav"')) {
-          patchedHtml = patchedHtml.replace(
-            /<nav class="navbar[\s\S]*?<\/nav>/,
-            siteNav(),
-          );
-        }
-        // Patch old footer → new footer (detect old footer without footer-inner)
+        // Patch old footer — replace any footer that lacks footer-inner
         if (patchedHtml.includes('class="footer"') && !patchedHtml.includes('footer-inner')) {
           patchedHtml = patchedHtml.replace(
-            /<footer class="footer">[\s\S]*?<\/footer>/,
+            /<footer class="footer">[\s\S]*?<\/footer>\s*(?=<\/body>|<\/html>|$)/,
             siteFooter(),
           );
         }
-        // Patch old CSS vars and dark-theme blocks
-        if (patchedHtml.includes('--primary-bg') || patchedHtml.includes('body.dark-theme')) {
-          // Replace old :root block with green palette
+        // Patch old Bootstrap navbar → new siteNav()
+        if (patchedHtml.includes('class="navbar') && !patchedHtml.includes('class="nav"')) {
+          patchedHtml = patchedHtml.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
+        }
+        // Patch old CSS vars (blue palette) → new green palette
+        if (patchedHtml.includes('--primary-bg') || patchedHtml.includes('--card-bg')) {
           patchedHtml = patchedHtml.replace(
             /:root\s*\{[^}]*--primary-bg[^}]*\}/,
-            `:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}`,
+            `:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}`,
           );
-          // Remove all body.dark-theme blocks
+          // Remove body.dark-theme blocks
           patchedHtml = patchedHtml.replace(/body\.dark-theme\s*\{[^}]*\}/g, '');
           patchedHtml = patchedHtml.replace(/body\.dark-theme\s+[^{]*\{[^}]*\}/g, '');
+          // Replace old var references
+          patchedHtml = patchedHtml
+            .replaceAll('var(--card-bg)', 'var(--bg)')
+            .replaceAll('var(--card-border)', 'var(--border)')
+            .replaceAll('var(--text-color)', 'var(--text)')
+            .replaceAll('var(--secondary-bg)', 'var(--bg)')
+            .replaceAll('var(--primary-bg)', 'var(--btn-bg)')
+            .replaceAll('var(--footer-bg)', 'var(--bg-alt)')
+            .replaceAll('var(--footer-text-color)', 'var(--text)')
+            .replaceAll('var(--header-text-color)', 'var(--text)')
+            .replaceAll('var(--link-color)', 'var(--btn-bg)')
+            .replaceAll('var(--link-hover-color)', 'var(--accent)');
+          // Fix body styles
+          patchedHtml = patchedHtml.replace(
+            /body\s*\{[^}]*font-family:\s*Inter[^}]*\}/,
+            'body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}',
+          );
         }
         // Patch old font-family: Inter → Lora
-        if (patchedHtml.includes('font-family:Inter') || patchedHtml.includes("font-family: Inter")) {
-          patchedHtml = patchedHtml.replace(/font-family:\s*Inter[^;]*/g, 'font-family:Lora,serif');
+        if (patchedHtml.includes('font-family:Inter') || patchedHtml.includes("font-family: Inter") || patchedHtml.includes("font-family:'Inter'")) {
+          patchedHtml = patchedHtml.replace(/font-family:\s*['"]?Inter[^;]*/g, 'font-family:Lora,serif');
         }
         // Inject NAV_CSS + FOOTER_CSS if missing
         if (!patchedHtml.includes('.nav-inner')) {
           patchedHtml = patchedHtml.replace('</head>', `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
         }
-        // Patch old theme toggle JS — remove setTheme/darkTheme localStorage blocks
+        // Remove old theme toggle JS
         patchedHtml = patchedHtml.replace(/<script>\s*\(function\(\)\s*\{[^<]*setTheme[^<]*\}\)\(\);\s*<\/script>/g, '');
         // Add navToggle script if missing
         if (!patchedHtml.includes('navToggle') && patchedHtml.includes('class="nav"')) {
@@ -1397,8 +1410,8 @@ async function runPostPublishExtras(env, slug, content) {
       if (sp) {
         const mPad = String(sp.monthIndex + 1).padStart(2, "0");
         const dPad = String(sp.day).padStart(2, "0");
-        await env.EVENTS_KV.delete(`quiz-page-v22:${mPad}-${dPad}`);
-        console.log(`Blog: busted quiz-page-v22:${mPad}-${dPad} cache`);
+        await env.EVENTS_KV.delete(`quiz-page-v21:${mPad}-${dPad}`);
+        console.log(`Blog: busted quiz-page-v21:${mPad}-${dPad} cache`);
       }
     } catch (e) {
       console.error("Blog: quiz page cache bust failed:", e);

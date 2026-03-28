@@ -951,9 +951,10 @@ async function generateMultiSceneVideo(
         // stream_loop repeats the clip; -t trims to exact scene duration
         cmd.input(path).inputOptions(["-stream_loop -1", `-t ${sceneDurations[i]}`]);
       } else {
-        // -framerate must match FPS so zoompan reads at the same rate it outputs —
+        // -r must match FPS so zoompan reads at the same rate it outputs —
         // without this the input defaults to 25 fps, causing frame duplication stuttering.
-        cmd.input(path).inputOptions(["-loop 1", `-framerate ${FPS}`, `-t ${sceneDurations[i]}`]);
+        // Note: -framerate was removed as a general input option in ffmpeg 7.x; use -r instead.
+        cmd.input(path).inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
       }
     }
 
@@ -1050,7 +1051,19 @@ async function generateMultiSceneVideo(
     } else {
       cmd.outputOptions(baseOpts);
     }
-    cmd.output(videoPath).on("end", resolve).on("error", reject).run();
+    const stderrLines = [];
+    cmd
+      .output(videoPath)
+      .on("stderr", (line) => stderrLines.push(line))
+      .on("end", resolve)
+      .on("error", (err) =>
+        reject(
+          new Error(
+            `${err.message}\nFFmpeg stderr (last 40 lines):\n${stderrLines.slice(-40).join("\n")}`,
+          ),
+        ),
+      )
+      .run();
   });
 
   [...sceneFiles.map((s) => s.path), ...captionPNGPaths, endScreenPath].forEach((p) => {
@@ -1267,7 +1280,19 @@ export async function generateVideo(
       }
     }
 
-    cmd.output(videoPath).on("end", resolve).on("error", reject).run();
+    const stderrLines2 = [];
+    cmd
+      .output(videoPath)
+      .on("stderr", (line) => stderrLines2.push(line))
+      .on("end", resolve)
+      .on("error", (err) =>
+        reject(
+          new Error(
+            `${err.message}\nFFmpeg stderr (last 40 lines):\n${stderrLines2.slice(-40).join("\n")}`,
+          ),
+        ),
+      )
+      .run();
   });
 
   [...captionPNGPaths, framePath].forEach((p) => {

@@ -420,10 +420,24 @@ export default {
         if (patchedHtml.includes('class="navbar') && !patchedHtml.includes('class="nav"')) {
           patchedHtml = patchedHtml.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
         }
-        // Always inject correct green palette — overrides any stored :root
+        // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace('</head>',
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}</style></head>`
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}</style></head>`
         );
+        // Patch old CSS variable aliases used in early posts
+        patchedHtml = patchedHtml
+          .replaceAll('var(--card-bg)', 'var(--bg)')
+          .replaceAll('var(--text-color)', 'var(--text)')
+          .replaceAll('var(--primary-bg)', 'var(--btn-bg)')
+          .replaceAll('var(--footer-bg)', 'var(--bg-alt)')
+          .replaceAll('var(--link-color)', 'var(--btn-bg)')
+          .replaceAll('var(--secondary-bg)', 'var(--bg)');
+        // Patch Bootstrap primary button classes → site btn
+        patchedHtml = patchedHtml
+          .replaceAll('class="btn btn-primary', 'class="btn')
+          .replaceAll("class='btn btn-primary", "class='btn")
+          .replaceAll('class="btn btn-outline-secondary', 'class="btn')
+          .replaceAll("class='btn btn-outline-secondary", "class='btn");
         // Inject NAV_CSS + FOOTER_CSS if missing
         if (!patchedHtml.includes('.nav-inner')) {
           patchedHtml = patchedHtml.replace('</head>', `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);

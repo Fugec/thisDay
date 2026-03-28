@@ -865,6 +865,8 @@ export default {
             "<style>.tdq-opt:hover{border-color:var(--accent,#9dc43a)!important;background:rgba(157,196,58,.07)!important}.tdq-opt-selected{border-color:var(--accent,#9dc43a)!important;background:rgba(157,196,58,.15)!important}.tdq-opt-selected .tdq-opt-key{background:var(--btn-bg,#1b3a2d)!important}</style></head>",
           );
         }
+        // Patch float bar background to white on already-stored posts
+        patchedHtml = patchedHtml.replaceAll('background:rgba(27,58,45,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.3)', 'background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15)');
         // Inject floating quiz bar into stored posts that don't have it yet
         if (!patchedHtml.includes("tdq-float-bar")) {
           const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}#tdq-float-btn:hover{background:#8ab532;box-shadow:0 2px 16px rgba(157,196,58,.5)}</style>`;

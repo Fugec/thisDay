@@ -105,35 +105,11 @@ async function generateViaCFWorkersAI(prompt) {
 }
 
 /**
- * Generates a historical image via Pollinations.ai (free, no token required).
- * Uses flux model, 1080×1920 portrait. No auth needed.
- *
- * @param {string} prompt
- * @returns {Promise<Buffer>} image bytes (JPEG)
- */
-async function generateViaPollinationsAI(prompt) {
-  console.log("  → Pollinations.ai (flux, free, no token)...");
-  const encodedPrompt = encodeURIComponent(
-    prompt +
-      ", vertical 9:16 portrait, cinematic photorealism, highly detailed, anatomically correct",
-  );
-  const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1080&height=1920&model=flux&nologo=true&seed=${Math.floor(Math.random() * 1e9)}`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" },
-    signal: AbortSignal.timeout(120_000),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Pollinations error ${res.status}: ${body.slice(0, 200)}`);
-  }
-  return Buffer.from(await res.arrayBuffer());
-}
-
-/**
  * Generates an AI image, trying providers in order:
- *   1. Hugging Face (FLUX.1-schnell)
- *   2. Pollinations.ai (flux, free, no token)
- *   3. Cloudflare Workers AI (SDXL-base)
+ *   1. Hugging Face (FLUX.1-schnell) — HF_TOKEN then HF_TOKEN_2
+ *   2. Cloudflare Workers AI (SDXL-base) — needs CF_API_TOKEN with AI permission
+ *
+ * If all providers fail, the caller falls back to Wikipedia images.
  *
  * @param {string} prompt
  * @returns {Promise<Buffer>} image bytes (JPEG or PNG)
@@ -149,14 +125,7 @@ export async function generateAIImage(prompt) {
     }
   }
 
-  // 2. Pollinations.ai — free, no token, flux model (good quality)
-  try {
-    return await generateViaPollinationsAI(prompt);
-  } catch (err) {
-    console.warn(`  ⚠ Pollinations.ai failed: ${err.message}`);
-  }
-
-  // 3. Cloudflare Workers AI (last resort, needs CF_API_TOKEN with AI permission)
+  // 2. Cloudflare Workers AI (needs CF_API_TOKEN with Workers AI permission)
   return await generateViaCFWorkersAI(prompt);
 }
 

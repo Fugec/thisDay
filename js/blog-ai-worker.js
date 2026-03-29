@@ -17,14 +17,7 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-import {
-  siteNav,
-  siteFooter,
-  footerYearScript,
-  NAV_CSS,
-  FOOTER_CSS,
-  navToggleScript,
-} from "./shared/layout.js";
+import { siteNav, siteFooter, footerYearScript, NAV_CSS, FOOTER_CSS, navToggleScript } from "./shared/layout.js";
 import {
   resolveAiModel,
   checkAndUpdateAiModel,
@@ -222,8 +215,8 @@ export default {
       const cache = caches.default;
       const results = await Promise.allSettled(
         index.map((e) =>
-          cache.delete(new Request(`https://thisday.info/blog/${e.slug}/`)),
-        ),
+          cache.delete(new Request(`https://thisday.info/blog/${e.slug}/`))
+        )
       );
       const purged = results.filter((r) => r.status === "fulfilled").length;
       return jsonResponse({ status: "ok", purged, total: index.length });
@@ -339,10 +332,7 @@ export default {
         const index = indexRaw ? JSON.parse(indexRaw) : [];
         const entry = index.find((p) => p.slug === slug);
         // Fall back to slug-only when entry not in index (covers old static posts)
-        const entryOrFallback = entry || {
-          title: slug.replace(/[-/]/g, " "),
-          description: "",
-        };
+        const entryOrFallback = entry || { title: slug.replace(/[-/]/g, " "), description: "" };
         if (env.AI || env.GROQ_API_KEY) {
           const content = await buildRichContent(entryOrFallback, slug);
           const quiz = await generateBlogQuiz(env, content, slug);
@@ -420,38 +410,28 @@ export default {
           }
         }
         // Patch old footer — replace any footer that lacks footer-inner
-        if (
-          patchedHtml.includes('class="footer"') &&
-          !patchedHtml.includes("footer-inner")
-        ) {
+        if (patchedHtml.includes('class="footer"') && !patchedHtml.includes('footer-inner')) {
           patchedHtml = patchedHtml.replace(
             /<footer class="footer">[\s\S]*?<\/footer>\s*(?=<\/body>|<\/html>|$)/,
             siteFooter(),
           );
         }
         // Patch old Bootstrap navbar → new siteNav()
-        if (
-          patchedHtml.includes('class="navbar') &&
-          !patchedHtml.includes('class="nav"')
-        ) {
-          patchedHtml = patchedHtml.replace(
-            /<nav class="navbar[\s\S]*?<\/nav>/,
-            siteNav(),
-          );
+        if (patchedHtml.includes('class="navbar') && !patchedHtml.includes('class="nav"')) {
+          patchedHtml = patchedHtml.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
         }
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
-        patchedHtml = patchedHtml.replace(
-          "</head>",
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;font-family:"Lora",Georgia,serif;font-size:.875rem;font-weight:500;color:#fff!important;background:var(--btn-bg);padding:.65rem 1.5rem;border-radius:8px;border:none;cursor:pointer;text-decoration:none!important;transition:background .2s,transform .15s;white-space:nowrap}.btn::after{content:" →";font-style:normal}.btn:hover,.btn:focus{background:var(--btn-hover);transform:translateY(-1px);color:#fff!important;text-decoration:none!important;outline:none}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}</style></head>`,
+        patchedHtml = patchedHtml.replace('</head>',
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}</style></head>`
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml
-          .replaceAll("var(--card-bg)", "var(--bg)")
-          .replaceAll("var(--text-color)", "var(--text)")
-          .replaceAll("var(--primary-bg)", "var(--btn-bg)")
-          .replaceAll("var(--footer-bg)", "var(--bg-alt)")
-          .replaceAll("var(--link-color)", "var(--btn-bg)")
-          .replaceAll("var(--secondary-bg)", "var(--bg)");
+          .replaceAll('var(--card-bg)', 'var(--bg)')
+          .replaceAll('var(--text-color)', 'var(--text)')
+          .replaceAll('var(--primary-bg)', 'var(--btn-bg)')
+          .replaceAll('var(--footer-bg)', 'var(--bg-alt)')
+          .replaceAll('var(--link-color)', 'var(--btn-bg)')
+          .replaceAll('var(--secondary-bg)', 'var(--bg)');
         // Patch Bootstrap primary button classes → site btn
         patchedHtml = patchedHtml
           .replaceAll('class="btn btn-primary', 'class="btn')
@@ -459,30 +439,16 @@ export default {
           .replaceAll('class="btn btn-outline-secondary', 'class="btn')
           .replaceAll("class='btn btn-outline-secondary", "class='btn");
         // Inject NAV_CSS + FOOTER_CSS if missing
-        if (!patchedHtml.includes(".nav-inner")) {
-          patchedHtml = patchedHtml.replace(
-            "</head>",
-            `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`,
-          );
+        if (!patchedHtml.includes('.nav-inner')) {
+          patchedHtml = patchedHtml.replace('</head>', `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
         }
         // Remove old dark theme JS and CSS
-        patchedHtml = patchedHtml.replace(
-          /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*(?:setTheme|darkTheme|dark-theme|DARK_THEME)(?:(?!<\/script>)[\s\S])*<\/script>/g,
-          "",
-        );
-        // Strip body.dark-theme / body.dark CSS blocks
-        patchedHtml = patchedHtml.replace(/body\.dark(?:-theme)?[^{]*\{[^}]*\}/g, "");
-        // Strip @media (prefers-color-scheme: dark) blocks
-        patchedHtml = patchedHtml.replace(/@media\s*\([^)]*prefers-color-scheme\s*:\s*dark[^)]*\)\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, "");
+        patchedHtml = patchedHtml.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*(?:setTheme|darkTheme|dark-theme|DARK_THEME)(?:(?!<\/script>)[\s\S])*<\/script>/g, '');
+        patchedHtml = patchedHtml.replace(/body\.dark-theme\s*\{[^}]*\}/g, '');
+        patchedHtml = patchedHtml.replace(/body\.dark-theme[^{]*\{[^}]*\}/g, '');
         // Add navToggle script if missing
-        if (
-          !patchedHtml.includes("navToggle") &&
-          patchedHtml.includes('class="nav"')
-        ) {
-          patchedHtml = patchedHtml.replace(
-            "</body>",
-            `<script>${navToggleScript()}</script></body>`,
-          );
+        if (!patchedHtml.includes('navToggle') && patchedHtml.includes('class="nav"')) {
+          patchedHtml = patchedHtml.replace('</body>', `<script>${navToggleScript()}</script></body>`);
         }
         // Patch image caption — replace any AI-generated caption with correct Wikimedia attribution
         patchedHtml = patchedHtml.replace(
@@ -891,7 +857,7 @@ export default {
         }
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
-          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg,#1b3a2d);z-index:9999;transition:width .1s linear;pointer-events:none}.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;font-family:"Lora",Georgia,serif;font-size:.875rem;font-weight:500;color:#fff!important;background:var(--btn-bg,#1b3a2d);padding:.65rem 1.5rem;border-radius:8px;border:none;cursor:pointer;text-decoration:none!important;transition:background .2s,transform .15s;white-space:nowrap}.btn::after{content:" →";font-style:normal}.btn:hover,.btn:focus{background:var(--btn-hover,#2a4d3a);transform:translateY(-1px);color:#fff!important;text-decoration:none!important;outline:none}.tdq-cta-sub{color:var(--text-muted,#5c7a65)}</style>`;
+          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg,#1b3a2d);z-index:9999;transition:width .1s linear;pointer-events:none}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text,#1a2e20);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:var(--btn-bg,#1b3a2d);background:var(--bg-alt,#f2f7f2)}.site-btn-primary{border-color:var(--btn-bg,#1b3a2d);color:var(--btn-bg,#1b3a2d)}.site-btn-primary:hover{background:var(--bg-alt,#f2f7f2);border-color:var(--btn-hover,#2a4d3a);color:var(--btn-hover,#2a4d3a)}.tdq-cta-sub{color:var(--text-muted,#5c7a65)}</style>`;
           const progressHtml = `<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>`;
           const progressJs = `<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();<\/script>`;
           patchedHtml = patchedHtml
@@ -914,10 +880,7 @@ export default {
           );
         }
         // Patch float bar background to white on already-stored posts
-        patchedHtml = patchedHtml.replaceAll(
-          "background:rgba(27,58,45,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.3)",
-          "background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15)",
-        );
+        patchedHtml = patchedHtml.replaceAll('background:rgba(27,58,45,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.3)', 'background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15)');
         // Inject floating quiz bar into stored posts that don't have it yet
         if (!patchedHtml.includes("tdq-float-bar")) {
           const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}#tdq-float-btn:hover{background:#8ab532;box-shadow:0 2px 16px rgba(157,196,58,.5)}</style>`;
@@ -931,58 +894,36 @@ export default {
             .replace(bodyClose, floatHtml + "\n" + floatJs + "\n" + bodyClose);
         }
         // Patch old amber/orange quiz colors → green palette
-        if (
-          patchedHtml.includes("linear-gradient(90deg,#f59e0b") ||
-          patchedHtml.includes("rgba(15,23,42,.96)") ||
-          patchedHtml.includes("background:#f59e0b")
-        ) {
+        if (patchedHtml.includes('linear-gradient(90deg,#f59e0b') || patchedHtml.includes('rgba(15,23,42,.96)') || patchedHtml.includes('background:#f59e0b')) {
           patchedHtml = patchedHtml
-            .replaceAll("rgba(15,23,42,.96)", "rgba(27,58,45,.96)")
-            .replaceAll("linear-gradient(90deg,#f59e0b,#d97706)", "#9dc43a")
-            .replaceAll("linear-gradient(90deg,#d97706,#b45309)", "#8ab532")
-            .replaceAll("rgba(245,158,11,.35)", "rgba(157,196,58,.35)")
-            .replaceAll("rgba(245,158,11,.5)", "rgba(157,196,58,.5)")
-            .replaceAll(
-              "background:#f59e0b",
-              "background:var(--btn-bg,#1b3a2d)",
-            )
-            .replaceAll(
-              "background:#d97706",
-              "background:var(--btn-hover,#2a4d3a)",
-            )
-            .replaceAll("color:#f59e0b", "color:var(--accent,#9dc43a)")
-            .replaceAll(
-              "border-color:#f59e0b",
-              "border-color:var(--btn-bg,#1b3a2d)",
-            )
-            .replaceAll("rgba(245,158,11,.07)", "rgba(157,196,58,.07)")
-            .replaceAll("rgba(245,158,11,.12)", "rgba(157,196,58,.15)")
-            .replaceAll("rgba(245,158,11,.1)", "rgba(157,196,58,.1)")
-            .replaceAll(
-              "border-left:4px solid #f59e0b",
-              "border-left:4px solid var(--accent,#9dc43a)",
-            );
+            .replaceAll('rgba(15,23,42,.96)', 'rgba(27,58,45,.96)')
+            .replaceAll('linear-gradient(90deg,#f59e0b,#d97706)', '#9dc43a')
+            .replaceAll('linear-gradient(90deg,#d97706,#b45309)', '#8ab532')
+            .replaceAll('rgba(245,158,11,.35)', 'rgba(157,196,58,.35)')
+            .replaceAll('rgba(245,158,11,.5)', 'rgba(157,196,58,.5)')
+            .replaceAll('background:#f59e0b', 'background:var(--btn-bg,#1b3a2d)')
+            .replaceAll('background:#d97706', 'background:var(--btn-hover,#2a4d3a)')
+            .replaceAll('color:#f59e0b', 'color:var(--accent,#9dc43a)')
+            .replaceAll('border-color:#f59e0b', 'border-color:var(--btn-bg,#1b3a2d)')
+            .replaceAll('rgba(245,158,11,.07)', 'rgba(157,196,58,.07)')
+            .replaceAll('rgba(245,158,11,.12)', 'rgba(157,196,58,.15)')
+            .replaceAll('rgba(245,158,11,.1)', 'rgba(157,196,58,.1)')
+            .replaceAll('border-left:4px solid #f59e0b', 'border-left:4px solid var(--accent,#9dc43a)');
           // Fix float button text: white on light green → dark on light green
           patchedHtml = patchedHtml.replace(
-            /#tdq-float-btn\{background:#1a2e20;border:none;border-radius:100px;color:#fff;/,
-            "#tdq-float-btn{background:#1a2e20;border:none;border-radius:100px;color:#1a2e20;",
+            /#tdq-float-btn\{background:#9dc43a;border:none;border-radius:100px;color:#fff;/,
+            '#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;',
           );
         }
         // Patch old btn-warning quiz buttons → green
-        if (patchedHtml.includes("btn-warning")) {
+        if (patchedHtml.includes('btn-warning')) {
           patchedHtml = patchedHtml
-            .replaceAll(
-              'class="btn btn-warning fw-semibold w-100 mt-2"',
-              'class="btn"',
-            )
+            .replaceAll('class="btn btn-warning fw-semibold w-100 mt-2"', 'class="btn"')
             .replaceAll('class="btn btn-warning mt-3"', 'class="btn mt-3"');
         }
         // Patch old box-shadow on article border
-        if (patchedHtml.includes("box-shadow:0 2px 4px rgba(0,0,0,.1)")) {
-          patchedHtml = patchedHtml.replaceAll(
-            "box-shadow:0 2px 4px rgba(0,0,0,.1)",
-            "box-shadow:none",
-          );
+        if (patchedHtml.includes('box-shadow:0 2px 4px rgba(0,0,0,.1)')) {
+          patchedHtml = patchedHtml.replaceAll('box-shadow:0 2px 4px rgba(0,0,0,.1)', 'box-shadow:none');
         }
         // Inject AdSense ad unit into stored posts that don't have one yet
         // Only inject for posts from March 2026 onwards — leave older posts alone
@@ -1123,10 +1064,7 @@ export default {
     if (staticBlogMatch) {
       const slug = staticBlogMatch[1]; // e.g., "august/1-2025"
       const originResp = await fetch(request);
-      if (
-        !originResp.ok ||
-        !originResp.headers.get("Content-Type")?.includes("text/html")
-      ) {
+      if (!originResp.ok || !originResp.headers.get("Content-Type")?.includes("text/html")) {
         return originResp;
       }
       let html = await originResp.text();
@@ -1147,8 +1085,7 @@ export default {
           /:root\s*\{[^}]*--primary-bg[^}]*\}/,
           `:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}`,
         );
-        html = html.replace(/body\.dark(?:-theme)?[^{]*\{[^}]*\}/g, "");
-        html = html.replace(/@media\s*\([^)]*prefers-color-scheme\s*:\s*dark[^)]*\)\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, "");
+        html = html.replace(/body\.dark-theme\s*\{[^}]*\}/g, "");
         html = html
           .replaceAll("var(--card-bg)", "var(--bg)")
           .replaceAll("var(--text-color)", "var(--text)")
@@ -1161,28 +1098,16 @@ export default {
         );
       }
       // Patch Inter → Lora font
-      if (
-        html.includes("font-family:Inter") ||
-        html.includes("font-family: Inter")
-      ) {
-        html = html.replace(
-          /font-family:\s*['"]?Inter[^;]*/g,
-          "font-family:Lora,serif",
-        );
+      if (html.includes("font-family:Inter") || html.includes("font-family: Inter")) {
+        html = html.replace(/font-family:\s*['"]?Inter[^;]*/g, "font-family:Lora,serif");
       }
       // Inject NAV_CSS + FOOTER_CSS if missing
       if (!html.includes(".nav-inner")) {
-        html = html.replace(
-          "</head>",
-          `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`,
-        );
+        html = html.replace("</head>", `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
       }
       // Add navToggle script if missing
       if (!html.includes("navToggle") && html.includes('class="nav"')) {
-        html = html.replace(
-          "</body>",
-          `<script>${navToggleScript()}</script></body>`,
-        );
+        html = html.replace("</body>", `<script>${navToggleScript()}</script></body>`);
       }
       // Inject quiz CTA + popup if no quiz present
       if (!html.includes("tdq-cta-btn")) {
@@ -1285,11 +1210,7 @@ export default {
   })();
   <\/script>`;
         // Inject quiz CTA before </article> or </body>
-        const insertBefore = html.includes("</article>")
-          ? "</article>"
-          : html.includes("</body>")
-            ? "</body>"
-            : "</html>";
+        const insertBefore = html.includes("</article>") ? "</article>" : (html.includes("</body>") ? "</body>" : "</html>");
         html = html.replace(insertBefore, quizCta + "\n" + insertBefore);
         const bodyClose = html.includes("</body>") ? "</body>" : "</html>";
         html = html.replace(bodyClose, quizBlock + "\n" + bodyClose);
@@ -1297,10 +1218,7 @@ export default {
       // Inject support popup if not present
       if (!html.includes("supportPopup")) {
         const bodyClose = html.includes("</body>") ? "</body>" : "</html>";
-        html = html.replace(
-          bodyClose,
-          supportPopupSnippet() + "\n" + bodyClose,
-        );
+        html = html.replace(bodyClose, supportPopupSnippet() + "\n" + bodyClose);
       }
       return new Response(html, {
         headers: {
@@ -1674,7 +1592,8 @@ async function runPostPublishExtras(env, slug, content) {
         .filter((p) => p && p.length > 40 && p.length < 400)
         .slice(0, 12),
       description:
-        content.description || allParas.slice(0, 3).join(" ").substring(0, 800),
+        content.description ||
+        allParas.slice(0, 3).join(" ").substring(0, 800),
     };
     const quiz = await generateBlogQuiz(env, enrichedContent, slug);
     if (quiz) {
@@ -3157,11 +3076,14 @@ ${JSON.stringify({
       blockquote.historical-quote{border-left:3px solid var(--btn-bg);padding-left:1rem;margin-left:.5rem;font-style:italic}
       .border{border:1px solid var(--border)!important;box-shadow:none}
       .shadow-sm{box-shadow:none!important}
-      .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;font-family:"Lora",Georgia,serif;font-size:.875rem;font-weight:500;color:#fff!important;background:var(--btn-bg);padding:.65rem 1.5rem;border-radius:8px;border:none;cursor:pointer;text-decoration:none!important;transition:background .2s,transform .15s;white-space:nowrap}
-      .btn::after{content:" →";font-style:normal}
-      .btn:hover,.btn:focus{background:var(--btn-hover);transform:translateY(-1px);color:#fff!important;text-decoration:none!important;outline:none}
+      .btn-outline-primary{color:var(--text-muted);border-color:var(--border);background:var(--bg)}
+      .btn-outline-primary:hover{border-color:var(--btn-bg);color:var(--text);background:var(--bg-alt)}
       #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg);z-index:9999;transition:width .1s linear;pointer-events:none}
       button#chatbotToggle,#chatbotWindow{display:none!important}
+      .site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
+      .site-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}
+      .site-btn-primary{border-color:var(--btn-bg);color:var(--text)}
+      .site-btn-primary:hover{background:var(--bg-alt);border-color:var(--btn-hover);color:var(--text)}
       .site-table{width:100%;max-width:480px;border-collapse:collapse;border:1.5px solid var(--border);border-radius:10px;overflow:hidden;margin-top:1rem;margin-bottom:1.5rem;font-size:.9rem}
       .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--border);text-align:left;color:var(--text)}
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
@@ -3474,8 +3396,8 @@ ${analysisBadItems}
   <style>
     #tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}
     #tdq-float-bar.tdq-float-visible{transform:translateY(0)}
-    #tdq-float-btn{background:#1a2e20;border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}
-    #tdq-float-btn:hover{background:#1a2e20;box-shadow:0 2px 16px rgba(157,196,58,.5)}
+    #tdq-float-btn{background:var(--accent,#9dc43a);border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}
+    #tdq-float-btn:hover{background:#8ab532;box-shadow:0 2px 16px rgba(157,196,58,.5)}
   </style>
   <div id="tdq-float-bar">
     <button id="tdq-float-btn">
@@ -3699,7 +3621,7 @@ ${analysisBadItems}
       var el = document.getElementById("tdq-score");
       el.hidden = false;
       el.innerHTML = '<div class="tdq-score-box">You scored <span class="tdq-score-num">' + score + "/" + total + '</span> (' + pct + '%) — ' + msg + '</div>' +
-        '<a href="' + prevDayUrl() + '" class="btn w-100 mt-3"><i class="bi bi-arrow-left me-1"></i>Previous Day&#39;s Story</a>';
+        '<a href="' + prevDayUrl() + '" class="btn btn-outline-primary w-100 mt-3"><i class="bi bi-arrow-left me-1"></i>Previous Day&#39;s Story</a>';
       var popup = document.getElementById("tdq-popup");
       if (popup) { setTimeout(function(){ popup.scrollTop = 0; }, 30); }
       var progEl = document.getElementById("tdq-progress");
@@ -4008,10 +3930,10 @@ ${siteNav()}
         This page doesn&rsquo;t exist or may have moved.<br />
         Try the <a href="/">homepage</a> to explore today&rsquo;s events, or browse the <a href="/blog/">blog</a>.
       </p>
-      <a href="/" class="btn px-4 me-2">
+      <a href="/" class="btn btn-primary px-4 me-2">
         <i class="bi bi-house-door me-1"></i>Home
       </a>
-      <a href="/blog/" class="btn px-4">
+      <a href="/blog/" class="btn btn-outline-secondary px-4">
         <i class="bi bi-journal-text me-1"></i>Blog
       </a>
       ${suggestions}

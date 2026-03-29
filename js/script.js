@@ -418,9 +418,9 @@ function renderCarouselItem(container, post, index) {
       <h5>${truncatedTitle}</h5>
       <p>${teaserFinal}</p>
       <div class="d-flex justify-content-center gap-2">
-        <a href="${post.url}" class="btn"
+        <a href="${post.url}" class="btn btn-primary btn-sm"
            ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>Read Full Post</a>
-        <a href="${window.__todayGeneratedUrl || "/events/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn">Today's Events</a>
+        <a href="${window.__todayGeneratedUrl || "/events/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
       </div>
     </div>
   `;
@@ -439,7 +439,7 @@ function renderPlaceholder(container, month) {
     <div class="carousel-caption">
       <h5>Blog Posts for ${monthNames[month]}</h5>
       <p>No blog posts available for this month. Check back later for new content!</p>
-      <a href="#calendarGrid" class="btn">Explore Calendar</a>
+      <a href="#calendarGrid" class="btn btn-primary btn-sm">Explore Calendar</a>
     </div>
   `;
   container.appendChild(defaultItem);
@@ -908,7 +908,6 @@ async function populateMarquee() {
     const title = item.title || item.description || "Historical event";
 
     const yearBadge = document.createElement("span");
-    yearBadge.className = "event-years-ago";
     yearBadge.textContent = `${year}`;
     itemNode.appendChild(yearBadge);
 
@@ -956,8 +955,8 @@ async function populatePeopleStrip() {
     return;
   }
 
-  const births = (data.births || []).filter(p => p && p.title).slice(0, 7);
-  const deaths = (data.deaths || []).filter(p => p && p.title).slice(0, 7);
+  const births = (data.births || []).filter(p => p && p.title).slice(0, 5);
+  const deaths = (data.deaths || []).filter(p => p && p.title).slice(0, 5);
 
   if (!births.length && !deaths.length) {
     if (section) section.style.display = "none";
@@ -989,7 +988,7 @@ async function populatePeopleStrip() {
     name.textContent = person.title || "";
 
     const year = document.createElement("div");
-    year.className = "event-years-ago";
+    year.className = "person-pill-year";
     year.textContent = person.year ? person.year : "";
 
     a.appendChild(circle);
@@ -2134,19 +2133,19 @@ function renderFilteredItems(itemsToRender) {
                         <div class="event-actions">
                           ${
                             event.sourceUrl
-                              ? `<a href="${event.sourceUrl}" class="btn"
+                              ? `<a href="${event.sourceUrl}" class="event-action-btn event-action-read btn btn-contrast btn-sm"
                                  target="_blank" rel="noopener noreferrer">
                                    Read More About ${event.title.length > 20 ? `${event.title.substring(0, 20)}...` : event.title}
                                  </a>`
                               : ""
                           }
-                          <button class="btn share-copy-btn"
+                          <button class="event-action-btn event-action-share share-copy-btn btn btn-contrast btn-sm"
                             data-desc="${(event.description || "").replace(/"/g, "&quot;")}"
                             data-year="${event.year}"
                             data-url="${event.sourceUrl || ""}">
                             Share
                           </button>
-                          <a href="${waUrl}" class="btn" target="_blank" rel="noopener noreferrer">
+                          <a href="${waUrl}" class="event-action-btn event-action-wa btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">
                             WhatsApp
                           </a>
                         </div>
@@ -2253,11 +2252,11 @@ async function showEventDetails(
     // "All" button — full width on mobile, rest in 2-col grid
     const allActive = currentActiveFilter === "all" ? "active" : "";
     let filterButtonsHtml = `<div id="eventFilterContainer">
-      <button class="btn filter-btn filter-btn-all ${allActive}" data-category="all">All</button>`;
+      <button class="btn btn-sm btn-contrast filter-btn filter-btn-all ${allActive}" data-category="all">All</button>`;
     sortedCategories.slice(1).forEach((category) => {
       const isActive =
         category.toLowerCase() === currentActiveFilter ? "active" : "";
-      filterButtonsHtml += `<button class="btn filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
+      filterButtonsHtml += `<button class="btn btn-sm btn-contrast filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
     });
     filterButtonsHtml += `</div>`;
     const totalEvents = currentDayAllItems.length;
@@ -2343,7 +2342,7 @@ async function showEventDetails(
               }
               <div class="born-died-info">
                 <a href="${p.sourceUrl || "#"}" target="_blank" rel="noopener" class="born-died-name">${p.title || p.description?.substring(0, 40) || ""}</a>
-                <span class="event-years-ago">${p.year ?? ""}</span>
+                <span class="born-died-year">${p.year ?? ""}</span>
               </div>
             </div>`,
             )
@@ -2368,7 +2367,7 @@ async function showEventDetails(
       <div class="alert alert-danger" role="alert">
         <h5><i class="bi bi-exclamation-circle me-1"></i>Loading Error</h5>
         <p class="mb-2">Unable to load events for this day. Please check your internet connection.</p>
-        <button class="btn" id="retryEventsBtn">
+        <button class="btn btn-sm btn-outline-danger" id="retryEventsBtn">
           <i class="bi bi-arrow-clockwise me-1"></i>Try again
         </button>
       </div>
@@ -2669,8 +2668,8 @@ function renderFullWidthCarouselItem(container, event, index) {
       <h5 style="font-size:20px;font-weight:700;line-height:1.2;margin-bottom:0.75rem;">${title}</h5>
       <p>${excerpt}</p>
       <div style="display:inline-flex;gap:8px;justify-content:center;flex-direction:row;">
-        <a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn">Read on Wikipedia</a>
-        ${window.__todayGeneratedUrl ? `<a href="${window.__todayGeneratedUrl}" class="btn">Today's Events</a>` : ""}
+        <a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Read on Wikipedia</a>
+        ${window.__todayGeneratedUrl ? `<a href="${window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Today's Events</a>` : ""}
       </div>
     </div>
   `;

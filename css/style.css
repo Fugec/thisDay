@@ -185,6 +185,9 @@ button.carousel-control-prev {
 
 .cookie-banner .btn {
   flex-shrink: 0;
+  padding: 8px 16px;
+  border-radius: 5px;
+  border: 1px solid #fff;
 }
 
 button.btn.btn-sm.btn-outline-primary.filter-btn {
@@ -209,8 +212,8 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
 }
 
 #eventFilterContainer {
-  display: grid !important;
-  grid-template-columns: repeat(2, 1fr) !important;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.5rem;
   margin-bottom: 0.75rem;
 }
@@ -220,9 +223,21 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
   grid-column: 1 / -1;
 }
 
+/* Desktop: flex-wrap row, All full width, rest 50% (2 in a row) */
 @media (min-width: 576px) {
   #eventFilterContainer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
     margin-bottom: 0;
+  }
+  #eventFilterContainer .filter-btn-all {
+    grid-column: unset;
+    width: 100%;
+  }
+  #eventFilterContainer .filter-btn:not(.filter-btn-all) {
+    flex: 0 0 calc(50% - 0.25rem);
+    max-width: calc(50% - 0.25rem);
   }
 }
 
@@ -554,6 +569,11 @@ select:focus-visible,
 textarea:focus-visible {
   outline: none;
   box-shadow: var(--site-focus-ring) !important;
+}
+
+article.p-4.rounded.border.shadow-sm {
+  border-radius: var(--site-radius) !important;
+  box-shadow: var(--site-shadow-sm) !important;
 }
 
 article img {

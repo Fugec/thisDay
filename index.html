@@ -111,16 +111,16 @@
       sizes="16x16"
       href="images/favicon-16x16.png"
     />
-    <link rel="stylesheet" href="css/custom.css?v=3" />
+    <link rel="stylesheet" href="css/custom.css?v=10" />
 
     <link rel="manifest" href="/manifest.json" />
     <link
       rel="stylesheet"
-      href="css/style.css?v=9"
+      href="css/style.css?v=10"
       media="print"
       onload="this.media = 'all'"
     />
-    <noscript><link rel="stylesheet" href="css/style.css?v=9" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.css?v=10" /></noscript>
 
     <script
       async
@@ -588,7 +588,7 @@
                 "</div>";
               grid.appendChild(card);
             });
-            var section = grid.closest('.blog-section');
+            var section = grid.closest(".blog-section");
             if (section) section.scrollLeft = 0;
           })
           .catch(function () {});
@@ -667,7 +667,7 @@
 
               grid.appendChild(card);
             });
-            var section = grid.closest('.blog-section');
+            var section = grid.closest(".blog-section");
             if (section) section.scrollLeft = 0;
           } catch (err) {
             var grid = document.getElementById("todaysEventsGrid");

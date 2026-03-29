@@ -659,7 +659,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
     FOOTER_CSS +
     "\n" +
     `
-.card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
+.card-box{background:#ffffff;border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
 
@@ -691,18 +691,14 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
 .site-table th{background:rgba(0,0,0,.07);font-weight:600;white-space:nowrap;width:40%}
 
-.site-btn{display:inline-flex;align-items:center;gap:8px;padding:.5rem 1.1rem;background:transparent;color:var(--text);border:1.5px solid var(--border);border-radius:4px;font-size:.875rem;font-family:Lora,serif;font-weight:500;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s;user-select:none;white-space:nowrap}
-.site-btn:hover{background:var(--bg-alt);color:var(--text);border-color:var(--border);text-decoration:none}
-.site-btn-primary{background:transparent;color:var(--text);border-color:var(--border)}
-.site-btn-primary:hover{background:var(--bg-alt);color:var(--text);border-color:var(--border)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;font-family:"Lora",Georgia,serif;font-size:.875rem;font-weight:500;color:#fff!important;background:var(--btn-bg);padding:.65rem 1.5rem;border-radius:8px;border:none;cursor:pointer;text-decoration:none!important;transition:background .2s,transform .15s;white-space:nowrap}
+.btn::after{content:" →";font-style:normal}
+.btn:hover,.btn:focus{background:var(--btn-hover);transform:translateY(-1px);color:#fff!important;text-decoration:none!important;outline:none}
 
 #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg);z-index:9999;transition:width .1s linear;pointer-events:none}
 
 .explore-actions{display:flex;flex-direction:column;gap:.5rem}
 @media(min-width:576px){.explore-actions{flex-direction:row;flex-wrap:wrap;gap:.5rem}}
-.explore-action-btn{display:flex;align-items:center;width:100%;padding:.6rem 1rem;font-size:.875rem;font-weight:500;border:1.5px solid var(--cbr);border-radius:8px;text-decoration:none;color:var(--tc);background:transparent;transition:background .15s,border-color .15s}
-@media(min-width:576px){.explore-action-btn{width:auto}}
-.explore-action-btn:hover{background:rgba(0,0,0,.06);border-color:rgba(0,0,0,.35);color:#1a1a1a;text-decoration:none}
 .explore-action-quiz{border-color:rgba(0,0,0,.3);color:#1a1a1a}
 .explore-action-quiz:hover{background:rgba(0,0,0,.1);border-color:#1a1a1a}
 
@@ -1011,7 +1007,7 @@ function generateBlogPostHTML(
     </div>
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
       <span class="yr event-years-ago ms-2"${yrStyle}>${year}</span>
-      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
+      ${w ? `<a href="${escapeHtml(w)}" class="btn" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
     </div>
   </div>
 </div>`;
@@ -1115,7 +1111,7 @@ ${siteNav()}
       <tr><th>Events recorded</th><td>${events.length}</td></tr>
       <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
     </tbody></table>
-    ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn site-btn-primary mt-3" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Full Article on Wikipedia</a>` : ""}
+    ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="btn mt-3" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Full Article on Wikipedia</a>` : ""}
   </div>`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
@@ -1141,7 +1137,7 @@ ${siteNav()}
     ${
       othersHiddenHtml
         ? `<div id="events-more" style="display:none">${othersHiddenHtml}</div>
-    <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>`
+    <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>`
         : ""
     }
   </div>`
@@ -1167,7 +1163,7 @@ ${siteNav()}
     </div>
     <div class="row g-3 mb-3">${birthTop3Html}</div>
     ${birthGridHtml ? `<div style="padding:0 4px"><div class="row g-0">${birthGridHtml}</div></div>` : ""}
-    <a href="/born/${monthName}/${day}/" class="site-btn site-btn-primary mt-3"><i class="bi bi-person-heart"></i>See all birthdays on ${escapeHtml(mDisplay)} ${day}</a>
+    <a href="/born/${monthName}/${day}/" class="btn mt-3"><i class="bi bi-person-heart"></i>See all birthdays on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
@@ -1182,27 +1178,27 @@ ${siteNav()}
     </div>
     <div class="row g-3 mb-3">${deathTop3Html}</div>
     ${deathGridHtml ? `<div style="padding:0 4px"><div class="row g-0">${deathGridHtml}</div></div>` : ""}
-    <a href="/died/${monthName}/${day}/" class="site-btn mt-3"><i class="bi bi-flower1"></i>See all deaths on ${escapeHtml(mDisplay)} ${day}</a>
+    <a href="/died/${monthName}/${day}/" class="btn mt-3"><i class="bi bi-flower1"></i>See all deaths on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
   <div class="card-box">
     <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="explore-actions">
-      <a href="/quiz/${monthName}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
-      <a href="/born/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
-      <a href="/died/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
+      <a href="/quiz/${monthName}/${day}/" class="btn explore-action-quiz"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
+      <a href="/born/${monthName}/${day}/" class="btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
+      <a href="/died/${monthName}/${day}/" class="btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
     </div>
   </div>
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <a href="/events/${prevMonthName}/${prevDayNum}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
-      <a href="/events/${nextMonthName}/${nextDayNum}/" class="site-btn">${escapeHtml(nextMonthDisplay)} ${nextDayNum}<i class="bi bi-arrow-right"></i></a>
+      <a href="/events/${prevMonthName}/${prevDayNum}/" class="btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
+      <a href="/events/${nextMonthName}/${nextDayNum}/" class="btn">${escapeHtml(nextMonthDisplay)} ${nextDayNum}<i class="bi bi-arrow-right"></i></a>
     </div>
     <div class="text-center">
       <p class="text-muted mb-3">Explore history for any date on the interactive calendar.</p>
-      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+      <a href="/" class="btn me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
   </div>
 </main>
@@ -1383,7 +1379,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
     </div>
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
       <span class="yr event-years-ago ms-2">${year}</span>
-      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
+      ${w ? `<a href="${escapeHtml(w)}" class="btn" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
     </div>
   </div>
 </div>`;
@@ -1501,7 +1497,7 @@ ${siteNav()}
     ${
       hiddenGrid.length > 0
         ? `<div id="births-more" style="display:none"><div class="row g-0">${hiddenGridHtml}</div></div>
-    <button onclick="var m=document.getElementById('births-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${births.length} birthdays':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${births.length} birthdays</button>`
+    <button onclick="var m=document.getElementById('births-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${births.length} birthdays':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${births.length} birthdays</button>`
         : ""
     }
   </div>`
@@ -1513,7 +1509,7 @@ ${siteNav()}
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
     ${eventsSnippetHtml}
-    <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
+    <a href="/events/${monthName}/${day}/" class="btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
@@ -1526,19 +1522,19 @@ ${siteNav()}
   <div class="card-box">
     <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="d-flex flex-wrap gap-2">
-      <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
-      <a href="/died/${monthName}/${day}/" class="site-btn"><i class="bi bi-flower1"></i>Notable Deaths</a>
-      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Test Your Knowledge</a>
+      <a href="/events/${monthName}/${day}/" class="btn"><i class="bi bi-calendar-event"></i>Historical Events</a>
+      <a href="/died/${monthName}/${day}/" class="btn"><i class="bi bi-flower1"></i>Notable Deaths</a>
+      <a href="/quiz/${monthName}/${day}/" class="btn"><i class="bi bi-patch-question"></i>Test Your Knowledge</a>
     </div>
   </div>
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <a href="/born/${prevMonth}/${prevDay}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMDisplay)} ${prevDay}</a>
-      <a href="/born/${nextMonth}/${nextDay}/" class="site-btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
+      <a href="/born/${prevMonth}/${prevDay}/" class="btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMDisplay)} ${prevDay}</a>
+      <a href="/born/${nextMonth}/${nextDay}/" class="btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
     </div>
     <div class="text-center">
-      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+      <a href="/" class="btn me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
   </div>
 </main>
@@ -1694,7 +1690,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
     </div>
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
       <span class="yr event-years-ago ms-2" style="background:#6c757d">${year}</span>
-      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
+      ${w ? `<a href="${escapeHtml(w)}" class="btn" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
     </div>
   </div>
 </div>`;
@@ -1812,7 +1808,7 @@ ${siteNav()}
     ${
       hiddenGrid.length > 0
         ? `<div id="deaths-more" style="display:none"><div class="row g-0">${hiddenGridHtml}</div></div>
-    <button onclick="var m=document.getElementById('deaths-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${deaths.length} deaths':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${deaths.length} deaths</button>`
+    <button onclick="var m=document.getElementById('deaths-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${deaths.length} deaths':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${deaths.length} deaths</button>`
         : ""
     }
   </div>`
@@ -1824,7 +1820,7 @@ ${siteNav()}
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
     ${eventsSnippetHtml}
-    <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
+    <a href="/events/${monthName}/${day}/" class="btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
@@ -1837,19 +1833,19 @@ ${siteNav()}
   <div class="card-box">
     <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="d-flex flex-wrap gap-2">
-      <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
-      <a href="/born/${monthName}/${day}/" class="site-btn"><i class="bi bi-person-heart"></i>Famous Birthdays</a>
-      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Test Your Knowledge</a>
+      <a href="/events/${monthName}/${day}/" class="btn"><i class="bi bi-calendar-event"></i>Historical Events</a>
+      <a href="/born/${monthName}/${day}/" class="btn"><i class="bi bi-person-heart"></i>Famous Birthdays</a>
+      <a href="/quiz/${monthName}/${day}/" class="btn"><i class="bi bi-patch-question"></i>Test Your Knowledge</a>
     </div>
   </div>
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <a href="/died/${prevMonth}/${prevDay}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMDisplay)} ${prevDay}</a>
-      <a href="/died/${nextMonth}/${nextDay}/" class="site-btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
+      <a href="/died/${prevMonth}/${prevDay}/" class="btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMDisplay)} ${prevDay}</a>
+      <a href="/died/${nextMonth}/${nextDay}/" class="btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
     </div>
     <div class="text-center">
-      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+      <a href="/" class="btn me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
   </div>
 </main>
@@ -1895,7 +1891,7 @@ async function handleBlogIndex(env, url) {
               (desc
                 ? `<p class="mb-2" style="font-size:.9rem">${desc}</p>`
                 : "") +
-              `<a href="/blog/${slug}/" class="site-btn" style="padding:6px 12px;font-size:.8rem"><i class="bi bi-arrow-right me-1"></i>Read More</a>` +
+              `<a href="/blog/${slug}/" class="btn"><i class="bi bi-arrow-right me-1"></i>Read More</a>` +
               `</div></div></div>`
             );
           })
@@ -4073,9 +4069,9 @@ function buildQuizHTML(quiz, monthDisplay, day) {
     `<div class="card-box" id="tdq-widget">` +
     `<h2 class="h4 mb-3"><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>Test Your Knowledge — ${escapeHtml(monthDisplay)} ${day}</h2>` +
     `<p class="text-muted mb-2" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out.</p>` +
-    `<a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" class="site-btn mb-3"><i class="bi bi-list-check"></i>Full quiz page</a>` +
+    `<a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" class="btn mb-3"><i class="bi bi-list-check"></i>Full quiz page</a>` +
     `<div id="tdq-questions">${questionsHtml}</div>` +
-    `<button class="btn btn-warning mt-3" id="tdq-submit-btn"><i class="bi bi-check2-circle"></i>Check Answers</button>` +
+    `<button class="btn mt-3" id="tdq-submit-btn"><i class="bi bi-check2-circle"></i>Check Answers</button>` +
     `<div id="tdq-score" class="mt-3" hidden></div>` +
     `</div>` +
     `<script>(function(){` +
@@ -4170,7 +4166,7 @@ function buildCarouselQuizHTML(
         ? `<div class="qsc-img-wrap"><img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(imgAlt)}" class="qsc-event-img" loading="${qi === 0 ? "eager" : "lazy"}"/><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`
         : `<div class="qsc-img-wrap qsc-img-placeholder"><div class="qsc-img-overlay"></div>${evYear ? `<span class="qsc-year-pill">${escapeHtml(evYear)}</span>` : ""}</div>`;
 
-      const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${readMoreTarget}" rel="noopener" class="btn qsc-read-more-btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
+      const readMoreHtml = `<a href="${escapeHtml(readMoreUrl)}" target="${readMoreTarget}" rel="noopener" class="btn"><i class="bi bi-book me-1"></i>Don't know? Read more</a>`;
 
       const optsHtml = (q.options || [])
         .map(
@@ -4195,7 +4191,7 @@ function buildCarouselQuizHTML(
         readMoreHtml +
         `<div class="tdq-feedback qsc-feedback" id="tdq-f-${qi}" hidden></div>` +
         expHtml +
-        `<button class="qsc-next-btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
+        `<button class="btn" id="qsc-next-${qi}" data-slide="${qi}" hidden>` +
         (qi < total - 1
           ? `Next Question <i class="bi bi-arrow-right"></i>`
           : `See Results <i class="bi bi-trophy-fill"></i>`) +
@@ -4208,7 +4204,7 @@ function buildCarouselQuizHTML(
   // Final score slide
   const nextLink =
     nextMonthSlug && nextDay
-      ? `<a href="/quiz/${escapeHtml(nextMonthSlug)}/${nextDay}/" class="qsc-cta-btn qsc-cta-primary"><i class="bi bi-arrow-left-circle"></i>Previous Day's Quiz</a>`
+      ? `<a href="/quiz/${escapeHtml(nextMonthSlug)}/${nextDay}/" class="btn"><i class="bi bi-arrow-left-circle"></i>Previous Day's Quiz</a>`
       : "";
   const scoreSlide =
     `<div class="qsc-slide qsc-final-slide" data-slide="${total}" id="qsc-slide-${total}">` +
@@ -4219,8 +4215,8 @@ function buildCarouselQuizHTML(
     `</div>` +
     `<div class="qsc-review-list" id="qsc-review-list"></div>` +
     `<div class="qsc-cta-row">` +
-    `<a href="/events/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn"><i class="bi bi-calendar-event"></i>See All Events</a>` +
-    `<a href="/blog/" class="qsc-cta-btn"><i class="bi bi-journal-text"></i>Read the Blog</a>` +
+    `<a href="/events/${escapeHtml(monthSlug)}/${day}/" class="btn"><i class="bi bi-calendar-event"></i>See All Events</a>` +
+    `<a href="/blog/" class="btn"><i class="bi bi-journal-text"></i>Read the Blog</a>` +
     nextLink +
     `</div></div></div>`;
 
@@ -4301,7 +4297,7 @@ function buildCarouselQuizHTML(
     `updateProgress(cur);` +
     `}` +
     // Next buttons
-    `document.querySelectorAll('.qsc-next-btn').forEach(function(btn){` +
+    `document.querySelectorAll('[id^="qsc-next-"]').forEach(function(btn){` +
     `btn.addEventListener('click',function(){` +
     `var next=parseInt(this.dataset.slide)+1;` +
     `showSlide(next);` +
@@ -4324,7 +4320,7 @@ function buildCarouselQuizHTML(
     `wrap.addEventListener('touchstart',function(e){tx=e.touches[0].clientX;},{passive:true});` +
     `wrap.addEventListener('touchend',function(e){` +
     `var dx=e.changedTouches[0].clientX-tx;` +
-    `if(dx<-40&&results[cur]!==undefined){var nb=document.querySelector('.qsc-next-btn[data-slide="'+cur+'"]');if(nb)nb.click();}` +
+    `if(dx<-40&&results[cur]!==undefined){var nb=document.getElementById('qsc-next-'+cur);if(nb)nb.click();}` +
     `if(dx>40&&cur>0)showSlide(cur-1);` +
     `},{passive:true});` +
     // Final score
@@ -4679,7 +4675,7 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-back-btn:hover:not(:disabled){border-color:#1a1a1a;color:#1a1a1a}.qsc-back-btn:disabled{opacity:.35;cursor:default}
 .qsc-hint{font-size:.82rem;color:var(--mu);font-style:italic}
 /* Carousel wrapper */
-#qsc-wrapper{border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.12);background:var(--cb);margin-bottom:24px}
+#qsc-wrapper{overflow:hidden;border: 1px solid #cfe0cf; border-radius:6px;background:var(--cb);margin-bottom:24px}
 
 /* Slides */
 .qsc-slide{display:none;animation:qscIn .3s ease}
@@ -4696,15 +4692,9 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 /* Slide body */
 .qsc-slide-body{padding:18px 20px 22px;scroll-margin-top:60px}
 @media(min-width:600px){.qsc-slide-body{padding:22px 28px 28px}}
-.qsc-read-more-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 14px;padding:6px 14px;border:1.5px solid rgba(0,0,0,.35);border-radius:20px;font-size:.8rem;font-weight:500;color:#1a1a1a;text-decoration:none;transition:all .2s;background:rgba(0,0,0,.06)}
-.qsc-read-more-btn:hover{background:rgba(0,0,0,.14);border-color:#1a1a1a;color:#1a1a1a;text-decoration:none}
 .qsc-q-label{display:inline-flex;align-items:center;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--badge);margin-bottom:10px}
 .qsc-q-text{font-size:1.05rem;font-weight:700;color:var(--tc);margin-bottom:14px;line-height:1.45}
 .qsc-opts-wrap{display:flex;flex-direction:column;gap:9px}
-/* Next button */
-.qsc-next-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg);color:var(--btn-text);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;animation:qscIn .25s ease}
-.qsc-next-btn:hover{background:var(--btn-hover);transform:translateY(-1px)}
-.
 /* Final score slide */
 .qsc-final-slide .qsc-final-body{padding:32px 24px;text-align:center}
 .qsc-trophy-wrap{margin-bottom:18px}
@@ -4714,10 +4704,6 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-review-list{text-align:left;border:1px solid var(--cbr);border-radius:10px;overflow:hidden;margin-bottom:22px}
 .qsc-rev-item{display:flex;align-items:center;gap:10px;padding:10px 14px;font-size:.9rem;border-bottom:1px solid var(--cbr)}.qsc-rev-item:last-child{border-bottom:none}
 .qsc-cta-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-.qsc-cta-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:8px;font-size:.9rem;font-weight:600;text-decoration:none;border:1.5px solid var(--cbr);color:var(--tc);background:var(--cb);transition:all .15s}
-.qsc-cta-btn:hover{border-color:#1a1a1a;color:#1a1a1a;transform:translateY(-1px)}
-.qsc-cta-primary{background:var(--badge);color:#fff!important;border-color:var(--badge)}
-.qsc-cta-primary:hover{background:#a03508;border-color:#a03508;color:#fff!important}
 /* Page header */
 .qsc-page-header{text-align:center;padding:8px 0 24px;border-bottom:1px solid var(--cbr);margin-bottom:28px}
 .qsc-page-header h1{font-size:1.7rem;font-weight:800;color:var(--tc);margin-bottom:6px}

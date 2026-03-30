@@ -1521,8 +1521,9 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
   // Update the index (reuse the already-loaded existingIndex)
   const index = [...existingIndex];
 
-  // Add or update the index entry for this slug
-  const existingIdx = index.findIndex((e) => e.slug === slug);
+  // Add or update the index entry for this slug — remove ALL existing entries
+  // for this slug first to prevent duplicates accumulating from retries/restores
+  const deduped = index.filter((e) => e.slug !== slug);
   const entry = {
     slug,
     title: content.title,
@@ -1530,14 +1531,11 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
     imageUrl: content.imageUrl,
     publishedAt: now.toISOString(),
   };
-  if (existingIdx !== -1) {
-    index[existingIdx] = entry;
-  } else {
-    index.unshift(entry);
-  }
+  deduped.unshift(entry);
+  const finalIndex = deduped;
   // Cap the index at 200 entries
-  if (index.length > 200) index.splice(200);
-  await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
+  if (finalIndex.length > 200) finalIndex.splice(200);
+  await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(finalIndex));
 
   // Core write is done — fire all post-publish extras in the background so
   // the response (or cron return) is not blocked by quiz generation, cache

@@ -2693,15 +2693,16 @@ async function reviewContentWithSEOExpert(content, env) {
     "Mandatory humanization techniques — apply ALL of these across the full set of paragraphs:\n" +
     "1. CONTRACTIONS: use them naturally — 'didn't', 'wasn't', 'couldn't', 'it's', 'that's', 'they'd'\n" +
     "2. SENTENCE FRAGMENTS for emphasis. One word. Two words. Done.\n" +
-    "3. START sentences with 'And', 'But', 'So', or 'Because' where natural — AI avoids this\n" +
-    "4. RHETORICAL QUESTIONS mid-paragraph: 'What were they thinking?' 'Did it work? Barely.'\n" +
-    "5. SECOND PERSON sparingly: 'You have to understand the pressure he was under.' 'Picture the scene.'\n" +
-    "6. BREAK PARALLEL STRUCTURE: AI loves 'X did A, Y did B, Z did C' — destroy that pattern\n" +
-    "7. SENTENCE LENGTH CHAOS: mix 3-word sentences with 40-word sentences back to back\n" +
-    "8. AVOID consecutive sentences with the same grammatical opener (never 'The X... The Y... The Z...')\n" +
-    "9. DELETE these AI-signature connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
+    "3. BREAK PARALLEL STRUCTURE: AI loves 'X did A, Y did B, Z did C' — destroy that pattern\n" +
+    "4. SENTENCE LENGTH CHAOS: mix 3-word sentences with 40-word sentences back to back\n" +
+    "5. AVOID consecutive sentences with the same grammatical opener (never 'The X... The Y... The Z...')\n" +
+    "6. DELETE these AI-signature connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
     "'It is worth noting', 'It should be noted', 'Notably', 'Importantly', 'Significantly'\n" +
-    "10. ADD personality asides: 'Which, frankly, was insane.' 'Nobody expected that.' 'It almost worked.'\n\n" +
+    "7. Vary paragraph openers: start some with the subject, some with a time/place, some with a consequence\n\n" +
+    "ABSOLUTE PROHIBITIONS — never introduce these, even for humanization:\n" +
+    "- Do NOT add rhetorical questions directed at the reader ('What were they thinking?', 'Did it work?', 'So, what happened?', 'What does this tell us?'). If a paragraph contains one, rewrite it as a declarative statement.\n" +
+    "- Do NOT add 'Picture this', 'Picture the scene', 'So,', 'You have to understand', 'Nobody expected that', 'Which, frankly', 'It almost worked' — these are clickbait patterns, not human voice.\n" +
+    "- Do NOT start sentences with 'And,' or 'So,' as filler openers.\n\n" +
     "Rules:\n" +
     "- Keep all JSON field names exactly as given\n" +
     "- Do not change: historicalDate, historicalYear, historicalDateISO, location, country, quickFacts, " +

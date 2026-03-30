@@ -80,7 +80,7 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
     .filter((line) => line !== null && line !== undefined)
     .join("\n");
 
-  const res = await youtube.videos.insert({
+  const uploadPromise = youtube.videos.insert({
     part: ["snippet", "status"],
     requestBody: {
       snippet: {
@@ -100,7 +100,6 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
         defaultAudioLanguage: "en",
       },
       status: {
-        // Default 'public'; set YOUTUBE_PRIVACY=private to upload as draft for review
         privacyStatus: process.env.YOUTUBE_PRIVACY || "public",
         selfDeclaredMadeForKids: false,
       },
@@ -110,6 +109,13 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
       body: createReadStream(videoPath),
     },
   });
+
+  const res = await Promise.race([
+    uploadPromise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("YouTube upload timed out after 5 minutes")), 5 * 60 * 1000)
+    ),
+  ]);
 
   return res.data.id;
 }

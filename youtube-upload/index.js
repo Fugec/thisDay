@@ -96,6 +96,65 @@ async function triggerArticleRegen(slug) {
   return newPost;
 }
 
+/**
+ * Returns today's expected KV slug in the same format the blog worker uses:
+ * day (no leading zero) + "-" + lowercase month name + "-" + year
+ * e.g. "30-march-2026"
+ */
+function getTodaySlug() {
+  const now = new Date();
+  const day = now.getUTCDate();
+  const month = now.toLocaleString("en-US", { month: "long", timeZone: "UTC" }).toLowerCase();
+  const year = now.getUTCFullYear();
+  return `${day}-${month}-${year}`;
+}
+
+/**
+ * Ensures today's post exists in KV. If not found, calls POST /blog/publish
+ * to generate it, waits 60 s for propagation, then returns the refreshed index.
+ * Always returns the latest post list (never a stale in-memory copy).
+ */
+async function ensureTodaysPost(posts) {
+  const todaySlug = getTodaySlug();
+  console.log(`Today's expected slug: ${todaySlug}`);
+
+  if (posts.find((p) => p.slug === todaySlug)) {
+    console.log(`✓ Today's post is in KV.`);
+    return posts;
+  }
+
+  console.log(`⚠ Today's post "${todaySlug}" not found in KV — triggering blog worker...`);
+  const workerUrl = process.env.BLOG_WORKER_URL?.replace(/\/$/, "");
+  const secret = process.env.YOUTUBE_REGEN_SECRET;
+
+  if (!workerUrl || !secret) {
+    console.warn("  BLOG_WORKER_URL / YOUTUBE_REGEN_SECRET not set — cannot generate today's post.");
+    return posts;
+  }
+
+  const res = await fetch(`${workerUrl}/blog/publish`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${secret}` },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error(`  ✗ /blog/publish returned ${res.status}: ${body}`);
+    return posts;
+  }
+
+  console.log("  ✓ Blog worker triggered. Waiting 60 s for KV propagation...");
+  await new Promise((r) => setTimeout(r, 60_000));
+
+  // Re-fetch the index fresh — never use the stale in-memory copy
+  const fresh = await getPostIndex();
+  if (fresh.find((p) => p.slug === todaySlug)) {
+    console.log(`  ✓ Today's post "${todaySlug}" is now in KV.`);
+  } else {
+    console.warn(`  ⚠ Today's post still not found after regeneration — will upload next available.`);
+  }
+  return fresh;
+}
+
 async function main() {
   const privacyMode = process.env.YOUTUBE_PRIVACY || "public";
   const maxUploadsPerRun = Math.max(
@@ -119,16 +178,26 @@ async function main() {
       .filter(Boolean),
   );
 
-  // Fetch post index + upload history in parallel
-  const [posts, uploaded] = await Promise.all([getPostIndex(), getUploaded()]);
+  // Always fetch a fresh post index — never rely on a cached copy
+  let posts = await getPostIndex();
+  const uploaded = await getUploaded();
 
-  // Sort newest-first; forced re-uploads always float to the top
+  // Ensure today's post is in KV; generate it if missing
+  posts = await ensureTodaysPost(posts);
+
+  const todaySlug = getTodaySlug();
+
+  // Sort: forced re-uploads first, then today's post, then newest-first
   const pending = posts
     .filter((p) => !uploaded[p.slug] || reuploadSlugs.has(p.slug))
     .sort((a, b) => {
       const af = reuploadSlugs.has(a.slug) ? 1 : 0;
       const bf = reuploadSlugs.has(b.slug) ? 1 : 0;
       if (bf !== af) return bf - af;
+      // Today's post always floats to the top
+      const at = a.slug === todaySlug ? 1 : 0;
+      const bt = b.slug === todaySlug ? 1 : 0;
+      if (bt !== at) return bt - at;
       return new Date(b.publishedAt) - new Date(a.publishedAt);
     })
     .slice(0, maxUploadsPerRun);

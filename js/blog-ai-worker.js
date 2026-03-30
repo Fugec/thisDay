@@ -1996,7 +1996,7 @@ Sentence and paragraph rules:
 - Include at least one clear "what would need to be true for this to be wrong" check somewhere in the article when you make a strong claim.
 - Start with the takeaway, then walk backward to the evidence. Avoid "Picture..." and "This was not some minor accident." Write like a human: a little uneven, a little opinionated, and not overly polished.
 - Avoid semicolons. If absolutely necessary, use at most one semicolon in a paragraph.
-- Do not use dashes ("-" or "—") inside sentences. Use commas or rewrite.
+- Do not use dashes ("-" or "—") inside sentences. Use commas or rewrite. This means zero mid-sentence dashes across the entire article — not one, not occasionally, zero. Every place you reach for a dash, use a comma instead or split into two sentences.
 - Use active voice. Say who did what.
 - Start each paragraph with a sentence that makes the reader want to keep reading.
 - Use transition phrases between paragraphs: "What followed was even more remarkable.", "But the real damage was done quietly, in the years after.", "To understand why this mattered, you have to go back further."
@@ -2004,6 +2004,10 @@ Sentence and paragraph rules:
 
 BANNED PHRASES — never write any of these:
 "significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
+
+NEVER use teenage writing tricks — these include: posing rhetorical questions to the reader ("But why was it significant?", "What were they thinking?", "What happened next?", "What were the chances?"), fake-suspense openers ("Picture this:", "Picture the scene:", "So, what happened"), conversational hooks designed to manufacture intrigue ("For starters", "To say the least", "Slim to none, it seemed"), and any sentence structure that feels like it belongs in a clickbait YouTube script rather than authoritative historical prose. If you catch yourself building artificial suspense with a question or a tease, delete it and state the fact directly.
+
+DO NOT open consecutive paragraphs with the same word or conjunction. Each paragraph must begin with a structurally different sentence.
 
 Title rules:
 - The "title" field MUST follow exactly this format: "[Specific Action or Event] — ${monthName} ${day}, Year"
@@ -2046,8 +2050,8 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 2 to 3 sentences, minimum 40 words."
   ],
   "overviewParagraphs": [
-    "Paragraph 1 (claim + strongest evidence; ~120+ words): Open with a striking scene or detail and state the core claim about why this event mattered. Include the single strongest, attributable piece of evidence (name, year, number, or place) that supports the claim. Be vivid, specific, and direct.",
-    "Paragraph 2 (nuance + synthesis; ~100 words): Introduce the strongest complication or contrary reality naturally, without announcing it as 'the opposing view' or 'critics argue'. Just write it as part of the narrative. Then synthesize: show where the complication holds and where it falls short. End with a brief assessment that links back to the opening claim."
+    "Paragraph 1 (claim + strongest evidence; ~120+ words): Open with a striking scene, a concrete detail, or a blunt declarative statement — never with a rhetorical question. State the core claim directly. Include the single strongest, attributable piece of evidence (name, year, number, or place) that supports it. No chatty openers like 'So, what happened' or 'For starters'. Start with the most important thing.",
+    "Paragraph 2 (nuance + synthesis; ~100 words): Introduce the strongest complication or contrary reality as part of the narrative — not as a rhetorical question or a 'But why?' setup. State the complication directly as a fact or claim, then synthesize. Do NOT begin with 'But the [topic] wasn't without...' or 'But why was it...'. End with a precise assessment that links back to the opening claim."
   ],
   "eyewitnessOrChronicle": [
     "Paragraph 1 (vivid account; ~100+ words): Present the most vivid contemporary account with full attribution (name, role, source). Let the account show the texture of the moment — what a named eyewitness described and why their perspective matters.",

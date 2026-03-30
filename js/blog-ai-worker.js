@@ -1963,12 +1963,21 @@ async function callWorkersAI(
 
   const avoidSection =
     takenThisMonth.length > 0
-      ? `\nThese topics have already been covered recently — do NOT write about any of them:\n${takenThisMonth.map((t) => `- ${t}`).join("\n")}\nChoose a completely different event.\n`
+      ? `\nThese topics have already been covered — do NOT write about any of them or anything closely related:\n${takenThisMonth.map((t) => `- ${t}`).join("\n")}\nSemantic avoidance rules: (1) If a listed title names a person, do not pick any event involving that person, their family, or their dynasty. (2) If a listed title names a battle or war, do not pick another engagement from the same conflict. (3) Do not pick a different year of the same recurring event type (e.g. if "Treaty of Paris 1856" is listed, avoid "Treaty of Paris 1783"). (4) If two events share the same country and the same event type within 50 years of each other, they are too similar — pick something from a different region or era entirely.\n`
       : "";
 
   const eventSelection = forcedEvent
     ? `You MUST write about this specific event: "${forcedEvent}". Do not choose a different event.`
-    : `Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year). Choose the most interesting or impactful event for this exact date.`;
+    : `Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year).
+
+When choosing the event, rank candidates by click and share potential on YouTube Shorts and social media. Prioritise in this order:
+1. Events involving globally recognised figures (presidents, kings, scientists, cultural icons) in dramatic or unexpected situations
+2. Events with a shocking twist, a near-miss, a dramatic reversal, or a surprising outcome that most people do not know
+3. Discoveries, inventions, or "firsts" that changed everyday life in ways still felt today
+4. Political turning points or military events whose consequences are still visible in the modern world
+5. Avoid obscure regional events, minor treaties, and incremental legislative steps unless they have a genuinely surprising story attached
+
+Choose the single event from this date that a curious 25-year-old would most likely stop scrolling to watch a 45-second video about.`;
 
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.
 
@@ -2005,7 +2014,9 @@ Sentence and paragraph rules:
 BANNED PHRASES — never write any of these:
 "significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
 
-NEVER use teenage writing tricks — these include: posing rhetorical questions to the reader ("But why was it significant?", "What were they thinking?", "What happened next?", "What were the chances?"), fake-suspense openers ("Picture this:", "Picture the scene:", "So, what happened"), conversational hooks designed to manufacture intrigue ("For starters", "To say the least", "Slim to none, it seemed"), and any sentence structure that feels like it belongs in a clickbait YouTube script rather than authoritative historical prose. If you catch yourself building artificial suspense with a question or a tease, delete it and state the fact directly.
+HARD RULE — NO RHETORICAL QUESTIONS: Do not write a single sentence in the form of a question directed at the reader. Not one. This includes: "But why was it significant?", "What were they thinking?", "What happened next?", "So, what happened?", "What does this tell us?", "What if King Faisal had lived?", "What were the consequences?", "Did it work?", or any variation. Every question you are tempted to write must be rewritten as a declarative statement that answers itself. Example: instead of "What were the consequences?" write "The consequences were immediate and lasting." Before submitting your response, scan every sentence — if any sentence ends with a question mark and is addressed to the reader, rewrite it.
+
+HARD RULE — NO FAKE SUSPENSE OPENERS: Do not start any sentence with: "So,", "Picture this", "Picture the scene", "And then,", "But what", "But why", "You have to understand", "Nobody expected", "Frankly", "Which, frankly". These are conversational filler. State the fact directly.
 
 DO NOT open consecutive paragraphs with the same word or conjunction. Each paragraph must begin with a structurally different sentence.
 

@@ -43,10 +43,10 @@ export function buildNarrationScript(post, contentItems) {
   const parts = ["On this day in history.", title + "."];
 
   if (contentItems && contentItems.length > 0) {
+    // Use only the first DYK item — most impactful fact, keeps the Short tight
+    const item = contentItems[0];
     parts.push("Did you know?");
-    contentItems.forEach((item) =>
-      parts.push(item.endsWith(".") ? item : item + "."),
-    );
+    parts.push(item.endsWith(".") ? item : item + ".");
   } else {
     parts.push(post.description + ".");
   }
@@ -67,10 +67,10 @@ export function buildNarrationParts(post, contentItems) {
   const title = post.title.replace(/ [—–] /g, ", ");
   const parts = ["On this day in history.", title + "."];
   if (contentItems && contentItems.length > 0) {
+    // Use only the first DYK item — most impactful fact, keeps the Short tight
+    const item = contentItems[0];
     parts.push("Did you know?");
-    contentItems.forEach((item) =>
-      parts.push(item.endsWith(".") ? item : item + "."),
-    );
+    parts.push(item.endsWith(".") ? item : item + ".");
   } else {
     parts.push(post.description + ".");
   }

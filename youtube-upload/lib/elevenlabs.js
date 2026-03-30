@@ -51,7 +51,7 @@ export function buildNarrationScript(post, contentItems) {
     parts.push(post.description + ".");
   }
 
-  parts.push("Discover more at thisday dot info.");
+  parts.push("Discover more at thisday.info.");
   return parts.join(" ");
 }
 
@@ -74,7 +74,7 @@ export function buildNarrationParts(post, contentItems) {
   } else {
     parts.push(post.description + ".");
   }
-  parts.push("Discover more at thisday dot info.");
+  parts.push("Discover more at thisday.info.");
   return parts;
 }
 

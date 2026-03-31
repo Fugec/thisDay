@@ -625,7 +625,7 @@ article iframe {
 /* Ad units */
 .ad-unit-container {
   margin: 32px 0;
-  padding: 20px 0;
+  padding: 15px 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -783,4 +783,36 @@ article iframe {
   [data-page="v2"] .event-summary {
     font-size: 14.4px !important;
   }
+}
+
+span.yr.event-years-ago.ms-2 {
+  background: #176534 !important;
+  color: #fff !important;
+  border: 1px solid;
+  border-radius: 5px;
+  margin: auto;
+  font-family: "Lora";
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  margin-left: 0px !important;
+}
+
+.d-flex.flex-wrap.gap-2.align-items-center.mb-3 {
+  margin: 25px 0 0 -10px;
+}
+
+.site-btn-primary {
+  background: #176534 !important;
+  color: #fff !important;
+  border-color: #176534 !important;
+}
+
+.site-btn-primary:hover {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  filter: brightness(0.95);
+}
+
+.site-table {
+  max-width: 100% !important;
 }

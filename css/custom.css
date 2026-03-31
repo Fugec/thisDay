@@ -375,7 +375,7 @@ img {
   .people-group {
     display: grid;
     grid-template-columns: repeat(auto-fit, 80px);
-    gap: 1rem;
+    gap: 2rem;
     justify-content: center;
   }
 }
@@ -1469,4 +1469,9 @@ img {
   background: var(--bg-alt);
   color: var(--border);
   font-size: 4rem;
+}
+
+article.p-4.rounded.border.shadow-sm {
+  border: 0 solid #fff !important;
+  box-shadow: none !important;
 }

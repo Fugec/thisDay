@@ -5,8 +5,8 @@
  *      Free tier with a free HF account token.
  *      Fast (~10–20s per image), 1080×1920 supported natively.
  *
- *   1b. Hugging Face Inference API  (HF_TOKEN_2) — fallback account
- *      Same model, second free-tier account for when HF_TOKEN hits monthly quota (402).
+ *   1b. Hugging Face Inference API  (HF_TOKEN_2, HF_TOKEN_3) — fallback accounts
+ *      Same model, extra free-tier accounts for when the prior hits monthly quota (402).
  *      Rotate accounts when one is depleted.
  *
  *   2. Cloudflare Workers AI  @cf/stabilityai/stable-diffusion-xl-base-1.0
@@ -106,7 +106,7 @@ async function generateViaCFWorkersAI(prompt) {
 
 /**
  * Generates an AI image, trying providers in order:
- *   1. Hugging Face (FLUX.1-schnell) — HF_TOKEN then HF_TOKEN_2
+ *   1. Hugging Face (FLUX.1-schnell) — HF_TOKEN then HF_TOKEN_2 then HF_TOKEN_3
  *   2. Cloudflare Workers AI (SDXL-base) — needs CF_API_TOKEN with AI permission
  *
  * If all providers fail, the caller falls back to Wikipedia images.
@@ -115,8 +115,12 @@ async function generateViaCFWorkersAI(prompt) {
  * @returns {Promise<Buffer>} image bytes (JPEG or PNG)
  */
 export async function generateAIImage(prompt) {
-  // 1. Hugging Face — try HF_TOKEN, then HF_TOKEN_2 as fallback
-  for (const [label, token] of [["HF_TOKEN", process.env.HF_TOKEN], ["HF_TOKEN_2", process.env.HF_TOKEN_2]]) {
+  // 1. Hugging Face — try HF_TOKEN, then HF_TOKEN_2, then HF_TOKEN_3 as fallback
+  for (const [label, token] of [
+    ["HF_TOKEN", process.env.HF_TOKEN],
+    ["HF_TOKEN_2", process.env.HF_TOKEN_2],
+    ["HF_TOKEN_3", process.env.HF_TOKEN_3],
+  ]) {
     if (!token) continue;
     try {
       return await generateViaHuggingFace(prompt, token);
@@ -139,8 +143,9 @@ export async function generateAIImage(prompt) {
 export async function generateAIImageBatch(prompts) {
   // Run 2 scenes concurrently — halves wait time without tripping rate limits
   const limit = pLimit(2);
-  const results = await Promise.all(
-    prompts.map((prompt, i) =>
+  const firstTwo = prompts.slice(0, 2);
+  const firstResults = await Promise.all(
+    firstTwo.map((prompt, i) =>
       limit(async () => {
         console.log(
           `  → Scene ${i + 1}/${prompts.length}: "${prompt.slice(0, 70)}..."`,
@@ -154,7 +159,13 @@ export async function generateAIImageBatch(prompts) {
       }),
     ),
   );
-  return results;
+
+  const reusable = firstResults.filter(Boolean);
+  return prompts.map((_, i) => {
+    if (i < firstResults.length) return firstResults[i];
+    if (!reusable.length) return null;
+    return reusable[i % reusable.length];
+  });
 }
 
 /**
@@ -167,8 +178,9 @@ export async function generateAIImageBatch(prompts) {
  */
 export async function generateAISceneBatch(prompts) {
   const limit = pLimit(2);
-  const scenes = await Promise.all(
-    prompts.map((prompt, i) =>
+  const firstTwo = prompts.slice(0, 2);
+  const firstScenes = await Promise.all(
+    firstTwo.map((prompt, i) =>
       limit(async () => {
         console.log(
           `  → Scene ${i + 1}/${prompts.length}: "${prompt.slice(0, 70)}..."`,
@@ -183,7 +195,14 @@ export async function generateAISceneBatch(prompts) {
       }),
     ),
   );
-  return scenes;
+
+  const reusable = firstScenes.filter(Boolean);
+  return prompts.map((_, i) => {
+    if (i < firstScenes.length) return firstScenes[i];
+    if (!reusable.length) return null;
+    const pick = reusable[i % reusable.length];
+    return pick ? { ...pick } : null;
+  });
 
   /* I2V Phase 2 — uncomment to re-enable WAN 2.2 animation:
   const imageBuffers = scenes.map(s => s?.buffer ?? null);

@@ -171,16 +171,30 @@ async function main() {
   }
 
   // Posts that should be re-uploaded even if already in the tracker
-  const reuploadSlugs = new Set(
-    (process.env.REUPLOAD_SLUGS || "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
+  const reuploadSlugsRaw = (process.env.REUPLOAD_SLUGS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   // Always fetch a fresh post index — never rely on a cached copy
   let posts = await getPostIndex();
   const uploaded = await getUploaded();
+
+  // Skip re-upload slugs that already succeeded within the last 24 hours
+  // (REUPLOAD_SLUGS is a persistent GitHub secret — this prevents infinite loops)
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const reuploadSlugs = new Set(
+    reuploadSlugsRaw.filter((slug) => {
+      const entry = uploaded[slug];
+      if (!entry) return true; // never uploaded — allow
+      const age = Date.now() - new Date(entry.uploadedAt).getTime();
+      if (age < ONE_DAY_MS) {
+        console.log(`  Skipping re-upload of "${slug}" — already uploaded ${Math.round(age / 3600000)}h ago.`);
+        return false;
+      }
+      return true;
+    }),
+  );
 
   // Ensure today's post is in KV; generate it if missing
   posts = await ensureTodaysPost(posts);

@@ -37,7 +37,7 @@ const H = 1920;
  * Images: Pollinations flux-2-dev (free). Animation: WAN 2.2 I2V via HF ZeroGPU
  * (requires HF_TOKEN; falls back to Ken Burns automatically if unavailable).
  */
-const N_SCENES = 3;
+const N_SCENES = 2;
 
 // Gentle crossfade only — slide/wipe transitions are too jarring for a calm history channel
 const XFADE_TRANSITIONS = ["fade", "dissolve", "fade"];

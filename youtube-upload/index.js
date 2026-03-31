@@ -18,13 +18,14 @@
  *   ELEVENLABS_API_KEY     (TTS voiceover, 10k chars/month free)
  *   HF_TOKEN               (HuggingFace FLUX.1-schnell, primary AI image)
  *   HF_TOKEN_2             (HuggingFace fallback account, same model)
- *   REUPLOAD_SLUGS         (optional: force re-upload, comma-separated)
+ *   HF_TOKEN_3             (HuggingFace fallback account, same model)
  *   YOUTUBE_PRIVACY        (optional: private or public, default public)
- *   USE_AI_IMAGE           (optional: true = AI-generated background, default false)
+ *   USE_AI_IMAGE           (optional: false = Wikipedia image, default true)
  */
 
 import "dotenv/config";
 import { unlinkSync } from "fs";
+import { execFileSync } from "child_process";
 import {
   getPostIndex,
   getDidYouKnow,
@@ -155,6 +156,30 @@ async function ensureTodaysPost(posts) {
   return fresh;
 }
 
+function ensureSocialPrereqs() {
+  const wantsMeta =
+    process.env.META_PAGE_ID ||
+    process.env.META_PAGE_TOKEN ||
+    process.env.META_IG_USER_ID;
+  const wantsTikTok =
+    process.env.TIKTOK_ACCESS_TOKEN || process.env.TIKTOK_OPEN_ID;
+
+  if (!wantsMeta && !wantsTikTok) return;
+
+  try {
+    execFileSync("openclaw", ["--version"], { encoding: "utf8", timeout: 5_000 });
+  } catch {
+    if (wantsMeta && process.env.META_SKIP_FACEBOOK !== "true") {
+      console.warn("  Meta: openclaw not found — forcing META_SKIP_FACEBOOK=true");
+      process.env.META_SKIP_FACEBOOK = "true";
+    }
+    if (wantsTikTok && process.env.TIKTOK_SKIP !== "true") {
+      console.warn("  TikTok: openclaw not found — forcing TIKTOK_SKIP=true");
+      process.env.TIKTOK_SKIP = "true";
+    }
+  }
+}
+
 async function main() {
   const privacyMode = process.env.YOUTUBE_PRIVACY || "public";
   const maxUploadsPerRun = Math.max(
@@ -164,6 +189,7 @@ async function main() {
 
   console.log(`YouTube privacy mode: ${privacyMode}`);
   console.log(`Max uploads this run: ${maxUploadsPerRun}`);
+  ensureSocialPrereqs();
   if (privacyMode === "private") {
     console.warn(
       "Warning: privacy=private. Videos will upload, but blog pages will not embed them.",
@@ -171,30 +197,9 @@ async function main() {
   }
 
   // Posts that should be re-uploaded even if already in the tracker
-  const reuploadSlugsRaw = (process.env.REUPLOAD_SLUGS || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
   // Always fetch a fresh post index — never rely on a cached copy
   let posts = await getPostIndex();
   const uploaded = await getUploaded();
-
-  // Skip re-upload slugs that already succeeded within the last 24 hours
-  // (REUPLOAD_SLUGS is a persistent GitHub secret — this prevents infinite loops)
-  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-  const reuploadSlugs = new Set(
-    reuploadSlugsRaw.filter((slug) => {
-      const entry = uploaded[slug];
-      if (!entry) return true; // never uploaded — allow
-      const age = Date.now() - new Date(entry.uploadedAt).getTime();
-      if (age < ONE_DAY_MS) {
-        console.log(`  Skipping re-upload of "${slug}" — already uploaded ${Math.round(age / 3600000)}h ago.`);
-        return false;
-      }
-      return true;
-    }),
-  );
 
   // Ensure today's post is in KV; generate it if missing
   posts = await ensureTodaysPost(posts);
@@ -203,7 +208,7 @@ async function main() {
 
   // Sort: forced re-uploads first, then today's post, then newest-first
   const pending = posts
-    .filter((p) => !uploaded[p.slug] || reuploadSlugs.has(p.slug))
+    .filter((p) => !uploaded[p.slug])
     .sort((a, b) => {
       const af = reuploadSlugs.has(a.slug) ? 1 : 0;
       const bf = reuploadSlugs.has(b.slug) ? 1 : 0;
@@ -219,8 +224,7 @@ async function main() {
   console.log(
     `Posts in KV: ${posts.length} | ` +
       `Uploaded: ${Object.keys(uploaded).length} | ` +
-      `This run: ${pending.length}` +
-      (reuploadSlugs.size ? ` (force: ${[...reuploadSlugs].join(", ")})` : ""),
+      `This run: ${pending.length}`,
   );
 
   if (!pending.length) {
@@ -269,10 +273,10 @@ async function main() {
       narrationPath = narrPath;
 
       // ── Image pre-check ────────────────────────────────────────────────────
-      // When USE_AI_IMAGE is set we skip the Wikipedia check (AI generates its own).
+      // When USE_AI_IMAGE is true we skip the Wikipedia check (AI generates its own).
       // Otherwise validate stored imageUrl; find a Wikipedia replacement if broken.
       // Throws IMAGE_UNAVAILABLE if no working image exists — post is skipped.
-      const useAiImage = process.env.USE_AI_IMAGE === "true";
+      const useAiImage = process.env.USE_AI_IMAGE !== "false";
       if (!useAiImage) {
         console.log("  Checking image...");
         const { imageUrl: resolvedImage, wasReplaced } =

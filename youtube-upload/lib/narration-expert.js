@@ -27,7 +27,12 @@ const PROVIDERS = [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({ model, messages, max_tokens: 1024, temperature: 0.5 }),
+    body: (model, messages) => ({
+      model,
+      messages,
+      max_tokens: 1024,
+      temperature: 0.5,
+    }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -40,7 +45,13 @@ const PROVIDERS = [
       "Content-Type": "application/json",
       "x-use-cache": "0",
     }),
-    body: (model, messages) => ({ model, messages, max_tokens: 1024, temperature: 0.5, stream: false }),
+    body: (model, messages) => ({
+      model,
+      messages,
+      max_tokens: 1024,
+      temperature: 0.5,
+      stream: false,
+    }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
 ];
@@ -68,7 +79,7 @@ Style guide:
 - Do NOT invent facts not present in the original items or the article text
 - Use contractions naturally ("didn't", "wasn't", "he'd") — stiff formal language kills TTS pacing
 - Grammar must be perfect — check plurals and verb agreement before returning
-- Each rewritten item must be under 200 characters (for TTS pacing)
+- Each rewritten item must be under 350 characters (for TTS pacing)
 - Return ONLY a JSON array of exactly N rewritten strings, no other text, no markdown`;
 
 // ---------------------------------------------------------------------------
@@ -100,9 +111,14 @@ function parseResponse(raw, expectedLength) {
   const match = raw.match(/\[[\s\S]*\]/);
   if (!match) return null;
   let items;
-  try { items = JSON.parse(match[0]); } catch { return null; }
+  try {
+    items = JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
   if (!Array.isArray(items) || items.length !== expectedLength) return null;
-  if (!items.every((s) => typeof s === "string" && s.trim().length > 10)) return null;
+  if (!items.every((s) => typeof s === "string" && s.trim().length > 10))
+    return null;
   return items.map((s) => s.trim());
 }
 
@@ -126,9 +142,7 @@ export async function polishNarrationItems(title, items, articleText = null) {
   const userContent = [
     `Event: ${title}`,
     "",
-    articleText
-      ? `Full article context:\n${articleText}`
-      : null,
+    articleText ? `Full article context:\n${articleText}` : null,
     "",
     `Rewrite these ${items.length} facts into engaging documentary voiceover sentences.`,
     `Return a JSON array of exactly ${items.length} strings.`,
@@ -146,23 +160,31 @@ export async function polishNarrationItems(title, items, articleText = null) {
   for (const provider of PROVIDERS) {
     const apiKey = process.env[provider.envKey];
     if (!apiKey) {
-      console.log(`  ℹ Narration expert: ${provider.envKey} not set — skipping ${provider.name}`);
+      console.log(
+        `  ℹ Narration expert: ${provider.envKey} not set — skipping ${provider.name}`,
+      );
       continue;
     }
 
-    console.log(`  → Narration expert (${provider.name}): polishing ${items.length} items for "${title.slice(0, 50)}..."`);
+    console.log(
+      `  → Narration expert (${provider.name}): polishing ${items.length} items for "${title.slice(0, 50)}..."`,
+    );
 
     let raw;
     try {
       raw = await callProvider(provider, apiKey, messages);
     } catch (err) {
-      console.warn(`  ⚠ Narration expert (${provider.name}): ${err.message} — trying next provider`);
+      console.warn(
+        `  ⚠ Narration expert (${provider.name}): ${err.message} — trying next provider`,
+      );
       continue;
     }
 
     const polished = parseResponse(raw, items.length);
     if (!polished) {
-      console.warn(`  ⚠ Narration expert (${provider.name}): invalid response — trying next provider\n    Got: ${raw.slice(0, 200)}`);
+      console.warn(
+        `  ⚠ Narration expert (${provider.name}): invalid response — trying next provider\n    Got: ${raw.slice(0, 200)}`,
+      );
       continue;
     }
 
@@ -173,6 +195,8 @@ export async function polishNarrationItems(title, items, articleText = null) {
     return polished;
   }
 
-  console.warn("  ⚠ Narration expert: all providers unavailable — using original items");
+  console.warn(
+    "  ⚠ Narration expert: all providers unavailable — using original items",
+  );
   return items;
 }

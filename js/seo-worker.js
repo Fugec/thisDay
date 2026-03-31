@@ -1124,7 +1124,7 @@ ${siteNav()}
     <ins class="adsbygoogle"
          style="display:block;border-radius:8px;overflow:hidden"
          data-ad-client="ca-pub-8565025017387209"
-         data-ad-slot="4828593028"
+         data-ad-slot="9477779891"
          data-ad-format="auto"
          data-full-width-responsive="true"></ins>
   </div>
@@ -1489,7 +1489,7 @@ ${siteNav()}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
-         data-ad-client="ca-pub-8565025017387209" data-ad-slot="4828593028"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
   ${
@@ -1800,7 +1800,7 @@ ${siteNav()}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
-         data-ad-client="ca-pub-8565025017387209" data-ad-slot="4828593028"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
   ${
@@ -4759,7 +4759,7 @@ ${siteNav()}
     <ins class="adsbygoogle"
          style="display:block;border-radius:8px;overflow:hidden"
          data-ad-client="ca-pub-8565025017387209"
-         data-ad-slot="4828593028"
+         data-ad-slot="9477779891"
          data-ad-format="auto"
          data-full-width-responsive="true"></ins>
   </div>

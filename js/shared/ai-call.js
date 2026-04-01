@@ -3,11 +3,18 @@
  *
  * Provider priority:
  *   1. Workers AI (env.AI)       — @cf/meta/llama-3.3-70b-instruct-fp8-fast, built-in
- *   2. Groq  (env.GROQ_API_KEY)  — llama-3.3-70b-versatile, fallback when Workers AI quota is exhausted
+ *   2. Groq  (env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3)
+ *        — llama-3.3-70b-versatile, fallback when Workers AI quota is exhausted
  *
  * Set GROQ_API_KEY as a Worker secret to enable Groq fallback:
  *   npx wrangler secret put GROQ_API_KEY --config wrangler.jsonc
  *   npx wrangler secret put GROQ_API_KEY --config wrangler-blog.jsonc
+ *
+ * Optional rotation keys:
+ *   npx wrangler secret put GROQ_API_KEY_2 --config wrangler.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_2 --config wrangler-blog.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_3 --config wrangler.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_3 --config wrangler-blog.jsonc
  *
  * @module shared/ai-call
  */
@@ -24,7 +31,9 @@ const GROQ_MODEL = "llama-3.3-70b-versatile";
  *
  * @param {object}   env
  * @param {object}   [env.AI]            Workers AI binding
- * @param {string}   [env.GROQ_API_KEY]  Groq API key secret (optional fallback)
+ * @param {string}   [env.GROQ_API_KEY]   Groq API key secret (optional fallback)
+ * @param {string}   [env.GROQ_API_KEY_2] Groq API key secret (optional rotation)
+ * @param {string}   [env.GROQ_API_KEY_3] Groq API key secret (optional rotation)
  * @param {object}   [env.BLOG_AI_KV]   KV for resolving the best CF model name
  * @param {Array}    messages            OpenAI-style chat messages array
  * @param {object}   [opts]
@@ -55,12 +64,13 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
   }
 
   // 2. Groq — fallback when Workers AI quota is exhausted or unavailable
-  if (env.GROQ_API_KEY) {
+  const groqKeys = [env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3].filter(Boolean);
+  for (const key of groqKeys) {
     try {
       const res = await fetch(GROQ_URL, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${env.GROQ_API_KEY}`,
+          Authorization: `Bearer ${key}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

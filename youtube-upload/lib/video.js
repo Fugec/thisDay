@@ -663,6 +663,21 @@ function getHistoricalEraContext(rawTitle) {
 // ---------------------------------------------------------------------------
 
 /**
+ * Extracts a person's name from the title if the article is about a person.
+ * Looks for patterns like "Nikola Tesla — January 9, 1943" or "Ada Lovelace — November 27, 1852"
+ * Returns null if no person detected.
+ */
+function extractPersonName(title) {
+  // Pattern: "Name — Date" or "Name - Date" or "Name, Date"
+  const match = title.match(/^([A-Z][a-z]+(?: [A-Z][a-z]+)+?)\s*[—–-]\s*[,]?\s*\w+ \d{1,2},?\s*\d{4}$/);
+  if (match) return match[1];
+  // Also handle titles like "Nikola Tesla — 1943"
+  const simpleMatch = title.match(/^([A-Z][a-z]+(?: [A-Z][a-z]+)+?)\s*[—–-]\s*\d{4}$/);
+  if (simpleMatch) return simpleMatch[1];
+  return null;
+}
+
+/**
  * Builds 3 distinct cinematic AI image prompts — one per narration section,
  * each anchored to the correct historical period (clothing, weapons, architecture).
  *
@@ -683,14 +698,23 @@ function buildScenePrompts(title, contentItems, qualityHint = null) {
   const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
   const facts = (contentItems || []).map((f) => (f || "").slice(0, 120));
 
+  // Detect if this is an article about a specific person
+  const person = extractPersonName(title);
+
   // Append remediation hint from a previous failed quality check so the retry
   // produces visually different output (e.g. "sharper lighting, richer detail")
   const hint = qualityHint ? `, ${qualityHint}` : "";
 
+  // If article is about a person, ensure they appear in the images
+  const personGuidance = person
+    ? `IMPORTANT: This image MUST feature ${person} as the main subject, dressed in ${era}-appropriate clothing. The historical figure must be clearly recognizable.`
+    : "";
+
   const base =
     `ultra-realistic ${era} scene, photorealistic painting or photograph, ` +
     `${style}` + hint + `, ` +
-    `vertical 9:16 portrait format, anatomically correct, no text, no logos, no watermarks`;
+    `vertical 9:16 portrait format, anatomically correct, no text, no logos, no watermarks` +
+    (personGuidance ? ` ${personGuidance}` : "");
 
   const allPrompts = [
     // Scene 1 — wide establishing shot: location, scale, atmosphere

@@ -692,7 +692,7 @@ function buildScenePrompts(title, contentItems, qualityHint = null) {
     `${style}` + hint + `, ` +
     `vertical 9:16 portrait format, anatomically correct, no text, no logos, no watermarks`;
 
-  return [
+  const allPrompts = [
     // Scene 1 — wide establishing shot: location, scale, atmosphere
     `${base}. ` +
       `Wide establishing shot of ${event}. ` +
@@ -713,6 +713,7 @@ function buildScenePrompts(title, contentItems, qualityHint = null) {
       `Wide documentary shot: ruins, monuments or transformed landscape, ` +
       `raw consequence visible, reflective poignant light, no isolated close-up faces.`,
   ];
+  return allPrompts.slice(0, N_SCENES);
 }
 
 /**

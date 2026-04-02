@@ -32,8 +32,7 @@ const TMP = "./tmp";
 const W = 1080;
 const H = 1920;
 /**
- * 4 scenes per video — one cut every ~10-12s at 45s total.
- * Research shows 4 scenes at that cadence maximises documentary-style retention.
+ * 2 scenes per video — one cut at ~22s for a 45s total.
  * Images: Pollinations flux-2-dev (free). Animation: WAN 2.2 I2V via HF ZeroGPU
  * (requires HF_TOKEN; falls back to Ken Burns automatically if unavailable).
  */

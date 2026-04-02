@@ -49,6 +49,16 @@ import {
   buildNarrationParts,
 } from "./lib/elevenlabs.js";
 
+// Parse REUPLOAD_SLUGS from env into a Set.
+// Accepts: "a,b,c" or "a b c" or newline-separated.
+// Empty/undefined => empty set.
+const reuploadSlugs = new Set(
+  (process.env.REUPLOAD_SLUGS || "")
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
 /**
  * Deletes the broken post from KV, then calls POST /blog/publish to generate
  * a fresh article (same date slug, new topic, guaranteed real image).
@@ -217,7 +227,9 @@ async function main() {
       const at = a.slug === todaySlug ? 1 : 0;
       const bt = b.slug === todaySlug ? 1 : 0;
       if (bt !== at) return bt - at;
-      return new Date(b.publishedAt) - new Date(a.publishedAt);
+      const ap = Date.parse(a.publishedAt || 0) || 0;
+      const bp = Date.parse(b.publishedAt || 0) || 0;
+      return bp - ap;
     })
     .slice(0, maxUploadsPerRun);
 

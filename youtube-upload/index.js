@@ -369,11 +369,17 @@ async function main() {
     } catch (err) {
       if (err.message?.startsWith("IMAGE_UNAVAILABLE")) {
         console.error(`  ✗ No working image for "${post.title}"`);
-        const newPost = await triggerArticleRegen(post.slug);
-        if (newPost) {
-          // Re-run this iteration with the freshly generated post
-          pending.splice(pending.indexOf(post) + 1, 0, newPost);
-          console.log(`  → New article queued for upload in this run.`);
+        // Guard: only regenerate once per slug to prevent infinite loop
+        if (reuploadSlugs.has(`__regen_${post.slug}`)) {
+          console.error(`  ✗ Already regenerated "${post.slug}" once — skipping.`);
+        } else {
+          reuploadSlugs.add(`__regen_${post.slug}`);
+          const newPost = await triggerArticleRegen(post.slug);
+          if (newPost) {
+            // Re-run this iteration with the freshly generated post
+            pending.splice(pending.indexOf(post) + 1, 0, newPost);
+            console.log(`  → New article queued for upload in this run.`);
+          }
         }
       } else {
         console.error(`  ✗ Failed: ${err.message}`);

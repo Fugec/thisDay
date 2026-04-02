@@ -744,8 +744,8 @@ function findSceneBoundaries(words, narrationParts) {
     const maxIdx = Math.floor(words.length * 0.7);
     for (let i = minIdx; i < maxIdx; i++) {
       if (
-        words[i].word.toLowerCase() === "did" &&
-        words[i + 1]?.word.toLowerCase() === "you"
+        words[i].word?.toLowerCase() === "did" &&
+        words[i + 1]?.word?.toLowerCase() === "you"
       ) {
         dykTime = Math.max(3, words[i].start);
         break;
@@ -943,10 +943,11 @@ async function generateMultiSceneVideo(
   const endScreenPath = join(TMP, `${slug}_end.png`);
   await sharp(await buildEndScreenPNG()).toFile(endScreenPath);
 
-  await new Promise((resolve, reject) => {
-    const cmd = ffmpeg();
+  try {
+    await new Promise((resolve, reject) => {
+      const cmd = ffmpeg();
 
-    // Add scene inputs — video clips loop, static images freeze
+      // Add scene inputs — video clips loop, static images freeze
     for (let i = 0; i < sceneFiles.length; i++) {
       const { path, isVideo } = sceneFiles[i];
       if (isVideo) {
@@ -1067,14 +1068,15 @@ async function generateMultiSceneVideo(
       )
       .run();
   });
-
-  [...sceneFiles.map((s) => s.path), ...captionPNGPaths, endScreenPath].forEach((p) => {
-    try {
-      unlinkSync(p);
-    } catch {
-      /* ignore */
-    }
-  });
+  } finally {
+    [...sceneFiles.map((s) => s.path), ...captionPNGPaths, endScreenPath].forEach((p) => {
+      try {
+        unlinkSync(p);
+      } catch {
+        /* ignore */
+      }
+    });
+  }
   return { path: videoPath, cuts };
 }
 
@@ -1172,8 +1174,9 @@ export async function generateVideo(
   //      narration only     → narration track, video pads to 45 s silently
   //      music only         → music looped at full volume for 45 s
   //      no audio           → silent video
-  await new Promise((resolve, reject) => {
-    const cmd = ffmpeg().input(framePath).inputOptions(["-loop 1"]); // input 0 — image
+  try {
+    await new Promise((resolve, reject) => {
+      const cmd = ffmpeg().input(framePath).inputOptions(["-loop 1"]); // input 0 — image
 
     const hasNarr = !!narrationPath;
     const hasMusic = !!bgMusicPath;
@@ -1296,13 +1299,14 @@ export async function generateVideo(
       )
       .run();
   });
-
-  [...captionPNGPaths, framePath].forEach((p) => {
-    try {
-      unlinkSync(p);
-    } catch {
-      /* ignore */
-    }
-  });
+  } finally {
+    [...captionPNGPaths, framePath].forEach((p) => {
+      try {
+        unlinkSync(p);
+      } catch {
+        /* ignore */
+      }
+    });
+  }
   return { path: videoPath, cuts: [] };
 }

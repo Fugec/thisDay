@@ -24,11 +24,12 @@
 import sharp from "sharp";
 import ffmpeg from "fluent-ffmpeg";
 import { mkdirSync, unlinkSync, writeFileSync } from "fs";
-import { join } from "path";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { generateAISceneBatch } from "./ai-image.js";
 import { reviewPromptsWithHistoryExpert } from "./history-expert.js";
 
-const TMP = "./tmp";
+const TMP = join(dirname(fileURLToPath(import.meta.url)), "../tmp");
 const W = 1080;
 const H = 1920;
 /**

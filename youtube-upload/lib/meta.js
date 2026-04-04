@@ -371,7 +371,23 @@ async function uploadStory(videoPath) {
 
   // ── Step 2: Wait for story composer ───────────────────────────────────────
   console.log("  [Meta:Story] Waiting for story composer...");
-  waitForText("story", 60_000);
+  // Wait for any of the typical story composer elements
+  const deadline2 = Date.now() + 90_000;
+  let composerSnap = null;
+  while (Date.now() < deadline2) {
+    sleep(2_500);
+    try {
+      const s = ocb(["snapshot", "--interactive"], 15_000);
+      if (
+        s.toLowerCase().includes("story") ||
+        s.toLowerCase().includes("add photo") ||
+        s.toLowerCase().includes("upload") ||
+        s.toLowerCase().includes("choose")
+      ) { composerSnap = s; break; }
+    } catch { /* still loading */ }
+  }
+  if (!composerSnap) throw new Error("[Meta:Story] Story composer did not load");
+  snap = composerSnap;
   jitter(800);
   snap = ocb(["snapshot", "--interactive"], 30_000);
   debugSnapshot("story-composer", snap);
@@ -419,7 +435,20 @@ async function uploadStory(videoPath) {
   console.log("  [Meta:Story] Publishing story...");
   humanPause();
   ocb(["click", publishRef], 15_000);
-  waitForText("story", 90_000);
+  // Wait for success — any of: "story", "published", "shared", back to content home
+  const pubDeadline = Date.now() + 90_000;
+  while (Date.now() < pubDeadline) {
+    sleep(2_500);
+    try {
+      const s = ocb(["snapshot", "--interactive"], 15_000);
+      if (
+        s.toLowerCase().includes("story") ||
+        s.toLowerCase().includes("published") ||
+        s.toLowerCase().includes("shared") ||
+        s.toLowerCase().includes("create reel")
+      ) break;
+    } catch { /* still loading */ }
+  }
   jitter(700);
 
   // Click Done if it appears
@@ -470,8 +499,8 @@ export async function postToMeta(videoPath, post, youtubeId) {
   }
 
   if (process.env.META_SKIP_STORY !== "true") {
-    // Brief pause between reel and story — looks more natural
-    jitter(3_000);
+    // Longer pause between reel and story — let the page settle after reel confirmation
+    jitter(6_000);
     try {
       await uploadStory(videoPath);
     } catch (err) {

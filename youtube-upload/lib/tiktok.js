@@ -176,7 +176,9 @@ async function uploadToTikTok(videoPath, post, youtubeId) {
   snap = ocb(["snapshot", "--interactive"], 30_000);
   debugSnapshot("pre-post", snap);
 
-  const postRef = findRef(snap, "Post", "Publish", "Submit");
+  // Exact "Post" match first — avoids matching "Discard post" or similar labels
+  const postRef = snap.match(/"Post"\s*\[ref=(e\d+)\]/i)?.[1]
+    ?? findRef(snap, "Publish", "Submit");
   if (!postRef) throw new Error("[TT] Could not find Post/Publish button");
 
   console.log("  [TT] Clicking Post...");
@@ -194,7 +196,20 @@ async function uploadToTikTok(videoPath, post, youtubeId) {
     try {
       waitForText("processing", 20_000);
     } catch {
-      console.warn("  [TT] ⚠ No confirmation text detected — assuming success");
+      // Check if TikTok navigated back to the upload page — that also means success
+      try {
+        const confirmSnap = ocb(["snapshot", "--interactive"], 10_000);
+        if (confirmSnap.includes("Select video")) {
+          console.log("  [TT] Navigated back to upload page — post succeeded");
+        } else if (confirmSnap.toLowerCase().includes("discard") || confirmSnap.toLowerCase().includes("exit")) {
+          throw new Error("Post button click landed on discard/exit dialog — post may not have published");
+        } else {
+          console.warn("  [TT] ⚠ No confirmation text detected — assuming success");
+        }
+      } catch (snapErr) {
+        if (snapErr.message.includes("discard") || snapErr.message.includes("exit")) throw snapErr;
+        console.warn("  [TT] ⚠ No confirmation text detected — assuming success");
+      }
     }
   }
 

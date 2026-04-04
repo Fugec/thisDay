@@ -17,13 +17,101 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-import { siteNav, siteFooter, footerYearScript, NAV_CSS, FOOTER_CSS, navToggleScript } from "./shared/layout.js";
+import {
+  siteNav,
+  siteFooter,
+  footerYearScript,
+  NAV_CSS,
+  FOOTER_CSS,
+  navToggleScript,
+} from "./shared/layout.js";
 import {
   resolveAiModel,
   checkAndUpdateAiModel,
   CF_AI_MODEL,
 } from "./shared/ai-model.js";
 import { callAI } from "./shared/ai-call.js";
+
+const PIPELINE_STATE_KEY = "youtube:pipeline-state";
+
+function utcDateString(value = new Date()) {
+  return value.toISOString().slice(0, 10);
+}
+
+async function getPipelineState(env) {
+  const raw = await env.BLOG_AI_KV.get(PIPELINE_STATE_KEY);
+  const parsed = raw ? JSON.parse(raw) : {};
+  return {
+    ...parsed,
+    steps: parsed.steps ?? {},
+    quota: parsed.quota ?? {},
+  };
+}
+
+async function savePipelineState(env, state) {
+  await env.BLOG_AI_KV.put(PIPELINE_STATE_KEY, JSON.stringify(state));
+}
+
+async function notifyPipelineIssue(env, issue) {
+  if (!env.DISCORD_WEBHOOK_URL) return;
+  const streakLine = issue.streak
+    ? `\n📈 Consecutive days: ${issue.streak}`
+    : "";
+  const content =
+    `⚠️ **Pipeline issue detected**\n` +
+    `Step: ${issue.step}\n` +
+    `Slug: ${issue.slug}\n` +
+    `Date: ${issue.date}\n` +
+    `Details: ${issue.message}${streakLine}`;
+  await fetch(env.DISCORD_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  }).catch((e) =>
+    console.warn("Blog: Discord pipeline alert failed:", e.message),
+  );
+}
+
+async function recordPipelineFailure(
+  env,
+  { step, slug, message, date = new Date() },
+) {
+  const today = utcDateString(date);
+  const yesterday = utcDateString(new Date(date.getTime() - 86_400_000));
+  const state = await getPipelineState(env);
+  const stepState = state.steps[step] ?? {};
+
+  if (stepState.lastFailureDate === today) {
+    stepState.lastFailureSlug = slug;
+    stepState.lastFailureMessage = message;
+    state.steps[step] = stepState;
+    await savePipelineState(env, state);
+    return;
+  }
+
+  const streak =
+    stepState.lastFailureDate === yesterday ? (stepState.streak ?? 1) + 1 : 1;
+  stepState.lastFailureDate = today;
+  stepState.lastFailureSlug = slug;
+  stepState.lastFailureMessage = message;
+  stepState.streak = streak;
+  state.steps[step] = stepState;
+  await savePipelineState(env, state);
+
+  if (streak >= 2) {
+    await notifyPipelineIssue(env, {
+      step,
+      slug,
+      date: today,
+      message,
+      streak,
+    });
+    stepState.lastAlertDate = today;
+    state.steps[step] = stepState;
+    await savePipelineState(env, state);
+  }
+}
+
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
@@ -115,6 +203,12 @@ export default {
           `Blog AI: /blog/publish generation failed — ${err.message}`,
         );
         const today = todayDateString();
+        await recordPipelineFailure(env, {
+          step: "blog",
+          slug: today,
+          message: err.message,
+          date: new Date(),
+        });
         await env.BLOG_AI_KV.put(
           `error:${today}`,
           `Publish endpoint failed: ${err.message}`,
@@ -215,8 +309,8 @@ export default {
       const cache = caches.default;
       const results = await Promise.allSettled(
         index.map((e) =>
-          cache.delete(new Request(`https://thisday.info/blog/${e.slug}/`))
-        )
+          cache.delete(new Request(`https://thisday.info/blog/${e.slug}/`)),
+        ),
       );
       const purged = results.filter((r) => r.status === "fulfilled").length;
       return jsonResponse({ status: "ok", purged, total: index.length });
@@ -332,7 +426,10 @@ export default {
         const index = indexRaw ? JSON.parse(indexRaw) : [];
         const entry = index.find((p) => p.slug === slug);
         // Fall back to slug-only when entry not in index (covers old static posts)
-        const entryOrFallback = entry || { title: slug.replace(/[-/]/g, " "), description: "" };
+        const entryOrFallback = entry || {
+          title: slug.replace(/[-/]/g, " "),
+          description: "",
+        };
         if (env.AI || env.GROQ_API_KEY) {
           const content = await buildRichContent(entryOrFallback, slug);
           const quiz = await generateBlogQuiz(env, content, slug);
@@ -390,6 +487,22 @@ export default {
       if (html) {
         // Patch old quiz API path in already-stored HTML
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
+        // Patch raw og:image / twitter:image URLs → image-proxy at 1200px for proper social card sizing.
+        // Old posts store the raw Wikimedia URL directly; new posts use image-proxy in buildPostHTML.
+        if (!patchedHtml.includes('og:image" content="/image-proxy')) {
+          patchedHtml = patchedHtml.replace(
+            /(<meta property="og:image" content=")(https?:\/\/[^"]+)(")/,
+            (_, pre, url, post) =>
+              `${pre}/image-proxy?src=${encodeURIComponent(url)}&w=1200&q=85${post}`,
+          );
+        }
+        if (!patchedHtml.includes('twitter:image" content="/image-proxy')) {
+          patchedHtml = patchedHtml.replace(
+            /(<meta name="twitter:image" content=")(https?:\/\/[^"]+)(")/,
+            (_, pre, url, post) =>
+              `${pre}/image-proxy?src=${encodeURIComponent(url)}&w=1200&q=85${post}`,
+          );
+        }
         // Patch broken JS apostrophe — \'s inside template literal got unescaped to 's,
         // breaking the JS string literal in showResults()
         patchedHtml = patchedHtml.replace(
@@ -410,28 +523,38 @@ export default {
           }
         }
         // Patch old footer — replace any footer that lacks footer-inner
-        if (patchedHtml.includes('class="footer"') && !patchedHtml.includes('footer-inner')) {
+        if (
+          patchedHtml.includes('class="footer"') &&
+          !patchedHtml.includes("footer-inner")
+        ) {
           patchedHtml = patchedHtml.replace(
             /<footer class="footer">[\s\S]*?<\/footer>\s*(?=<\/body>|<\/html>|$)/,
             siteFooter(),
           );
         }
         // Patch old Bootstrap navbar → new siteNav()
-        if (patchedHtml.includes('class="navbar') && !patchedHtml.includes('class="nav"')) {
-          patchedHtml = patchedHtml.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
+        if (
+          patchedHtml.includes('class="navbar') &&
+          !patchedHtml.includes('class="nav"')
+        ) {
+          patchedHtml = patchedHtml.replace(
+            /<nav class="navbar[\s\S]*?<\/nav>/,
+            siteNav(),
+          );
         }
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
-        patchedHtml = patchedHtml.replace('</head>',
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}</style></head>`
+        patchedHtml = patchedHtml.replace(
+          "</head>",
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}</style></head>`,
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml
-          .replaceAll('var(--card-bg)', 'var(--bg)')
-          .replaceAll('var(--text-color)', 'var(--text)')
-          .replaceAll('var(--primary-bg)', 'var(--btn-bg)')
-          .replaceAll('var(--footer-bg)', 'var(--bg-alt)')
-          .replaceAll('var(--link-color)', 'var(--btn-bg)')
-          .replaceAll('var(--secondary-bg)', 'var(--bg)');
+          .replaceAll("var(--card-bg)", "var(--bg)")
+          .replaceAll("var(--text-color)", "var(--text)")
+          .replaceAll("var(--primary-bg)", "var(--btn-bg)")
+          .replaceAll("var(--footer-bg)", "var(--bg-alt)")
+          .replaceAll("var(--link-color)", "var(--btn-bg)")
+          .replaceAll("var(--secondary-bg)", "var(--bg)");
         // Patch Bootstrap primary button classes → site btn
         patchedHtml = patchedHtml
           .replaceAll('class="btn btn-primary', 'class="btn')
@@ -439,16 +562,31 @@ export default {
           .replaceAll('class="btn btn-outline-secondary', 'class="btn')
           .replaceAll("class='btn btn-outline-secondary", "class='btn");
         // Inject NAV_CSS + FOOTER_CSS if missing
-        if (!patchedHtml.includes('.nav-inner')) {
-          patchedHtml = patchedHtml.replace('</head>', `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
+        if (!patchedHtml.includes(".nav-inner")) {
+          patchedHtml = patchedHtml.replace(
+            "</head>",
+            `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`,
+          );
         }
         // Remove old dark theme JS and CSS
-        patchedHtml = patchedHtml.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*(?:setTheme|darkTheme|dark-theme|DARK_THEME)(?:(?!<\/script>)[\s\S])*<\/script>/g, '');
-        patchedHtml = patchedHtml.replace(/body\.dark-theme\s*\{[^}]*\}/g, '');
-        patchedHtml = patchedHtml.replace(/body\.dark-theme[^{]*\{[^}]*\}/g, '');
+        patchedHtml = patchedHtml.replace(
+          /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*(?:setTheme|darkTheme|dark-theme|DARK_THEME)(?:(?!<\/script>)[\s\S])*<\/script>/g,
+          "",
+        );
+        patchedHtml = patchedHtml.replace(/body\.dark-theme\s*\{[^}]*\}/g, "");
+        patchedHtml = patchedHtml.replace(
+          /body\.dark-theme[^{]*\{[^}]*\}/g,
+          "",
+        );
         // Add navToggle script if missing
-        if (!patchedHtml.includes('navToggle') && patchedHtml.includes('class="nav"')) {
-          patchedHtml = patchedHtml.replace('</body>', `<script>${navToggleScript()}</script></body>`);
+        if (
+          !patchedHtml.includes("navToggle") &&
+          patchedHtml.includes('class="nav"')
+        ) {
+          patchedHtml = patchedHtml.replace(
+            "</body>",
+            `<script>${navToggleScript()}</script></body>`,
+          );
         }
         // Patch image caption — replace any AI-generated caption with correct Wikimedia attribution
         patchedHtml = patchedHtml.replace(
@@ -880,7 +1018,10 @@ export default {
           );
         }
         // Patch float bar background to white on already-stored posts
-        patchedHtml = patchedHtml.replaceAll('background:rgba(27,58,45,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.3)', 'background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15)');
+        patchedHtml = patchedHtml.replaceAll(
+          "background:rgba(27,58,45,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.3)",
+          "background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15)",
+        );
         // Inject floating quiz bar into stored posts that don't have it yet
         if (!patchedHtml.includes("tdq-float-bar")) {
           const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}#tdq-float-btn:hover{background:#8ab532;box-shadow:0 2px 16px rgba(157,196,58,.5)}</style>`;
@@ -894,36 +1035,58 @@ export default {
             .replace(bodyClose, floatHtml + "\n" + floatJs + "\n" + bodyClose);
         }
         // Patch old amber/orange quiz colors → green palette
-        if (patchedHtml.includes('linear-gradient(90deg,#f59e0b') || patchedHtml.includes('rgba(15,23,42,.96)') || patchedHtml.includes('background:#f59e0b')) {
+        if (
+          patchedHtml.includes("linear-gradient(90deg,#f59e0b") ||
+          patchedHtml.includes("rgba(15,23,42,.96)") ||
+          patchedHtml.includes("background:#f59e0b")
+        ) {
           patchedHtml = patchedHtml
-            .replaceAll('rgba(15,23,42,.96)', 'rgba(27,58,45,.96)')
-            .replaceAll('linear-gradient(90deg,#f59e0b,#d97706)', '#9dc43a')
-            .replaceAll('linear-gradient(90deg,#d97706,#b45309)', '#8ab532')
-            .replaceAll('rgba(245,158,11,.35)', 'rgba(157,196,58,.35)')
-            .replaceAll('rgba(245,158,11,.5)', 'rgba(157,196,58,.5)')
-            .replaceAll('background:#f59e0b', 'background:var(--btn-bg,#1b3a2d)')
-            .replaceAll('background:#d97706', 'background:var(--btn-hover,#2a4d3a)')
-            .replaceAll('color:#f59e0b', 'color:var(--accent,#9dc43a)')
-            .replaceAll('border-color:#f59e0b', 'border-color:var(--btn-bg,#1b3a2d)')
-            .replaceAll('rgba(245,158,11,.07)', 'rgba(157,196,58,.07)')
-            .replaceAll('rgba(245,158,11,.12)', 'rgba(157,196,58,.15)')
-            .replaceAll('rgba(245,158,11,.1)', 'rgba(157,196,58,.1)')
-            .replaceAll('border-left:4px solid #f59e0b', 'border-left:4px solid var(--accent,#9dc43a)');
+            .replaceAll("rgba(15,23,42,.96)", "rgba(27,58,45,.96)")
+            .replaceAll("linear-gradient(90deg,#f59e0b,#d97706)", "#9dc43a")
+            .replaceAll("linear-gradient(90deg,#d97706,#b45309)", "#8ab532")
+            .replaceAll("rgba(245,158,11,.35)", "rgba(157,196,58,.35)")
+            .replaceAll("rgba(245,158,11,.5)", "rgba(157,196,58,.5)")
+            .replaceAll(
+              "background:#f59e0b",
+              "background:var(--btn-bg,#1b3a2d)",
+            )
+            .replaceAll(
+              "background:#d97706",
+              "background:var(--btn-hover,#2a4d3a)",
+            )
+            .replaceAll("color:#f59e0b", "color:var(--accent,#9dc43a)")
+            .replaceAll(
+              "border-color:#f59e0b",
+              "border-color:var(--btn-bg,#1b3a2d)",
+            )
+            .replaceAll("rgba(245,158,11,.07)", "rgba(157,196,58,.07)")
+            .replaceAll("rgba(245,158,11,.12)", "rgba(157,196,58,.15)")
+            .replaceAll("rgba(245,158,11,.1)", "rgba(157,196,58,.1)")
+            .replaceAll(
+              "border-left:4px solid #f59e0b",
+              "border-left:4px solid var(--accent,#9dc43a)",
+            );
           // Fix float button text: white on light green → dark on light green
           patchedHtml = patchedHtml.replace(
             /#tdq-float-btn\{background:#9dc43a;border:none;border-radius:100px;color:#fff;/,
-            '#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;',
+            "#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;",
           );
         }
         // Patch old btn-warning quiz buttons → green
-        if (patchedHtml.includes('btn-warning')) {
+        if (patchedHtml.includes("btn-warning")) {
           patchedHtml = patchedHtml
-            .replaceAll('class="btn btn-warning fw-semibold w-100 mt-2"', 'class="btn"')
+            .replaceAll(
+              'class="btn btn-warning fw-semibold w-100 mt-2"',
+              'class="btn"',
+            )
             .replaceAll('class="btn btn-warning mt-3"', 'class="btn mt-3"');
         }
         // Patch old box-shadow on article border
-        if (patchedHtml.includes('box-shadow:0 2px 4px rgba(0,0,0,.1)')) {
-          patchedHtml = patchedHtml.replaceAll('box-shadow:0 2px 4px rgba(0,0,0,.1)', 'box-shadow:none');
+        if (patchedHtml.includes("box-shadow:0 2px 4px rgba(0,0,0,.1)")) {
+          patchedHtml = patchedHtml.replaceAll(
+            "box-shadow:0 2px 4px rgba(0,0,0,.1)",
+            "box-shadow:none",
+          );
         }
         // Inject AdSense ad unit into stored posts that don't have one yet
         // Only inject for posts from March 2026 onwards — leave older posts alone
@@ -1064,7 +1227,10 @@ export default {
     if (staticBlogMatch) {
       const slug = staticBlogMatch[1]; // e.g., "august/1-2025"
       const originResp = await fetch(request);
-      if (!originResp.ok || !originResp.headers.get("Content-Type")?.includes("text/html")) {
+      if (
+        !originResp.ok ||
+        !originResp.headers.get("Content-Type")?.includes("text/html")
+      ) {
         return originResp;
       }
       let html = await originResp.text();
@@ -1098,16 +1264,28 @@ export default {
         );
       }
       // Patch Inter → Lora font
-      if (html.includes("font-family:Inter") || html.includes("font-family: Inter")) {
-        html = html.replace(/font-family:\s*['"]?Inter[^;]*/g, "font-family:Lora,serif");
+      if (
+        html.includes("font-family:Inter") ||
+        html.includes("font-family: Inter")
+      ) {
+        html = html.replace(
+          /font-family:\s*['"]?Inter[^;]*/g,
+          "font-family:Lora,serif",
+        );
       }
       // Inject NAV_CSS + FOOTER_CSS if missing
       if (!html.includes(".nav-inner")) {
-        html = html.replace("</head>", `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`);
+        html = html.replace(
+          "</head>",
+          `<style>${NAV_CSS}\n${FOOTER_CSS}</style></head>`,
+        );
       }
       // Add navToggle script if missing
       if (!html.includes("navToggle") && html.includes('class="nav"')) {
-        html = html.replace("</body>", `<script>${navToggleScript()}</script></body>`);
+        html = html.replace(
+          "</body>",
+          `<script>${navToggleScript()}</script></body>`,
+        );
       }
       // Inject quiz CTA + popup if no quiz present
       if (!html.includes("tdq-cta-btn")) {
@@ -1210,7 +1388,11 @@ export default {
   })();
   <\/script>`;
         // Inject quiz CTA before </article> or </body>
-        const insertBefore = html.includes("</article>") ? "</article>" : (html.includes("</body>") ? "</body>" : "</html>");
+        const insertBefore = html.includes("</article>")
+          ? "</article>"
+          : html.includes("</body>")
+            ? "</body>"
+            : "</html>";
         html = html.replace(insertBefore, quizCta + "\n" + insertBefore);
         const bodyClose = html.includes("</body>") ? "</body>" : "</html>";
         html = html.replace(bodyClose, quizBlock + "\n" + bodyClose);
@@ -1218,7 +1400,10 @@ export default {
       // Inject support popup if not present
       if (!html.includes("supportPopup")) {
         const bodyClose = html.includes("</body>") ? "</body>" : "</html>";
-        html = html.replace(bodyClose, supportPopupSnippet() + "\n" + bodyClose);
+        html = html.replace(
+          bodyClose,
+          supportPopupSnippet() + "\n" + bodyClose,
+        );
       }
       return new Response(html, {
         headers: {
@@ -1290,6 +1475,12 @@ async function maybeGenerateBlogPost(env, ctx) {
 
   // All attempts failed — persist error in KV so it's visible in the dashboard.
   const errMsg = lastError?.message ?? String(lastError);
+  await recordPipelineFailure(env, {
+    step: "blog",
+    slug: today,
+    message: errMsg,
+    date: now,
+  });
   await env.BLOG_AI_KV.put(
     `error:${today}`,
     `Generation failed after 3 attempts: ${errMsg}`,
@@ -1470,6 +1661,10 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
   // sentence length before building HTML. Falls back to original on any error.
   content = await reviewContentWithSEOExpert(content, env);
 
+  // Fact-check pass: verify date, year, location against the event name.
+  // Applies corrections in-place; never blocks generation on failure.
+  await factCheckContent(env, content);
+
   // Validate image URLs and fetch alternatives if broken.
   // If no working image is found, regenerate once with a different topic.
   const MAX_CONTENT_ATTEMPTS = 2;
@@ -1505,11 +1700,24 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
         155,
       );
   }
+  // Clamp meta description to 155 chars maximum (Google truncates beyond this)
+  if (content.description.length > 155) {
+    content.description =
+      content.description.substring(0, 152).trimEnd() + "...";
+  }
   if (!content.ogDescription || content.ogDescription.length < 80) {
     content.ogDescription = content.description.substring(0, 130);
   }
+  if (content.ogDescription.length > 130) {
+    content.ogDescription =
+      content.ogDescription.substring(0, 127).trimEnd() + "...";
+  }
   if (!content.twitterDescription || content.twitterDescription.length < 60) {
     content.twitterDescription = content.description.substring(0, 120);
+  }
+  if (content.twitterDescription.length > 120) {
+    content.twitterDescription =
+      content.twitterDescription.substring(0, 117).trimEnd() + "...";
   }
 
   const slug = buildSlug(now);
@@ -1590,8 +1798,7 @@ async function runPostPublishExtras(env, slug, content) {
         .filter((p) => p && p.length > 40 && p.length < 400)
         .slice(0, 12),
       description:
-        content.description ||
-        allParas.slice(0, 3).join(" ").substring(0, 800),
+        content.description || allParas.slice(0, 3).join(" ").substring(0, 800),
     };
     const quiz = await generateBlogQuiz(env, enrichedContent, slug);
     if (quiz) {
@@ -2161,6 +2368,90 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
 }
 
 // ---------------------------------------------------------------------------
+// Fact-check pass — lightweight verification of core fields after generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Asks the AI to verify the core factual fields of a generated article
+ * (event date, year, location) and applies any confident corrections in-place.
+ * Designed to be adversarial — "find errors", not "confirm correctness".
+ * Never throws; logs and returns silently on any failure.
+ *
+ * @param {object} env
+ * @param {object} content  Parsed content object — mutated directly on correction.
+ */
+async function factCheckContent(env, content) {
+  const prompt =
+    `You are a strict historical fact-checker. Given the article data below, identify any clear factual errors.\n` +
+    `Focus ONLY on: whether the event date/year matches the event name, and whether the location is correct.\n` +
+    `Do NOT invent errors. Only flag what you are confident is wrong based on well-established historical fact.\n\n` +
+    `Event: ${content.eventTitle}\n` +
+    `Historical date: ${content.historicalDate}\n` +
+    `Year: ${content.historicalYear}\n` +
+    `Location: ${content.location}\n` +
+    `ISO date: ${content.historicalDateISO}\n\n` +
+    `Reply with ONLY a JSON object — nothing else:\n` +
+    `{ "passed": true }\n` +
+    `OR\n` +
+    `{ "passed": false, "corrections": { "historicalDate": "corrected", "historicalYear": 1234, "historicalDateISO": "YYYY-MM-DD", "location": "corrected" } }\n` +
+    `Include in corrections ONLY fields you are certain are wrong. Omit any field you are uncertain about.`;
+
+  try {
+    const raw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content:
+            "You are a historical fact-checker. Reply with JSON only, no markdown.",
+        },
+        { role: "user", content: prompt },
+      ],
+      { maxTokens: 256, timeoutMs: 15_000 },
+    );
+
+    const match = raw?.match(/\{[\s\S]*\}/);
+    if (!match) return;
+
+    const result = JSON.parse(match[0]);
+    if (result.passed === false && result.corrections) {
+      const cor = result.corrections;
+
+      // Plausibility guard — reject year corrections more than 10 years off the
+      // original to prevent hallucinated rewrites from corrupting the post.
+      if (
+        typeof cor.historicalYear === "number" &&
+        typeof content.historicalYear === "number" &&
+        Math.abs(cor.historicalYear - content.historicalYear) > 10
+      ) {
+        console.warn(
+          `factCheck: year correction rejected (${content.historicalYear} → ${cor.historicalYear} exceeds ±10 yr window)`,
+        );
+        delete cor.historicalYear;
+      }
+
+      const before = {
+        historicalDate: content.historicalDate,
+        historicalYear: content.historicalYear,
+        historicalDateISO: content.historicalDateISO,
+        location: content.location,
+      };
+
+      if (cor.historicalDate) content.historicalDate = cor.historicalDate;
+      if (typeof cor.historicalYear === "number") content.historicalYear = cor.historicalYear;
+      if (cor.historicalDateISO) content.historicalDateISO = cor.historicalDateISO;
+      if (cor.location) content.location = cor.location;
+
+      console.log(`factCheck: corrections applied — before: ${JSON.stringify(before)} after: ${JSON.stringify(cor)}`);
+    } else {
+      console.log("factCheck: passed");
+    }
+  } catch (err) {
+    console.warn(`factCheck: skipped — ${err.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SEO meta patcher — updates meta tags in existing KV HTML without regenerating
 // ---------------------------------------------------------------------------
 
@@ -2443,13 +2734,13 @@ async function humanizeSection(
  * back in place. Returns { updatedHtml, changed: string[] }.
  */
 async function patchBodyParagraphs(html, env) {
-  // Extract eventTitle directly from the Overview h2 — most reliable source
-  // (JSON-LD uses c.jsonLdName which may differ from c.eventTitle used in h2 headings)
+  // Extract eventTitle from h1 ("Event Name — Month Day, Year") — works for both
+  // old posts (h2: "Overview: EventTitle") and new posts (h2: "Overview").
   let eventTitle = "";
-  const overviewH2Match = html.match(/<h2 class="h3">Overview: ([^<]+)<\/h2>/);
-  if (overviewH2Match) eventTitle = unesc(overviewH2Match[1]);
+  const h1Match = html.match(/<h1[^>]*>([^<]+?) —/);
+  if (h1Match) eventTitle = unesc(h1Match[1].trim());
 
-  // Fallback: extract from JSON-LD
+  // Fallback: extract from JSON-LD about.name
   if (!eventTitle) {
     const jldMatch = html.match(
       /<script type="application\/ld\+json">([\s\S]*?)<\/script>/,
@@ -2487,15 +2778,20 @@ async function patchBodyParagraphs(html, env) {
     return [first, second];
   };
 
+  // Each section tries the new short h2 first, then the old "Verb of EventTitle" form
+  // so humanization still works on posts stored before the h2 change.
   const sections = [
-    { name: "overviewParagraphs", h2: `Overview: ${eventTitle}` },
-    {
-      name: "eyewitnessOrChronicle",
-      h2: `Eyewitness Accounts of ${eventTitle}`,
-    },
-    { name: "aftermathParagraphs", h2: `Aftermath of ${eventTitle}` },
-    { name: "conclusionParagraphs", h2: `Legacy of ${eventTitle}` },
-  ].map((s) => ({ ...s, paras: normalizeParas(extractSectionParas(s.h2)) }));
+    { name: "overviewParagraphs",    h2: "Overview",            h2Legacy: `Overview: ${eventTitle}` },
+    { name: "eyewitnessOrChronicle", h2: "Eyewitness Accounts", h2Legacy: `Eyewitness Accounts of ${eventTitle}` },
+    { name: "aftermathParagraphs",   h2: "Aftermath",           h2Legacy: `Aftermath of ${eventTitle}` },
+    { name: "conclusionParagraphs",  h2: "Legacy",              h2Legacy: `Legacy of ${eventTitle}` },
+  ].map((s) => {
+    const paras = normalizeParas(extractSectionParas(s.h2));
+    return {
+      ...s,
+      paras: paras.length ? paras : normalizeParas(extractSectionParas(s.h2Legacy)),
+    };
+  });
 
   if (!sections[0].paras.length) {
     console.warn(
@@ -2860,12 +3156,20 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
 
-  const eyewitnessQuoteBlock = c.eyewitnessQuote
-    ? `          <blockquote class="historical-quote mt-3">
+  // Only render the blockquote when the source attribution contains a year and
+  // a real document/letter reference — filters out vague AI-generated attributions
+  // like "Contemporary account" or "Historical record, unknown date".
+  const hasVerifiableSource =
+    c.eyewitnessQuoteSource &&
+    /\d{4}/.test(c.eyewitnessQuoteSource) &&
+    c.eyewitnessQuoteSource.length > 20;
+  const eyewitnessQuoteBlock =
+    c.eyewitnessQuote && hasVerifiableSource
+      ? `          <blockquote class="historical-quote mt-3">
             <p>"${esc(c.eyewitnessQuote)}"</p>
-            <footer class="article-meta">${esc(c.eyewitnessQuoteSource || "Contemporary source")}</footer>
+            <footer class="article-meta">${esc(c.eyewitnessQuoteSource)}</footer>
           </blockquote>`
-    : "";
+      : "";
 
   const aftermathParas = (c.aftermathParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
@@ -2963,8 +3267,8 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     <meta property="og:description" content="${esc(c.ogDescription || c.description)}" />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="${canonicalUrl}" />
-    <meta property="og:image" content="${esc(c.imageUrl)}" />
-    <meta property="og:image:alt" content="${esc(c.title)}" />
+    <meta property="og:image" content="${esc(c.imageUrl ? `/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=1200&q=85` : `https://thisday.info/images/logo.png`)}" />
+    <meta property="og:image:alt" content="${esc(c.imageAlt || c.title)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:locale" content="en_US" />
@@ -2985,8 +3289,8 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${esc(c.title)}" />
     <meta name="twitter:description" content="${esc(c.twitterDescription || c.description)}" />
-    <meta name="twitter:image" content="${esc(c.imageUrl)}" />
-    <meta name="twitter:image:alt" content="${esc(c.imageAlt)}" />
+    <meta name="twitter:image" content="${esc(c.imageUrl ? `/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=1200&q=85` : `https://thisday.info/images/logo.png`)}" />
+    <meta name="twitter:image:alt" content="${esc(c.imageAlt || c.title)}" />
 
     <!-- JSON-LD Schema -->
     <script type="application/ld+json">
@@ -3181,7 +3485,7 @@ ${didYouKnowItems}
           ${
             overviewParas
               ? `<section class="mt-4">
-            <h2 class="h3">Overview: ${esc(c.eventTitle)}</h2>
+            <h2 class="h3">Overview</h2>
 ${overviewParas}
           </section>`
               : ""
@@ -3192,7 +3496,7 @@ ${overviewParas}
             eyewitnessParas
               ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
           <section class="mt-5">
-            <h2 class="h3">Eyewitness Accounts of ${esc(c.eventTitle)}</h2>
+            <h2 class="h3">Eyewitness Accounts</h2>
 ${eyewitnessParas}
 ${eyewitnessQuoteBlock}
           </section>`
@@ -3217,7 +3521,7 @@ ${eyewitnessQuoteBlock}
           ${
             aftermathParas
               ? `<section class="mt-5">
-            <h2 class="h3">Aftermath of ${esc(c.eventTitle)}</h2>
+            <h2 class="h3">Aftermath</h2>
 ${aftermathParas}
           </section>`
               : ""
@@ -3228,7 +3532,7 @@ ${aftermathParas}
             conclusionParas
               ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
           <section class="mt-5">
-            <h2 class="h3">Legacy of ${esc(c.eventTitle)}</h2>
+            <h2 class="h3">Legacy</h2>
 ${conclusionParas}
           </section>`
               : ""

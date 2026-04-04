@@ -64,3 +64,29 @@ export async function notifyUpload(post, youtubeId) {
 
   await Promise.all(sends);
 }
+
+/**
+ * Sends a pipeline issue notification to Discord.
+ *
+ * @param {{ step: string, slug: string, date: string, message: string, streak?: number }} issue
+ */
+export async function notifyPipelineIssue(issue) {
+  const discord = process.env.DISCORD_WEBHOOK_URL;
+  if (!discord) return;
+
+  const streakLine = issue.streak
+    ? `\n📈 Consecutive days: ${issue.streak}`
+    : "";
+  const message =
+    `⚠️ **Pipeline issue detected**\n` +
+    `Step: ${issue.step}\n` +
+    `Slug: ${issue.slug}\n` +
+    `Date: ${issue.date}\n` +
+    `Details: ${issue.message}${streakLine}`;
+
+  await fetch(discord, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: message }),
+  }).catch((e) => console.warn(`  ⚠ Discord pipeline alert error: ${e.message}`));
+}

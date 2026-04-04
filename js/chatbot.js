@@ -404,7 +404,7 @@ async function navigateToDate(parsedDate) {
       dayCard.classList.add("highlight-pulse");
       setTimeout(() => dayCard.classList.remove("highlight-pulse"), 2000);
 
-      // Start loading events right away — no click needed, then report count
+      // Load events then auto-open the popup
       if (typeof loadDayEvents === "function") {
         loadDayEvents(dayCard, parsedDate.month).then(() => {
           const data = dayCard.eventsData;
@@ -419,11 +419,23 @@ async function navigateToDate(parsedDate) {
             if (data.deaths?.length) parts.push(`${data.deaths.length} death${data.deaths.length !== 1 ? "s" : ""}`);
             if (total > 0) {
               addMessageToChat(
-                `Found ${total} records for this date: ${parts.join(", ")}. Click the day to explore them.`,
+                `Found ${total} records for this date: ${parts.join(", ")}.`,
                 false,
               );
             } else {
               addMessageToChat("No recorded events found for this date.", false);
+            }
+            // Auto-open the event popup
+            if (typeof showEventDetails === "function" && total > 0) {
+              if (typeof lastActiveCard !== "undefined") {
+                window.lastActiveCard = dayCard;
+              }
+              showEventDetails(
+                parsedDate.day,
+                parsedDate.month + 1,
+                parsedDate.year,
+                data,
+              );
             }
           }
         }).catch(() => {});
@@ -483,14 +495,7 @@ async function processUserMessage(userInput) {
       if (isMainCalendarPage()) {
         // We're on the main calendar page - navigate normally
         const success = await navigateToDate(parsedDate);
-        if (success) {
-          setTimeout(() => {
-            addMessageToChat(
-              "I've switched the calendar to show events for this date. You can scroll down to see the calendar or click on any day to explore more events!",
-              false,
-            );
-          }, 500);
-        } else {
+        if (!success) {
           setTimeout(() => {
             addMessageToChat(
               "I found the date but had trouble switching the calendar. Please try manually navigating to the date.",

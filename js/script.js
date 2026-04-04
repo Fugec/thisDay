@@ -308,6 +308,22 @@ function tryCarouselFallbacks(img, fallbacks) {
   const next = fallbacks.shift();
   if (!next) {
     img.onerror = null;
+    // All fallbacks exhausted — remove this slide so no blank/broken image shows
+    const slide = img.closest(".carousel-item");
+    if (slide) {
+      const wasActive = slide.classList.contains("active");
+      slide.remove();
+      // If the removed slide was active, activate the next one
+      const remaining = document.querySelectorAll("#carouselInner .carousel-item");
+      if (wasActive && remaining.length > 0) {
+        remaining[0].classList.add("active");
+      }
+      // Sync indicators
+      document.querySelectorAll("#carouselIndicators button").forEach((btn, i) => {
+        btn.classList.toggle("active", i === 0);
+        btn.setAttribute("aria-current", i === 0 ? "true" : "false");
+      });
+    }
     return;
   }
   img.onerror = () => tryCarouselFallbacks(img, fallbacks);
@@ -955,8 +971,8 @@ async function populatePeopleStrip() {
     return;
   }
 
-  const births = (data.births || []).filter(p => p && p.title).slice(0, 5);
-  const deaths = (data.deaths || []).filter(p => p && p.title).slice(0, 5);
+  const births = (data.births || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 8);
+  const deaths = (data.deaths || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 8);
 
   if (!births.length && !deaths.length) {
     if (section) section.style.display = "none";
@@ -1006,7 +1022,7 @@ async function populatePeopleStrip() {
     const wrap = document.createElement("div");
     wrap.className = "people-group-wrap";
 
-    const label = document.createElement("div");
+    const label = document.createElement("h3");
     label.className = "group-label born";
     label.innerHTML = '<i class="bi bi-sunrise"></i> Born';
 
@@ -1031,7 +1047,7 @@ async function populatePeopleStrip() {
     const wrap = document.createElement("div");
     wrap.className = "people-group-wrap";
 
-    const label = document.createElement("div");
+    const label = document.createElement("h3");
     label.className = "group-label died";
     label.innerHTML = '<i class="bi bi-sunset"></i> Died';
 
@@ -2910,6 +2926,8 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
         for (const entry of latest) {
           if (!entry?.slug || !entry?.imageUrl) continue;
           if (isBlockedCarouselImage(entry.imageUrl)) continue;
+          // Skip entries whose image doesn't actually load — prevents blank slides
+          if (!(await doesImageLoad(entry.imageUrl))) continue;
 
           const slugParts = String(entry.slug).split("-");
           const day = Number.parseInt(slugParts[0], 10);

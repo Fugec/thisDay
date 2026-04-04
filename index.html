@@ -245,6 +245,9 @@
     <section class="hero">
       <p class="eyebrow">On This Day</p>
       <h1 id="dynamicTitle">What Happened in History?</h1>
+      <script>
+        (function(){var now=new Date(),m=now.toLocaleDateString("en-US",{month:"long"}),d=now.getDate(),el=document.getElementById("dynamicTitle");if(el)el.innerHTML="What happened on <span style='color:var(--accent);font-family:\"Meddon\",cursive'>"+m+", "+d+"</span> in History?";}());
+      </script>
       <p>
         Every date hides a story. Thisday.info surfaces the wars declared,
         inventions patented, leaders born, and empires fallen on this exact
@@ -310,9 +313,10 @@
         <div class="quiz-card" id="todayEventCard">
           <img
             id="todayEventImg"
-            src="https://placehold.co/800x400?text=Loading+today+event"
+            src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
             alt="Today event image"
             class="quiz-card-img"
+            style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
             <h3 id="todayEventTitle">Today's Events</h3>
@@ -687,20 +691,6 @@
         // Year
         document.getElementById("currentYear").textContent =
           new Date().getFullYear();
-
-        // Dynamic title with current month and day
-        var titleEl = document.getElementById("dynamicTitle");
-        if (titleEl) {
-          var now = new Date();
-          var month = now.toLocaleDateString("en-US", { month: "long" });
-          var day = now.getDate();
-          titleEl.innerHTML =
-            "What happened on <span style='color:var(--accent);font-family:\"Meddon\",cursive'>" +
-            month +
-            ", " +
-            day +
-            "</span> in History?";
-        }
 
         // Mobile nav toggle
         var navToggle = document.getElementById("navToggle");

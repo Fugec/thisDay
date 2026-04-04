@@ -215,6 +215,7 @@ img {
   padding: 1rem 1.5rem;
 }
 .people-track-wrap {
+  max-width: 1400px;
   margin: 0 auto;
 }
 .people-track {
@@ -240,19 +241,6 @@ img {
   flex-direction: column;
   gap: 0.5rem;
   flex-shrink: 0;
-}
-.group-label {
-  font-size: 0.62rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.group-label.born {
-  color: var(--accent);
-}
-.group-label.died {
-  color: var(--text-muted);
 }
 .people-divider {
   width: 1px;
@@ -359,12 +347,12 @@ img {
   height: 64px;
   border-radius: 50%;
 }
-/* Desktop: grid layout */
+/* Desktop: full-width spread layout */
 @media (min-width: 768px) {
   .people-track {
     overflow-x: visible;
     flex-wrap: nowrap;
-    justify-content: center;
+    justify-content: stretch;
     gap: 0;
   }
   .people-group-wrap {
@@ -373,10 +361,10 @@ img {
     padding: 0 1.25rem;
   }
   .people-group {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, 80px);
-    gap: 2rem;
-    justify-content: center;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-evenly;
+    gap: 1rem 0;
   }
 }
 

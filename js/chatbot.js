@@ -395,16 +395,24 @@ async function navigateToDate(parsedDate) {
     // Re-render calendar
     await renderCalendar();
 
-    // Find and highlight the specific day if it exists
+    // Find, highlight and auto-load events for the specific day
     const dayCard = document.querySelector(
       `[data-day="${parsedDate.day}"][data-month="${parsedDate.month + 1}"]`,
     );
     if (dayCard) {
+      // Highlight immediately
+      dayCard.classList.add("highlight-pulse");
+      setTimeout(() => dayCard.classList.remove("highlight-pulse"), 2000);
+
+      // Start loading events right away — no click needed
+      if (typeof loadDayEvents === "function") {
+        loadDayEvents(dayCard, parsedDate.month);
+      }
+
+      // Scroll into view after a short delay to let the calendar settle
       setTimeout(() => {
         dayCard.scrollIntoView({ behavior: "smooth", block: "center" });
-        dayCard.classList.add("highlight-pulse");
-        setTimeout(() => dayCard.classList.remove("highlight-pulse"), 2000);
-      }, 500);
+      }, 300);
     }
 
     return true;

@@ -878,7 +878,7 @@ async function generateMultiSceneVideo(
   console.log(
     `  Generating ${scenePrompts.length} AI scenes (Pollinations + WAN I2V if available)...`,
   );
-  const rawScenes = await generateAISceneBatch(scenePrompts);
+  const rawScenes = await generateAISceneBatch(scenePrompts, event);
 
   // Fall back to Wikipedia image buffer for any scene that failed entirely
   const fallbackBuf = post.imageUrl

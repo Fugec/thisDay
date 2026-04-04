@@ -22,6 +22,7 @@
 import { writeFile } from "fs/promises";
 import { mkdirSync } from "fs";
 import { join } from "path";
+import { recordQuotaSignal } from "./tracker.js";
 
 const ASSETS_DIR = "./assets";
 const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George — warm captivating storyteller
@@ -96,9 +97,9 @@ async function callElevenLabsWithTimestamps(apiKey, script) {
         text: script,
         model_id: MODEL_ID,
         voice_settings: {
-          stability: 0.62,        // steadier, documentary cadence
+          stability: 0.62, // steadier, documentary cadence
           similarity_boost: 0.78, // keep voice identity consistent
-          style: 0.25,            // lower style for e-learning clarity
+          style: 0.25, // lower style for e-learning clarity
           use_speaker_boost: true,
         },
       }),
@@ -189,12 +190,24 @@ export async function generateNarration(slug, script) {
     res = await callElevenLabsWithTimestamps(keys[i], script);
     if (res.ok) break;
     if (isQuotaError(res) && i < keys.length - 1) {
-      console.warn(`  ⚠ ElevenLabs key ${i + 1} quota reached — trying key ${i + 2}`);
+      console.warn(
+        `  ⚠ ElevenLabs key ${i + 1} quota reached — trying key ${i + 2}`,
+      );
+      await recordQuotaSignal(
+        "elevenlabs",
+        `key ${i + 1} quota reached (${res.status})`,
+      );
     }
   }
 
   if (!res || !res.ok) {
     const body = res ? await res.text() : "no API key available";
+    if (res && isQuotaError(res)) {
+      await recordQuotaSignal(
+        "elevenlabs",
+        `${res.status}: ${body.slice(0, 120)}`,
+      );
+    }
     console.warn(
       `  ⚠ ElevenLabs error ${res?.status ?? "—"}: ${body} — video will have no narration`,
     );

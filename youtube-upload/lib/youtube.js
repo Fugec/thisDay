@@ -113,9 +113,17 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
   const res = await Promise.race([
     uploadPromise,
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("YouTube upload timed out after 5 minutes")), 5 * 60 * 1000)
+      setTimeout(
+        () => reject(new Error("YouTube upload timed out after 5 minutes")),
+        5 * 60 * 1000,
+      ),
     ),
   ]);
 
   return res.data.id;
+}
+
+export async function verifyYoutubeAuth() {
+  const auth = getOAuth2Client();
+  await auth.getAccessToken();
 }

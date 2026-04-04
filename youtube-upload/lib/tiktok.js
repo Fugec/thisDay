@@ -164,7 +164,9 @@ async function uploadToTikTok(videoPath, post, youtubeId) {
   if (captionRef) {
     console.log("  [TT] Typing caption...");
     ocb(["click", captionRef], 10_000);
-    ocb(["press", "Control+a"], 5_000);
+    // Select all existing text then overwrite — use Meta+A (Cmd+A on Mac)
+    ocb(["evaluate", "--ref", captionRef, "--fn", "el => { el.focus(); document.execCommand('selectAll'); }"], 5_000);
+    sleep(300);
     // Strip non-ASCII — TikTok caption can hold up to 4000 chars
     const safeCaption = buildCaption(post, youtubeId).replace(/[^\x00-\x7F]/g, "");
     ocb(["type", captionRef, safeCaption], 60_000);
@@ -177,7 +179,9 @@ async function uploadToTikTok(videoPath, post, youtubeId) {
   debugSnapshot("pre-post", snap);
 
   // Exact "Post" match first — avoids matching "Discard post" or similar labels
-  const postRef = snap.match(/"Post"\s*\[ref=(e\d+)\]/i)?.[1]
+  // Prefer button role, fall back to any element with exact "Post" label
+  const postRef = snap.match(/\bbutton\s+"Post"\s+\[ref=(e\d+)\]/i)?.[1]
+    ?? snap.match(/(?<!\w)"Post"\s+\[ref=(e\d+)\]/i)?.[1]
     ?? findRef(snap, "Publish", "Submit");
   if (!postRef) throw new Error("[TT] Could not find Post/Publish button");
 

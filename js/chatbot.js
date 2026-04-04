@@ -404,9 +404,29 @@ async function navigateToDate(parsedDate) {
       dayCard.classList.add("highlight-pulse");
       setTimeout(() => dayCard.classList.remove("highlight-pulse"), 2000);
 
-      // Start loading events right away — no click needed
+      // Start loading events right away — no click needed, then report count
       if (typeof loadDayEvents === "function") {
-        loadDayEvents(dayCard, parsedDate.month);
+        loadDayEvents(dayCard, parsedDate.month).then(() => {
+          const data = dayCard.eventsData;
+          if (data) {
+            const total =
+              (data.events?.length || 0) +
+              (data.births?.length || 0) +
+              (data.deaths?.length || 0);
+            const parts = [];
+            if (data.events?.length) parts.push(`${data.events.length} historical event${data.events.length !== 1 ? "s" : ""}`);
+            if (data.births?.length) parts.push(`${data.births.length} birth${data.births.length !== 1 ? "s" : ""}`);
+            if (data.deaths?.length) parts.push(`${data.deaths.length} death${data.deaths.length !== 1 ? "s" : ""}`);
+            if (total > 0) {
+              addMessageToChat(
+                `Found ${total} records for this date: ${parts.join(", ")}. Click the day to explore them.`,
+                false,
+              );
+            } else {
+              addMessageToChat("No recorded events found for this date.", false);
+            }
+          }
+        }).catch(() => {});
       }
 
       // Scroll into view after a short delay to let the calendar settle

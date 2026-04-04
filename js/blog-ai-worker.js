@@ -588,6 +588,13 @@ export default {
             `<script>${navToggleScript()}</script></body>`,
           );
         }
+        // Patch legacy H2 headings — old posts used "Overview: EventTitle", "Eyewitness Accounts of EventTitle",
+        // "Aftermath of EventTitle", "Legacy of EventTitle". Strip the suffix so headings are clean and short.
+        patchedHtml = patchedHtml
+          .replace(/(<h2[^>]*>)Overview:\s[^<]+(<\/h2>)/g, "$1Overview$2")
+          .replace(/(<h2[^>]*>)Eyewitness Accounts of\s[^<]+(<\/h2>)/g, "$1Eyewitness Accounts$2")
+          .replace(/(<h2[^>]*>)Aftermath of\s[^<]+(<\/h2>)/g, "$1Aftermath$2")
+          .replace(/(<h2[^>]*>)Legacy of\s[^<]+(<\/h2>)/g, "$1Legacy$2");
         // Patch image caption — replace any AI-generated caption with correct Wikimedia attribution
         patchedHtml = patchedHtml.replace(
           /<figcaption class="article-meta mt-2">\s*<small>(?!Image courtesy of)[\s\S]*?<\/small>\s*<\/figcaption>/,

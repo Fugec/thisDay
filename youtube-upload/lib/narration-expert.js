@@ -1,3 +1,6 @@
+import { recordQuotaSignal } from "./tracker.js";
+import { resolveGroqModels, resolveHFTextModel } from "./model-resolver.js";
+
 /**
  * Narration Expert — rewrites DYK / Quick Facts content items into engaging
  * documentary-style voiceover sentences before sending to ElevenLabs TTS.
@@ -6,8 +9,11 @@
  * historical detail beyond the bullet points alone.
  *
  * Provider fallback chain (first available key wins):
- *   1. Groq  — llama-3.3-70b-versatile, free 6,000 req/day
- *   2. HuggingFace — meta-llama/Meta-Llama-3.1-8B-Instruct via Inference API
+ *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: llama-3.3-70b-versatile)
+ *              Keys: GROQ_API_KEY → GROQ_API_KEY_2 → GROQ_API_KEY_3 → GROQ_API_KEY_4
+ *   2. HuggingFace — best free instruct model auto-resolved via resolveHFTextModel()
+ *              (default: meta-llama/Llama-3.1-8B-Instruct via router.huggingface.co)
+ *              Tokens: HF_TOKEN → HF_TOKEN_2 → HF_TOKEN_3
  *
  * If both providers fail the originals are returned silently — TTS continues
  * normally with the unpolished facts.
@@ -17,12 +23,63 @@
 // Provider definitions (same chain as history-expert.js)
 // ---------------------------------------------------------------------------
 
-const PROVIDERS = [
+function buildProviders(textModel, hfModelId, hfUrl) { return [
   {
     name: "Groq",
     envKey: "GROQ_API_KEY",
     url: "https://api.groq.com/openai/v1/chat/completions",
-    model: "llama-3.3-70b-versatile",
+    model: textModel,
+    headers: (key) => ({
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    }),
+    body: (model, messages) => ({
+      model,
+      messages,
+      max_tokens: 1024,
+      temperature: 0.5,
+    }),
+    extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
+  },
+  {
+    name: "Groq (key 2)",
+    envKey: "GROQ_API_KEY_2",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    model: textModel,
+    headers: (key) => ({
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    }),
+    body: (model, messages) => ({
+      model,
+      messages,
+      max_tokens: 1024,
+      temperature: 0.5,
+    }),
+    extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
+  },
+  {
+    name: "Groq (key 3)",
+    envKey: "GROQ_API_KEY_3",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    model: textModel,
+    headers: (key) => ({
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    }),
+    body: (model, messages) => ({
+      model,
+      messages,
+      max_tokens: 1024,
+      temperature: 0.5,
+    }),
+    extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
+  },
+  {
+    name: "Groq (key 4)",
+    envKey: "GROQ_API_KEY_4",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    model: textModel,
     headers: (key) => ({
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
@@ -38,8 +95,8 @@ const PROVIDERS = [
   {
     name: "HuggingFace",
     envKey: "HF_TOKEN",
-    url: "https://router.huggingface.co/hf-inference/models/meta-llama/Meta-Llama-3.1-8B-Instruct/v1/chat/completions",
-    model: "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    url: hfUrl,
+    model: hfModelId,
     headers: (key) => ({
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
@@ -54,7 +111,45 @@ const PROVIDERS = [
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
-];
+  {
+    name: "HuggingFace (token 2)",
+    envKey: "HF_TOKEN_2",
+    url: hfUrl,
+    model: hfModelId,
+    headers: (key) => ({
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "x-use-cache": "0",
+    }),
+    body: (model, messages) => ({
+      model,
+      messages,
+      max_tokens: 1024,
+      temperature: 0.5,
+      stream: false,
+    }),
+    extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
+  },
+  {
+    name: "HuggingFace (token 3)",
+    envKey: "HF_TOKEN_3",
+    url: hfUrl,
+    model: hfModelId,
+    headers: (key) => ({
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "x-use-cache": "0",
+    }),
+    body: (model, messages) => ({
+      model,
+      messages,
+      max_tokens: 1024,
+      temperature: 0.5,
+      stream: false,
+    }),
+    extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
+  },
+]; }
 
 const TIMEOUT_MS = 30_000;
 
@@ -157,7 +252,11 @@ export async function polishNarrationItems(title, items, articleText = null) {
     { role: "user", content: userContent },
   ];
 
-  for (const provider of PROVIDERS) {
+  const { textModel } = await resolveGroqModels();
+  const { modelId: hfModelId, url: hfUrl } = await resolveHFTextModel();
+  const providers = buildProviders(textModel, hfModelId, hfUrl);
+
+  for (const provider of providers) {
     const apiKey = process.env[provider.envKey];
     if (!apiKey) {
       console.log(
@@ -174,6 +273,12 @@ export async function polishNarrationItems(title, items, articleText = null) {
     try {
       raw = await callProvider(provider, apiKey, messages);
     } catch (err) {
+      if (/429|rate limit|quota|too many|403/i.test(err.message)) {
+        await recordQuotaSignal(
+          "groq-narration",
+          `${provider.name}: ${err.message}`,
+        );
+      }
       console.warn(
         `  ⚠ Narration expert (${provider.name}): ${err.message} — trying next provider`,
       );

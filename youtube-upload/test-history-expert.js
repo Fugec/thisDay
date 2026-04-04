@@ -123,10 +123,12 @@ const TESTS = [
   {
     name: "Fallback — no keys at all returns originals unchanged, no fetch",
     run: async () => {
-      const savedGroq = process.env.GROQ_API_KEY;
-      const savedHf = process.env.HF_TOKEN;
-      process.env.GROQ_API_KEY = "";
-      process.env.HF_TOKEN = "";
+      const saved = {
+        GROQ_API_KEY: process.env.GROQ_API_KEY, GROQ_API_KEY_2: process.env.GROQ_API_KEY_2,
+        GROQ_API_KEY_3: process.env.GROQ_API_KEY_3, GROQ_API_KEY_4: process.env.GROQ_API_KEY_4,
+        HF_TOKEN: process.env.HF_TOKEN, HF_TOKEN_2: process.env.HF_TOKEN_2, HF_TOKEN_3: process.env.HF_TOKEN_3,
+      };
+      Object.keys(saved).forEach((k) => { process.env[k] = ""; });
       let fetchCalled = false;
       const realFetch = globalThis.fetch;
       globalThis.fetch = async (...args) => { fetchCalled = true; return realFetch(...args); };
@@ -140,26 +142,29 @@ const TESTS = [
         console.log("  ✓ No fetch called, originals returned unchanged");
       } finally {
         globalThis.fetch = realFetch;
-        process.env.GROQ_API_KEY = savedGroq;
-        process.env.HF_TOKEN = savedHf;
+        Object.entries(saved).forEach(([k, v]) => { process.env[k] = v; });
       }
     },
   },
 
   {
-    name: "Fallback — bad token (401) returns originals unchanged",
+    name: "Fallback — all tokens invalid (401) returns originals unchanged",
     run: async () => {
-      const saved = process.env.GROQ_API_KEY;
-      process.env.GROQ_API_KEY = "hf_invalid_token_for_testing";
+      const saved = {
+        GROQ_API_KEY: process.env.GROQ_API_KEY, GROQ_API_KEY_2: process.env.GROQ_API_KEY_2,
+        GROQ_API_KEY_3: process.env.GROQ_API_KEY_3, GROQ_API_KEY_4: process.env.GROQ_API_KEY_4,
+        HF_TOKEN: process.env.HF_TOKEN, HF_TOKEN_2: process.env.HF_TOKEN_2, HF_TOKEN_3: process.env.HF_TOKEN_3,
+      };
+      Object.keys(saved).forEach((k) => { process.env[k] = "invalid_token_for_testing"; });
       try {
         const result = await reviewPromptsWithHistoryExpert(
           "Apollo 11 Moon Landing", 1969, "1960s", MOON_PROMPTS,
         );
         assert(result.length === MOON_PROMPTS.length, "length mismatch");
         MOON_PROMPTS.forEach((p, i) => assert(result[i] === p, `Prompt ${i + 1} was modified on 401`));
-        console.log("  ✓ 401 auth error — originals returned unchanged");
+        console.log("  ✓ All 401 errors — originals returned unchanged");
       } finally {
-        process.env.GROQ_API_KEY = saved;
+        Object.entries(saved).forEach(([k, v]) => { process.env[k] = v; });
       }
     },
   },

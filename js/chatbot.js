@@ -427,9 +427,7 @@ async function navigateToDate(parsedDate) {
             }
             // Auto-open the event popup
             if (typeof showEventDetails === "function" && total > 0) {
-              if (typeof lastActiveCard !== "undefined") {
-                window.lastActiveCard = dayCard;
-              }
+              lastActiveCard = dayCard;
               showEventDetails(
                 parsedDate.day,
                 parsedDate.month + 1,

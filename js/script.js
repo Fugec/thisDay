@@ -31,8 +31,8 @@ try {
   /* ignore */
 }
 
-let currentDate = new Date();
-let lastActiveCard = null;
+var currentDate = new Date();
+var lastActiveCard = null;
 
 const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000;
 const LOCAL_STORAGE_CACHE_KEY = "wikipediaEventCache";

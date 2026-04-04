@@ -3996,7 +3996,7 @@ ${analysisBadItems}
     if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;
     var units=document.querySelectorAll('ins.adsbygoogle');
     if(!units.length)return;
-    function pushIns(ins){if(ins.getAttribute('data-adsbygoogle-status')||ins.getAttribute('data-ad-pushed'))return;ins.setAttribute('data-ad-pushed','1');try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}
+    function pushIns(ins){if(ins.getAttribute('data-adsbygoogle-status')||ins.getAttribute('data-ad-pushed'))return;if(ins.offsetWidth===0)return;ins.setAttribute('data-ad-pushed','1');try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}
     if('IntersectionObserver' in window){
       var io=new IntersectionObserver(function(entries,obs){entries.forEach(function(e){if(e.isIntersecting){pushIns(e.target);obs.unobserve(e.target);}});},{threshold:0.1});
       units.forEach(function(ins){io.observe(ins);});
@@ -4150,7 +4150,7 @@ ${JSON.stringify(
     ${navToggleScript()}
     if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
       document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
-        if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed')) {
+        if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed') && ins.offsetWidth > 0) {
           ins.setAttribute('data-ad-pushed', '1');
           try { (adsbygoogle = window.adsbygoogle || []).push({}); } catch {}
         }

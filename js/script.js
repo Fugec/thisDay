@@ -2174,7 +2174,6 @@ function renderFilteredItems(itemsToRender) {
 }
 
 function applyFilter() {
-  const modalBody = document.getElementById("modalBodyContent");
   const listToFilter = currentDayAllItems;
   const filteredItems = listToFilter.filter((item) => {
     if (currentActiveFilter === "all") {
@@ -2537,7 +2536,8 @@ const eventDetailModalElement = document.getElementById("eventDetailModal");
 if (eventDetailModalElement) {
   eventDetailModalElement
     .querySelector(".btn-close")
-    .addEventListener("click", () => {
+    .addEventListener("click", (e) => {
+      e.currentTarget.blur(); // move focus before Bootstrap sets aria-hidden
       eventDetailModal.hide();
       currentActiveFilter = "all";
     });
@@ -3012,7 +3012,6 @@ async function populateCarousel(month, _year) {
   const carouselIndicators = document.getElementById("carouselIndicators");
 
   if (!carouselInner || !carouselIndicators) {
-    console.error("Carousel elements not found!");
     return;
   }
 

@@ -16,6 +16,91 @@
 
 import pLimit from "p-limit";
 // import { animateImage } from "./wan-i2v.js"; // I2V disabled — re-enable to use WAN animation
+import { resolveGroqModels } from "./model-resolver.js";
+
+const GROQ_VISION_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+/**
+ * Asks Groq (Llama 4 Scout) whether an image clearly depicts the expected subject.
+ * Tries all four GROQ_API_KEY slots in order; skips if none are set.
+ * Never throws — returns { ok: true } on any failure so image generation continues.
+ *
+ * @param {Buffer} imageBuffer  JPEG/PNG image bytes
+ * @param {string} subject      Expected subject, e.g. "Nikola Tesla" or "Battle of Stalingrad"
+ * @returns {Promise<{ ok: boolean, reason: string }>}
+ */
+async function verifyImageSubject(imageBuffer, subject) {
+  const groqKeys = [
+    process.env.GROQ_API_KEY,
+    process.env.GROQ_API_KEY_2,
+    process.env.GROQ_API_KEY_3,
+    process.env.GROQ_API_KEY_4,
+  ].filter(Boolean);
+
+  if (!groqKeys.length) return { ok: true, reason: "skipped (no Groq key)" };
+
+  const { visionModel } = await resolveGroqModels();
+
+  const base64 = imageBuffer.toString("base64");
+  const mediaType = imageBuffer[0] === 0xff ? "image/jpeg" : "image/png";
+
+  for (const key of groqKeys) {
+    try {
+      const res = await fetch(GROQ_VISION_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: visionModel,
+          max_tokens: 120,
+          temperature: 0.1,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: { url: `data:${mediaType};base64,${base64}` },
+              },
+              {
+                type: "text",
+                text: `Does this image clearly and prominently depict "${subject}"?
+If it shows a person, is that specific person the identifiable main subject?
+Find any mismatch: wrong person, generic crowd, unrelated scene, or subject not visible.
+
+Respond ONLY with valid JSON, no markdown:
+{"ok": true/false, "reason": "<max 15 words>"}`,
+              },
+            ],
+          }],
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+
+      if (!res.ok) {
+        const body = await res.text();
+        console.warn(`  ⚠ Subject verify (Groq): HTTP ${res.status} — ${body.slice(0, 100)}`);
+        continue;
+      }
+
+      const data = await res.json();
+      const text = (data.choices?.[0]?.message?.content ?? "").trim();
+      const match = text.match(/\{[\s\S]*?\}/);
+      if (!match) {
+        console.warn(`  ⚠ Subject verify (Groq): unparseable response — ${text.slice(0, 80)}`);
+        continue;
+      }
+      const parsed = JSON.parse(match[0]);
+      return { ok: Boolean(parsed.ok), reason: parsed.reason ?? "" };
+    } catch (err) {
+      console.warn(`  ⚠ Subject verify (Groq): ${err.message}`);
+    }
+  }
+
+  // All keys failed — don't block image generation
+  return { ok: true, reason: "all Groq keys failed — skipping check" };
+}
 
 const NEGATIVE =
   "deformed, ugly, bad anatomy, extra fingers, extra limbs, missing limbs, " +
@@ -109,28 +194,60 @@ async function generateViaCFWorkersAI(prompt) {
  *   1. Hugging Face (FLUX.1-schnell) — HF_TOKEN then HF_TOKEN_2 then HF_TOKEN_3
  *   2. Cloudflare Workers AI (SDXL-base) — needs CF_API_TOKEN with AI permission
  *
+ * If a subject is provided, the image is verified via Groq vision after generation.
+ * On mismatch, one retry is attempted with a stronger subject anchor prepended to the prompt.
+ * If the retry still fails verification, the retry buffer is returned anyway with a warning.
+ * If Groq vision is unavailable, verification is skipped and the image is returned as-is.
+ *
  * If all providers fail, the caller falls back to Wikipedia images.
  *
- * @param {string} prompt
+ * @param {string}      prompt
+ * @param {string|null} [subject]  Expected subject for visual verification (e.g. "Nikola Tesla")
  * @returns {Promise<Buffer>} image bytes (JPEG or PNG)
  */
-export async function generateAIImage(prompt) {
-  // 1. Hugging Face — try HF_TOKEN, then HF_TOKEN_2, then HF_TOKEN_3 as fallback
-  for (const [label, token] of [
-    ["HF_TOKEN", process.env.HF_TOKEN],
-    ["HF_TOKEN_2", process.env.HF_TOKEN_2],
-    ["HF_TOKEN_3", process.env.HF_TOKEN_3],
-  ]) {
-    if (!token) continue;
-    try {
-      return await generateViaHuggingFace(prompt, token);
-    } catch (err) {
-      console.warn(`  ⚠ HuggingFace [${label}] failed: ${err.message}`);
+export async function generateAIImage(prompt, subject = null) {
+  async function tryGenerate(p) {
+    // 1. Hugging Face — try HF_TOKEN, then HF_TOKEN_2, then HF_TOKEN_3 as fallback
+    for (const [label, token] of [
+      ["HF_TOKEN", process.env.HF_TOKEN],
+      ["HF_TOKEN_2", process.env.HF_TOKEN_2],
+      ["HF_TOKEN_3", process.env.HF_TOKEN_3],
+    ]) {
+      if (!token) continue;
+      try {
+        return await generateViaHuggingFace(p, token);
+      } catch (err) {
+        console.warn(`  ⚠ HuggingFace [${label}] failed: ${err.message}`);
+      }
     }
+    // 2. Cloudflare Workers AI (needs CF_API_TOKEN with Workers AI permission)
+    return await generateViaCFWorkersAI(p);
   }
 
-  // 2. Cloudflare Workers AI (needs CF_API_TOKEN with Workers AI permission)
-  return await generateViaCFWorkersAI(prompt);
+  const buffer = await tryGenerate(prompt);
+
+  if (!subject) return buffer;
+
+  // Verify the generated image actually shows the expected subject
+  const { ok, reason } = await verifyImageSubject(buffer, subject);
+  if (ok) {
+    console.log(`  ✓ Subject verify: "${subject}" — ${reason}`);
+    return buffer;
+  }
+
+  // Retry once with a stronger subject anchor at the front of the prompt
+  console.warn(`  ⚠ Subject mismatch: ${reason} — retrying with stronger anchor`);
+  const anchoredPrompt = `CLOSE-UP PORTRAIT of ${subject}, clearly identifiable face and figure. ${prompt}`;
+  const retryBuffer = await tryGenerate(anchoredPrompt);
+
+  // Verify the retry result — if still wrong, log and return the retry buffer anyway
+  const retry = await verifyImageSubject(retryBuffer, subject);
+  if (!retry.ok) {
+    console.warn(`  ⚠ Subject mismatch after retry ("${subject}"): ${retry.reason} — keeping best attempt`);
+  } else {
+    console.log(`  ✓ Subject verify (retry): "${subject}" — ${retry.reason}`);
+  }
+  return retryBuffer;
 }
 
 /**
@@ -173,10 +290,11 @@ export async function generateAIImageBatch(prompts) {
  * I2V animation (WAN 2.2) is disabled; re-enable by uncommenting the
  * animateImage import and restoring Phase 2 below.
  *
- * @param {string[]} prompts
+ * @param {string[]}    prompts
+ * @param {string|null} [subject]  Expected subject for visual verification (e.g. "Nikola Tesla")
  * @returns {Promise<({ buffer: Buffer, isVideo: boolean } | null)[]>}
  */
-export async function generateAISceneBatch(prompts) {
+export async function generateAISceneBatch(prompts, subject = null) {
   const limit = pLimit(2);
   const firstTwo = prompts.slice(0, 2);
   const firstScenes = await Promise.all(
@@ -186,7 +304,7 @@ export async function generateAISceneBatch(prompts) {
           `  → Scene ${i + 1}/${prompts.length}: "${prompt.slice(0, 70)}..."`,
         );
         try {
-          const buffer = await generateAIImage(prompt);
+          const buffer = await generateAIImage(prompt, subject);
           return { buffer, isVideo: false };
         } catch (err) {
           console.warn(`  ⚠ Scene ${i + 1} image failed: ${err.message}`);

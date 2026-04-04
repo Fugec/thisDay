@@ -723,7 +723,7 @@ const yrEl=document.getElementById('yr');
 if(yrEl)yrEl.textContent=new Date().getFullYear();
 const gt=k=>{try{return localStorage.getItem(k)}catch{return null}};
 const st=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
-const syncAdUnitVisibility=(ins)=>{if(!ins)return;const unit=ins.closest('.ad-unit');if(!unit)return;const status=ins.getAttribute('data-ad-status');if(status==='unfilled')unit.style.display='none';if(status==='filled')unit.style.display='';};
+const syncAdUnitVisibility=(ins)=>{if(!ins)return;const unit=ins.closest('.ad-unit,.ad-unit-container');if(!unit)return;const status=ins.getAttribute('data-ad-status');if(status==='unfilled')unit.style.display='none';if(status==='filled')unit.style.display='';};
 const adObserver=new MutationObserver((mutations)=>{for(const m of mutations){if(m.type==='attributes'&&m.attributeName==='data-ad-status'){syncAdUnitVisibility(m.target);}}});
 document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{syncAdUnitVisibility(ins);adObserver.observe(ins,{attributes:true,attributeFilter:['data-ad-status']});});
 setTimeout(()=>{document.querySelectorAll('ins.adsbygoogle').forEach(syncAdUnitVisibility);},5000);
@@ -1421,7 +1421,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
   let gridHtml = "";
   visibleGrid.forEach((b, i) => {
     gridHtml += renderGridItem(b);
-    if (i === 5 && visibleGrid.length > 6) {
+    if (i === 9 && visibleGrid.length > 10) {
       gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="fluid" data-ad-layout="in-article"></ins></div></div>`;
     }
   });
@@ -1734,7 +1734,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
   let gridHtml = "";
   visibleGrid.forEach((d, i) => {
     gridHtml += renderGridItem(d);
-    if (i === 5 && visibleGrid.length > 6) {
+    if (i === 9 && visibleGrid.length > 10) {
       gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="fluid" data-ad-layout="in-article"></ins></div></div>`;
     }
   });

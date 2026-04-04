@@ -3530,8 +3530,7 @@ ${aftermathParas}
           <!-- Conclusion -->
           ${
             conclusionParas
-              ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
-          <section class="mt-5">
+              ? `<section class="mt-5">
             <h2 class="h3">Legacy</h2>
 ${conclusionParas}
           </section>`

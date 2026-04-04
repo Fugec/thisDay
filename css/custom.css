@@ -242,6 +242,12 @@ img {
   gap: 0.5rem;
   flex-shrink: 0;
 }
+.group-label {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0 0 0.6rem;
+  line-height: 1.35;
+}
 .people-divider {
   width: 1px;
   min-height: 100px;

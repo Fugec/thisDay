@@ -112,7 +112,7 @@
       sizes="16x16"
       href="icons/favicon-16x16.png"
     />
-    <link rel="stylesheet" href="css/custom.css?v=3" />
+    <link rel="stylesheet" href="css/custom.css?v=4" />
 
     <link rel="manifest" href="/manifest.json" />
     <link
@@ -579,7 +579,7 @@
                     img +
                     '" alt="' +
                     title.replace(/"/g, "&quot;") +
-                    '" class="blog-card-img" loading="lazy" />'
+                    '" class="blog-card-img" loading="lazy" onerror="this.style.display=\'none\'" />'
                   : "") +
                 '<div class="blog-card-body">' +
                 (dateLabel
@@ -657,7 +657,7 @@
                     img +
                     '" alt="' +
                     title.replace(/"/g, "&quot;") +
-                    '" class="blog-card-img" loading="lazy" />'
+                    '" class="blog-card-img" loading="lazy" onerror="this.style.display=\'none\'" />'
                   : "") +
                 '<div class="blog-card-body">' +
                 (yearLabel

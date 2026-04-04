@@ -33,14 +33,15 @@ export async function markUploaded(slug, youtubeId, privacy = "public") {
  * Only sets the timestamp for platforms that succeeded (truthy).
  *
  * @param {string} slug
- * @param {{ meta?: boolean, tiktok?: boolean }} platforms
+ * @param {{ meta?: boolean, tiktok?: boolean, pinterest?: boolean }} platforms
  */
-export async function markSocialPosted(slug, { meta, tiktok } = {}) {
+export async function markSocialPosted(slug, { meta, tiktok, pinterest } = {}) {
   const tracker = await getUploaded();
   if (!tracker[slug]) return;
   const now = new Date().toISOString();
   if (meta) tracker[slug].metaPostedAt = now;
   if (tiktok) tracker[slug].tiktokPostedAt = now;
+  if (pinterest) tracker[slug].pinterestPostedAt = now;
   await kvPut(TRACKER_KEY, JSON.stringify(tracker));
 }
 

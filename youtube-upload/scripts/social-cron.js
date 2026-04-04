@@ -27,6 +27,7 @@ import { getPostIndex } from "../lib/kv.js";
 import { getUploaded, markSocialPosted } from "../lib/tracker.js";
 import { postToMeta } from "../lib/meta.js";
 import { postToTikTok } from "../lib/tiktok.js";
+import { postToPinterest } from "../lib/pinterest.js";
 
 const POST_DELAY_MS = (Number(process.env.POST_DELAY_MIN) || 5) * 60_000;
 const STALE_MS      = (Number(process.env.STALE_HOURS)    || 48) * 3_600_000;
@@ -71,7 +72,7 @@ async function main() {
   // Candidates: have a YouTube ID, not yet fully posted, not stale
   const candidates = Object.entries(uploaded).filter(([, data]) => {
     if (!data.youtubeId) return false;
-    if (data.metaPostedAt && data.tiktokPostedAt) return false;
+    if (data.metaPostedAt && data.tiktokPostedAt && data.pinterestPostedAt) return false;
     const age = now - new Date(data.uploadedAt).getTime();
     return age <= STALE_MS;
   });
@@ -133,16 +134,18 @@ async function main() {
       if (dl.status !== 0) throw new Error("yt-dlp download failed");
       if (!existsSync(videoPath)) throw new Error(`Downloaded file not found: ${videoPath}`);
 
-      const skipMeta   = !!data.metaPostedAt   || process.env.META_SKIP_FACEBOOK === "true";
-      const skipTikTok = !!data.tiktokPostedAt || process.env.TIKTOK_SKIP        === "true";
+      const skipMeta      = !!data.metaPostedAt      || process.env.META_SKIP_FACEBOOK === "true";
+      const skipTikTok    = !!data.tiktokPostedAt    || process.env.TIKTOK_SKIP        === "true";
+      const skipPinterest = !!data.pinterestPostedAt || process.env.PINTEREST_SKIP     === "true";
 
-      const metaOk   = skipMeta   ? null : await postToMeta(videoPath, post, data.youtubeId);
-      const tiktokOk = skipTikTok ? null : await postToTikTok(videoPath, post, data.youtubeId);
+      const metaOk      = skipMeta      ? null : await postToMeta(videoPath, post, data.youtubeId);
+      const tiktokOk    = skipTikTok    ? null : await postToTikTok(videoPath, post, data.youtubeId);
+      const pinterestOk = skipPinterest ? null : await postToPinterest(post, data.youtubeId);
 
-      await markSocialPosted(slug, { meta: metaOk === true, tiktok: tiktokOk === true });
+      await markSocialPosted(slug, { meta: metaOk === true, tiktok: tiktokOk === true, pinterest: pinterestOk === true });
 
       const fmt = (v, skip) => skip ? "skip" : v ? "✓" : "✗";
-      console.log(`[social-cron]   Meta: ${fmt(metaOk, skipMeta)} | TikTok: ${fmt(tiktokOk, skipTikTok)}`);
+      console.log(`[social-cron]   Meta: ${fmt(metaOk, skipMeta)} | TikTok: ${fmt(tiktokOk, skipTikTok)} | Pinterest: ${fmt(pinterestOk, skipPinterest)}`);
     } catch (err) {
       console.error(`[social-cron]   ✗ ${err.message}`);
     } finally {

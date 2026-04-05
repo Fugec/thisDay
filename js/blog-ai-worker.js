@@ -381,6 +381,12 @@ export default {
       return serveListing(env);
     }
 
+    // Pillar hub pages: /blog/topic/:pillar-slug/
+    const topicMatch = path.match(/^\/blog\/topic\/([a-z0-9-]+)$/);
+    if (topicMatch) {
+      return servePillarHub(env, topicMatch[1]);
+    }
+
     // JSON index used by the main blog page to dynamically render AI posts
     if (path === "/blog/archive.json") {
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
@@ -4493,6 +4499,214 @@ async function serveListing(env) {
   const index = indexRaw ? JSON.parse(indexRaw) : [];
   const html = await buildListingHTML(index);
   return htmlResponse(html);
+}
+
+// ---------------------------------------------------------------------------
+// Pillar hub pages — /blog/topic/:pillar-slug/
+// ---------------------------------------------------------------------------
+
+const PILLAR_DESCRIPTIONS = {
+  "War & Conflict": "Battles, wars, sieges, and the military events that redrew maps and reshaped civilisations.",
+  "Politics & Government": "Elections, treaties, coups, revolutions, and the political decisions that defined nations.",
+  "Science & Technology": "Discoveries, inventions, missions, and the breakthroughs that changed how we understand the world.",
+  "Arts & Culture": "Literature, music, art, film, and the cultural moments that left a lasting mark on society.",
+  "Disasters & Accidents": "Natural disasters, industrial accidents, and catastrophes and the human stories behind them.",
+  "Social & Human Rights": "Civil rights movements, protests, landmark legislation, and milestones in the fight for equality.",
+  "Economy & Business": "Market crashes, trade revolutions, corporate milestones, and the economic forces that shaped modern life.",
+  "Health & Medicine": "Epidemics, medical breakthroughs, public health crises, and the science that saved lives.",
+  "Exploration & Discovery": "Expeditions, voyages, space missions, and the adventures that expanded the boundaries of the known world.",
+  "Famous Persons": "Leaders, artists, scientists, and figures whose lives defined an era.",
+  "Born on This Day": "Notable people born on this date throughout history.",
+  "Died on This Day": "Notable people who died on this date throughout history.",
+};
+
+function toTitlePillarSlug(slugStr) {
+  return BLOG_PILLARS.find(
+    (p) => p.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") === slugStr,
+  ) || null;
+}
+
+async function servePillarHub(env, slugStr) {
+  const pillarName = toTitlePillarSlug(slugStr);
+  if (!pillarName) return serve404(env);
+
+  const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+  const index = indexRaw ? JSON.parse(indexRaw) : [];
+  const posts = index
+    .filter((e) => Array.isArray(e.pillars) && e.pillars.includes(pillarName))
+    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+
+  const html = buildPillarHubHTML(pillarName, slugStr, posts);
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=3600, s-maxage=3600",
+    },
+  });
+}
+
+function buildPillarHubHTML(pillarName, slugStr, posts) {
+  const canonicalUrl = `https://thisday.info/blog/topic/${slugStr}/`;
+  const description = PILLAR_DESCRIPTIONS[pillarName] || `Articles about ${pillarName} on thisDay.`;
+  const pageTitle = `${pillarName} — Historical Articles | thisDay.`;
+
+  const postItems = posts.length
+    ? posts.map((entry) => {
+        const date = new Date(entry.publishedAt);
+        const dateStr = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+        return `
+        <a href="/blog/${esc(entry.slug)}/" class="blog-post-link">
+          <i class="bi bi-clock-history post-icon"></i>
+          <div>
+            <div class="post-title">${esc(entry.title)}</div>
+            <small style="color:var(--text-muted,#5c7a65);opacity:.7">${esc(dateStr)}</small>
+          </div>
+        </a>`;
+      }).join("\n")
+    : '<p class="text-muted">No articles in this category yet — check back soon.</p>';
+
+  const otherPillars = BLOG_PILLARS
+    .filter((p) => p !== pillarName)
+    .map((p) => {
+      const s = p.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      return `<a href="/blog/topic/${s}/" class="badge text-decoration-none me-1 mb-1" style="background:var(--btn-bg);color:#fff;font-weight:500;font-size:.78rem;padding:.35em .7em;border-radius:20px">${esc(p)}</a>`;
+    }).join("");
+
+  const jsonLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: pageTitle,
+    url: canonicalUrl,
+    description,
+    publisher: {
+      "@type": "Organization",
+      name: "thisDay.info",
+      url: "https://thisday.info/",
+      logo: { "@type": "ImageObject", url: "https://thisday.info/images/logo.png" },
+    },
+    hasPart: posts.slice(0, 20).map((p) => ({
+      "@type": "NewsArticle",
+      name: p.title,
+      url: `https://thisday.info/blog/${p.slug}/`,
+      datePublished: p.publishedAt ? new Date(p.publishedAt).toISOString().split("T")[0] : undefined,
+      description: p.description,
+    })),
+  }, null, 2);
+
+  const breadcrumbJsonLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "thisDay.", item: "https://thisday.info/" },
+      { "@type": "ListItem", position: 2, name: "Historical Blog", item: "https://thisday.info/blog/" },
+      { "@type": "ListItem", position: 3, name: pillarName, item: canonicalUrl },
+    ],
+  }, null, 2);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${esc(pageTitle)}</title>
+    <link rel="canonical" href="${esc(canonicalUrl)}" />
+    <meta name="robots" content="index, follow" />
+    <meta name="description" content="${esc(description)}" />
+    <meta name="author" content="thisDay. Editorial" />
+    <meta property="og:title" content="${esc(pageTitle)}" />
+    <meta property="og:description" content="${esc(description)}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="${esc(canonicalUrl)}" />
+    <meta property="og:image" content="https://thisday.info/images/logo.png" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:site_name" content="thisDay." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${esc(pageTitle)}" />
+    <meta name="twitter:description" content="${esc(description)}" />
+    <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
+    <script type="application/ld+json">${jsonLd}</script>
+    <script type="application/ld+json">${breadcrumbJsonLd}</script>
+    <link rel="icon" href="/images/favicon.ico" />
+    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/css/style.css" />
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
+    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+    <style>
+      :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
+      body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
+      main{flex:1;padding:20px 0}
+      h1,h2,h3{color:var(--text)}
+      a{color:var(--btn-bg);text-decoration:none}a:hover{text-decoration:underline}
+      .blog-post-link{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--border);border-radius:8px;background-color:var(--bg);text-decoration:none;color:var(--text);transition:transform .15s ease,box-shadow .15s ease;margin-bottom:10px}
+      .blog-post-link:hover{transform:translateX(4px);box-shadow:0 3px 12px rgba(0,0,0,.08);text-decoration:none;color:var(--text)}
+      .post-icon{color:var(--btn-bg);font-size:1.1rem;flex-shrink:0;margin-top:2px}
+      .post-title{font-weight:600;font-size:.95rem;line-height:1.4;color:var(--btn-bg)}
+      .section-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
+      .breadcrumb{font-size:.82rem;margin-bottom:1.2rem}
+      .breadcrumb a{color:var(--text-muted)}
+      ${NAV_CSS}
+      ${FOOTER_CSS}
+    </style>
+  </head>
+  <body>
+  ${siteNav()}
+
+  <main class="container">
+    <div class="row justify-content-center">
+      <div class="col-lg-9 col-xl-7">
+        <nav aria-label="breadcrumb" class="breadcrumb">
+          <a href="/">thisDay.</a> &rsaquo;
+          <a href="/blog/">Historical Blog</a> &rsaquo;
+          <span>${esc(pillarName)}</span>
+        </nav>
+
+        <h1 class="fw-bold mb-2" style="font-size:1.8rem">${esc(pillarName)}</h1>
+        <p class="mb-4" style="color:var(--text-muted,#5c7a65)">${esc(description)}</p>
+
+        <div class="mb-4">
+          <ins class="adsbygoogle"
+               data-ad-client="ca-pub-8565025017387209"
+               data-ad-slot="9477779891"
+               data-ad-format="auto"
+               data-full-width-responsive="true"></ins>
+        </div>
+
+        <div class="mb-5">
+          <h2 class="section-header">
+            <i class="bi bi-journals me-2"></i>Articles (${posts.length})
+          </h2>
+          ${postItems}
+        </div>
+
+        <div class="mb-5">
+          <h2 class="section-header" style="font-size:1rem">Explore Other Topics</h2>
+          <div>${otherPillars}</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  ${siteFooter()}
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    ${footerYearScript()}
+    ${navToggleScript()}
+    if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
+      document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
+        if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed') && ins.offsetWidth > 0) {
+          ins.setAttribute('data-ad-pushed', '1');
+          try { (adsbygoogle = window.adsbygoogle || []).push({}); } catch {}
+        }
+      });
+    }
+  </script>
+  ${supportPopupSnippet()}
+  </body>
+</html>`;
 }
 
 // ---------------------------------------------------------------------------

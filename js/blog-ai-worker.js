@@ -1672,6 +1672,11 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
   // Applies corrections in-place; never blocks generation on failure.
   await factCheckContent(env, content);
 
+  // Eyewitness quote validation: confirm the quote is from a verifiable source.
+  // Clears eyewitnessQuote if the AI cannot confirm documented provenance,
+  // preventing fabricated quotes from being published under real names.
+  await validateEyewitnessQuote(env, content);
+
   // Validate image URLs and fetch alternatives if broken.
   // If no working image is found, regenerate once with a different topic.
   const MAX_CONTENT_ATTEMPTS = 2;
@@ -2455,6 +2460,73 @@ async function factCheckContent(env, content) {
     }
   } catch (err) {
     console.warn(`factCheck: skipped — ${err.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Eyewitness quote validation — clears unverifiable quotes before publish
+// ---------------------------------------------------------------------------
+
+/**
+ * Asks the AI to confirm whether eyewitnessQuote can be traced to a real,
+ * documented source. If the quote cannot be verified, clears both
+ * eyewitnessQuote and eyewitnessQuoteSource on the content object so the
+ * quote block is omitted from the rendered HTML.
+ *
+ * This prevents fabricated or hallucinated quotes from being published
+ * under real historical names — the highest trust-destruction risk in the
+ * generation pipeline.
+ */
+async function validateEyewitnessQuote(env, content) {
+  if (!content.eyewitnessQuote || !content.eyewitnessQuoteSource) return;
+
+  const prompt =
+    `You are a strict historical source verifier. Your only job is to assess whether the following quote can be traced to a real, documented historical source.\n\n` +
+    `Quote: "${content.eyewitnessQuote}"\n` +
+    `Attributed to: ${content.eyewitnessQuoteSource}\n` +
+    `Event context: ${content.eventTitle} (${content.historicalDate})\n\n` +
+    `Answer only: can this specific quote be confirmed as appearing in a real, verifiable document (letter, diary, newspaper, official record, published memoir)?\n` +
+    `Do NOT verify paraphrases as if they were direct quotes.\n` +
+    `Do NOT confirm a quote just because the person existed and the event happened.\n\n` +
+    `Reply with ONLY a JSON object:\n` +
+    `{ "verified": true, "source": "document name and year" }\n` +
+    `OR\n` +
+    `{ "verified": false, "reason": "brief explanation" }`;
+
+  try {
+    const raw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content: "You are a historical source verifier. Reply with JSON only, no markdown.",
+        },
+        { role: "user", content: prompt },
+      ],
+      { maxTokens: 256, timeoutMs: 15_000 },
+    );
+
+    const match = raw?.match(/\{[\s\S]*\}/);
+    if (!match) {
+      console.warn("eyewitnessQuoteValidation: no JSON returned — quote cleared as precaution");
+      content.eyewitnessQuote = null;
+      content.eyewitnessQuoteSource = null;
+      return;
+    }
+
+    const result = JSON.parse(match[0]);
+    if (result.verified === true) {
+      console.log(`eyewitnessQuoteValidation: verified — ${result.source || "source confirmed"}`);
+    } else {
+      console.warn(`eyewitnessQuoteValidation: unverified — ${result.reason || "unknown reason"} — quote cleared`);
+      content.eyewitnessQuote = null;
+      content.eyewitnessQuoteSource = null;
+    }
+  } catch (err) {
+    // On error, clear the quote as a safety measure rather than publish unverified
+    console.warn(`eyewitnessQuoteValidation: skipped (error) — ${err.message} — quote cleared`);
+    content.eyewitnessQuote = null;
+    content.eyewitnessQuoteSource = null;
   }
 }
 
@@ -3443,7 +3515,7 @@ ${JSON.stringify({
               <small>
                 Published: ${esc(publishedStr)} &nbsp;|&nbsp;
                 Event Date: ${esc(c.historicalDate)} &nbsp;|&nbsp;
-                By <a href="/about/" rel="author" style="color:inherit">thisDay. Editorial Team</a>${readingTime}
+                By <a href="/about/editorial/" rel="author" style="color:inherit">thisDay. Editorial Team</a>${readingTime}
               </small>
             </p>
           </header>
@@ -3650,7 +3722,20 @@ ${analysisBadItems}
           </section>`;
           })()}
 
-          <footer class="text-center mt-5 pt-3 border-top">
+          <!-- AI & Editorial Disclosure -->
+          <div class="mt-5 p-3 rounded" style="background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);font-size:.82rem;line-height:1.6">
+            <strong style="display:block;margin-bottom:4px">About this article</strong>
+            <span class="article-meta">
+              This article was researched and drafted with AI assistance, then reviewed for factual accuracy by the
+              <a href="/about/editorial/" rel="author">thisDay. editorial team</a>.
+              Historical source: <a href="${esc(c.wikiUrl || c.jsonLdUrl)}" target="_blank" rel="noopener noreferrer">Wikipedia</a>
+              (licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>).
+              Images via <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.
+              Found an error? <a href="/contact/">Let us know</a>.
+            </span>
+          </div>
+
+          <footer class="text-center mt-4 pt-3 border-top">
             <small class="article-meta">
               Part of the <strong>thisDay.</strong> historical blog archive &mdash;
               <a href="/blog/archive/">Browse more posts</a> &bull;

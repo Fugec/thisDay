@@ -3387,7 +3387,7 @@ async function reviewContentWithSEOExpert(content, env) {
  * Builds the full blog post HTML page, matching the structure of existing
  * hand-written posts on thisday.info.
  */
-function buildPostHTML(c, date, slug, allPosts = []) {
+function buildPostHTML(c, date, slug, allPosts = [], currentPillars = []) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
   const publishYear = date.getFullYear();
@@ -3472,9 +3472,9 @@ function buildPostHTML(c, date, slug, allPosts = []) {
       inLanguage: "en",
       articleSection: "History",
       author: {
-        "@type": "Person",
+        "@type": "Organization",
         name: "thisDay.info Editorial Team",
-        url: "https://thisday.info/about/",
+        url: "https://thisday.info/about/editorial/",
       },
       publisher: {
         "@type": "Organization",
@@ -3502,6 +3502,35 @@ function buildPostHTML(c, date, slug, allPosts = []) {
         organizer: { "@type": "Organization", name: c.organizerName },
       },
     },
+    null,
+    2,
+  );
+
+  // BreadcrumbList: Home > Blog > [Pillar] > Article
+  // Pillar level included only when currentPillars data is available.
+  // Pillar hub URLs (/blog/topic/…/) will be live once P3b (hub pages) lands.
+  const pillarSlug = (str) =>
+    str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const breadcrumbItems = [
+    { "@type": "ListItem", position: 1, name: "thisDay.", item: "https://thisday.info/" },
+    { "@type": "ListItem", position: 2, name: "Historical Blog", item: "https://thisday.info/blog/" },
+  ];
+  if (currentPillars.length > 0) {
+    breadcrumbItems.push({
+      "@type": "ListItem",
+      position: 3,
+      name: currentPillars[0],
+      item: `https://thisday.info/blog/topic/${pillarSlug(currentPillars[0])}/`,
+    });
+  }
+  breadcrumbItems.push({
+    "@type": "ListItem",
+    position: breadcrumbItems.length + 1,
+    name: c.title,
+    item: canonicalUrl,
+  });
+  const breadcrumbJsonLd = JSON.stringify(
+    { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: breadcrumbItems },
     null,
     2,
   );
@@ -3552,6 +3581,9 @@ function buildPostHTML(c, date, slug, allPosts = []) {
     <!-- JSON-LD Schema -->
     <script type="application/ld+json">
 ${jsonLd}
+    </script>
+    <script type="application/ld+json">
+${breadcrumbJsonLd}
     </script>
     <script type="application/ld+json">
 ${JSON.stringify({
@@ -3863,7 +3895,28 @@ ${analysisBadItems}
           })()}
 
           ${(() => {
-            const related = allPosts.filter((p) => p.slug !== slug).slice(0, 3); // already sorted newest-first; today's post is always shown first
+            const others = allPosts.filter((p) => p.slug !== slug);
+            // Prefer posts that share at least one pillar with the current article.
+            // Sort by overlap count descending, fill remainder from most recent.
+            let related;
+            if (currentPillars.length > 0) {
+              const withOverlap = others.map((p) => ({
+                p,
+                overlap: Array.isArray(p.pillars)
+                  ? p.pillars.filter((pl) => currentPillars.includes(pl)).length
+                  : 0,
+              })).sort((a, b) => b.overlap - a.overlap);
+              const matching = withOverlap.filter((x) => x.overlap > 0).map((x) => x.p).slice(0, 3);
+              if (matching.length < 3) {
+                const seen = new Set(matching.map((p) => p.slug));
+                const rest = others.filter((p) => !seen.has(p.slug)).slice(0, 3 - matching.length);
+                related = [...matching, ...rest];
+              } else {
+                related = matching;
+              }
+            } else {
+              related = others.slice(0, 3); // no pillar data yet — fall back to most recent
+            }
             if (related.length === 0) return "";
             const cards = related
               .map((p) => {

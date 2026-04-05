@@ -1768,6 +1768,12 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
     }
   }
 
+  // P4a — "why now" context hook: one short AI call that grounds the article
+  // in the publish date's current world. The hook is injected into the main
+  // generation prompt so at least one sentence exists that could not have been
+  // written six months ago. Non-blocking — falls back to null on any error.
+  const contextHook = await fetchContextHook(env, now, forcedEvent);
+
   let content = await callWorkersAI(
     env,
     now,
@@ -1775,6 +1781,7 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
     activeModel,
     forcedEvent,
     preferredPillars,
+    contextHook,
   );
 
   // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
@@ -1819,6 +1826,13 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
       `No working image for "${content.title}" after ${MAX_CONTENT_ATTEMPTS} attempts.`,
     );
   }
+
+  // P4b — separate editorial note: a second isolated AI call that reads the
+  // finished article and writes a perspective section that must reference the
+  // current year. This creates structural differentiation between the research
+  // layer (article body) and the perspective layer (editorial note).
+  // Non-blocking — keeps existing editorialNote on any error.
+  await generateEditorialNote(env, content, now);
 
   // Ensure meta description meets minimum SEO length (120 chars)
   if (!content.description || content.description.length < 120) {
@@ -2294,6 +2308,7 @@ async function callWorkersAI(
   model = CF_AI_MODEL,
   forcedEvent = null,
   preferredPillars = [],
+  contextHook = null,
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -2307,6 +2322,10 @@ async function callWorkersAI(
     preferredPillars.length > 0
       ? `\nTOPIC FOCUS: To build editorial depth, strongly prefer an event that falls into one of these underrepresented categories: ${preferredPillars.map((p) => `"${p}"`).join(", ")}. Only override this preference if no compelling event from those categories occurred on this date.\n`
       : "";
+
+  const contextHookSection = contextHook
+    ? `\nCURRENT-WORLD CONTEXT (mandatory): The following hook connects this historical event to today's world as of the publish date. You MUST weave at least one sentence from this angle into the article — specifically into the conclusionParagraphs or editorialNote. The sentence must feel grounded in the present, not generic. Do not quote the hook verbatim; use it as a lens:\n"${contextHook}"\n`
+    : "";
 
   const eventSelection = forcedEvent
     ? `You MUST write about this specific event: "${forcedEvent}". Do not choose a different event.`
@@ -2322,7 +2341,7 @@ When choosing the event, rank candidates by click and share potential on YouTube
 Choose the single event from this date that a curious 25-year-old would most likely stop scrolling to watch a 45-second video about.`;
 
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.
-
+${contextHookSection}
 STRICT DATE REQUIREMENT: You MUST write about an event that occurred on ${monthName} ${day} ONLY. The event must have taken place in the month of ${monthName} on day ${day}. Events from ANY other month or day are strictly forbidden. Before choosing an event, verify it happened on ${monthName} ${day}. If you are not certain an event occurred on ${monthName} ${day}, choose a different event you are confident about.
 
 ${eventSelection}
@@ -2503,6 +2522,128 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   }
 
   return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// P4a — Context hook: "why now" grounding sentence
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches a short current-world hook for the publish date.
+ * Returns a single sentence (or null on any failure) that connects today's
+ * world to the historical event being covered, giving the main generation
+ * prompt a temporal anchor it could not have had six months ago.
+ *
+ * @param {object} env
+ * @param {Date}   date        The publish date (today)
+ * @param {string|null} forcedEvent  Event name if forced, otherwise null
+ * @returns {Promise<string|null>}
+ */
+async function fetchContextHook(env, date, forcedEvent = null) {
+  // NOTE: The AI may hallucinate current-world parallels if the event is outside
+  // its training data. This is acceptable because the hook is injected only into
+  // the editorial/conclusion layer (opinion framing), never into the factual
+  // article body which is separately fact-checked by factCheckContent().
+  try {
+    const monthName = MONTH_NAMES[date.getMonth()];
+    const day = date.getDate();
+    const year = date.getFullYear();
+    const eventHint = forcedEvent ? ` The article will cover: "${forcedEvent}".` : "";
+
+    const prompt =
+      `Today is ${monthName} ${day}, ${year}.${eventHint}\n` +
+      `In one sentence (max 60 words), identify a current-world parallel, anniversary resonance, or modern echo that makes a historical event from ${monthName} ${day} feel especially relevant *right now* in ${year}.\n` +
+      `Requirements:\n` +
+      `- Must reference something real happening in ${year} or a round-number anniversary (e.g. 80th, 100th)\n` +
+      `- Must be specific — name a country, conflict, technology, or cultural moment\n` +
+      `- Must not be generic ("history repeats itself", "lessons of the past")\n` +
+      `- Respond with the single sentence only. No preamble, no explanation.`;
+
+    const result = await callAI(
+      env,
+      [
+        { role: "system", content: "You provide concise, specific current-affairs context for historical articles. Respond with one sentence only." },
+        { role: "user", content: prompt },
+      ],
+      { maxTokens: 120, timeoutMs: 15_000 },
+    );
+
+    const hook = result?.trim().replace(/^["']|["']$/g, "");
+    if (!hook || hook.length < 20) return null;
+    console.log(`contextHook: "${hook}"`);
+    return hook;
+  } catch (err) {
+    console.warn(`contextHook: skipped — ${err.message}`);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// P4b — Separate editorial note pass
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates the editorial note in an isolated second AI call, after the full
+ * article body is written. Passes the complete article as context so the note
+ * can respond to specific things in the article — not just the topic.
+ *
+ * Constraints enforced in the prompt:
+ *   - Must reference something from the publish year (${year}) or a current parallel
+ *   - Must make a connection the article body did not explicitly make
+ *   - Must be 100+ words, first-person plural, no hedging
+ *
+ * Mutates content.editorialNote in-place. Keeps existing value on any error.
+ *
+ * @param {object} env
+ * @param {object} content  Article content object — mutated directly
+ * @param {Date}   date     Publish date
+ */
+async function generateEditorialNote(env, content, date) {
+  try {
+    const year = date.getFullYear();
+    const articleSummary =
+      `Title: ${content.title}\n` +
+      `Event: ${content.eventTitle} (${content.historicalDate})\n` +
+      `Location: ${content.location || "unknown"}\n\n` +
+      `Overview:\n${(content.overviewParagraphs || []).join("\n\n")}\n\n` +
+      `Aftermath:\n${(content.aftermathParagraphs || []).join("\n\n")}\n\n` +
+      `Conclusion:\n${(content.conclusionParagraphs || []).join("\n\n")}`;
+
+    const prompt =
+      `You are the thisDay. editorial team writing a short opinion note to appear at the end of the article below.\n\n` +
+      `ARTICLE:\n${articleSummary}\n\n` +
+      `YOUR TASK:\n` +
+      `Write a first-person-plural editorial note (100–150 words) that:\n` +
+      `1. Opens with "What strikes us about this is..." or "We keep coming back to one thing:" or a similarly direct opener\n` +
+      `2. Makes a specific connection to something happening in ${year} — name it (a conflict, a political situation, a technological shift, a cultural moment). Be concrete, not vague.\n` +
+      `3. Says something the article body could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered vs what actually happened\n` +
+      `4. Ends with one precise, memorable sentence\n\n` +
+      `ABSOLUTE RULES:\n` +
+      `- No hedging. No "it is important to remember". No "this serves as a reminder".\n` +
+      `- Do not summarize the article — respond to it\n` +
+      `- Do not mention Wikipedia or sources\n` +
+      `- Respond with the note text only. No preamble, no label, no quotes around it.`;
+
+    const result = await callAI(
+      env,
+      [
+        { role: "system", content: "You are a sharp editorial voice. Write the note only — no preamble, no labels." },
+        { role: "user", content: prompt },
+      ],
+      { maxTokens: 300, timeoutMs: 20_000 },
+    );
+
+    const note = result?.trim().replace(/^["']|["']$/g, "");
+    if (!note || note.length < 80) {
+      console.warn("generateEditorialNote: response too short, keeping original");
+      return;
+    }
+    content.editorialNote = note;
+    console.log(`generateEditorialNote: replaced (${note.length} chars)`);
+  } catch (err) {
+    console.warn(`generateEditorialNote: skipped — ${err.message}`);
+    // Keep existing content.editorialNote unchanged
+  }
 }
 
 // ---------------------------------------------------------------------------

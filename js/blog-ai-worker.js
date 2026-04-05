@@ -117,6 +117,25 @@ const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
 const EVERY_OTHER_DAYS = 1; // Generate every N days
 
+// Content pillars — mirrors the 10 event filter categories in script.js,
+// plus "Born on This Day" and "Died on This Day" matching the site's nav sections.
+// Used to classify blog posts for topical authority tracking and depth rotation.
+// DO NOT change these names without also updating the backfill logic below.
+const BLOG_PILLARS = [
+  "War & Conflict",
+  "Politics & Government",
+  "Science & Technology",
+  "Arts & Culture",
+  "Disasters & Accidents",
+  "Social & Human Rights",
+  "Economy & Business",
+  "Health & Medicine",
+  "Exploration & Discovery",
+  "Famous Persons",
+  "Born on This Day",
+  "Died on This Day",
+];
+
 const MONTH_NAMES = [
   "January",
   "February",
@@ -314,6 +333,47 @@ export default {
       );
       const purged = results.filter((r) => r.status === "fulfilled").length;
       return jsonResponse({ status: "ok", purged, total: index.length });
+    }
+
+    // Admin: classify all existing posts into pillars and persist in KV index
+    // POST /blog/backfill-pillars           — all unclassified posts
+    // POST /blog/backfill-pillars?all=true  — reclassify every post (overwrite)
+    if (path === "/blog/backfill-pillars" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const backfillAll = new URL(request.url).searchParams.get("all") === "true";
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+
+      const targets = backfillAll
+        ? index
+        : index.filter((e) => !e.pillars || e.pillars.length === 0);
+
+      const results = [];
+      for (const e of targets) {
+        try {
+          const fakeContent = {
+            title: e.title,
+            eventTitle: e.title,
+            keywords: "",
+            description: e.description || "",
+          };
+          const classified = await classifyPillars(env, fakeContent);
+          if (classified && classified.length > 0) {
+            e.pillars = classified;
+            results.push({ slug: e.slug, pillars: classified, status: "classified" });
+          } else {
+            results.push({ slug: e.slug, status: "skipped" });
+          }
+        } catch (err) {
+          results.push({ slug: e.slug, status: "error", error: err.message });
+        }
+      }
+
+      await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index));
+      return jsonResponse({ status: "ok", processed: targets.length, results });
     }
 
     // Listing page: /blog/archive
@@ -1460,6 +1520,24 @@ async function maybeGenerateBlogPost(env, ctx) {
     }
   }
 
+  // Day-of-week aware publish variance (P2c — anti-spam-signal pattern break).
+  //
+  // YouTube upload runs Mon/Tue/Thu/Fri at 01:00 UTC and depends on today's
+  // post being ready. Those days always generate.
+  //
+  // Wed/Sat/Sun have no scheduled YouTube run, so we skip ~35% of them
+  // randomly. This makes the publish schedule non-deterministic without
+  // breaking the YouTube pipeline or touching wrangler-blog.jsonc.
+  const SKIP_PROBABILITY = 0.35;
+  const YOUTUBE_DAYS = new Set([1, 2, 4, 5]); // Mon=1, Tue=2, Thu=4, Fri=5
+  const todayDow = new Date(today + "T00:00:00Z").getUTCDay(); // 0=Sun…6=Sat
+  if (!YOUTUBE_DAYS.has(todayDow) && Math.random() < SKIP_PROBABILITY) {
+    console.log(
+      `Blog AI: random publish skip applied (${Math.round(SKIP_PROBABILITY * 100)}% chance on non-YouTube days) — no post today.`,
+    );
+    return;
+  }
+
   // Mark today as attempted before generating so tomorrow's cron always starts
   // from today's date regardless of whether generation succeeds or fails.
   await env.BLOG_AI_KV.put(KV_LAST_GEN_KEY, today);
@@ -1656,12 +1734,41 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
           ),
     );
 
+  // Pillar depth rotation: identify underrepresented topic pillars from recent posts
+  // so the AI favours depth over breadth. Only active when enough classified posts exist.
+  let preferredPillars = [];
+  if (!forcedEvent) {
+    const recentClassified = existingIndex
+      .slice()
+      .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
+      .slice(0, 30)
+      .filter((e) => Array.isArray(e.pillars) && e.pillars.length > 0);
+
+    if (recentClassified.length >= 5) {
+      const counts = {};
+      for (const pillar of BLOG_PILLARS) counts[pillar] = 0;
+      for (const e of recentClassified) {
+        for (const p of e.pillars) {
+          if (counts[p] !== undefined) counts[p]++;
+        }
+      }
+      // Prefer the 3 least-covered pillars (excluding Born/Died which are niche)
+      preferredPillars = Object.entries(counts)
+        .filter(([p]) => p !== "Born on This Day" && p !== "Died on This Day")
+        .sort((a, b) => a[1] - b[1])
+        .slice(0, 3)
+        .map(([p]) => p);
+      console.log(`Blog AI: depth rotation — preferred pillars: [${preferredPillars.join(", ")}]`);
+    }
+  }
+
   let content = await callWorkersAI(
     env,
     now,
     takenAllTime,
     activeModel,
     forcedEvent,
+    preferredPillars,
   );
 
   // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
@@ -1676,6 +1783,10 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
   // Clears eyewitnessQuote if the AI cannot confirm documented provenance,
   // preventing fabricated quotes from being published under real names.
   await validateEyewitnessQuote(env, content);
+
+  // Pillar classification: assign article to 1–3 content pillars for topical
+  // authority tracking and "You Might Also Like" relevance. Non-blocking.
+  const pillars = await classifyPillars(env, content);
 
   // Validate image URLs and fetch alternatives if broken.
   // If no working image is found, regenerate once with a different topic.
@@ -1733,7 +1844,7 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
   }
 
   const slug = buildSlug(now);
-  const html = buildPostHTML(content, now, slug, existingIndex);
+  const html = buildPostHTML(content, now, slug, existingIndex, pillars);
 
   // Persist the rendered page (no expiry — permanent archive)
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
@@ -1750,6 +1861,8 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
     description: content.description,
     imageUrl: content.imageUrl,
     publishedAt: now.toISOString(),
+    ...(pillars && pillars.length > 0 ? { pillars } : {}),
+    ...(content.contentRationale ? { contentRationale: content.contentRationale } : {}),
   };
   deduped.unshift(entry);
   const finalIndex = deduped;
@@ -2174,6 +2287,7 @@ async function callWorkersAI(
   takenThisMonth = [],
   model = CF_AI_MODEL,
   forcedEvent = null,
+  preferredPillars = [],
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -2183,10 +2297,15 @@ async function callWorkersAI(
       ? `\nThese topics have already been covered — do NOT write about any of them or anything closely related:\n${takenThisMonth.map((t) => `- ${t}`).join("\n")}\nSemantic avoidance rules: (1) If a listed title names a person, do not pick any event involving that person, their family, or their dynasty. (2) If a listed title names a battle or war, do not pick another engagement from the same conflict. (3) Do not pick a different year of the same recurring event type (e.g. if "Treaty of Paris 1856" is listed, avoid "Treaty of Paris 1783"). (4) If two events share the same country and the same event type within 50 years of each other, they are too similar — pick something from a different region or era entirely.\n`
       : "";
 
+  const pillarHint =
+    preferredPillars.length > 0
+      ? `\nTOPIC FOCUS: To build editorial depth, strongly prefer an event that falls into one of these underrepresented categories: ${preferredPillars.map((p) => `"${p}"`).join(", ")}. Only override this preference if no compelling event from those categories occurred on this date.\n`
+      : "";
+
   const eventSelection = forcedEvent
     ? `You MUST write about this specific event: "${forcedEvent}". Do not choose a different event.`
     : `Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year).
-
+${pillarHint}
 When choosing the event, rank candidates by click and share potential on YouTube Shorts and social media. Prioritise in this order:
 1. Events involving globally recognised figures (presidents, kings, scientists, cultural icons) in dramatic or unexpected situations
 2. Events with a shocking twist, a near-miss, a dramatic reversal, or a surprising outcome that most people do not know
@@ -2308,7 +2427,8 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   ],
   "editorialNote": "Minimum 80 words. A frank, first-person-plural editorial reflection from the thisDay. team. Start with 'What strikes us about this is...' or 'We keep coming back to one thing:' or a similarly direct opening. Say something that the body of the article could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered and what actually happened. No hedging. No 'it is important to remember'. Say the thing.",
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
-  "youtubeSearchQuery": "specific event name year history documentary"
+  "youtubeSearchQuery": "specific event name year history documentary",
+  "contentRationale": "Minimum 40 words. Answer this specific question: what does a reader find in this article that Wikipedia's entry on the same event does not already give them? Name the specific angle, the particular framing, the overlooked detail, or the editorial judgement that makes this article worth reading over the Wikipedia source. Do not be vague. Do not say 'deeper context' or 'engaging narrative'."
 }`;
 
   const rawValue = await callAI(
@@ -2460,6 +2580,64 @@ async function factCheckContent(env, content) {
     }
   } catch (err) {
     console.warn(`factCheck: skipped — ${err.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pillar classification — assigns article to one or more content pillars
+// ---------------------------------------------------------------------------
+
+/**
+ * Classifies an article into 1–3 of the BLOG_PILLARS categories.
+ * Returns an array of pillar name strings, or null if classification fails.
+ * Multiple pillars are valid — e.g. an assassination article can be both
+ * "War & Conflict" and "Politics & Government".
+ */
+async function classifyPillars(env, content) {
+  const pillarsStr = BLOG_PILLARS.map((p, i) => `${i + 1}. ${p}`).join("\n");
+  const prompt =
+    `You are a content classifier. Assign the following historical article to 1–3 of the categories below.\n\n` +
+    `Categories:\n${pillarsStr}\n\n` +
+    `Article title: ${content.title}\n` +
+    `Event: ${content.eventTitle}\n` +
+    `Keywords: ${content.keywords}\n` +
+    `Description: ${content.description}\n\n` +
+    `Rules:\n` +
+    `- Assign 1 category if the article clearly belongs to one topic.\n` +
+    `- Assign 2–3 only when genuinely relevant (e.g. an assassination fits both "War & Conflict" and "Politics & Government").\n` +
+    `- Do NOT pad with loosely related categories.\n` +
+    `- Use "Born on This Day" only if the article's primary focus is a person's birth.\n` +
+    `- Use "Died on This Day" only if the article's primary focus is a person's death.\n` +
+    `- Use "Famous Persons" for general biographical articles not specifically about birth or death.\n` +
+    `- Reply with ONLY a JSON object: { "pillars": ["exact category name", ...] }`;
+
+  try {
+    const raw = await callAI(
+      env,
+      [
+        { role: "system", content: "You are a content classifier. Reply with JSON only." },
+        { role: "user", content: prompt },
+      ],
+      { maxTokens: 128, timeoutMs: 10_000 },
+    );
+
+    const match = raw?.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+
+    const result = JSON.parse(match[0]);
+    const pillars = result?.pillars;
+    if (!Array.isArray(pillars) || pillars.length === 0) return null;
+
+    const valid = pillars.filter((p) => typeof p === "string" && BLOG_PILLARS.includes(p));
+    if (valid.length === 0) {
+      console.warn(`classifyPillars: no valid pillars in response ${JSON.stringify(pillars)}`);
+      return null;
+    }
+    console.log(`classifyPillars: assigned [${valid.join(", ")}]`);
+    return valid;
+  } catch (err) {
+    console.warn(`classifyPillars: skipped — ${err.message}`);
+    return null;
   }
 }
 

@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Editorial Standards & AI Policy | thisDay.</title>
+    <link rel="canonical" href="https://thisday.info/about/editorial/" />
+    <meta name="robots" content="index, follow" />
+    <meta
+      name="description"
+      content="How thisDay.info produces its historical blog articles — our editorial standards, AI-assisted research process, fact-checking policy, and how to report errors."
+    />
+    <meta
+      property="og:title"
+      content="Editorial Standards & AI Policy | thisDay."
+    />
+    <meta
+      property="og:description"
+      content="How thisDay.info produces its historical blog articles — editorial standards, AI-assisted research process, fact-checking, and correction policy."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://thisday.info/about/editorial/" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:image" content="https://thisday.info/images/logo.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta
+      name="twitter:title"
+      content="Editorial Standards & AI Policy | thisDay."
+    />
+    <meta
+      name="twitter:description"
+      content="How thisDay.info produces its historical blog articles."
+    />
+    <meta name="author" content="thisDay. Editorial Team" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "AboutPage",
+        "name": "Editorial Standards & AI Policy — thisDay.info",
+        "description": "How thisDay.info researches, writes, and reviews its historical blog articles, including AI usage disclosure and correction policy.",
+        "url": "https://thisday.info/about/editorial/",
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": "thisDay.info",
+          "url": "https://thisday.info/"
+        },
+        "author": {
+          "@type": "Organization",
+          "name": "thisDay. Editorial Team",
+          "url": "https://thisday.info/about/editorial/"
+        }
+      }
+    </script>
+
+    <!-- Favicons -->
+    <link rel="icon" href="/images/favicon.ico" type="image/x-icon" />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="/images/apple-touch-icon.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="/images/favicon-32x32.png"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="/images/favicon-16x16.png"
+    />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Bootstrap CSS & Icons -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+    />
+    <link rel="stylesheet" href="/css/custom.css" />
+    <link rel="stylesheet" href="/css/style.css" />
+
+    <style>
+      .container {
+        max-width: 820px;
+      }
+      main {
+        flex: 1;
+        padding: 20px 0;
+      }
+
+      .editorial-hero {
+        background: linear-gradient(
+          135deg,
+          var(--btn-bg) 0%,
+          var(--btn-hover) 100%
+        );
+        color: #fff;
+        padding: 52px 20px;
+        text-align: center;
+        margin-bottom: 40px;
+      }
+      .editorial-hero h1 {
+        color: #fff !important;
+        font-size: 2.2rem;
+        font-weight: 700;
+      }
+      .editorial-hero p {
+        font-size: 1.05rem;
+        opacity: 0.92;
+        max-width: 580px;
+        margin: 0 auto;
+      }
+
+      .step-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 22px 24px;
+        background: var(--bg);
+        margin-bottom: 16px;
+        display: flex;
+        gap: 18px;
+        align-items: flex-start;
+      }
+      .step-num {
+        background: var(--btn-bg);
+        color: #fff;
+        border-radius: 50%;
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.95rem;
+      }
+      .step-card h5 {
+        margin-bottom: 6px;
+        color: var(--text);
+      }
+      .step-card p {
+        margin: 0;
+        color: var(--text);
+        font-size: 0.95rem;
+      }
+
+      .policy-box {
+        border-left: 4px solid var(--accent);
+        padding: 16px 20px;
+        background: rgba(0, 0, 0, 0.03);
+        border-radius: 0 8px 8px 0;
+        margin-bottom: 20px;
+      }
+      .policy-box strong {
+        display: block;
+        margin-bottom: 6px;
+        color: var(--text);
+      }
+      .policy-box p {
+        margin: 0;
+        font-size: 0.95rem;
+        color: var(--text);
+      }
+
+      h2,
+      h3,
+      h4,
+      h5 {
+        color: var(--text);
+      }
+      section p {
+        color: var(--text);
+      }
+      section a {
+        color: var(--btn-bg);
+      }
+      section a:hover {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+
+  <body>
+    <nav class="nav">
+      <div class="nav-inner">
+        <a href="/" class="brand">thisDay.</a>
+        <div class="nav-links">
+          <a href="/events/today/">Events on this day</a>
+          <a href="/born/today/">Born on this day</a>
+          <a href="/died/today/">Died on this day</a>
+          <a href="/blog/">Blog</a>
+          <a href="/quiz/">Quiz</a>
+          <a href="/about/">About</a>
+          <a href="/contact/">Contact</a>
+          <a
+            href="https://buymeacoffee.com/fugec?new=1"
+            target="_blank"
+            rel="noopener noreferrer"
+            style="color: var(--accent); font-weight: 600"
+            aria-label="Support this project"
+            >☕ Support</a
+          >
+        </div>
+        <button class="btn" id="navToggle" aria-label="Toggle menu">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="nav-mobile" id="navMobile">
+        <a href="/events/today/">Events</a>
+        <a href="/blog/">Blog</a>
+        <a href="/quiz/">Quiz</a>
+        <a href="/about/">About</a>
+        <a href="/contact/">Contact</a>
+        <div class="nav-mobile-bottom">
+          <a href="/events/today/" class="mobile-menu-link"
+            >Events on this day</a
+          >
+          <a href="/born/today/" class="mobile-menu-link">Born on this day</a>
+          <a href="/died/today/" class="mobile-menu-link">Died on this day</a>
+          <div class="mobile-menu-social">
+            <a
+              href="https://github.com/Fugec"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub"
+              ><i class="bi bi-github"></i
+            ></a>
+            <a
+              href="https://www.facebook.com/profile.php?id=61578009082537"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Facebook"
+              ><i class="bi bi-facebook"></i
+            ></a>
+            <a
+              href="https://www.instagram.com/thisday.info/"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Instagram"
+              ><i class="bi bi-instagram"></i
+            ></a>
+            <a
+              href="https://www.tiktok.com/@this__day"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="TikTok"
+              ><i class="bi bi-tiktok"></i
+            ></a>
+            <a
+              href="https://www.youtube.com/@thisDay_info/shorts"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="YouTube"
+              ><i class="bi bi-youtube"></i
+            ></a>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="editorial-hero">
+      <h1>Editorial Standards & AI Policy</h1>
+      <p class="mt-3">
+        How we research, write, and review every article on thisDay.
+      </p>
+    </div>
+
+    <main class="container my-4">
+      <section class="mb-5">
+        <h2 class="mb-3">Who We Are</h2>
+        <p>
+          thisDay.info is run by <strong>Armin Kapetanovic</strong>, a developer
+          and history enthusiast based in Bosnia and Herzegovina. The editorial
+          team is small by design — the goal has always been depth over volume,
+          and a genuine interest in why historical events happened, not just
+          that they did.
+        </p>
+        <p>
+          Our blog focuses on significant historical events tied to specific
+          calendar dates. We cover wars and conflict, political turning points,
+          scientific breakthroughs, social movements, disasters, exploration,
+          and the lives of people who shaped the world. Every article is
+          grounded in documented historical record.
+        </p>
+      </section>
+
+      <section class="mb-5">
+        <h2 class="mb-3">How Articles Are Produced</h2>
+        <p class="mb-4">
+          We use an AI-assisted research and drafting pipeline, combined with
+          editorial review. Here is the exact process every blog article goes
+          through before it is published:
+        </p>
+
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <div>
+            <h5>Event selection</h5>
+            <p>
+              An event is selected from the current calendar date's historical
+              record, weighted toward events with strong documentation, clear
+              historical significance, and enough primary-source material to
+              write a substantive article. Events with insufficient documented
+              sources are excluded.
+            </p>
+          </div>
+        </div>
+
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <div>
+            <h5>AI-assisted research and drafting</h5>
+            <p>
+              An AI language model drafts the article using its training
+              knowledge of the event, constrained to include specific,
+              verifiable facts — real names, exact dates, documented locations,
+              and attributable quotes. The AI is instructed to flag any detail
+              it cannot attribute to a named source. Generic summaries and
+              unsupported generalisations are explicitly prohibited in the
+              generation prompt.
+            </p>
+          </div>
+        </div>
+
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <div>
+            <h5>Eyewitness quote verification</h5>
+            <p>
+              Any direct quote attributed to a historical figure is put through
+              a separate verification pass. If the quote cannot be traced to a
+              real, documented source — a letter, diary entry, newspaper
+              account, or published memoir — it is removed before publication.
+              We do not publish paraphrases as direct quotes.
+            </p>
+          </div>
+        </div>
+
+        <div class="step-card">
+          <div class="step-num">4</div>
+          <div>
+            <h5>Fact-check pass</h5>
+            <p>
+              A dedicated fact-check step verifies that the event date, year,
+              and location are internally consistent and match the article's
+              core claims. Any identified discrepancy triggers a correction
+              before the article is stored.
+            </p>
+          </div>
+        </div>
+
+        <div class="step-card">
+          <div class="step-num">5</div>
+          <div>
+            <h5>SEO and quality review</h5>
+            <p>
+              The article is reviewed for clarity, completeness, and accuracy of
+              metadata (descriptions, keywords, image attribution). Weak or
+              vague passages are rewritten. The article must meet a minimum word
+              count and structural standard before it qualifies for publication.
+            </p>
+          </div>
+        </div>
+
+        <div class="step-card">
+          <div class="step-num">6</div>
+          <div>
+            <h5>Publication</h5>
+            <p>
+              The finished article is published with full source attribution to
+              Wikipedia (under CC BY-SA 4.0), image credit to Wikimedia Commons,
+              and a disclosure note stating it was produced with AI assistance.
+              Every article links back to its Wikipedia source so readers can
+              verify facts independently.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-5">
+        <h2 class="mb-3">Our Editorial Standards</h2>
+
+        <div class="policy-box">
+          <strong>Specific over generic</strong>
+          <p>
+            Every paragraph must contain at least one verifiable, attributable
+            fact — a real name, an exact year or number, a specific place, or a
+            documented quote. Vague generalisations ("a pivotal moment",
+            "changed history") are prohibited in our generation guidelines.
+          </p>
+        </div>
+
+        <div class="policy-box">
+          <strong>Sources cited, not hidden</strong>
+          <p>
+            Every article links to its Wikipedia source and credits Wikimedia
+            Commons for images. We use the CC BY-SA 4.0 licence. Where an
+            eyewitness quote is used, the source document and year are
+            attributed inline.
+          </p>
+        </div>
+
+        <div class="policy-box">
+          <strong
+            >AI used as a research tool, not a replacement for accuracy</strong
+          >
+          <p>
+            We use AI to process and structure documented historical information
+            efficiently. We do not use AI to invent facts, fill gaps with
+            plausible-sounding detail, or generate quotes without verified
+            attribution. The fact-check and quote validation steps exist
+            specifically to catch and remove hallucinated content before
+            publication.
+          </p>
+        </div>
+
+        <div class="policy-box">
+          <strong>Corrections welcomed</strong>
+          <p>
+            We publish corrections when errors are identified. If you find a
+            factual mistake — a wrong date, a misattributed quote, an incorrect
+            location — please <a href="/contact/">contact us</a>. We take
+            accuracy seriously and will update the article and note the
+            correction.
+          </p>
+        </div>
+      </section>
+
+      <section class="mb-5">
+        <h2 class="mb-3">What We Don't Do</h2>
+        <ul style="color: var(--text); line-height: 2">
+          <li>
+            We do not publish AI-generated content without a verification
+            pipeline.
+          </li>
+          <li>
+            We do not fabricate or invent historical detail to fill gaps in the
+            record.
+          </li>
+          <li>
+            We do not present AI-generated paraphrases as direct historical
+            quotes.
+          </li>
+          <li>
+            We do not artificially update article dates to make old content
+            appear new.
+          </li>
+          <li>We do not remove correction notices once they are added.</li>
+        </ul>
+      </section>
+
+      <section class="mb-5">
+        <h2 class="mb-3">Data Sources</h2>
+        <p>
+          Historical event data across the site is sourced from
+          <a
+            href="https://www.wikipedia.org"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Wikipedia</a
+          >
+          via the
+          <a
+            href="https://api.wikimedia.org/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Wikimedia REST API</a
+          >, provided under the
+          <a
+            href="https://creativecommons.org/licenses/by-sa/4.0/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >CC BY-SA 4.0</a
+          >
+          licence. Images are sourced from
+          <a
+            href="https://commons.wikimedia.org/"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Wikimedia Commons</a
+          >
+          under their respective free licences.
+        </p>
+        <p>
+          Blog articles draw on the AI model's training knowledge of documented
+          historical events, anchored by the Wikipedia source linked at the
+          bottom of each post. Readers are always encouraged to follow the
+          Wikipedia link and consult primary sources for anything academically
+          or professionally important.
+        </p>
+      </section>
+
+      <section class="mb-5">
+        <h2 class="mb-3">Report an Error</h2>
+        <p>
+          Found a factual error, a misattributed quote, or something that
+          doesn't look right? Use our <a href="/contact/">contact page</a> or
+          email
+          <a href="mailto:kapetanovic.armin@gmail.com"
+            >kapetanovic.armin@gmail.com</a
+          >
+          with the article URL and a brief description of the issue. We review
+          all correction requests and respond within a few days.
+        </p>
+      </section>
+
+      <div class="mt-4 pt-3 border-top">
+        <small style="color: var(--text-muted)">
+          &larr; <a href="/about/">Back to About thisDay.</a>
+        </small>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <div class="footer-social">
+          <a
+            href="https://github.com/Fugec"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHub"
+            ><i class="bi bi-github"></i
+          ></a>
+          <a
+            href="https://www.facebook.com/profile.php?id=61578009082537"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Facebook"
+            ><i class="bi bi-facebook"></i
+          ></a>
+          <a
+            href="https://www.instagram.com/thisday.info/"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram"
+            ><i class="bi bi-instagram"></i
+          ></a>
+          <a
+            href="https://www.tiktok.com/@this__day"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="TikTok"
+            ><i class="bi bi-tiktok"></i
+          ></a>
+          <a
+            href="https://www.youtube.com/@thisDay_info/shorts"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="YouTube"
+            ><i class="bi bi-youtube"></i
+          ></a>
+        </div>
+        <div class="footer-text">
+          <p>
+            &copy; <span id="currentYear"></span> thisDay. All rights reserved.
+          </p>
+          <p>
+            Historical data sourced from
+            <a
+              href="https://creativecommons.org/licenses/by-sa/4.0/"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Wikipedia.org under CC BY-SA 4.0</a
+            >
+            licence.
+          </p>
+          <p>
+            This website is not affiliated with any official historical
+            organisation. Content is for educational and entertainment purposes
+            only.
+          </p>
+        </div>
+        <div class="footer-bottom">
+          <a
+            href="https://buymeacoffee.com/fugec?new=1"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Support This Project</a
+          >
+          <a href="/blog/">Blog</a>
+          <a href="/about/">About</a>
+          <a href="/about/editorial/">Editorial Policy</a>
+          <a href="/contact/">Contact</a>
+          <a href="/terms/">Terms</a>
+          <a href="/privacy-policy/">Privacy</a>
+        </div>
+      </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      document.getElementById("currentYear").textContent =
+        new Date().getFullYear();
+      (function () {
+        var t = document.getElementById("navToggle"),
+          m = document.getElementById("navMobile");
+        if (t && m)
+          t.addEventListener("click", function () {
+            m.classList.toggle("active");
+          });
+      })();
+    </script>
+  </body>
+</html>

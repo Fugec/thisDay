@@ -27,6 +27,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://thisday.info/about/editorial/</loc>
+    <lastmod>2026-04-05</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://thisday.info/contact/</loc>
     <lastmod>2026-03-17</lastmod>
     <changefreq>monthly</changefreq>

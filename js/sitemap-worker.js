@@ -38,6 +38,12 @@ const STATIC_PAGES = [
     priority: "0.7",
   },
   {
+    loc: "/about/editorial/",
+    lastmod: "2026-04-05",
+    changefreq: "monthly",
+    priority: "0.7",
+  },
+  {
     loc: "/contact/",
     lastmod: "2026-03-17",
     changefreq: "monthly",

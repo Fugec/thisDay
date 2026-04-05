@@ -666,6 +666,33 @@ export default {
           /<figcaption class="article-meta mt-2">\s*<small>(?!Image courtesy of)[\s\S]*?<\/small>\s*<\/figcaption>/,
           '<figcaption class="article-meta mt-2"><small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small></figcaption>',
         );
+        // Patch old byline link /about/ → /about/editorial/ (E-E-A-T signal)
+        if (patchedHtml.includes('href="/about/" rel="author"')) {
+          patchedHtml = patchedHtml.replaceAll(
+            'href="/about/" rel="author"',
+            'href="/about/editorial/" rel="author"',
+          );
+        }
+        // Inject AI disclosure block into old posts that predate P1a.
+        // New posts have it baked in via buildPostHTML; old KV posts don't.
+        // Detect by absence of the sentinel string and inject before </article>.
+        if (
+          !patchedHtml.includes("About this article") &&
+          patchedHtml.includes("</article>")
+        ) {
+          const disclosureBlock =
+            `<div class="mt-5 p-3 rounded" style="background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);font-size:.82rem;line-height:1.6">` +
+            `<strong style="display:block;margin-bottom:4px">About this article</strong>` +
+            `<span class="article-meta">` +
+            `This article was researched and drafted with AI assistance, then reviewed for factual accuracy by the ` +
+            `<a href="/about/editorial/" rel="author">thisDay. editorial team</a>. ` +
+            `Historical source: <a href="https://en.wikipedia.org/" target="_blank" rel="noopener noreferrer">Wikipedia</a> ` +
+            `(licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>). ` +
+            `Images via <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>. ` +
+            `Found an error? <a href="/contact/">Let us know</a>.` +
+            `</span></div>`;
+          patchedHtml = patchedHtml.replace("</article>", disclosureBlock + "\n</article>");
+        }
         // Patch old quiz popup to flex-column sticky-header layout
         if (
           patchedHtml.includes('id="tdq-popup"') &&

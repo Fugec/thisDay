@@ -215,7 +215,8 @@ export default {
       try {
         const publishUrl = new URL(request.url);
         const forcedEvent = publishUrl.searchParams.get("force-event") || null;
-        await generateAndStore(env, ctx, forcedEvent);
+        const forceDate = publishUrl.searchParams.get("force-date") || null;
+        await generateAndStore(env, ctx, forcedEvent, forceDate);
         return jsonResponse({ status: "ok", message: "Blog post published." });
       } catch (err) {
         console.error(
@@ -1751,11 +1752,156 @@ async function resolveWorkingImageForContent(content) {
   return null;
 }
 
+// Phrases the prompt explicitly forbids. Any match is logged as a violation
+// so prompt quality can be monitored without blocking generation.
+const BANNED_PHRASE_LIST = [
+  // Generic importance/impact filler
+  "significant event", "pivotal moment", "changed history", "shaped the course of",
+  "left a lasting impact", "cannot be overstated", "one of the most important",
+  "it is worth noting", "it is important to remember", "this was a time of great change",
+  "the importance of this", "a reminder of", "shows the importance of",
+  "demonstrated the power of", "played a crucial role", "played a key role",
+  "played a significant role", "played a vital role", "had a profound impact",
+  "had a lasting impact", "had a significant impact", "indelible mark",
+  "far-reaching consequences", "world was forever changed", "world would never be the same",
+  "made history", "turning point", "watershed moment", "stands as a", "serves as a",
+  "testament to", "in the annals of history", "throughout history",
+  "stood the test of time", "chapter in history",
+  // Mood labels without evidence
+  "it was a dark time", "it was a bleak time", "it was a difficult period",
+  "it was chaos", "it was a complex time", "dark chapter", "in the face of adversity",
+  // Vague connectors and filler
+  "at its core", "in many ways", "at the heart of", "in no small part",
+  "it goes without saying", "needless to say", "the fact remains",
+  "at the end of the day", "in essence", "in the grand scheme",
+  "time and again", "when all is said and done",
+  // Casual speech patterns
+  "that's the thing", "it's a shame", "he saw it all", "she saw it all",
+  "they saw it all", "it's like they", "you have to understand",
+  "it's a lesson", "we must not forget", "mustn't forget", "we can't forget",
+  "as the world grapples", "it's a reminder", "still resonates today",
+  "cannot be forgotten", "reminder of the past", "to this day",
+];
+
+const PARA_FIELDS = [
+  "overviewParagraphs", "eyewitnessOrChronicle",
+  "aftermathParagraphs", "conclusionParagraphs",
+];
+
+/**
+ * Scans generated content for banned phrases.
+ * Returns a list of violation strings. Empty array = clean.
+ */
+function scanBannedPhrases(content) {
+  const violations = [];
+  for (const field of PARA_FIELDS) {
+    const paras = content[field];
+    if (!Array.isArray(paras)) continue;
+    paras.forEach((p, i) => {
+      const lower = p.toLowerCase();
+      for (const phrase of BANNED_PHRASE_LIST) {
+        if (lower.includes(phrase)) {
+          violations.push(`${field}[${i}]: "${phrase}"`);
+        }
+      }
+    });
+  }
+  if (violations.length > 0) {
+    console.warn(
+      `scanBannedPhrases: ${violations.length} violation(s):\n` +
+      violations.map((v) => `  ${v}`).join("\n"),
+    );
+  } else {
+    console.log("scanBannedPhrases: clean");
+  }
+  return violations;
+}
+
+/**
+ * Quality fix pass: rewrites paragraphs that contain banned phrases AND
+ * removes cross-section repetition (same facts restated in a later section).
+ * Sends all four sections together so the AI can see the full picture.
+ * Called once after scanBannedPhrases finds violations.
+ * Returns updated content — falls back to original on any error.
+ */
+async function fixBannedPhrases(env, content, violations) {
+  const allSections = {
+    overviewParagraphs: content.overviewParagraphs || [],
+    eyewitnessOrChronicle: content.eyewitnessOrChronicle || [],
+    aftermathParagraphs: content.aftermathParagraphs || [],
+    conclusionParagraphs: content.conclusionParagraphs || [],
+  };
+
+  const foundPhrases = [...new Set(violations.map((v) => {
+    const m = v.match(/"([^"]+)"$/);
+    return m ? m[1] : null;
+  }).filter(Boolean))];
+
+  const systemPrompt =
+    "You are a strict copy editor fixing a historical blog article. You have two tasks:\n\n" +
+    "TASK 1 — BANNED PHRASES: Remove every banned phrase listed below. " +
+    "Replace it with the specific concrete detail it was avoiding. " +
+    "Do not use vague substitutes. If the paragraph has nothing concrete to say, cut the vague sentence entirely.\n\n" +
+    "TASK 2 — CROSS-SECTION REPETITION: Check whether any paragraph in aftermathParagraphs or conclusionParagraphs " +
+    "restates facts already stated in overviewParagraphs or eyewitnessOrChronicle. " +
+    "If a later paragraph says the same thing as an earlier one, rewrite it to add new information not yet covered, " +
+    "or advance the story to a later point in time. Each section must earn its place with information the reader has not seen yet.\n\n" +
+    "Rules: Preserve paragraph count exactly in every array. Never use dashes (-) or em dashes. " +
+    "Keep all facts accurate. Return ONLY a JSON object with the arrays that changed. Omit unchanged arrays.";
+
+  const userMessage =
+    `Banned phrases to remove: ${foundPhrases.map((p) => `"${p}"`).join(", ")}\n\n` +
+    `Full article sections:\n${JSON.stringify(allSections, null, 2)}\n\n` +
+    `Return ONLY JSON: {"overviewParagraphs":[...],"conclusionParagraphs":[...]} — only include arrays that changed.`;
+
+  let raw;
+  try {
+    raw = await callAI(
+      env,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      { maxTokens: 3000, timeoutMs: 40_000 },
+    );
+  } catch (err) {
+    console.warn(`fixBannedPhrases: AI call failed (${err.message}) — keeping original`);
+    return content;
+  }
+
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) {
+    console.warn("fixBannedPhrases: no JSON in response — keeping original");
+    return content;
+  }
+
+  let fixes;
+  try {
+    fixes = JSON.parse(match[0]);
+  } catch {
+    console.warn("fixBannedPhrases: JSON parse error — keeping original");
+    return content;
+  }
+
+  const updated = { ...content };
+  for (const field of Object.keys(allSections)) {
+    if (!Array.isArray(fixes[field])) continue;
+    if (fixes[field].length !== (content[field] || []).length) continue;
+    if (!fixes[field].every((p) => typeof p === "string" && p.trim().length > 20)) continue;
+    updated[field] = fixes[field];
+  }
+
+  const remaining = scanBannedPhrases(updated);
+  console.log(`fixBannedPhrases: done — ${remaining.length} phrase(s) still present after fix`);
+  return updated;
+}
+
 /**
  * Calls the Claude API, builds the HTML page, and persists everything to KV.
  */
-async function generateAndStore(env, ctx, forcedEvent = null) {
-  const now = new Date();
+async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) {
+  const now = forceDate ? new Date(forceDate + "T12:00:00Z") : new Date();
   const activeModel = await resolveAiModel(env.BLOG_AI_KV);
 
   // Collect titles already published (all-time, capped at 50) so the AI avoids duplicates
@@ -1823,6 +1969,14 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
     preferredPillars,
     contextHook,
   );
+
+  // Post-generation banned phrase scan + targeted fix pass.
+  // If violations are found, one focused AI call patches only the offending paragraphs.
+  // Falls back to original paragraphs if the fix call fails or produces worse output.
+  const violations = scanBannedPhrases(content);
+  if (violations.length > 0) {
+    content = await fixBannedPhrases(env, content, violations);
+  }
 
   // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
   // sentence length before building HTML. Falls back to original on any error.
@@ -1904,8 +2058,16 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
   }
 
   const slug = buildSlug(now);
-  const rawHtml = buildPostHTML(content, now, slug, existingIndex, pillars);
-  const html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
+
+  // Fetch person portraits + book cover in parallel (non-blocking)
+  const [personImages, bookCoverUrl] = await Promise.all([
+    fetchKeyPersonImages(content.keyTerms).catch(() => []),
+    fetchBookCover(content.bookSearchQuery).catch(() => null),
+  ]);
+
+  const rawHtml = buildPostHTML(content, now, slug, existingIndex, pillars, bookCoverUrl);
+  let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
+  html = injectPersonImages(html, personImages);
 
   // Persist the rendered page (no expiry — permanent archive)
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
@@ -2393,7 +2555,7 @@ The article must be substantial — at least 1,500 words of body content across 
 
 VOICE AND PERSONALITY — this is the most important instruction:
 Write like a passionate history obsessive who has spent weeks researching this event and genuinely cannot believe more people do not know about it. You have opinions. You find things surprising, tragic, infuriating, or inspiring, and you say so. You are not a textbook. You are not a Wikipedia summary. You are a storyteller who happens to know an enormous amount of history.
-Write this like you are explaining it to a smart 16-year-old who has never heard of this event. That means: every proper noun (person, organization, treaty, battle) must be briefly explained on its first mention so the reader knows what it is without googling. Prefer a short direct sentence over a long elegant one every time. If you would never say something out loud to a person sitting across from you, do not write it that way.
+Write as a passionate, opinionated history narrator — serious and authoritative, never casual or colloquial. Do not write like you are texting or chatting. Assume the reader is intelligent but has never heard of this event. Explain every proper noun on its first mention with one short inline phrase — enough to orient the reader without a digression.
 
 Specific voice qualities:
 - PLAY YOUR ACE CARD FIRST: The single most surprising, counterintuitive, or little-known fact in the entire article belongs in the first two sentences. Do not save the best for the end. Most readers will not reach it.
@@ -2501,12 +2663,14 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   ],
   "editorialNote": "Minimum 80 words. A frank, first-person-plural editorial reflection from the thisDay. team. Start with 'What strikes us about this is...' or 'We keep coming back to one thing:' or a similarly direct opening. Say something that the body of the article could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered and what actually happened. No hedging. No 'it is important to remember'. Say the thing.",
   "keyTerms": [
-    { "term": "Exact phrase as it appears in the article text", "wikiUrl": "https://en.wikipedia.org/wiki/Exact_Article" },
-    { "term": "Another key person, place, or event named in the article", "wikiUrl": "https://en.wikipedia.org/wiki/Another_Article" }
+    { "term": "Exact phrase as it appears in the article text", "wikiUrl": "https://en.wikipedia.org/wiki/Exact_Article", "type": "person" },
+    { "term": "Another key person, place, or event named in the article", "wikiUrl": "https://en.wikipedia.org/wiki/Another_Article", "type": "event" }
   ],
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
   "youtubeSearchQuery": "specific event name year history documentary",
-  "keyTerms": "5 to 8 important proper nouns that appear verbatim in the article body — key people, battles, organizations, treaties, or places. For each, provide the exact phrase as written in the article and a valid Wikipedia URL. These will be used to create hyperlinks in the published text.",
+  "bookSearchQuery": "event keyword book history",
+  "keyTerms": "5 to 8 important proper nouns that appear verbatim in the article body — key people, battles, organizations, treaties, or places. For each, provide: the exact phrase as written in the article, a valid Wikipedia URL, and a type from: person, place, event, organization. These will be used to create hyperlinks and inline images in the published text.",
+  "bookSearchQuery": "3-5 word search query optimised for finding books about this specific event on eBay and Open Library. Example: 'italian invasion ethiopia 1935'.",
   "contentRationale": "Minimum 40 words. Answer this specific question: what does a reader find in this article that Wikipedia's entry on the same event does not already give them? Name the specific angle, the particular framing, the overlooked detail, or the editorial judgement that makes this article worth reading over the Wikipedia source. Do not be vague. Do not say 'deeper context' or 'engaging narrative'."
 }`;
 
@@ -3458,7 +3622,7 @@ async function reviewSEOMetaOnly(content, env) {
 async function reviewContentWithSEOExpert(content, env) {
   if (!env.AI && !env.GROQ_API_KEY) return content;
 
-  // Build full paragraph payload organized by field — sent as JSON so expert knows which belongs where
+  // --- PASS 1: Paragraph quality + humanization (no meta fields) ---
   const allParagraphs = {
     overviewParagraphs: content.overviewParagraphs || [],
     eyewitnessOrChronicle: content.eyewitnessOrChronicle || [],
@@ -3466,102 +3630,111 @@ async function reviewContentWithSEOExpert(content, env) {
     conclusionParagraphs: content.conclusionParagraphs || [],
   };
 
-  let systemPrompt =
-    "You are a triple expert: a senior SEO editor, a passionate opinionated history writer, AND a human-voice specialist. " +
-    "You receive a JSON content object for a historical blog post. Your three jobs are inseparable:\n\n" +
-    "JOB 1 — SEO QUALITY:\n" +
-    "- description: 120–155 chars, open with the year and event, include location and a specific hook\n" +
-    "- ogDescription: 100–130 chars, curiosity-driven — give readers a reason to click, not just a summary\n" +
-    "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
-    "- keywords: 5–8 specific terms — include year, location, key person names, and the historical context\n" +
-    "- imageAlt: a vivid 8–15 word description of what is actually visible in the image\n" +
-    "- title: must stay in format 'Event Name — Month Day, Year'. Only touch the event name if it is vague or generic.\n\n" +
-    "JOB 2 — VOICE AND CONTENT QUALITY:\n" +
-    "You are a history obsessive. You find generic, hollow paragraph writing offensive. " +
-    "If any paragraph reads like a Wikipedia stub — vague, passive, free of specific facts — rewrite it.\n" +
-    "Standards for a paragraph you would rewrite:\n" +
-    "- It contains no specific names, numbers, dates, or places (pure generalization)\n" +
-    "- It uses banned phrases: 'significant event', 'pivotal moment', 'changed history', 'shaped the course of', " +
+  const paraSystemPrompt =
+    "You are a passionate, opinionated history writer and human-voice editor. " +
+    "You receive paragraph arrays for a historical blog post. Your two jobs:\n\n" +
+    "JOB 1 — CONTENT QUALITY:\n" +
+    "Rewrite any paragraph that fails these standards:\n" +
+    "- Contains no specific names, numbers, dates, or places\n" +
+    "- Uses banned phrases: 'significant event', 'pivotal moment', 'changed history', 'shaped the course of', " +
     "'left a lasting impact', 'cannot be overstated', 'shows the importance of', 'reminder of', " +
-    "'it was a dark time', 'it was a bleak time', 'it was a difficult period', 'it was chaos', 'dark chapter'\n" +
-    "- It makes a summary mood judgment ('it was brutal', 'it was chaotic') without a concrete observable detail to back it up\n" +
-    "- It is under 80 words and adds nothing a reader could not guess\n" +
-    "- It restates a point, conclusion, or fact already made in a previous section (redundancy dilutes impact)\n" +
-    "- It reads like it was written by someone trying to avoid saying anything specific\n\n" +
-    "When you rewrite a paragraph:\n" +
-    "- Add the specific fact or detail that the vague phrase was avoiding\n" +
-    "- Replace mood labels with the observable evidence: not 'it was brutal' but what the brutality looked, sounded, or smelled like\n" +
-    "- Open with something that makes the reader want to continue — a striking detail, a contradiction, a consequence\n" +
-    "- Mix sentence lengths: some long and layered (25-35 words), some short and punchy (under 10 words)\n" +
-    "- Say what you actually think. If something was brutal, say what the brutality consisted of. If something was surprising, say what surprised.\n" +
-    "- Preserve paragraph count exactly. Do not add or remove paragraphs.\n\n" +
-    "JOB 3 — HUMAN VOICE (AI DETECTION SCORE MUST BE BELOW 50%):\n" +
-    "AI detectors flag text that is too uniform, too balanced, too clean. Every paragraph must pass as human.\n" +
-    "Rewrite ALL paragraphs to beat AI detection — do not skip any, even good-sounding ones.\n\n" +
-    "Mandatory humanization techniques — apply ALL of these across the full set of paragraphs:\n" +
-    "1. CONTRACTIONS: use them naturally — 'didn't', 'wasn't', 'couldn't', 'it's', 'that's', 'they'd'\n" +
-    "2. SENTENCE FRAGMENTS for emphasis. One word. Two words. Done.\n" +
-    "3. BREAK PARALLEL STRUCTURE: AI loves 'X did A, Y did B, Z did C' — destroy that pattern\n" +
-    "4. SENTENCE LENGTH CHAOS: mix 3-word sentences with 40-word sentences back to back\n" +
-    "5. AVOID consecutive sentences with the same grammatical opener (never 'The X... The Y... The Z...')\n" +
-    "6. DELETE these AI-signature connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', " +
-    "'It is worth noting', 'It should be noted', 'Notably', 'Importantly', 'Significantly'\n" +
-    "7. Vary paragraph openers: start some with the subject, some with a time/place, some with a consequence\n\n" +
-    "ABSOLUTE PROHIBITIONS — never introduce these, even for humanization:\n" +
-    "- Do NOT add rhetorical questions directed at the reader ('What were they thinking?', 'Did it work?', 'So, what happened?', 'What does this tell us?'). If a paragraph contains one, rewrite it as a declarative statement.\n" +
-    "- Do NOT add 'Picture this', 'Picture the scene', 'So,', 'You have to understand', 'Nobody expected that', 'Which, frankly', 'It almost worked' — these are clickbait patterns, not human voice.\n" +
-    "- Do NOT start sentences with 'And,' or 'So,' as filler openers.\n\n" +
-    "Rules:\n" +
-    "- Keep all JSON field names exactly as given\n" +
-    "- Do not change: historicalDate, historicalYear, historicalDateISO, location, country, quickFacts, " +
-    "didYouKnowFacts, analysisGood, analysisBad, editorialNote, wikiUrl, youtubeSearchQuery\n" +
-    "- Output ONLY valid JSON with the fields that need improvement. Omit fields that are already good.";
-  // Enforce punctuation guidance at the SEO/voice level as well
-  systemPrompt +=
-    "\n\nPUNCTUATION NOTE: Never use hyphens (-) or em dashes (—) anywhere in the text. Zero dashes. Use a comma or split into two sentences.";
-  // Add Oxford essay-writing notes so the SEO expert also enforces PEE and evidence-first
-  // while keeping existing SEO and voice rules.
-  systemPrompt +=
-    "\n\nOXFORD ESSAY GUIDANCE (append):\n" +
-    "- Encourage an editorial plan: for each section, name the core claim and the one fact that proves it.\n" +
-    "- Paragraph standard: claim + strongest evidence + brief explanation (PEE).\n" +
-    "- Favor leading with evidence in body paragraphs; keep intro/conclusion short and pointed.\n" +
-    "- Avoid jargon; when a technical term is necessary, provide a one-line definition.\n" +
-    "- When nuance or complication enters a paragraph, give the strongest version of it. Write it naturally into the narrative flow — never signal it with 'critics argue', 'some would say', or 'the opposing view is'. Just state it directly.\n" +
-    "- Each body paragraph can work as: position, complication woven in, then synthesis.\n" +
-    "- Apply a 'why' test: every factual claim must answer 'why does this matter to the reader?' — if it cannot, cut or sharpen it.\n";
+    "'it was a dark time', 'it was a bleak time', 'it was a difficult period', 'dark chapter', " +
+    "'that's the thing', 'it's a shame', 'still resonates today', 'testament to', 'played a crucial role', " +
+    "'had a profound impact', 'turning point', 'watershed moment', 'throughout history'\n" +
+    "- Makes a mood judgment without observable evidence ('it was brutal' with no detail of what the brutality was)\n" +
+    "- Restates a point already made in a previous paragraph\n" +
+    "When rewriting: add the specific fact being avoided, replace mood labels with concrete observable detail, " +
+    "open with a striking fact or consequence. Preserve paragraph count exactly.\n\n" +
+    "JOB 2 — HUMAN VOICE:\n" +
+    "Make every paragraph sound like a serious, authoritative narrator, not an AI assistant.\n" +
+    "- Use contractions naturally where they fit: 'didn't', 'wasn't', 'couldn't'\n" +
+    "- Vary sentence structure: avoid three consecutive sentences with the same grammatical opener\n" +
+    "- Delete AI connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', 'Notably', 'Significantly'\n" +
+    "- Vary paragraph openers: some start with subject, some with time/place, some with consequence\n" +
+    "PROHIBITIONS: No rhetorical questions to the reader. No 'Picture this', 'So,', 'You have to understand'. " +
+    "No sentence fragments as a style device. No casual speech: 'That's the thing', 'It's a shame, really', 'He saw it all'.\n\n" +
+    "PUNCTUATION: Never use hyphens (-) or em dashes (—). Use a comma or split into two sentences.\n\n" +
+    "Return ONLY a JSON object with the paragraph arrays that needed improvement. " +
+    "Omit arrays that are already good. Preserve array lengths exactly.\n" +
+    "Example: {\"overviewParagraphs\":[\"para1\",\"para2\"]}";
 
-  const userMessage =
-    `Blog post to review:\n` +
+  const paraUserMessage =
+    `Event: ${content.eventTitle} on ${content.historicalDate}\n\n` +
+    `${JSON.stringify(allParagraphs, null, 2)}\n\n` +
+    `Return ONLY JSON with improved paragraph arrays.`;
+
+  let paraRaw;
+  try {
+    paraRaw = await callAI(
+      env,
+      [
+        { role: "system", content: paraSystemPrompt },
+        { role: "user", content: paraUserMessage },
+      ],
+      { maxTokens: 4000, timeoutMs: 50_000 },
+    );
+  } catch (err) {
+    console.warn(`Paragraph expert: AI call failed (${err.message}) — skipping pass`);
+    paraRaw = null;
+  }
+
+  if (paraRaw) {
+    const paraCleaned = paraRaw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+    const paraMatch = paraCleaned.match(/\{[\s\S]*\}/);
+    if (paraMatch) {
+      let paraImprovements;
+      try { paraImprovements = JSON.parse(paraMatch[0]); } catch { paraImprovements = null; }
+      if (paraImprovements) {
+        const PARA_ALLOWED = ["overviewParagraphs", "eyewitnessOrChronicle", "aftermathParagraphs", "conclusionParagraphs"];
+        for (const field of PARA_ALLOWED) {
+          if (!Array.isArray(paraImprovements[field])) continue;
+          if (paraImprovements[field].length !== (content[field] || []).length) continue;
+          if (!paraImprovements[field].every((p) => typeof p === "string" && p.trim().length > 20)) continue;
+          content = { ...content, [field]: paraImprovements[field] };
+        }
+        console.log("Paragraph expert: applied improvements");
+      }
+    }
+  }
+
+  // --- PASS 2: SEO meta fields only (no paragraphs) ---
+  const seoSystemPrompt =
+    "You are a senior SEO editor for a historical blog. Improve only these meta fields:\n" +
+    "- description: 120–155 chars, open with year and event, include location and a specific hook\n" +
+    "- ogDescription: 100–130 chars, curiosity-driven, give readers a reason to click\n" +
+    "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
+    "- keywords: 5–8 specific terms including year, location, key people, historical context\n" +
+    "- imageAlt: vivid 8–15 word description of what is visible in the image\n" +
+    "- title: keep format 'Event Name — Month Day, Year'. Only change event name if vague or generic.\n\n" +
+    "Return ONLY a JSON object with fields that need improvement. Omit fields that are already good.";
+
+  const seoUserMessage =
     `Title: ${content.title}\n` +
     `Event: ${content.eventTitle} on ${content.historicalDate} in ${content.location || "unknown"}\n` +
-    `description: ${content.description}\n` +
+    `description: ${content.description || ""}\n` +
     `ogDescription: ${content.ogDescription || ""}\n` +
     `twitterDescription: ${content.twitterDescription || ""}\n` +
     `keywords: ${content.keywords || ""}\n` +
-    `imageAlt: ${content.imageAlt || ""}\n\n` +
-    `ALL paragraphs — apply JOB 2 + JOB 3 to every paragraph array:\n` +
-    `${JSON.stringify(allParagraphs, null, 2)}\n\n` +
-    `TARGET: AI detection score below 50%. Rewrite every paragraph to sound unmistakably human.\n` +
-    `Return ONLY a JSON object with the fields that need improvement:\n` +
-    `{"description":"improved...","keywords":"improved...","overviewParagraphs":["para1","para2","para3","para4"]}`;
+    `imageAlt: ${content.imageAlt || ""}`;
 
-  let raw;
+  let seoRaw;
   try {
-    raw = await callAI(
+    seoRaw = await callAI(
       env,
       [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
+        { role: "system", content: seoSystemPrompt },
+        { role: "user", content: seoUserMessage },
       ],
-      { maxTokens: 6000, timeoutMs: 50_000 },
+      { maxTokens: 600, timeoutMs: 20_000 },
     );
   } catch (err) {
-    console.warn(
-      `SEO expert: AI call failed (${err.message}) — using original content`,
-    );
-    return content;
+    console.warn(`SEO expert: AI call failed (${err.message}) — skipping pass`);
+    seoRaw = null;
   }
+
+  // Parse SEO meta improvements from Pass 2
+  if (!seoRaw) return content;
+  const raw = seoRaw;
 
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
@@ -3581,7 +3754,7 @@ async function reviewContentWithSEOExpert(content, env) {
     return content;
   }
 
-  // Whitelist of fields the SEO expert is allowed to improve
+  // SEO pass only touches meta fields — paragraphs were handled in Pass 1
   const ALLOWED_FIELDS = [
     "title",
     "description",
@@ -3589,10 +3762,6 @@ async function reviewContentWithSEOExpert(content, env) {
     "twitterDescription",
     "keywords",
     "imageAlt",
-    "overviewParagraphs",
-    "eyewitnessOrChronicle",
-    "aftermathParagraphs",
-    "conclusionParagraphs",
   ];
 
   let changed = 0;
@@ -3634,6 +3803,113 @@ async function reviewContentWithSEOExpert(content, env) {
 
   console.log(`SEO expert: reviewed content — ${changed} field(s) improved`);
   return improved;
+}
+
+// ---------------------------------------------------------------------------
+// Person image injection — Wikipedia portraits near first mention per section
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetches Wikipedia thumbnails for all person-type keyTerms (up to 4).
+ * Returns array of { name, imageUrl, wikiUrl }.
+ */
+async function fetchKeyPersonImages(keyTerms) {
+  const people = (keyTerms || []).filter(
+    (kt) => kt.type === "person" && kt.term && kt.wikiUrl,
+  ).slice(0, 4);
+  const results = [];
+  for (const kt of people) {
+    try {
+      const imgUrl = await fetchWikipediaImage(kt.term, kt.wikiUrl);
+      if (imgUrl) results.push({ name: kt.term, imageUrl: imgUrl, wikiUrl: kt.wikiUrl });
+    } catch {
+      // skip this person
+    }
+  }
+  return results;
+}
+
+/**
+ * Fetches an Open Library book cover URL for the given search query.
+ * Returns a cover URL string or null.
+ */
+async function fetchBookCover(bookSearchQuery) {
+  if (!bookSearchQuery) return null;
+  try {
+    const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
+    const searchRes = await fetch(
+      `https://openlibrary.org/search.json?q=${encodeURIComponent(bookSearchQuery)}&mode=books&limit=3&fields=cover_i,title`,
+      { headers: ua },
+    );
+    if (!searchRes.ok) return null;
+    const data = await searchRes.json();
+    const docs = data?.docs || [];
+    for (const doc of docs) {
+      if (doc.cover_i) {
+        return `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Injects a floated Wikipedia portrait figure before the first <p> that mentions
+ * each person. Enforces a minimum 1500-char gap between injected images so they
+ * don't stack near ads. Each person is only injected once.
+ */
+function injectPersonImages(html, personImages) {
+  if (!personImages || personImages.length === 0) return html;
+
+  // Build portrait HTML for a given person
+  const figHtml = ({ name, imageUrl, wikiUrl }) =>
+    `<figure style="float:right;margin:0 0 1.2rem 1.5rem;max-width:min(150px,35%);clear:right;">` +
+    `<a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">` +
+    `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=200&q=80"` +
+    ` alt="${esc(name)}" loading="lazy" class="img-fluid rounded"` +
+    ` style="display:block;width:100%;height:auto;">` +
+    `</a>` +
+    `<figcaption class="article-meta mt-1" style="font-size:0.72rem;text-align:center;">` +
+    `${esc(name)}<br><a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">via Wikimedia</a>` +
+    `</figcaption>` +
+    `</figure>`;
+
+  // Minimum character distance between two injected images
+  const MIN_GAP = 1500;
+  let lastInjectedAt = -MIN_GAP;
+
+  for (const person of personImages) {
+    const lowerName = person.name.toLowerCase();
+    const lowerHtml = html.toLowerCase();
+    let searchFrom = 0;
+
+    while (true) {
+      const nameIdx = lowerHtml.indexOf(lowerName, searchFrom);
+      if (nameIdx === -1) break;
+
+      // Find the opening <p> that contains this mention
+      const pStart = html.lastIndexOf("<p>", nameIdx);
+      if (pStart === -1) { searchFrom = nameIdx + 1; continue; }
+
+      // Confirm no </p> closes the tag between pStart and the name (i.e. still in same <p>)
+      const between = html.slice(pStart + 3, nameIdx);
+      if (between.includes("</p>")) { searchFrom = nameIdx + 1; continue; }
+
+      // Enforce minimum distance from last injected image
+      if (pStart - lastInjectedAt < MIN_GAP) { searchFrom = nameIdx + 1; continue; }
+
+      // Inject figure inside the <p> (after opening tag) so float aligns with paragraph text, not the heading
+      const figure = figHtml(person);
+      const afterOpenTag = pStart + 3; // position right after "<p>"
+      html = html.slice(0, afterOpenTag) + figure + html.slice(afterOpenTag);
+      lastInjectedAt = pStart;
+      break;
+    }
+  }
+
+  return html;
 }
 
 // ---------------------------------------------------------------------------
@@ -3708,7 +3984,7 @@ function injectLinks(html, keyTerms = [], existingIndex = [], ownEventTitle = ""
  * Builds the full blog post HTML page, matching the structure of existing
  * hand-written posts on thisday.info.
  */
-function buildPostHTML(c, date, slug, allPosts = [], currentPillars = []) {
+function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCoverUrl = null) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
   const publishYear = date.getFullYear();
@@ -4111,12 +4387,27 @@ ${didYouKnowItems}
           <!-- Overview -->
           ${
             overviewParas
-              ? `<section class="mt-4">
+              ? `<section class="mt-4" style="overflow:hidden;">
             <h2 class="h3">Overview</h2>
 ${overviewParas}
           </section>`
               : ""
           }
+
+          ${bookCoverUrl && c.bookSearchQuery ? `<!-- Further Reading -->
+          <div class="mt-3 p-3 rounded" style="background-color: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08); display:flex; align-items:flex-start; gap:14px;">
+            <a href="https://openlibrary.org/search?q=${encodeURIComponent(c.bookSearchQuery)}&mode=books" target="_blank" rel="noopener noreferrer" style="flex-shrink:0;">
+              <img src="${esc(bookCoverUrl)}" alt="Book cover" loading="lazy" style="width:60px;height:auto;border-radius:4px;display:block;">
+            </a>
+            <div>
+              <strong style="font-size:0.9rem;">Want to read more?</strong><br>
+              <small class="article-meta">If you want to explore this topic further, we recommend searching for books on
+                <a href="https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(c.bookSearchQuery + " book")}&_sacat=267" target="_blank" rel="noopener noreferrer">eBay</a>
+                or browsing free digital editions at
+                <a href="https://openlibrary.org/search?q=${encodeURIComponent(c.bookSearchQuery)}&mode=books" target="_blank" rel="noopener noreferrer">Open Library</a>.
+              </small>
+            </div>
+          </div>` : ""}
 
           <!-- Eyewitness / Chronicle Accounts -->
           ${

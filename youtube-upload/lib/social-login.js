@@ -9,10 +9,12 @@
  *   node lib/social-login.js             # login to all platforms
  *   node lib/social-login.js facebook    # Facebook + Instagram (Business Suite)
  *   node lib/social-login.js tiktok
+ *   node lib/social-login.js pinterest
  *
  * Required in .env:
  *   FACEBOOK_EMAIL, FACEBOOK_PASSWORD
  *   TIKTOK_EMAIL, TIKTOK_PASSWORD
+ *   PINTEREST_EMAIL, PINTEREST_PASSWORD  — Google account used for "Continue with Google"
  *
  * Optional:
  *   OPENCLAW_PROFILE  — browser profile (default: "openclaw")
@@ -159,12 +161,75 @@ async function loginTikTok() {
 }
 
 // ---------------------------------------------------------------------------
+// Pinterest
+// ---------------------------------------------------------------------------
+
+async function loginPinterest() {
+  const email    = process.env.PINTEREST_EMAIL;
+  const password = process.env.PINTEREST_PASSWORD;
+  if (!email || !password) throw new Error("PINTEREST_EMAIL / PINTEREST_PASSWORD not set in .env");
+
+  console.log("  [PT] Navigating to login page...");
+  ocb(["open", "https://www.pinterest.com/login/"]);
+  sleep(3_000);
+
+  let snap = ocb(["snapshot", "--interactive"], 20_000);
+  const alreadyLoggedIn = !snap.toLowerCase().includes("log in") && !snap.toLowerCase().includes("sign up");
+
+  if (alreadyLoggedIn) {
+    console.log("  [PT] Already logged in");
+  } else {
+    // Click "Continue with Google"
+    const googleRef = findRef(snap, "Continue with Google");
+    if (!googleRef) throw new Error("[PT] Could not find 'Continue with Google' button");
+
+    console.log("  [PT] Clicking Continue with Google...");
+    ocb(["click", googleRef], 10_000);
+    sleep(3_000);
+
+    snap = ocb(["snapshot", "--interactive"], 20_000);
+
+    // Google may show an account picker or an email/password form
+    const accountRef = findRef(snap, email);
+    if (accountRef) {
+      // Account already in picker — just click it
+      console.log("  [PT] Selecting Google account...");
+      ocb(["click", accountRef], 10_000);
+    } else if (snap.toLowerCase().includes("email or phone")) {
+      // Full Google login form
+      console.log("  [PT] Entering Google credentials...");
+      const gEmailRef = findRef(snap, "Email or phone");
+      if (!gEmailRef) throw new Error("[PT] Could not find Google email field");
+      ocb(["click", gEmailRef], 5_000);
+      ocb(["type", gEmailRef, email], 10_000);
+      ocb(["press", "Enter"], 5_000);
+      sleep(2_000);
+
+      snap = ocb(["snapshot", "--interactive"], 20_000);
+      const gPassRef = findRef(snap, "Enter your password", "Password");
+      if (!gPassRef) throw new Error("[PT] Could not find Google password field");
+      ocb(["click", gPassRef], 5_000);
+      ocb(["type", gPassRef, password], 10_000);
+      ocb(["press", "Enter"], 5_000);
+    } else {
+      console.warn("  [PT] ⚠ Unexpected Google auth screen — check PINTEREST_DEBUG");
+    }
+
+    console.log("  [PT] Waiting for Pinterest home feed...");
+    waitForText("Today", 60_000);
+  }
+
+  console.log("  [PT] ✓ Logged into Pinterest");
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 const PLATFORMS = {
-  facebook: loginFacebook,
-  tiktok:   loginTikTok,
+  facebook:  loginFacebook,
+  tiktok:    loginTikTok,
+  pinterest: loginPinterest,
 };
 
 async function main() {

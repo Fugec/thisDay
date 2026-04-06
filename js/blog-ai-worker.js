@@ -115,6 +115,8 @@ async function recordPipelineFailure(
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
+const KV_PERSON_IMAGE_PREFIX = "person-image:";
+const KV_PERSON_IMAGE_TTL = 60 * 60 * 24 * 30; // 30 days
 const EVERY_OTHER_DAYS = 1; // Generate every N days
 
 // Content pillars — mirrors the 10 event filter categories in script.js,
@@ -1901,7 +1903,8 @@ async function fixBannedPhrases(env, content, violations) {
  * Calls the Claude API, builds the HTML page, and persists everything to KV.
  */
 async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) {
-  const now = forceDate ? new Date(forceDate + "T12:00:00Z") : new Date();
+  const parsedForceDate = forceDate ? new Date(forceDate + "T12:00:00Z") : null;
+  const now = parsedForceDate && !isNaN(parsedForceDate) ? parsedForceDate : new Date();
   const activeModel = await resolveAiModel(env.BLOG_AI_KV);
 
   // Collect titles already published (all-time, capped at 50) so the AI avoids duplicates
@@ -2061,7 +2064,7 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
 
   // Fetch person portraits + book cover in parallel (non-blocking)
   const [personImages, bookCoverUrl] = await Promise.all([
-    fetchKeyPersonImages(content.keyTerms).catch(() => []),
+    fetchKeyPersonImages(env, content.keyTerms).catch(() => []),
     fetchBookCover(content.bookSearchQuery).catch(() => null),
   ]);
 
@@ -3813,15 +3816,27 @@ async function reviewContentWithSEOExpert(content, env) {
  * Fetches Wikipedia thumbnails for all person-type keyTerms (up to 4).
  * Returns array of { name, imageUrl, wikiUrl }.
  */
-async function fetchKeyPersonImages(keyTerms) {
+async function fetchKeyPersonImages(env, keyTerms) {
   const people = (keyTerms || []).filter(
     (kt) => kt.type === "person" && kt.term && kt.wikiUrl,
   ).slice(0, 4);
+
+  // Sequential: KV cache first (fast), Wikipedia only on miss (1 fetch per person max)
+  // Keeps total subrequest count predictable alongside the AI pipeline calls.
   const results = [];
   for (const kt of people) {
     try {
-      const imgUrl = await fetchWikipediaImage(kt.term, kt.wikiUrl);
-      if (imgUrl) results.push({ name: kt.term, imageUrl: imgUrl, wikiUrl: kt.wikiUrl });
+      const cacheKey = KV_PERSON_IMAGE_PREFIX + kt.term.toLowerCase().replace(/\s+/g, "_");
+      const cached = await env.BLOG_AI_KV.get(cacheKey, { type: "json" }).catch(() => null);
+      if (cached?.imageUrl) {
+        results.push({ name: kt.term, imageUrl: cached.imageUrl, wikiUrl: kt.wikiUrl });
+        continue;
+      }
+      // Cache miss — fetch from Wikipedia and store (fire-and-forget write)
+      const imageUrl = await fetchWikipediaImage(kt.term, kt.wikiUrl);
+      if (!imageUrl) continue;
+      env.BLOG_AI_KV.put(cacheKey, JSON.stringify({ imageUrl }), { expirationTtl: KV_PERSON_IMAGE_TTL }).catch(() => {});
+      results.push({ name: kt.term, imageUrl, wikiUrl: kt.wikiUrl });
     } catch {
       // skip this person
     }
@@ -3900,10 +3915,9 @@ function injectPersonImages(html, personImages) {
       // Enforce minimum distance from last injected image
       if (pStart - lastInjectedAt < MIN_GAP) { searchFrom = nameIdx + 1; continue; }
 
-      // Inject figure inside the <p> (after opening tag) so float aligns with paragraph text, not the heading
+      // Inject figure as a sibling immediately before <p> — valid HTML5, float aligns with paragraph text
       const figure = figHtml(person);
-      const afterOpenTag = pStart + 3; // position right after "<p>"
-      html = html.slice(0, afterOpenTag) + figure + html.slice(afterOpenTag);
+      html = html.slice(0, pStart) + figure + html.slice(pStart);
       lastInjectedAt = pStart;
       break;
     }

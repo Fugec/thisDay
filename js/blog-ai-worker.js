@@ -1904,7 +1904,8 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
   }
 
   const slug = buildSlug(now);
-  const html = buildPostHTML(content, now, slug, existingIndex, pillars);
+  const rawHtml = buildPostHTML(content, now, slug, existingIndex, pillars);
+  const html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
 
   // Persist the rendered page (no expiry — permanent archive)
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
@@ -2102,7 +2103,7 @@ async function reviewQuizWithExpert(questions, content, env) {
   // in-sentence hyphens or em dashes. If you find '-' or '—' inside a sentence,
   // replace with a comma or rewrite for clarity.
   systemPrompt +=
-    "\n\nPUNCTUATION NOTE: Do not use hyphens (-) or em dashes (—) inside sentences in questions or explanations. Use commas, semicolons, or rephrase the sentence instead.";
+    "\n\nPUNCTUATION NOTE: Never use hyphens (-) or em dashes (—) anywhere in the text. Zero dashes. Use a comma or split into two sentences.";
 
   const userMessage =
     `Historical context:\n${contextLines}\n\n` +
@@ -2392,30 +2393,36 @@ The article must be substantial — at least 1,500 words of body content across 
 
 VOICE AND PERSONALITY — this is the most important instruction:
 Write like a passionate history obsessive who has spent weeks researching this event and genuinely cannot believe more people do not know about it. You have opinions. You find things surprising, tragic, infuriating, or inspiring, and you say so. You are not a textbook. You are not a Wikipedia summary. You are a storyteller who happens to know an enormous amount of history.
-Write this like you are explaining it to a smart 16 year old who has never heard of this topic.
+Write this like you are explaining it to a smart 16-year-old who has never heard of this event. That means: every proper noun (person, organization, treaty, battle) must be briefly explained on its first mention so the reader knows what it is without googling. Prefer a short direct sentence over a long elegant one every time. If you would never say something out loud to a person sitting across from you, do not write it that way.
 
 Specific voice qualities:
-- Open sections with a scene, a striking detail, or a provocative question — not with "The event was..."
-- Use vivid, concrete language. Instead of "there was widespread suffering", write what the suffering looked like, smelled like, felt like.
+- PLAY YOUR ACE CARD FIRST: The single most surprising, counterintuitive, or little-known fact in the entire article belongs in the first two sentences. Do not save the best for the end. Most readers will not reach it.
+- FOCUS ON ONE THREAD: Do not try to cover everything about the event. Find the sharpest angle — one person, one decision, one consequence — and pull that thread through the whole article. Breadth kills impact.
+- MULTI-SENSORY writing: Do not describe only what something looked like. What did it sound like? What did it smell like? What did it feel like physically? Include at least one non-visual sensory detail in the Overview and one in the Eyewitness section.
+- NEVER make a summary mood judgment. Do not write "it was a dark time", "it was a difficult period", "it was chaotic", "it was a bleak time", or any sentence that labels a mood without evidence. Describe the specific thing that is dark, difficult, or chaotic — what someone would see, hear, smell, or feel on the ground — and let the reader draw the conclusion themselves. The writer plants the evidence; the reader forms the judgment.
+- FRESH COMPARISONS ONLY: Do not use stock idioms or pre-made comparisons. "As hot as hell" is dead from overuse. Write a fresh, specific comparison that could only come from this event: "as chaotic as a harbor pilot trying to dock in a force-9 gale" is better than "utterly chaotic."
 - Have a point of view. If a leader made a cowardly decision, say so. If an act was unexpectedly brave, say so. Readers come for analysis, not neutrality.
 - Use transitions that show your thinking: "What makes this stranger still is...", "Here is what the textbooks skip over:", "The irony is remarkable:", "Most people assume X, but the reality was Y."
 - Connect the past to something the reader recognizes. A parallel to a modern situation, a personality trait that feels familiar, a consequence we still live with today.
+- You are a guide traveling alongside the reader, not a sage on a podium dispensing wisdom. Share in the discovery.
 
 Sentence and paragraph rules:
 - Mix sentence lengths deliberately for rhythm. Some sentences can be 30+ words when building a complex, layered point. Use short sentences (under 10 words) for emphasis and dramatic beats. Never write five consecutive sentences of the same length.
+- VARY SENTENCE FORMS, not just lengths. If one sentence is conditional ("If X, then Y"), the next should be a short declarative. Follow that with a cause-and-effect. Never write three consecutive sentences with the same grammatical structure — structural repetition kills energy even when length varies.
 - Target an average of 18-22 words per sentence across each paragraph. This creates readable depth without choppiness.
 - Every paragraph must contain at least one specific, verifiable fact: a real name, an exact year or number, a specific place, or a direct quote. No paragraph may consist entirely of vague generalizations.
+- NO REPETITION ACROSS SECTIONS: Each paragraph must introduce new information. Never restate a point, conclusion, or fact already made in a previous section. Do not name the same person, institution, or concept more than three times in the full article — use pronouns or contextual references after the first mention.
 - Include at least one clear "what would need to be true for this to be wrong" check somewhere in the article when you make a strong claim.
 - Start with the takeaway, then walk backward to the evidence. Avoid "Picture..." and "This was not some minor accident." Write like a human: a little uneven, a little opinionated, and not overly polished.
 - Avoid semicolons. If absolutely necessary, use at most one semicolon in a paragraph.
-- Do not use dashes ("-" or "—") inside sentences. Use commas or rewrite. This means zero mid-sentence dashes across the entire article — not one, not occasionally, zero. Every place you reach for a dash, use a comma instead or split into two sentences.
+- ABSOLUTE BAN ON DASHES: Never use "-" or "—" anywhere in the article body. Not mid-sentence, not at the end of a clause, not anywhere. Zero dashes in the entire text. Use a comma, or split into two sentences.
 - Use active voice. Say who did what.
 - Start each paragraph with a sentence that makes the reader want to keep reading.
 - Use transition phrases between paragraphs: "What followed was even more remarkable.", "But the real damage was done quietly, in the years after.", "To understand why this mattered, you have to go back further."
 - When nuance or complication enters a paragraph, represent it at its strongest — give the best version of the opposing case, not the weakest. Do not signal you are doing this with phrases like "critics argue" or "some would say." Just write it directly as part of the narrative flow: "Nehru rejected the resolution not because he dismissed Muslim concerns, but because he believed division would harden them into interstate conflict." Strong nuance woven naturally is far more persuasive than a weak position you announce and dismiss.
 
 BANNED PHRASES — never write any of these:
-"significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
+"significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of", "it was a dark time", "it was a bleak time", "it was a difficult period", "it was chaos", "it was a complex time", "dark chapter". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
 
 HARD RULE — NO RHETORICAL QUESTIONS: Do not write a single sentence in the form of a question directed at the reader. Not one. This includes: "But why was it significant?", "What were they thinking?", "What happened next?", "So, what happened?", "What does this tell us?", "What if King Faisal had lived?", "What were the consequences?", "Did it work?", or any variation. Every question you are tempted to write must be rewritten as a declarative statement that answers itself. Example: instead of "What were the consequences?" write "The consequences were immediate and lasting." Before submitting your response, scan every sentence — if any sentence ends with a question mark and is addressed to the reader, rewrite it.
 
@@ -2468,18 +2475,18 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "Paragraph 2 (nuance + synthesis; ~100 words): Introduce the strongest complication or contrary reality as part of the narrative — not as a rhetorical question or a 'But why?' setup. State the complication directly as a fact or claim, then synthesize. Do NOT begin with 'But the [topic] wasn't without...' or 'But why was it...'. End with a precise assessment that links back to the opening claim."
   ],
   "eyewitnessOrChronicle": [
-    "Paragraph 1 (vivid account; ~100+ words): Present the most vivid contemporary account with full attribution (name, role, source). Let the account show the texture of the moment — what a named eyewitness described and why their perspective matters.",
-    "Paragraph 2 (contrast + historical appraisal; ~100+ words): Offer a contrasting contemporary perspective or later scholarly appraisal, and explain what the gap between accounts reveals about narrative control, bias, or documentary limits. End with what historians now agree or still dispute."
+    "Paragraph 1 (vivid account + source criticism; ~100+ words): Present the most vivid contemporary account with full attribution (name, role, source). Then interrogate the source: why was this person present, what stake did they have in how the event was remembered, what biases or blind spots might they carry (insider, foreign observer, someone currying favor or evading blame), and what does the account leave out that you would expect it to address?",
+    "Paragraph 2 (contrast + what the record reveals; ~100+ words): Offer a contrasting account or later scholarly appraisal. Explain what the gap between the two perspectives reveals about who controlled the narrative, whose version survived, and why. A modern historian reads these sources differently than their intended audience did. End with what historians now agree on or still dispute, and why the disagreement matters."
   ],
   "eyewitnessQuote": "A direct or closely paraphrased quote from a named contemporary source, under 200 characters. Must be attributed to a real person or document.",
-  "eyewitnessQuoteSource": "Full attribution: name, role, and source document with year — e.g. 'Ivan Turgenev, letter to a friend, March 1861'",
+  "eyewitnessQuoteSource": "Full attribution: name, role, source document, and year, plus one phrase noting the circumstances under which it was written (e.g. 'written under censorship', 'published posthumously', 'testimony given under oath'). Example: 'Ivan Turgenev, letter to a friend, March 1861, written in exile'",
   "aftermathParagraphs": [
     "Paragraph 1 (immediate aftermath; ~120+ words): Describe the first days and weeks after the event with concrete actions, dates, and effects on people and institutions. Focus on specific, attributable changes on the ground.",
     "Paragraph 2 (medium-term + long view synthesis; ~120+ words): Combine medium-term consequences and the long historical assessment: reforms, responses, and how historians judge the legacy. Be specific and, where appropriate, opinionated."
   ],
   "conclusionParagraphs": [
-    "Paragraph 1 (honest assessment; ~100+ words): State plainly what the event changed and what remained. Be precise: name people, systems, or ideas affected. Avoid vague grandiosity.",
-    "Paragraph 2 (modern resonance + closing thought; ~80+ words): Draw a direct modern parallel or leave the reader with a pointed question or observation that lingers. End with a concise, memorable final sentence."
+    "Paragraph 1 (honest assessment; ~100+ words): State plainly what the event changed and what remained unchanged. Name the specific people, institutions, or ideas that were different afterward, and name what surprised historians about the outcome. Avoid vague grandiosity.",
+    "Paragraph 2 (reframing close; ~80+ words): End with a specific fact, contradiction, or detail that reframes everything the reader just learned — the kind of thing that makes someone put the article down and think. Not a call to reflection, not a generic statement about the importance of history. A concrete surprising detail that lands. The final sentence must be short, direct, and self-contained."
   ],
   "analysisGood": [
     { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who deserves credit and why. Describe the specific decision, action, or circumstance that worked, what the alternatives were, and why this outcome was not guaranteed. No generic praise." },
@@ -2493,8 +2500,13 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     { "title": "Optional: a systemic or institutional failure", "detail": "Minimum 60 words. The failure that no single person owned but that shaped the outcome nonetheless." }
   ],
   "editorialNote": "Minimum 80 words. A frank, first-person-plural editorial reflection from the thisDay. team. Start with 'What strikes us about this is...' or 'We keep coming back to one thing:' or a similarly direct opening. Say something that the body of the article could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered and what actually happened. No hedging. No 'it is important to remember'. Say the thing.",
+  "keyTerms": [
+    { "term": "Exact phrase as it appears in the article text", "wikiUrl": "https://en.wikipedia.org/wiki/Exact_Article" },
+    { "term": "Another key person, place, or event named in the article", "wikiUrl": "https://en.wikipedia.org/wiki/Another_Article" }
+  ],
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
   "youtubeSearchQuery": "specific event name year history documentary",
+  "keyTerms": "5 to 8 important proper nouns that appear verbatim in the article body — key people, battles, organizations, treaties, or places. For each, provide the exact phrase as written in the article and a valid Wikipedia URL. These will be used to create hyperlinks in the published text.",
   "contentRationale": "Minimum 40 words. Answer this specific question: what does a reader find in this article that Wikipedia's entry on the same event does not already give them? Name the specific angle, the particular framing, the overlooked detail, or the editorial judgement that makes this article worth reading over the Wikipedia source. Do not be vague. Do not say 'deeper context' or 'engaging narrative'."
 }`;
 
@@ -3125,11 +3137,13 @@ async function humanizeSection(
     "- Return ONLY a JSON array with exactly the same number of strings as the input\n" +
     "- Preserve every fact. Do not invent, merge, or split paragraphs.\n" +
     "- No casual fillers: 'So,', 'Done.', 'It's crazy, really.', 'Nobody expected that.'\n" +
-    "- Do NOT use phrases like 'surprised no one', 'surprising to no one', or similar.";
+    "- Do NOT use phrases like 'surprised no one', 'surprising to no one', or similar.\n" +
+    "- Do NOT write summary mood judgments: 'it was a dark time', 'it was chaos', 'it was a bleak time', 'dark chapter'. Replace them with the concrete observable detail that makes the mood real.\n" +
+    "- If a paragraph describes only what something looked like, add one non-visual sensory detail (sound, smell, physical sensation) where it fits naturally.";
 
   // Explicit punctuation guidance: prefer commas over hyphens inside sentences
   systemPrompt +=
-    "\n\nPUNCTUATION NOTE: Avoid using hyphens (-) inside sentences; prefer commas or restructure the sentence to maintain flow and clarity.";
+    "\n\nPUNCTUATION NOTE: Never use hyphens (-) or em dashes (—) anywhere in the text. Zero dashes. Use a comma or split into two sentences.";
 
   // Append concise essay-writing guidance from Oxford's "Tips from my first year - essay writing".
   // Keep all previous humanization rules intact; add planning/PEE/evidence-first reminders.
@@ -3468,14 +3482,18 @@ async function reviewContentWithSEOExpert(content, env) {
     "Standards for a paragraph you would rewrite:\n" +
     "- It contains no specific names, numbers, dates, or places (pure generalization)\n" +
     "- It uses banned phrases: 'significant event', 'pivotal moment', 'changed history', 'shaped the course of', " +
-    "'left a lasting impact', 'cannot be overstated', 'shows the importance of', 'reminder of'\n" +
+    "'left a lasting impact', 'cannot be overstated', 'shows the importance of', 'reminder of', " +
+    "'it was a dark time', 'it was a bleak time', 'it was a difficult period', 'it was chaos', 'dark chapter'\n" +
+    "- It makes a summary mood judgment ('it was brutal', 'it was chaotic') without a concrete observable detail to back it up\n" +
     "- It is under 80 words and adds nothing a reader could not guess\n" +
+    "- It restates a point, conclusion, or fact already made in a previous section (redundancy dilutes impact)\n" +
     "- It reads like it was written by someone trying to avoid saying anything specific\n\n" +
     "When you rewrite a paragraph:\n" +
     "- Add the specific fact or detail that the vague phrase was avoiding\n" +
-    "- Open with something that makes the reader want to continue — a striking detail, a contradiction, a question\n" +
+    "- Replace mood labels with the observable evidence: not 'it was brutal' but what the brutality looked, sounded, or smelled like\n" +
+    "- Open with something that makes the reader want to continue — a striking detail, a contradiction, a consequence\n" +
     "- Mix sentence lengths: some long and layered (25-35 words), some short and punchy (under 10 words)\n" +
-    "- Say what you actually think. If something was brutal, say brutal. If something was surprising, say surprising.\n" +
+    "- Say what you actually think. If something was brutal, say what the brutality consisted of. If something was surprising, say what surprised.\n" +
     "- Preserve paragraph count exactly. Do not add or remove paragraphs.\n\n" +
     "JOB 3 — HUMAN VOICE (AI DETECTION SCORE MUST BE BELOW 50%):\n" +
     "AI detectors flag text that is too uniform, too balanced, too clean. Every paragraph must pass as human.\n" +
@@ -3500,7 +3518,7 @@ async function reviewContentWithSEOExpert(content, env) {
     "- Output ONLY valid JSON with the fields that need improvement. Omit fields that are already good.";
   // Enforce punctuation guidance at the SEO/voice level as well
   systemPrompt +=
-    "\n\nPUNCTUATION NOTE: Do not use hyphens (-) inside sentences. Use commas, semicolons, or restructure clauses instead to preserve readability and compliance with editorial style.";
+    "\n\nPUNCTUATION NOTE: Never use hyphens (-) or em dashes (—) anywhere in the text. Zero dashes. Use a comma or split into two sentences.";
   // Add Oxford essay-writing notes so the SEO expert also enforces PEE and evidence-first
   // while keeping existing SEO and voice rules.
   systemPrompt +=
@@ -3616,6 +3634,70 @@ async function reviewContentWithSEOExpert(content, env) {
 
   console.log(`SEO expert: reviewed content — ${changed} field(s) improved`);
   return improved;
+}
+
+// ---------------------------------------------------------------------------
+// Link injection — Wikipedia + internal blog post cross-links
+// ---------------------------------------------------------------------------
+
+/**
+ * Injects hyperlinks into rendered article HTML.
+ *
+ * Two link types:
+ *   1. Wikipedia links — from keyTerms provided by the AI ({term, wikiUrl} pairs).
+ *      Only the first occurrence of each term in <p> tags is linked.
+ *   2. Internal blog links — scans existingIndex for post titles whose event name
+ *      appears verbatim in the new article. Links first occurrence to /blog/archive/SLUG/.
+ *
+ * Never links inside an existing <a>...</a> block.
+ * Never links the article's own event title.
+ */
+function injectLinks(html, keyTerms = [], existingIndex = [], ownEventTitle = "") {
+  // Build list of {term, url, isExternal} sorted longest-first to avoid
+  // partial matches (e.g. "Battle of Waterloo" before "Waterloo")
+  const links = [];
+
+  for (const kt of keyTerms) {
+    if (!kt.term || !kt.wikiUrl || kt.term.length < 3) continue;
+    if (ownEventTitle && kt.term.toLowerCase().includes(ownEventTitle.toLowerCase().slice(0, 15))) continue;
+    links.push({ term: kt.term, url: kt.wikiUrl, isExternal: true });
+  }
+
+  for (const post of existingIndex) {
+    const eventName = post.title ? post.title.split(" — ")[0].trim() : "";
+    if (!eventName || eventName.length < 5) continue;
+    if (ownEventTitle && eventName.toLowerCase() === ownEventTitle.toLowerCase()) continue;
+    links.push({ term: eventName, url: `/blog/archive/${post.slug}/`, isExternal: false });
+  }
+
+  // Longest term first to avoid partial-match collisions
+  links.sort((a, b) => b.term.length - a.term.length);
+
+  // Track which terms have already been linked (first-occurrence only)
+  const linked = new Set();
+
+  // Only process content inside <p>...</p> blocks, skipping anything already in <a>
+  html = html.replace(/(<p>)([\s\S]*?)(<\/p>)/g, (_match, open, body, close) => {
+    for (const { term, url, isExternal } of links) {
+      if (linked.has(term)) continue;
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`(?<!<[^>]*)\\b(${escaped})\\b`, "i");
+      if (!re.test(body)) continue;
+      // Skip if already inside an anchor in this paragraph
+      if (/<a\b/.test(body)) {
+        const inAnchor = new RegExp(`<a\\b[^>]*>[^<]*${escaped}[^<]*<\\/a>`, "i");
+        if (inAnchor.test(body)) continue;
+      }
+      const attrs = isExternal
+        ? `href="${url}" target="_blank" rel="noopener noreferrer"`
+        : `href="${url}"`;
+      body = body.replace(re, `<a ${attrs}>$1</a>`);
+      linked.add(term);
+    }
+    return open + body + close;
+  });
+
+  return html;
 }
 
 // ---------------------------------------------------------------------------

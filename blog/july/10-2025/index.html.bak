@@ -450,7 +450,7 @@ crossorigin="anonymous">
           </ol>
         </nav>
 
-        <article class="p-4 rounded border shadow-sm"
+        <article class="p-4 rounded border"
                  style="background-color: var(--card-bg); color: var(--text-color)">
 
           <header class="mb-4 text-center">

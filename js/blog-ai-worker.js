@@ -343,7 +343,8 @@ export default {
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
-      const backfillAll = new URL(request.url).searchParams.get("all") === "true";
+      const backfillAll =
+        new URL(request.url).searchParams.get("all") === "true";
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
       const index = indexRaw ? JSON.parse(indexRaw) : [];
 
@@ -363,7 +364,11 @@ export default {
           const classified = await classifyPillars(env, fakeContent);
           if (classified && classified.length > 0) {
             e.pillars = classified;
-            results.push({ slug: e.slug, pillars: classified, status: "classified" });
+            results.push({
+              slug: e.slug,
+              pillars: classified,
+              status: "classified",
+            });
           } else {
             results.push({ slug: e.slug, status: "skipped" });
           }
@@ -658,7 +663,10 @@ export default {
         // "Aftermath of EventTitle", "Legacy of EventTitle". Strip the suffix so headings are clean and short.
         patchedHtml = patchedHtml
           .replace(/(<h2[^>]*>)Overview:\s[^<]+(<\/h2>)/g, "$1Overview$2")
-          .replace(/(<h2[^>]*>)Eyewitness Accounts of\s[^<]+(<\/h2>)/g, "$1Eyewitness Accounts$2")
+          .replace(
+            /(<h2[^>]*>)Eyewitness Accounts of\s[^<]+(<\/h2>)/g,
+            "$1Eyewitness Accounts$2",
+          )
           .replace(/(<h2[^>]*>)Aftermath of\s[^<]+(<\/h2>)/g, "$1Aftermath$2")
           .replace(/(<h2[^>]*>)Legacy of\s[^<]+(<\/h2>)/g, "$1Legacy$2");
         // Patch image caption — replace any AI-generated caption with correct Wikimedia attribution
@@ -691,7 +699,10 @@ export default {
             `Images via <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>. ` +
             `Found an error? <a href="/contact/">Let us know</a>.` +
             `</span></div>`;
-          patchedHtml = patchedHtml.replace("</article>", disclosureBlock + "\n</article>");
+          patchedHtml = patchedHtml.replace(
+            "</article>",
+            disclosureBlock + "\n</article>",
+          );
         }
         // Patch old quiz popup to flex-column sticky-header layout
         if (
@@ -1791,7 +1802,9 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
         .sort((a, b) => a[1] - b[1])
         .slice(0, 3)
         .map(([p]) => p);
-      console.log(`Blog AI: depth rotation — preferred pillars: [${preferredPillars.join(", ")}]`);
+      console.log(
+        `Blog AI: depth rotation — preferred pillars: [${preferredPillars.join(", ")}]`,
+      );
     }
   }
 
@@ -1909,7 +1922,9 @@ async function generateAndStore(env, ctx, forcedEvent = null) {
     imageUrl: content.imageUrl,
     publishedAt: now.toISOString(),
     ...(pillars && pillars.length > 0 ? { pillars } : {}),
-    ...(content.contentRationale ? { contentRationale: content.contentRationale } : {}),
+    ...(content.contentRationale
+      ? { contentRationale: content.contentRationale }
+      : {}),
   };
   deduped.unshift(entry);
   const finalIndex = deduped;
@@ -2575,7 +2590,9 @@ async function fetchContextHook(env, date, forcedEvent = null) {
     const monthName = MONTH_NAMES[date.getMonth()];
     const day = date.getDate();
     const year = date.getFullYear();
-    const eventHint = forcedEvent ? ` The article will cover: "${forcedEvent}".` : "";
+    const eventHint = forcedEvent
+      ? ` The article will cover: "${forcedEvent}".`
+      : "";
 
     const prompt =
       `Today is ${monthName} ${day}, ${year}.${eventHint}\n` +
@@ -2589,7 +2606,11 @@ async function fetchContextHook(env, date, forcedEvent = null) {
     const result = await callAI(
       env,
       [
-        { role: "system", content: "You provide concise, specific current-affairs context for historical articles. Respond with one sentence only." },
+        {
+          role: "system",
+          content:
+            "You provide concise, specific current-affairs context for historical articles. Respond with one sentence only.",
+        },
         { role: "user", content: prompt },
       ],
       { maxTokens: 120, timeoutMs: 15_000 },
@@ -2654,7 +2675,11 @@ async function generateEditorialNote(env, content, date) {
     const result = await callAI(
       env,
       [
-        { role: "system", content: "You are a sharp editorial voice. Write the note only — no preamble, no labels." },
+        {
+          role: "system",
+          content:
+            "You are a sharp editorial voice. Write the note only — no preamble, no labels.",
+        },
         { role: "user", content: prompt },
       ],
       { maxTokens: 300, timeoutMs: 20_000 },
@@ -2662,7 +2687,9 @@ async function generateEditorialNote(env, content, date) {
 
     const note = result?.trim().replace(/^["']|["']$/g, "");
     if (!note || note.length < 80) {
-      console.warn("generateEditorialNote: response too short, keeping original");
+      console.warn(
+        "generateEditorialNote: response too short, keeping original",
+      );
       return;
     }
     content.editorialNote = note;
@@ -2744,11 +2771,15 @@ async function factCheckContent(env, content) {
       };
 
       if (cor.historicalDate) content.historicalDate = cor.historicalDate;
-      if (typeof cor.historicalYear === "number") content.historicalYear = cor.historicalYear;
-      if (cor.historicalDateISO) content.historicalDateISO = cor.historicalDateISO;
+      if (typeof cor.historicalYear === "number")
+        content.historicalYear = cor.historicalYear;
+      if (cor.historicalDateISO)
+        content.historicalDateISO = cor.historicalDateISO;
       if (cor.location) content.location = cor.location;
 
-      console.log(`factCheck: corrections applied — before: ${JSON.stringify(before)} after: ${JSON.stringify(cor)}`);
+      console.log(
+        `factCheck: corrections applied — before: ${JSON.stringify(before)} after: ${JSON.stringify(cor)}`,
+      );
     } else {
       console.log("factCheck: passed");
     }
@@ -2789,7 +2820,10 @@ async function classifyPillars(env, content) {
     const raw = await callAI(
       env,
       [
-        { role: "system", content: "You are a content classifier. Reply with JSON only." },
+        {
+          role: "system",
+          content: "You are a content classifier. Reply with JSON only.",
+        },
         { role: "user", content: prompt },
       ],
       { maxTokens: 128, timeoutMs: 10_000 },
@@ -2802,9 +2836,13 @@ async function classifyPillars(env, content) {
     const pillars = result?.pillars;
     if (!Array.isArray(pillars) || pillars.length === 0) return null;
 
-    const valid = pillars.filter((p) => typeof p === "string" && BLOG_PILLARS.includes(p));
+    const valid = pillars.filter(
+      (p) => typeof p === "string" && BLOG_PILLARS.includes(p),
+    );
     if (valid.length === 0) {
-      console.warn(`classifyPillars: no valid pillars in response ${JSON.stringify(pillars)}`);
+      console.warn(
+        `classifyPillars: no valid pillars in response ${JSON.stringify(pillars)}`,
+      );
       return null;
     }
     console.log(`classifyPillars: assigned [${valid.join(", ")}]`);
@@ -2851,7 +2889,8 @@ async function validateEyewitnessQuote(env, content) {
       [
         {
           role: "system",
-          content: "You are a historical source verifier. Reply with JSON only, no markdown.",
+          content:
+            "You are a historical source verifier. Reply with JSON only, no markdown.",
         },
         { role: "user", content: prompt },
       ],
@@ -2860,7 +2899,9 @@ async function validateEyewitnessQuote(env, content) {
 
     const match = raw?.match(/\{[\s\S]*\}/);
     if (!match) {
-      console.warn("eyewitnessQuoteValidation: no JSON returned — quote cleared as precaution");
+      console.warn(
+        "eyewitnessQuoteValidation: no JSON returned — quote cleared as precaution",
+      );
       content.eyewitnessQuote = null;
       content.eyewitnessQuoteSource = null;
       return;
@@ -2868,15 +2909,21 @@ async function validateEyewitnessQuote(env, content) {
 
     const result = JSON.parse(match[0]);
     if (result.verified === true) {
-      console.log(`eyewitnessQuoteValidation: verified — ${result.source || "source confirmed"}`);
+      console.log(
+        `eyewitnessQuoteValidation: verified — ${result.source || "source confirmed"}`,
+      );
     } else {
-      console.warn(`eyewitnessQuoteValidation: unverified — ${result.reason || "unknown reason"} — quote cleared`);
+      console.warn(
+        `eyewitnessQuoteValidation: unverified — ${result.reason || "unknown reason"} — quote cleared`,
+      );
       content.eyewitnessQuote = null;
       content.eyewitnessQuoteSource = null;
     }
   } catch (err) {
     // On error, clear the quote as a safety measure rather than publish unverified
-    console.warn(`eyewitnessQuoteValidation: skipped (error) — ${err.message} — quote cleared`);
+    console.warn(
+      `eyewitnessQuoteValidation: skipped (error) — ${err.message} — quote cleared`,
+    );
     content.eyewitnessQuote = null;
     content.eyewitnessQuoteSource = null;
   }
@@ -3212,15 +3259,33 @@ async function patchBodyParagraphs(html, env) {
   // Each section tries the new short h2 first, then the old "Verb of EventTitle" form
   // so humanization still works on posts stored before the h2 change.
   const sections = [
-    { name: "overviewParagraphs",    h2: "Overview",            h2Legacy: `Overview: ${eventTitle}` },
-    { name: "eyewitnessOrChronicle", h2: "Eyewitness Accounts", h2Legacy: `Eyewitness Accounts of ${eventTitle}` },
-    { name: "aftermathParagraphs",   h2: "Aftermath",           h2Legacy: `Aftermath of ${eventTitle}` },
-    { name: "conclusionParagraphs",  h2: "Legacy",              h2Legacy: `Legacy of ${eventTitle}` },
+    {
+      name: "overviewParagraphs",
+      h2: "Overview",
+      h2Legacy: `Overview: ${eventTitle}`,
+    },
+    {
+      name: "eyewitnessOrChronicle",
+      h2: "Eyewitness Accounts",
+      h2Legacy: `Eyewitness Accounts of ${eventTitle}`,
+    },
+    {
+      name: "aftermathParagraphs",
+      h2: "Aftermath",
+      h2Legacy: `Aftermath of ${eventTitle}`,
+    },
+    {
+      name: "conclusionParagraphs",
+      h2: "Legacy",
+      h2Legacy: `Legacy of ${eventTitle}`,
+    },
   ].map((s) => {
     const paras = normalizeParas(extractSectionParas(s.h2));
     return {
       ...s,
-      paras: paras.length ? paras : normalizeParas(extractSectionParas(s.h2Legacy)),
+      paras: paras.length
+        ? paras
+        : normalizeParas(extractSectionParas(s.h2Legacy)),
     };
   });
 
@@ -3684,10 +3749,23 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = []) {
   // Pillar level included only when currentPillars data is available.
   // Pillar hub URLs (/blog/topic/…/) will be live once P3b (hub pages) lands.
   const pillarSlug = (str) =>
-    str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+    str
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
   const breadcrumbItems = [
-    { "@type": "ListItem", position: 1, name: "thisDay.", item: "https://thisday.info/" },
-    { "@type": "ListItem", position: 2, name: "Historical Blog", item: "https://thisday.info/blog/" },
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "thisDay.",
+      item: "https://thisday.info/",
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: "Historical Blog",
+      item: "https://thisday.info/blog/",
+    },
   ];
   if (currentPillars.length > 0) {
     breadcrumbItems.push({
@@ -3704,7 +3782,11 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = []) {
     item: canonicalUrl,
   });
   const breadcrumbJsonLd = JSON.stringify(
-    { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: breadcrumbItems },
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: breadcrumbItems,
+    },
     null,
     2,
   );
@@ -3891,7 +3973,7 @@ ${JSON.stringify({
           </ol>
         </nav>
 
-        <article class="p-4 rounded border shadow-sm" style="background-color: var(--bg); color: var(--text)">
+        <article class="p-4 rounded border" style="background-color: var(--bg); color: var(--text)">
 
           <header class="mb-4 text-center">
             <h1 class="mb-2 fw-bold">${esc(c.title)}</h1>
@@ -4074,16 +4156,24 @@ ${analysisBadItems}
             // Sort by overlap count descending, fill remainder from most recent.
             let related;
             if (currentPillars.length > 0) {
-              const withOverlap = others.map((p) => ({
-                p,
-                overlap: Array.isArray(p.pillars)
-                  ? p.pillars.filter((pl) => currentPillars.includes(pl)).length
-                  : 0,
-              })).sort((a, b) => b.overlap - a.overlap);
-              const matching = withOverlap.filter((x) => x.overlap > 0).map((x) => x.p).slice(0, 3);
+              const withOverlap = others
+                .map((p) => ({
+                  p,
+                  overlap: Array.isArray(p.pillars)
+                    ? p.pillars.filter((pl) => currentPillars.includes(pl))
+                        .length
+                    : 0,
+                }))
+                .sort((a, b) => b.overlap - a.overlap);
+              const matching = withOverlap
+                .filter((x) => x.overlap > 0)
+                .map((x) => x.p)
+                .slice(0, 3);
               if (matching.length < 3) {
                 const seen = new Set(matching.map((p) => p.slug));
-                const rest = others.filter((p) => !seen.has(p.slug)).slice(0, 3 - matching.length);
+                const rest = others
+                  .filter((p) => !seen.has(p.slug))
+                  .slice(0, 3 - matching.length);
                 related = [...matching, ...rest];
               } else {
                 related = matching;
@@ -4674,24 +4764,41 @@ async function serveListing(env) {
 // ---------------------------------------------------------------------------
 
 const PILLAR_DESCRIPTIONS = {
-  "War & Conflict": "Battles, wars, sieges, and the military events that redrew maps and reshaped civilisations.",
-  "Politics & Government": "Elections, treaties, coups, revolutions, and the political decisions that defined nations.",
-  "Science & Technology": "Discoveries, inventions, missions, and the breakthroughs that changed how we understand the world.",
-  "Arts & Culture": "Literature, music, art, film, and the cultural moments that left a lasting mark on society.",
-  "Disasters & Accidents": "Natural disasters, industrial accidents, and catastrophes and the human stories behind them.",
-  "Social & Human Rights": "Civil rights movements, protests, landmark legislation, and milestones in the fight for equality.",
-  "Economy & Business": "Market crashes, trade revolutions, corporate milestones, and the economic forces that shaped modern life.",
-  "Health & Medicine": "Epidemics, medical breakthroughs, public health crises, and the science that saved lives.",
-  "Exploration & Discovery": "Expeditions, voyages, space missions, and the adventures that expanded the boundaries of the known world.",
-  "Famous Persons": "Leaders, artists, scientists, and figures whose lives defined an era.",
+  "War & Conflict":
+    "Battles, wars, sieges, and the military events that redrew maps and reshaped civilisations.",
+  "Politics & Government":
+    "Elections, treaties, coups, revolutions, and the political decisions that defined nations.",
+  "Science & Technology":
+    "Discoveries, inventions, missions, and the breakthroughs that changed how we understand the world.",
+  "Arts & Culture":
+    "Literature, music, art, film, and the cultural moments that left a lasting mark on society.",
+  "Disasters & Accidents":
+    "Natural disasters, industrial accidents, and catastrophes and the human stories behind them.",
+  "Social & Human Rights":
+    "Civil rights movements, protests, landmark legislation, and milestones in the fight for equality.",
+  "Economy & Business":
+    "Market crashes, trade revolutions, corporate milestones, and the economic forces that shaped modern life.",
+  "Health & Medicine":
+    "Epidemics, medical breakthroughs, public health crises, and the science that saved lives.",
+  "Exploration & Discovery":
+    "Expeditions, voyages, space missions, and the adventures that expanded the boundaries of the known world.",
+  "Famous Persons":
+    "Leaders, artists, scientists, and figures whose lives defined an era.",
   "Born on This Day": "Notable people born on this date throughout history.",
-  "Died on This Day": "Notable people who died on this date throughout history.",
+  "Died on This Day":
+    "Notable people who died on this date throughout history.",
 };
 
 function toTitlePillarSlug(slugStr) {
-  return BLOG_PILLARS.find(
-    (p) => p.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") === slugStr,
-  ) || null;
+  return (
+    BLOG_PILLARS.find(
+      (p) =>
+        p
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)/g, "") === slugStr,
+    ) || null
+  );
 }
 
 async function servePillarHub(env, slugStr) {
@@ -4715,14 +4822,17 @@ async function servePillarHub(env, slugStr) {
 
 function buildPillarHubHTML(pillarName, slugStr, posts) {
   const canonicalUrl = `https://thisday.info/blog/topic/${slugStr}/`;
-  const description = PILLAR_DESCRIPTIONS[pillarName] || `Articles about ${pillarName} on thisDay.`;
+  const description =
+    PILLAR_DESCRIPTIONS[pillarName] ||
+    `Articles about ${pillarName} on thisDay.`;
   const pageTitle = `${pillarName} — Historical Articles | thisDay.`;
 
   const postItems = posts.length
-    ? posts.map((entry) => {
-        const date = new Date(entry.publishedAt);
-        const dateStr = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
-        return `
+    ? posts
+        .map((entry) => {
+          const date = new Date(entry.publishedAt);
+          const dateStr = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+          return `
         <a href="/blog/${esc(entry.slug)}/" class="blog-post-link">
           <i class="bi bi-clock-history post-icon"></i>
           <div>
@@ -4730,46 +4840,78 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
             <small style="color:var(--text-muted,#5c7a65);opacity:.7">${esc(dateStr)}</small>
           </div>
         </a>`;
-      }).join("\n")
+        })
+        .join("\n")
     : '<p class="text-muted">No articles in this category yet — check back soon.</p>';
 
-  const otherPillars = BLOG_PILLARS
-    .filter((p) => p !== pillarName)
+  const otherPillars = BLOG_PILLARS.filter((p) => p !== pillarName)
     .map((p) => {
-      const s = p.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+      const s = p
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
       return `<a href="/blog/topic/${s}/" class="badge text-decoration-none me-1 mb-1" style="background:var(--btn-bg);color:#fff;font-weight:500;font-size:.78rem;padding:.35em .7em;border-radius:20px">${esc(p)}</a>`;
-    }).join("");
+    })
+    .join("");
 
-  const jsonLd = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "CollectionPage",
-    name: pageTitle,
-    url: canonicalUrl,
-    description,
-    publisher: {
-      "@type": "Organization",
-      name: "thisDay.info",
-      url: "https://thisday.info/",
-      logo: { "@type": "ImageObject", url: "https://thisday.info/images/logo.png" },
+  const jsonLd = JSON.stringify(
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      name: pageTitle,
+      url: canonicalUrl,
+      description,
+      publisher: {
+        "@type": "Organization",
+        name: "thisDay.info",
+        url: "https://thisday.info/",
+        logo: {
+          "@type": "ImageObject",
+          url: "https://thisday.info/images/logo.png",
+        },
+      },
+      hasPart: posts.slice(0, 20).map((p) => ({
+        "@type": "NewsArticle",
+        name: p.title,
+        url: `https://thisday.info/blog/${p.slug}/`,
+        datePublished: p.publishedAt
+          ? new Date(p.publishedAt).toISOString().split("T")[0]
+          : undefined,
+        description: p.description,
+      })),
     },
-    hasPart: posts.slice(0, 20).map((p) => ({
-      "@type": "NewsArticle",
-      name: p.title,
-      url: `https://thisday.info/blog/${p.slug}/`,
-      datePublished: p.publishedAt ? new Date(p.publishedAt).toISOString().split("T")[0] : undefined,
-      description: p.description,
-    })),
-  }, null, 2);
+    null,
+    2,
+  );
 
-  const breadcrumbJsonLd = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      { "@type": "ListItem", position: 1, name: "thisDay.", item: "https://thisday.info/" },
-      { "@type": "ListItem", position: 2, name: "Historical Blog", item: "https://thisday.info/blog/" },
-      { "@type": "ListItem", position: 3, name: pillarName, item: canonicalUrl },
-    ],
-  }, null, 2);
+  const breadcrumbJsonLd = JSON.stringify(
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        {
+          "@type": "ListItem",
+          position: 1,
+          name: "thisDay.",
+          item: "https://thisday.info/",
+        },
+        {
+          "@type": "ListItem",
+          position: 2,
+          name: "Historical Blog",
+          item: "https://thisday.info/blog/",
+        },
+        {
+          "@type": "ListItem",
+          position: 3,
+          name: pillarName,
+          item: canonicalUrl,
+        },
+      ],
+    },
+    null,
+    2,
+  );
 
   return `<!DOCTYPE html>
 <html lang="en">

@@ -427,7 +427,7 @@
               card.style.cssText = "text-decoration:none;color:inherit;";
               card.innerHTML =
                 '<div class="video-card-thumb">' +
-                '<img src="' + escHtml(v.thumbnail) + '" alt="' + escHtml(shortTitle) + '" loading="lazy" onerror="this.style.display=\'none\'" />' +
+                '<img src="' + escHtml(v.thumbnail) + '" alt="' + escHtml(shortTitle) + '" loading="lazy" onerror="if(this.src.indexOf(\'hqdefault\')>-1){this.src=this.src.replace(\'hqdefault\',\'mqdefault\');}else{this.style.display=\'none\';}" />' +
                 '<div class="video-card-play"><i class="bi bi-play-circle-fill"></i></div>' +
                 '</div>' +
                 '<div class="blog-card-body">' +

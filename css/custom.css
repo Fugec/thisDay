@@ -707,6 +707,7 @@ img {
 /* Featured Videos Section */
 .video-section .blog-grid {
   grid-template-columns: repeat(3, 1fr) 280px;
+  height: 480px;
 }
 .video-card {
   display: flex;
@@ -715,8 +716,8 @@ img {
 .video-card-thumb {
   position: relative;
   overflow: hidden;
-  background: #000;
-  aspect-ratio: 9 / 16;
+  background: #111;
+  flex: 1;
   width: 100%;
 }
 .video-card-thumb img {
@@ -760,6 +761,10 @@ img {
     border-right: 1px solid var(--border);
     border-bottom: none;
     scroll-snap-align: start;
+  }
+  .video-card-thumb {
+    height: auto;
+    aspect-ratio: 9 / 16;
   }
   .video-section .video-card:last-child {
     border-right: 1px solid var(--border);

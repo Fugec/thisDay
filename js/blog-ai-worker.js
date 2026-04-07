@@ -415,7 +415,7 @@ export default {
             youtubeId: v.youtubeId,
             title: post.title ?? slug,
             uploadedAt: v.uploadedAt,
-            thumbnail: `https://img.youtube.com/vi/${v.youtubeId}/maxresdefault.jpg`,
+            thumbnail: `https://img.youtube.com/vi/${v.youtubeId}/hqdefault.jpg`,
           };
         });
       return new Response(JSON.stringify(videos), {
@@ -4518,7 +4518,7 @@ ${JSON.stringify({
             </p>
           </header>
 
-          <figure class="text-center mb-4">
+          ${c.imageUrl ? `<figure class="text-center mb-4">
             <img
               src="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800&q=85"
               srcset="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=400 400w, /image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800 800w"
@@ -4527,12 +4527,12 @@ ${JSON.stringify({
               alt="${esc(c.imageAlt)}"
               style="max-height: 400px; object-fit: cover; width: 100%"
               loading="eager"
-              onerror="this.onerror=null;this.removeAttribute('srcset');"
+              onerror="this.onerror=null;this.removeAttribute('srcset');this.src='${esc(c.imageUrl)}';"
             />
             <figcaption class="article-meta mt-2">
               <small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small>
             </figcaption>
-          </figure>
+          </figure>` : ""}
 
           <!-- Quick Facts -->
           ${

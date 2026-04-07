@@ -66,7 +66,57 @@ export function siteNav() {
       </div>
     </div>
   </div>
-</nav>`;
+</nav>
+<div class="marquee-bar" id="marqueeBar" style="display:none">
+  <div class="marquee-track" id="marqueeTrack"></div>
+</div>`;
+}
+
+/**
+ * Self-contained script that populates the marquee bar using today's Wikipedia events.
+ * Identical behaviour to populateMarquee() in script.js — safe to include on any page.
+ */
+export function marqueeScript() {
+  return `<script>
+(function(){
+  var bar=document.getElementById('marqueeBar');
+  var track=document.getElementById('marqueeTrack');
+  if(!bar||!track)return;
+  var now=new Date();
+  var mm=String(now.getMonth()+1).padStart(2,'0');
+  var dd=String(now.getDate()).padStart(2,'0');
+  fetch('https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/'+mm+'/'+dd,{headers:{'User-Agent':'thisday.info/1.0'}})
+    .then(function(r){return r.ok?r.json():null;})
+    .then(function(d){
+      var items=(d&&d.events)||[];
+      if(!items.length)return;
+      items.slice(0,12).forEach(function(e){
+        var el=document.createElement('div');
+        el.className='marquee-item';
+        var yr=document.createElement('span');
+        yr.textContent=e.year||'';
+        el.appendChild(yr);
+        var pages=e.pages&&e.pages[0];
+        var url=pages&&pages.content_urls&&pages.content_urls.desktop&&pages.content_urls.desktop.page;
+        var txt=' '+(e.text||'');
+        if(url){
+          var a=document.createElement('a');
+          a.href=url;a.target='_blank';a.rel='noopener noreferrer';
+          a.style.cssText='color:inherit;text-decoration:none;font-weight:600';
+          a.textContent=txt;
+          el.appendChild(a);
+        }else{
+          var s=document.createElement('span');
+          s.style.fontWeight='600';s.textContent=txt;
+          el.appendChild(s);
+        }
+        track.appendChild(el);
+      });
+      track.innerHTML+=track.innerHTML;
+      bar.style.display='block';
+    }).catch(function(){});
+})();
+</script>`;
 }
 
 /** Nav CSS — extracted from css/custom.css. Paste into the page <style> block. */

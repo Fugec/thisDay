@@ -392,6 +392,58 @@
       })();
     </script>
 
+    <!-- Featured Videos Section -->
+    <section class="blog-section video-section">
+      <div class="blog-grid video-grid" id="videoGrid">
+        <!-- Populated by JavaScript -->
+      </div>
+      <div class="blog-cta-col">
+        <p>Featured Videos</p>
+        <h3>Watch history come alive in 60 seconds</h3>
+        <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" class="btn">
+          See All Videos <i class="bi bi-youtube"></i>
+        </a>
+      </div>
+    </section>
+
+    <script>
+      (function () {
+        fetch("/blog/videos.json")
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (videos) {
+            var grid = document.getElementById("videoGrid");
+            if (!grid || !videos.length) return;
+            grid.innerHTML = "";
+            var escHtml = function(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); };
+            videos.forEach(function (v) {
+              var title = v.title || "";
+              var shortTitle = title.length > 55 ? title.slice(0, 52) + "…" : title;
+              var ytUrl = "https://www.youtube.com/shorts/" + v.youtubeId;
+              var card = document.createElement("a");
+              card.className = "blog-card video-card";
+              card.href = ytUrl;
+              card.target = "_blank";
+              card.rel = "noopener noreferrer";
+              card.style.cssText = "text-decoration:none;color:inherit;";
+              card.innerHTML =
+                '<div class="video-card-thumb">' +
+                '<img src="' + escHtml(v.thumbnail) + '" alt="' + escHtml(shortTitle) + '" loading="lazy" onerror="this.style.display=\'none\'" />' +
+                '<div class="video-card-play"><i class="bi bi-play-circle-fill"></i></div>' +
+                '</div>' +
+                '<div class="blog-card-body">' +
+                '<div class="blog-card-date">YouTube Shorts</div>' +
+                '<h3>' + escHtml(shortTitle) + '</h3>' +
+                '<span class="btn" style="align-self:flex-start;margin-top:auto">Watch <i class="bi bi-arrow-right"></i></span>' +
+                '</div>';
+              grid.appendChild(card);
+            });
+            var section = grid.closest('.blog-section');
+            if (section) section.scrollLeft = 0;
+          })
+          .catch(function () {});
+      })();
+    </script>
+
     <!-- Calendar -->
     <main class="calendar-section">
       <div class="month-nav">

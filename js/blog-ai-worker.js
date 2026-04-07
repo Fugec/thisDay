@@ -395,6 +395,38 @@ export default {
       return servePillarHub(env, topicMatch[1]);
     }
 
+    // JSON feed of latest public YouTube videos, merged with blog index for titles/thumbnails
+    if (path === "/blog/videos.json") {
+      const [indexRaw, ytRaw] = await Promise.all([
+        env.BLOG_AI_KV.get(KV_INDEX_KEY),
+        env.BLOG_AI_KV.get("youtube:uploaded"),
+      ]);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const yt = ytRaw ? JSON.parse(ytRaw) : {};
+      const indexBySlug = Object.fromEntries(index.map((p) => [p.slug, p]));
+      const videos = Object.entries(yt)
+        .filter(([, v]) => v.youtubeId && v.privacy !== "private")
+        .sort(([, a], [, b]) => new Date(b.uploadedAt) - new Date(a.uploadedAt))
+        .slice(0, 6)
+        .map(([slug, v]) => {
+          const post = indexBySlug[slug] ?? {};
+          return {
+            slug,
+            youtubeId: v.youtubeId,
+            title: post.title ?? slug,
+            uploadedAt: v.uploadedAt,
+            thumbnail: `https://img.youtube.com/vi/${v.youtubeId}/maxresdefault.jpg`,
+          };
+        });
+      return new Response(JSON.stringify(videos), {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=300",
+        },
+      });
+    }
+
     // JSON index used by the main blog page to dynamically render AI posts
     if (path === "/blog/archive.json") {
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
@@ -2068,9 +2100,18 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
     fetchBookCover(content.bookSearchQuery).catch(() => null),
   ]);
 
+  // Fallback: if no person portraits found (event/battle/campaign articles),
+  // pull up to 2 real images from the article's own Wikipedia page and inject
+  // them at section boundaries (Aftermath, Legacy, Overview, Eyewitness).
+  let eventImages = [];
+  if (personImages.length === 0 && content.wikiUrl) {
+    eventImages = await fetchEventImages(content.wikiUrl, content.imageUrl).catch(() => []);
+  }
+
   const rawHtml = buildPostHTML(content, now, slug, existingIndex, pillars, bookCoverUrl);
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
   html = injectPersonImages(html, personImages);
+  if (eventImages.length > 0) html = injectEventImages(html, eventImages);
 
   // Persist the rendered page (no expiry — permanent archive)
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
@@ -3868,6 +3909,125 @@ async function fetchBookCover(bookSearchQuery) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetches up to `limit` images from the article's own Wikipedia page.
+ * Used as a fallback when no person portraits are available (event/battle articles).
+ * Skips the cover image, icons, maps, flags, and tiny images.
+ *
+ * @param {string} wikiUrl   Article Wikipedia URL
+ * @param {string} coverUrl  Already-used cover image URL (excluded to avoid duplicates)
+ * @param {number} limit
+ * @returns {Promise<{name:string,imageUrl:string,wikiUrl:string}[]>}
+ */
+async function fetchEventImages(wikiUrl, coverUrl, limit = 2) {
+  if (!wikiUrl) return [];
+  const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
+  const BAD = /\b(icon|logo|flag|map|seal|stub|arrow|bullet|blank|placeholder)\b/i;
+  try {
+    const title = decodeURIComponent((wikiUrl.split("/wiki/")[1] ?? "").split("#")[0]);
+    if (!title) return [];
+
+    const listRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=images&imlimit=30&format=json`,
+      { headers: ua },
+    );
+    if (!listRes.ok) return [];
+    const listData = await listRes.json();
+    const page = Object.values(listData?.query?.pages ?? {})[0];
+    const candidates = (page?.images ?? [])
+      .map((i) => i.title)
+      .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !BAD.test(t));
+    if (!candidates.length) return [];
+
+    const piped = candidates.slice(0, 15).join("|");
+    const infoRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(piped)}&prop=imageinfo&iiprop=url|size&format=json`,
+      { headers: ua },
+    );
+    if (!infoRes.ok) return [];
+    const infoData = await infoRes.json();
+
+    const coverFile = coverUrl ? coverUrl.split("/").pop().split("?")[0].toLowerCase() : "";
+    return Object.values(infoData?.query?.pages ?? {})
+      .map((p) => ({
+        url: p?.imageinfo?.[0]?.url ?? null,
+        px: (p?.imageinfo?.[0]?.width ?? 0) * (p?.imageinfo?.[0]?.height ?? 0),
+        w: p?.imageinfo?.[0]?.width ?? 0,
+        h: p?.imageinfo?.[0]?.height ?? 0,
+      }))
+      .filter(({ url, w, h }) => {
+        if (!url || w < 300 || h < 200) return false;
+        return url.split("/").pop().split("?")[0].toLowerCase() !== coverFile;
+      })
+      .sort((a, b) => b.px - a.px)
+      .slice(0, limit)
+      .map(({ url }) => ({ name: "via Wikimedia", imageUrl: url, wikiUrl }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Injects event images (non-portrait) at section boundaries in the article HTML.
+ * Targets Aftermath then Eyewitness/Chronicle sections; falls back to fixed
+ * paragraph offsets. Uses alternating left/right floats. Min 1500-char gap enforced.
+ *
+ * @param {string} html
+ * @param {{name:string,imageUrl:string,wikiUrl:string}[]} eventImages
+ * @returns {string}
+ */
+function injectEventImages(html, eventImages) {
+  if (!eventImages || eventImages.length === 0) return html;
+
+  const figHtml = ({ imageUrl, name, wikiUrl }, float) => {
+    const margin = float === "right"
+      ? "0 0 1.2rem 1.5rem"
+      : "0 1.5rem 1.2rem 0";
+    return `<figure style="float:${float};margin:${margin};max-width:min(200px,40%);clear:${float};">` +
+      `<a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">` +
+      `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=200&q=80"` +
+      ` alt="${esc(name)}" loading="lazy" class="img-fluid rounded"` +
+      ` style="display:block;width:100%;height:auto;">` +
+      `</a>` +
+      `<figcaption class="article-meta mt-1" style="font-size:0.72rem;text-align:center;">` +
+      `${esc(name)}<br><a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">via Wikimedia</a>` +
+      `</figcaption></figure>`;
+  };
+
+  // Section anchors tried in priority order — one image per section, alternating float
+  const SECTION_ANCHORS = [
+    "<!-- Overview -->",
+    "<!-- Eyewitness / Chronicle Accounts -->",
+    "<!-- Aftermath -->",
+    "<!-- Conclusion -->",
+  ];
+
+  const MIN_GAP = 1500;
+  let lastInjectedAt = -MIN_GAP;
+  let floats = ["right", "left"];
+  let floatIdx = 0;
+  let imageIdx = 0;
+
+  for (const anchor of SECTION_ANCHORS) {
+    if (imageIdx >= eventImages.length) break;
+    const anchorPos = html.indexOf(anchor);
+    if (anchorPos === -1) continue;
+    if (anchorPos - lastInjectedAt < MIN_GAP) continue;
+
+    // Find the first <p> after this anchor
+    const pPos = html.indexOf("<p", anchorPos);
+    if (pPos === -1) continue;
+
+    const fig = figHtml(eventImages[imageIdx], floats[floatIdx % 2]);
+    html = html.slice(0, pPos) + fig + html.slice(pPos);
+    lastInjectedAt = pPos;
+    floatIdx++;
+    imageIdx++;
+  }
+
+  return html;
 }
 
 /**

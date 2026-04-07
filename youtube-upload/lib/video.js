@@ -26,7 +26,7 @@ import ffmpeg from "fluent-ffmpeg";
 import { mkdirSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { generateAISceneBatch } from "./ai-image.js";
+import { generateAISceneBatch, enhanceImageWithAI, colorizeImageWithAI } from "./ai-image.js";
 import { reviewPromptsWithHistoryExpert } from "./history-expert.js";
 
 const TMP = join(dirname(fileURLToPath(import.meta.url)), "../tmp");
@@ -37,7 +37,7 @@ const H = 1920;
  * Images: Pollinations flux-2-dev (free). Animation: WAN 2.2 I2V via HF ZeroGPU
  * (requires HF_TOKEN; falls back to Ken Burns automatically if unavailable).
  */
-const N_SCENES = 2;
+const N_SCENES = 3;
 
 // Gentle crossfade only — slide/wipe transitions are too jarring for a calm history channel
 const XFADE_TRANSITIONS = ["fade", "dissolve", "fade"];
@@ -192,6 +192,254 @@ async function fetchWikipediaImage(title) {
   }
 }
 
+/**
+ * Fetches multiple real image buffers from Wikipedia/Wikimedia Commons for a topic.
+ *
+ * Uses actual historical/documentary photos from Wikipedia as-is — no AI generation.
+ * Works for person portraits, single objects, events, or any other subject.
+ *
+ * Strategy:
+ *   1. Wikipedia page images — sorted by pixel count (largest first) for best quality
+ *   2. Wikimedia Commons search — extra images when the Wikipedia page alone isn't enough
+ *
+ * @param {string} eventTitle  Event/topic name (date suffix already stripped)
+ * @param {number} count       Max images to return (default 2)
+ * @returns {Promise<Buffer[]>}
+ */
+async function fetchWikipediaImageBuffers(eventTitle, count = 2) {
+  const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
+  const buffers = [];
+
+  // Only skip obvious UI/template images — keep portraits, objects, events
+  const BAD =
+    /\b(icon|logo|flag|map|seal|stub|arrow|bullet|commons[-_]logo|wikimedia[-_]logo|blank|placeholder)\b/i;
+
+  async function resolveUrls(apiBase, fileTitles) {
+    if (!fileTitles.length) return [];
+    const piped = fileTitles.slice(0, 12).join("|");
+    try {
+      const res = await fetch(
+        `${apiBase}?action=query&titles=${encodeURIComponent(piped)}&prop=imageinfo&iiprop=url|size&format=json`,
+        { headers: ua, signal: AbortSignal.timeout(15_000) },
+      );
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Object.values(data?.query?.pages ?? {})
+        .map((p) => ({
+          url: p?.imageinfo?.[0]?.url ?? null,
+          px: (p?.imageinfo?.[0]?.width ?? 0) * (p?.imageinfo?.[0]?.height ?? 0),
+          w: p?.imageinfo?.[0]?.width ?? 0,
+          h: p?.imageinfo?.[0]?.height ?? 0,
+        }))
+        .filter(({ url, w, h }) => url && w >= 800 && h >= 600)
+        .sort((a, b) => b.px - a.px) // largest first → best quality
+        .map(({ url }) => url);
+    } catch {
+      return [];
+    }
+  }
+
+  async function downloadSafe(url) {
+    try {
+      return await downloadImageBuffer(url);
+    } catch {
+      return null;
+    }
+  }
+
+  // 1. Wikipedia page images
+  try {
+    const listRes = await fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(eventTitle)}&prop=images&imlimit=30&format=json`,
+      { headers: ua, signal: AbortSignal.timeout(15_000) },
+    );
+    if (listRes.ok) {
+      const listData = await listRes.json();
+      const page = Object.values(listData?.query?.pages ?? {})[0];
+      const candidates = (page?.images ?? [])
+        .map((i) => i.title)
+        .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !BAD.test(t));
+
+      const urls = await resolveUrls("https://en.wikipedia.org/w/api.php", candidates);
+      for (const url of urls) {
+        if (buffers.length >= count) break;
+        const buf = await downloadSafe(url);
+        if (buf) buffers.push(buf);
+      }
+    }
+  } catch { /* continue to Commons */ }
+
+  if (buffers.length >= count) return buffers;
+
+  // 2. Wikimedia Commons search — broader pool for less-covered topics
+  try {
+    const searchRes = await fetch(
+      `https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&srsearch=${encodeURIComponent(eventTitle)}&srlimit=20&format=json`,
+      { headers: ua, signal: AbortSignal.timeout(15_000) },
+    );
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      const candidates = (searchData?.query?.search ?? [])
+        .map((r) => r.title)
+        .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !BAD.test(t));
+
+      const urls = await resolveUrls("https://commons.wikimedia.org/w/api.php", candidates);
+      for (const url of urls) {
+        if (buffers.length >= count) break;
+        const buf = await downloadSafe(url);
+        if (buf) buffers.push(buf);
+      }
+    }
+  } catch { /* return what we have */ }
+
+  return buffers;
+}
+
+// ---------------------------------------------------------------------------
+// Image quality & cinematic helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when an image is effectively grayscale (B&W or sepia).
+ * Samples a 32×32 thumbnail; if the average per-pixel channel spread is below
+ * threshold the image has no meaningful chroma and can benefit from colorization.
+ */
+async function isGrayscaleBuffer(buffer) {
+  try {
+    const { data } = await sharp(buffer)
+      .resize(32, 32, { fit: "fill" })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    let totalDiff = 0;
+    const pixels = data.length / 3;
+    for (let i = 0; i < data.length; i += 3) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      totalDiff += Math.abs(r - g) + Math.abs(g - b) + Math.abs(r - b);
+    }
+    return totalDiff / pixels < 15; // avg channel diff <15 → grayscale
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns an SVG vignette (dark radial gradient) that can be composited over
+ * any image to add a cinematic edge-darkening effect.
+ */
+function buildVignetteSVG(w, h) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+    <defs>
+      <radialGradient id="vig" cx="50%" cy="50%" r="72%" gradientUnits="objectBoundingBox">
+        <stop offset="30%" stop-color="black" stop-opacity="0"/>
+        <stop offset="100%" stop-color="black" stop-opacity="0.50"/>
+      </radialGradient>
+    </defs>
+    <rect width="${w}" height="${h}" fill="url(#vig)"/>
+  </svg>`;
+}
+
+/**
+ * Applies era-appropriate color grading to a Sharp pipeline.
+ * Uses the event year extracted from the title to pick a cinematic tone:
+ *   pre-1900  → warm sepia (or gentle saturation boost if just colorized)
+ *   1900-1939 → muted warm film look
+ *   1940-1959 → cool, gritty (WWII / post-war)
+ *   1960-1979 → slightly faded Kodachrome warmth
+ *   1980+     → punchy, natural
+ *
+ * @param {object}  sharpInst    A fluent sharp instance
+ * @param {number|null} year     Event year, or null for generic boost
+ * @param {boolean} wasColorized True if a B&W image was just colorized
+ * @returns {object}  The same sharp instance with grading applied
+ */
+function applyEraGrading(sharpInst, year, wasColorized) {
+  if (!year) {
+    return sharpInst.modulate({ saturation: 1.05, brightness: 0.98 });
+  }
+  if (year < 1900) {
+    // Likely B&W photography — sepia warmth unless freshly colorized
+    return wasColorized
+      ? sharpInst.modulate({ saturation: 0.85, brightness: 0.95 })
+      : sharpInst.modulate({ saturation: 0.45, brightness: 0.92 }).tint({ r: 112, g: 73, b: 38 });
+  }
+  if (year < 1940) {
+    // Early film era — warm but more neutral than full sepia
+    return wasColorized
+      ? sharpInst.modulate({ saturation: 0.80, brightness: 0.93 })
+      : sharpInst.modulate({ saturation: 0.60, brightness: 0.90 }).tint({ r: 95, g: 85, b: 70 });
+  }
+  if (year < 1960) {
+    // WWII / post-war — cooler, slightly desaturated, gritty
+    return sharpInst.modulate({ saturation: 0.78, brightness: 0.90 });
+  }
+  if (year < 1980) {
+    // 1960s-70s Kodachrome — slight warm fade
+    return sharpInst.modulate({ saturation: 0.90, brightness: 0.95 }).tint({ r: 100, g: 94, b: 84 });
+  }
+  // 1980+ — natural with a small saturation/contrast push
+  return sharpInst.modulate({ saturation: 1.08, brightness: 1.0 });
+}
+
+/**
+ * Prepares a Wikipedia image buffer for 9:16 vertical video:
+ *   1. AI super-resolution (Real-ESRGAN / Swin2SR — best free model auto-selected)
+ *   2. B&W detection → colorization via HF if a colorization model is warm
+ *   3. Cover-crop to 1080×1920 + 15% Ken Burns headroom
+ *   4. Era-appropriate color grading (warm sepia, cool WWII, punchy modern)
+ *   5. Cinematic vignette overlay
+ *
+ * @param {Buffer}      buffer       Raw image bytes from Wikipedia/Commons
+ * @param {number|null} year         Event year for era grading, or null
+ * @param {boolean}     aiEnhance    Run AI upscale + colorize (default true). Set false
+ *                                   for scene 3+ to cap HF API usage at 2 calls/video.
+ * @returns {Promise<Buffer>}   PNG ready for scene compositing
+ */
+async function prepareWikipediaSceneBuffer(buffer, year = null, aiEnhance = true) {
+  const TARGET_W = Math.round(W * 1.15); // 15% larger — Ken Burns headroom
+  const TARGET_H = Math.round(H * 1.15);
+
+  // 1. AI super-resolution + colorization (capped at 2 images/video to stay within free tier)
+  let wasColorized = false;
+  if (aiEnhance) {
+    buffer = await enhanceImageWithAI(buffer);
+
+    // 2. B&W detection → colorization
+    const bw = await isGrayscaleBuffer(buffer);
+    if (bw) {
+      console.log("  → B&W image detected — attempting colorization...");
+      const colorized = await colorizeImageWithAI(buffer);
+      if (colorized) {
+        buffer = colorized;
+        wasColorized = true;
+        console.log("  ✓ Colorized");
+      } else {
+        console.log("  ℹ Colorization unavailable — keeping original");
+      }
+    }
+  } else {
+    console.log("  ℹ Scene 3: skipping AI enhance to stay within free-tier quota");
+  }
+
+  // 3. Cover-crop to full 9:16 frame with Ken Burns headroom
+  let proc = sharp(buffer)
+    .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre" })
+    .sharpen({ sigma: 1.2 });
+
+  // 4. Era color grading
+  proc = applyEraGrading(proc, year, wasColorized);
+
+  // 5. Cinematic vignette
+  const vignetteBuf = await sharp(Buffer.from(buildVignetteSVG(TARGET_W, TARGET_H)))
+    .png()
+    .toBuffer();
+
+  return proc
+    .composite([{ input: vignetteBuf, blend: "over" }])
+    .png()
+    .toBuffer();
+}
+
 /** URLs that must never be used as a video background image. */
 function isPlaceholderImage(url) {
   if (!url) return true;
@@ -338,7 +586,7 @@ function buildSVG(title) {
     <text x="540" y="960"
       font-family="DejaVu Sans Bold,DejaVu Sans,Arial Black,sans-serif"
       font-size="48" font-weight="900"
-      fill="#60a5fa" text-anchor="middle" dominant-baseline="middle"
+      fill="#9dc43a" text-anchor="middle" dominant-baseline="middle"
       stroke="black" stroke-width="4" paint-order="stroke fill"
       letter-spacing="10"
     >ON THIS DAY</text>
@@ -349,7 +597,7 @@ function buildSVG(title) {
     <text x="540" y="1868"
       font-family="DejaVu Sans Bold,DejaVu Sans,Arial Black,sans-serif"
       font-size="42" font-weight="900"
-      fill="#60a5fa" text-anchor="middle" dominant-baseline="middle"
+      fill="#9dc43a" text-anchor="middle" dominant-baseline="middle"
       stroke="black" stroke-width="3" paint-order="stroke fill"
     >thisday.info</text>
   </svg>`;
@@ -828,7 +1076,7 @@ async function buildEndScreenPNG() {
     <text x="${W / 2}" y="195"
       font-family="DejaVu Sans Bold,Arial Black,sans-serif"
       font-size="44" font-weight="900"
-      fill="#60a5fa" text-anchor="middle" dominant-baseline="middle"
+      fill="#9dc43a" text-anchor="middle" dominant-baseline="middle"
       stroke="black" stroke-width="3" paint-order="stroke fill"
     >thisday.info</text>
     <text x="${W / 2}" y="263"
@@ -867,27 +1115,52 @@ async function generateMultiSceneVideo(
       : `  Video duration: ${videoDuration} s (default — no word timestamps)`,
   );
 
-  // 1. Build scene prompts, then have a history expert review them for accuracy
-  const { era } = getHistoricalEraContext(title);
+  // 1. Fetch real Wikipedia/Commons images — no AI generation unless necessary
+  const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
   const yearMatch = title.match(/\b(\d{4})$/);
   const eventYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
-  const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
+  console.log(`  Fetching ${N_SCENES} real Wikipedia images for "${event}"...`);
+  const wikiBuffers = await fetchWikipediaImageBuffers(event, N_SCENES);
 
-  const rawPrompts = buildScenePrompts(title, contentItems, qualityHint);
-  const scenePrompts = await reviewPromptsWithHistoryExpert(event, eventYear, era, rawPrompts);
+  let rawScenes;
+  if (wikiBuffers.length >= N_SCENES) {
+    console.log(`  ✓ Using ${N_SCENES} real Wikipedia/Commons images — skipping AI generation`);
+    const MAX_AI_ENHANCE = 2; // cap HF API calls per video — free tier stays healthy
+    const prepared = await Promise.all(
+      wikiBuffers.slice(0, N_SCENES).map((buf, i) => prepareWikipediaSceneBuffer(buf, eventYear, i < MAX_AI_ENHANCE)),
+    );
+    rawScenes = prepared.map((buf) => ({ buffer: buf, isVideo: false }));
+  } else {
+    const aiCount = N_SCENES - wikiBuffers.length;
+    if (wikiBuffers.length > 0) {
+      console.log(`  Got ${wikiBuffers.length}/${N_SCENES} Wikipedia images — AI generating ${aiCount} more`);
+    } else {
+      console.log(`  No Wikipedia images found — generating ${N_SCENES} AI scenes`);
+    }
 
-  console.log(
-    `  Generating ${scenePrompts.length} AI scenes (Pollinations + WAN I2V if available)...`,
-  );
-  const rawScenes = await generateAISceneBatch(scenePrompts, event);
+    const { era } = getHistoricalEraContext(title);
 
-  // Fall back to Wikipedia image buffer for any scene that failed entirely
+    const rawPrompts = buildScenePrompts(title, contentItems, qualityHint);
+    const scenePrompts = await reviewPromptsWithHistoryExpert(event, eventYear, era, rawPrompts);
+    const aiScenes = await generateAISceneBatch(scenePrompts.slice(0, aiCount), event);
+
+    const MAX_AI_ENHANCE = 2;
+    const preparedWiki = await Promise.all(
+      wikiBuffers.map((buf, i) => prepareWikipediaSceneBuffer(buf, eventYear, i < MAX_AI_ENHANCE)),
+    );
+    rawScenes = [
+      ...preparedWiki.map((buf) => ({ buffer: buf, isVideo: false })),
+      ...aiScenes,
+    ];
+  }
+
+  // Fallback for any null slots
   const fallbackBuf = post.imageUrl
     ? await downloadImageBuffer(post.imageUrl).catch(() => null)
     : null;
   const scenes = rawScenes.map((scene, i) => {
     if (scene) return scene;
-    console.warn(`  ⚠ Scene ${i + 1} failed — using Wikipedia fallback`);
+    console.warn(`  ⚠ Scene ${i + 1} failed — using fallback image`);
     return fallbackBuf ? { buffer: fallbackBuf, isVideo: false } : null;
   });
   if (scenes.some((s) => !s)) {
@@ -922,6 +1195,7 @@ async function generateMultiSceneVideo(
   //    115% of target (zoompan headroom) and composited with the SVG title overlay.
   const KB_PAD = 1.15; // 15% larger than W×H so 12% zoom never crops to black
   const sceneFiles = []; // { path, isVideo }
+  let thumbnailPath = null;
   for (let i = 0; i < scenes.length; i++) {
     const { buffer, isVideo } = scenes[i];
     if (isVideo) {
@@ -931,24 +1205,38 @@ async function generateMultiSceneVideo(
       console.log(`  ✓ Scene ${i + 1} animated clip ready`);
     } else {
       const framePath = join(TMP, `${slug}_s${i}.png`);
-      await sharp(buffer)
-        .resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD), {
-          fit: "cover",
-          position: "center",
-        })
-        .composite([
-          {
-            input: await sharp(Buffer.from(buildSVG(title)))
-              .resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD))
-              .png()
-              .toBuffer(),
-            blend: "over",
-          },
-        ])
-        .png()
-        .toFile(framePath);
+      const resized = sharp(buffer).resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD), {
+        fit: "cover",
+        position: "center",
+      });
+      // Title overlay only on scene 1 — after "Did you know?" the image takes centre stage
+      if (i === 0) {
+        await resized
+          .composite([
+            {
+              input: await sharp(Buffer.from(buildSVG(title)))
+                .resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD))
+                .png()
+                .toBuffer(),
+              blend: "over",
+            },
+          ])
+          .png()
+          .toFile(framePath);
+      } else {
+        await resized.png().toFile(framePath);
+      }
       sceneFiles.push({ path: framePath, isVideo: false });
-      console.log(`  ✓ Scene ${i + 1} frame ready`);
+      console.log(`  ✓ Scene ${i + 1} frame ready${i === 0 ? " (with title overlay)" : " (clean)"}`);
+
+      // Save scene 0 as the custom thumbnail at exact 1080×1920
+      if (i === 0) {
+        thumbnailPath = join(TMP, `${slug}_thumb.jpg`);
+        await sharp(framePath)
+          .resize(W, H, { fit: "cover", position: "centre" })
+          .jpeg({ quality: 92 })
+          .toFile(thumbnailPath);
+      }
     }
   }
 
@@ -1102,7 +1390,7 @@ async function generateMultiSceneVideo(
       }
     });
   }
-  return { path: videoPath, cuts };
+  return { path: videoPath, cuts, thumbnailPath };
 }
 
 // ---------------------------------------------------------------------------

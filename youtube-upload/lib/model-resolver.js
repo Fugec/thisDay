@@ -182,6 +182,7 @@ export async function resolveHFTextModel() {
     process.env.HF_TOKEN,
     process.env.HF_TOKEN_2,
     process.env.HF_TOKEN_3,
+    process.env.HF_TOKEN_4,
   ].filter(Boolean);
 
   const buildResult = (modelId) => ({
@@ -226,4 +227,107 @@ export async function resolveHFTextModel() {
 
   console.log(`  ✓ HF model — text: ${modelId}${freeModel ? " (free tier)" : " (scored fallback)"}`);
   return (_hfCache = buildResult(modelId));
+}
+
+// ===========================================================================
+// HuggingFace image model resolver (super-resolution + colorization)
+// ===========================================================================
+
+const HF_IMAGE_MODELS_URL =
+  "https://huggingface.co/api/models?inference=warm&pipeline_tag=image-to-image&sort=downloads&limit=100";
+
+export const HF_UPSCALE_MODEL_DEFAULT = "caidas/swin2SR-realworld-sr-x4-64";
+
+// Best free super-resolution models in priority order.
+// Real-ESRGAN handles real-world photo degradation (grain, JPEG compression, blur)
+// better than Swin2SR on historical photos. Update this list as better free models appear.
+const FREE_HF_UPSCALE_MODEL_PRIORITY = [
+  "ai-forever/Real-ESRGAN",                 // best for photos: handles real-world artifacts
+  "caidas/swin2SR-realworld-sr-x4-64",      // current default — solid x4 upscaler
+  "caidas/swin2SR-compressed-sr-x4-48",     // compressed variant, slightly smaller
+  "caidas/swin2SR-classical-sr-x2-64",      // x2 fallback when x4 is unavailable
+];
+
+// Free colorization models in priority order.
+// All are image-to-image pipeline_tag. colorizeUrl will be null if none are warm.
+const FREE_HF_COLORIZE_MODEL_PRIORITY = [
+  "Ander/DeoldifyColorizerArtistic",        // artistic colorizer — vivid tones
+  "Adolfo/DeoldifyColorizerStable",         // stable variant — more neutral tones
+  "jantic/DeOldify",                        // original DeOldify
+];
+
+let _hfImageCache = null;
+
+/**
+ * Resolves the best available free HuggingFace image enhancement models:
+ *   - upscaleModel: best warm super-resolution model (Real-ESRGAN preferred)
+ *   - colorizeModel: best warm colorization model (null if none available)
+ *
+ * Queries the HF models API once and caches for the process lifetime.
+ * Falls back to hardcoded defaults if the API is unreachable.
+ *
+ * @returns {Promise<{
+ *   upscaleModel: string,
+ *   upscaleUrl: string,
+ *   colorizeModel: string|null,
+ *   colorizeUrl: string|null
+ * }>}
+ */
+export async function resolveHFImageModels() {
+  if (_hfImageCache) return _hfImageCache;
+
+  const tokens = [
+    process.env.HF_TOKEN,
+    process.env.HF_TOKEN_2,
+    process.env.HF_TOKEN_3,
+    process.env.HF_TOKEN_4,
+  ].filter(Boolean);
+
+  const buildResult = (upscaleModel, colorizeModel) => ({
+    upscaleModel,
+    upscaleUrl: `https://router.huggingface.co/hf-inference/models/${upscaleModel}`,
+    colorizeModel,
+    colorizeUrl: colorizeModel
+      ? `https://router.huggingface.co/hf-inference/models/${colorizeModel}`
+      : null,
+  });
+
+  if (!tokens.length) {
+    console.log("  ℹ HF image model check: no tokens — using defaults");
+    return (_hfImageCache = buildResult(HF_UPSCALE_MODEL_DEFAULT, null));
+  }
+
+  let modelIds = null;
+  for (const token of tokens) {
+    try {
+      const res = await fetch(HF_IMAGE_MODELS_URL, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      modelIds = data.map((m) => m.id).filter(Boolean);
+      break;
+    } catch (err) {
+      console.warn(`  ⚠ HF image model check failed (${err.message}) — trying next token`);
+    }
+  }
+
+  if (!modelIds) {
+    console.warn("  ⚠ HF image model check: all tokens failed — using defaults");
+    return (_hfImageCache = buildResult(HF_UPSCALE_MODEL_DEFAULT, null));
+  }
+
+  const modelSet = new Set(modelIds);
+
+  const upscaleModel =
+    FREE_HF_UPSCALE_MODEL_PRIORITY.find((id) => modelSet.has(id)) ??
+    HF_UPSCALE_MODEL_DEFAULT;
+
+  const colorizeModel =
+    FREE_HF_COLORIZE_MODEL_PRIORITY.find((id) => modelSet.has(id)) ?? null;
+
+  const colorizeNote = colorizeModel ? `| colorize: ${colorizeModel}` : "| colorize: unavailable (none warm)";
+  console.log(`  ✓ HF image models — upscale: ${upscaleModel} ${colorizeNote}`);
+  return (_hfImageCache = buildResult(upscaleModel, colorizeModel));
 }

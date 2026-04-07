@@ -123,6 +123,26 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
   return res.data.id;
 }
 
+/**
+ * Uploads a custom thumbnail for a YouTube video.
+ * Requires the video to already be uploaded and the OAuth token to have
+ * the youtube.upload scope.
+ *
+ * @param {string} videoId
+ * @param {string} thumbnailPath  Path to a JPEG image (1080×1920 for Shorts)
+ */
+export async function setYoutubeThumbnail(videoId, thumbnailPath) {
+  const auth = getOAuth2Client();
+  const youtube = google.youtube({ version: "v3", auth });
+  await youtube.thumbnails.set({
+    videoId,
+    media: {
+      mimeType: "image/jpeg",
+      body: createReadStream(thumbnailPath),
+    },
+  });
+}
+
 export async function verifyYoutubeAuth() {
   const auth = getOAuth2Client();
   await auth.getAccessToken();

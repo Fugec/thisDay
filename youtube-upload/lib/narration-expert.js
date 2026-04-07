@@ -12,10 +12,9 @@ import { resolveGroqModels, resolveHFTextModel } from "./model-resolver.js";
  *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: llama-3.3-70b-versatile)
  *              Keys: GROQ_API_KEY → GROQ_API_KEY_2 → GROQ_API_KEY_3 → GROQ_API_KEY_4
  *   2. HuggingFace — best free instruct model auto-resolved via resolveHFTextModel()
- *              (default: meta-llama/Llama-3.1-8B-Instruct via router.huggingface.co)
- *              Tokens: HF_TOKEN → HF_TOKEN_2 → HF_TOKEN_3
+ *              Tokens: HF_TOKEN → HF_TOKEN_2 → HF_TOKEN_3 → HF_TOKEN_4
  *
- * If both providers fail the originals are returned silently — TTS continues
+ * If all providers fail the originals are returned silently — TTS continues
  * normally with the unpolished facts.
  */
 
@@ -133,6 +132,25 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
   {
     name: "HuggingFace (token 3)",
     envKey: "HF_TOKEN_3",
+    url: hfUrl,
+    model: hfModelId,
+    headers: (key) => ({
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "x-use-cache": "0",
+    }),
+    body: (model, messages) => ({
+      model,
+      messages,
+      max_tokens: 1024,
+      temperature: 0.5,
+      stream: false,
+    }),
+    extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
+  },
+  {
+    name: "HuggingFace (token 4)",
+    envKey: "HF_TOKEN_4",
     url: hfUrl,
     model: hfModelId,
     headers: (key) => ({

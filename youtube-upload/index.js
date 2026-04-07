@@ -38,7 +38,7 @@ import { polishNarrationItems } from "./lib/narration-expert.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
 import { verifyKvReadWriteAccess } from "./lib/kv.js";
 import { checkVideoQuality } from "./lib/video-quality.js";
-import { uploadToYoutube, verifyYoutubeAuth } from "./lib/youtube.js";
+import { uploadToYoutube, setYoutubeThumbnail, verifyYoutubeAuth } from "./lib/youtube.js";
 import {
   acquireUploadLock,
   getUploaded,
@@ -419,6 +419,18 @@ async function main() {
         console.log("  Uploading to YouTube...");
         const youtubeId = await uploadToYoutube(videoPath, post, videoCuts);
         console.log(`  ✓ https://www.youtube.com/shorts/${youtubeId}`);
+
+        // Set custom thumbnail — scene 1 with centred title text
+        if (videoResult.thumbnailPath) {
+          try {
+            await setYoutubeThumbnail(youtubeId, videoResult.thumbnailPath);
+            console.log("  ✓ Thumbnail set on YouTube");
+          } catch (thumbErr) {
+            console.warn(`  ⚠ Thumbnail upload failed: ${thumbErr.message}`);
+          } finally {
+            try { unlinkSync(videoResult.thumbnailPath); } catch { /* ignore */ }
+          }
+        }
 
         // Record in KV tracker (overwrites previous entry for re-uploads)
         const privacy = privacyMode;

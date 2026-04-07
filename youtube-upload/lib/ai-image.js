@@ -5,7 +5,7 @@
  *      Free tier with a free HF account token.
  *      Fast (~10–20s per image), 1080×1920 supported natively.
  *
- *   1b. Hugging Face Inference API  (HF_TOKEN_2, HF_TOKEN_3) — fallback accounts
+ *   1b. Hugging Face Inference API  (HF_TOKEN_2, HF_TOKEN_3, HF_TOKEN_4) — fallback accounts
  *      Same model, extra free-tier accounts for when the prior hits monthly quota (402).
  *      Rotate accounts when one is depleted.
  *
@@ -16,7 +16,8 @@
 
 import pLimit from "p-limit";
 // import { animateImage } from "./wan-i2v.js"; // I2V disabled — re-enable to use WAN animation
-import { resolveGroqModels } from "./model-resolver.js";
+import sharp from "sharp";
+import { resolveGroqModels, resolveHFImageModels } from "./model-resolver.js";
 
 const GROQ_VISION_URL = "https://api.groq.com/openai/v1/chat/completions";
 
@@ -191,7 +192,7 @@ async function generateViaCFWorkersAI(prompt) {
 
 /**
  * Generates an AI image, trying providers in order:
- *   1. Hugging Face (FLUX.1-schnell) — HF_TOKEN then HF_TOKEN_2 then HF_TOKEN_3
+ *   1. Hugging Face (FLUX.1-schnell) — HF_TOKEN then HF_TOKEN_2 then HF_TOKEN_3 then HF_TOKEN_4
  *   2. Cloudflare Workers AI (SDXL-base) — needs CF_API_TOKEN with AI permission
  *
  * If a subject is provided, the image is verified via Groq vision after generation.
@@ -212,6 +213,7 @@ export async function generateAIImage(prompt, subject = null) {
       ["HF_TOKEN", process.env.HF_TOKEN],
       ["HF_TOKEN_2", process.env.HF_TOKEN_2],
       ["HF_TOKEN_3", process.env.HF_TOKEN_3],
+    ["HF_TOKEN_4", process.env.HF_TOKEN_4],
     ]) {
       if (!token) continue;
       try {
@@ -248,6 +250,87 @@ export async function generateAIImage(prompt, subject = null) {
     console.log(`  ✓ Subject verify (retry): "${subject}" — ${retry.reason}`);
   }
   return retryBuffer;
+}
+
+/**
+ * Enhances a real (e.g. Wikipedia) image quality before scene compositing.
+ *
+ * HF inference providers no longer expose free super-resolution models, so this
+ * now uses Sharp's high-quality lanczos3 resampling + adaptive unsharp mask to
+ * recover detail lost in old/compressed source images.  The result is equivalent
+ * to a 2× bicubic pass that the subsequent cover-crop then downsamples to the
+ * Ken Burns canvas — giving the zoompan filter more detail to work with.
+ *
+ * If a future HF upscale model becomes available, re-add the fetch call above
+ * the Sharp fallback and it will take precedence automatically.
+ *
+ * @param {Buffer} buffer  Raw image bytes (JPEG or PNG)
+ * @returns {Promise<Buffer>}  Enhanced buffer (always succeeds)
+ */
+export async function enhanceImageWithAI(buffer) {
+  try {
+    const { width, height } = await sharp(buffer).metadata();
+    if (!width || !height) return buffer;
+
+    // 2× lanczos3 upsample — gives the cover-crop more pixels to work with
+    const upscaled = await sharp(buffer)
+      .resize(width * 2, height * 2, { kernel: "lanczos3", fastShrinkOnLoad: false })
+      .sharpen({ sigma: 0.8, m1: 1.0, m2: 0.5 }) // adaptive unsharp mask
+      .toBuffer();
+
+    console.log(`  ✓ Enhance: 2× lanczos3 (${width}×${height} → ${width * 2}×${height * 2})`);
+    return upscaled;
+  } catch (err) {
+    console.warn(`  ⚠ Enhance failed: ${err.message} — using original`);
+    return buffer;
+  }
+}
+
+/**
+ * Colorizes a grayscale/B&W image via HuggingFace Inference API.
+ * Uses the best available free colorization model (resolved at runtime).
+ * Returns null if no colorization model is warm or all tokens fail —
+ * the caller should then keep the original buffer.
+ *
+ * @param {Buffer} buffer  Grayscale image bytes (JPEG or PNG)
+ * @returns {Promise<Buffer|null>}  Colorized buffer, or null on failure
+ */
+export async function colorizeImageWithAI(buffer) {
+  const { colorizeModel, colorizeUrl } = await resolveHFImageModels();
+  if (!colorizeUrl) return null; // no colorization model currently warm
+
+  for (const [label, token] of [
+    ["HF_TOKEN", process.env.HF_TOKEN],
+    ["HF_TOKEN_2", process.env.HF_TOKEN_2],
+    ["HF_TOKEN_3", process.env.HF_TOKEN_3],
+    ["HF_TOKEN_4", process.env.HF_TOKEN_4],
+  ]) {
+    if (!token) continue;
+    try {
+      console.log(`  → Colorize [${label}] (${colorizeModel})...`);
+      const res = await fetch(colorizeUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/octet-stream",
+        },
+        body: buffer,
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        console.warn(`  ⚠ Colorize [${label}]: HTTP ${res.status} — ${body.slice(0, 120)}`);
+        continue;
+      }
+      const colorized = Buffer.from(await res.arrayBuffer());
+      console.log(`  ✓ Colorize done (${Math.round(colorized.length / 1024)} KB)`);
+      return colorized;
+    } catch (err) {
+      console.warn(`  ⚠ Colorize [${label}]: ${err.message}`);
+    }
+  }
+
+  return null; // all tokens failed — caller keeps original
 }
 
 /**

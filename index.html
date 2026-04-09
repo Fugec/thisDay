@@ -275,7 +275,7 @@
         var imgEl = document.getElementById("latest-article-img");
         var titleEl = document.getElementById("latest-article-title");
 
-        fetch("/blog/archive.json")
+        fetch("/blog/index.json")
           .then(function (r) {
             return r.ok ? r.json() : null;
           })
@@ -511,7 +511,7 @@
     <script>
       // Populate latest 10 blog posts
       (function () {
-        fetch("/blog/archive.json")
+        fetch("/blog/index.json")
           .then(function (r) {
             return r.ok ? r.json() : [];
           })

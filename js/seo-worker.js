@@ -2856,6 +2856,7 @@ async function handleFetchRequest(request, env, ctx) {
       "/",
       "/blog",
       "/blog/",
+      "/blog/index.json",
       "/blog/archive.json",
       "/events",
       "/events/",
@@ -3204,9 +3205,12 @@ async function handleFetchRequest(request, env, ctx) {
     return handleBlogIndex(env, url);
   }
 
-  // Serve KV blog index as /blog/archive.json so the homepage carousel
-  // can load latest posts without scanning individual day URLs
-  if (url.pathname === "/blog/archive.json") {
+  // Serve the KV blog index as canonical /blog/index.json.
+  // Keep /blog/archive.json as a legacy alias for older homepage consumers.
+  if (
+    url.pathname === "/blog/index.json" ||
+    url.pathname === "/blog/archive.json"
+  ) {
     const index = env.BLOG_AI_KV
       ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
       : null;

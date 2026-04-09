@@ -2912,7 +2912,7 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
 
   // Priority 1: latest AI archive posts (across months), but only with working images.
   try {
-    const archiveResponse = await fetch("/blog/archive.json", {
+    const archiveResponse = await fetch("/blog/index.json", {
       cache: "no-cache",
       headers: { Accept: "application/json" },
     });

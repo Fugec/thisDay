@@ -437,8 +437,10 @@ export default {
       });
     }
 
-    // JSON index used by the main blog page to dynamically render AI posts
-    if (path === "/blog/archive.json") {
+    // JSON index used by homepage/blog UI components.
+    // Canonical route: /blog/index.json
+    // Legacy alias: /blog/archive.json
+    if (path === "/blog/index.json" || path === "/blog/archive.json") {
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
       const index = indexRaw ? JSON.parse(indexRaw) : [];
       return new Response(JSON.stringify(index), {

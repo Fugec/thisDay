@@ -725,6 +725,14 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .explore-action-quiz{border-color:rgba(0,0,0,.3);color:#1a1a1a}
 .explore-action-quiz:hover{background:rgba(0,0,0,.1);border-color:#1a1a1a}
 
+.date-cluster-card{padding:18px 20px}
+.date-cluster-links{display:grid;grid-template-columns:1fr;gap:.65rem}
+@media(min-width:576px){.date-cluster-links{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.date-cluster-link{display:flex;align-items:center;gap:.7rem;padding:.8rem 1rem;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;color:var(--tc);text-decoration:none;font-weight:600;transition:background .15s,border-color .15s,transform .15s}
+.date-cluster-link:hover{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.35);color:#1a1a1a;text-decoration:none;transform:translateY(-1px)}
+.date-cluster-link i{font-size:1rem;flex-shrink:0}
+.date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
+
 #supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}
 #supportPopup.show{display:flex;opacity:1}
 .support-popup-content{background:var(--cb,#fff);color:var(--tc,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--cbr,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}
@@ -1129,6 +1137,7 @@ ${siteNav()}
   </div>
   <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(eventsIntroLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
   ${
     featured
       ? `
@@ -1262,6 +1271,48 @@ function servePeopleSitemap(siteUrl) {
     }
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
+}
+
+function buildDateClusterCard(monthName, day, mDisplay, currentType) {
+  const links = [
+    {
+      type: "events",
+      href: `/events/${monthName}/${day}/`,
+      icon: "bi-calendar-event",
+      label: `Events on ${mDisplay} ${day}`,
+    },
+    {
+      type: "born",
+      href: `/born/${monthName}/${day}/`,
+      icon: "bi-person-heart",
+      label: `Birthdays on ${mDisplay} ${day}`,
+    },
+    {
+      type: "died",
+      href: `/died/${monthName}/${day}/`,
+      icon: "bi-flower1",
+      label: `Deaths on ${mDisplay} ${day}`,
+    },
+    {
+      type: "quiz",
+      href: `/quiz/${monthName}/${day}/`,
+      icon: "bi-patch-question",
+      label: `${mDisplay} ${day} quiz`,
+    },
+  ];
+
+  const buttons = links
+    .map((link) => {
+      const active = link.type === currentType;
+      return `<a href="${link.href}" class="date-cluster-link${active ? " date-cluster-link-active" : ""}"${active ? ' aria-current="page"' : ""}><i class="bi ${link.icon}"></i>${escapeHtml(link.label)}</a>`;
+    })
+    .join("");
+
+  return `<div class="card-box date-cluster-card">
+    <h2 class="h5 mb-3"><i class="bi bi-signpost-split me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h2>
+    <p class="text-muted mb-3" style="font-size:.9rem">Jump between the main pages for this date to compare events, people, and the daily quiz.</p>
+    <div class="date-cluster-links">${buttons}</div>
+  </div>`;
 }
 
 function generateBornHTML(siteUrl, monthName, day, eventsData) {
@@ -1515,6 +1566,7 @@ ${siteNav()}
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
   <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${buildDateClusterCard(monthName, day, mDisplay, "born")}
   ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
@@ -1828,6 +1880,7 @@ ${siteNav()}
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
   <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${buildDateClusterCard(monthName, day, mDisplay, "died")}
   ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
@@ -4806,6 +4859,7 @@ ${siteNav()}
     <h1><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
     <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
   </div>
+  ${buildDateClusterCard(monthSlug, day, mDisplay, "quiz")}
   ${carouselHtml}
   ${recSliderHtml}
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>

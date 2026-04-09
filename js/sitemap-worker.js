@@ -1,9 +1,13 @@
 /**
  * Cloudflare Worker — Dynamic Sitemap Generator
  *
- * Serves /sitemap.xml by merging hard-coded static pages with AI-generated
- * blog posts read live from BLOG_AI_KV. The result is cached at the edge for
- * 1 hour so every new post is reflected within an hour of publication.
+ * Serves:
+ *   /sitemap.xml      → sitemap index for crawler discovery
+ *   /sitemap-main.xml → core/static/blog sitemap
+ *
+ * The blog sitemap is built by merging hard-coded static pages with
+ * AI-generated blog posts read live from BLOG_AI_KV. The result is cached at
+ * the edge for 1 hour so every new post is reflected quickly after publish.
  *
  * Deploy:  npx wrangler deploy --config wrangler-sitemap.jsonc
  * Dev:     npx wrangler dev --config wrangler-sitemap.jsonc
@@ -155,14 +159,18 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (url.pathname !== "/sitemap.xml") {
+    if (
+      url.pathname !== "/sitemap.xml" &&
+      url.pathname !== "/sitemap-main.xml"
+    ) {
       return fetch(request);
     }
 
     // Helpful for diagnosing Search Console “couldn’t fetch” issues.
     // Logs show up in `wrangler tail` for this worker.
     try {
-      console.log("sitemap.xml request", {
+      console.log("sitemap request", {
+        path: url.pathname,
         ua: request.headers.get("user-agent") || "",
         cf: request.cf || null,
       });
@@ -172,7 +180,7 @@ export default {
 
     // Serve from edge cache if available
     const cache = caches.default;
-    const cacheKey = new Request(`${DOMAIN}/sitemap.xml`);
+    const cacheKey = new Request(`${DOMAIN}${url.pathname}`);
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
 
@@ -188,7 +196,11 @@ export default {
 
     // Allow skipping legacy (static) blog posts via an environment flag
     const ignoreLegacy = env && String(env.IGNORE_LEGACY_BLOG) === "true";
-    const xml = buildSitemap(aiPosts, ignoreLegacy);
+    const latestPostLastmod = computeLatestPostLastmod(aiPosts, ignoreLegacy);
+    const xml =
+      url.pathname === "/sitemap.xml"
+        ? buildSitemapIndex(latestPostLastmod)
+        : buildMainSitemap(aiPosts, ignoreLegacy, latestPostLastmod);
 
     const response = new Response(xml, {
       headers: {
@@ -209,10 +221,29 @@ export default {
 // XML builder
 // ---------------------------------------------------------------------------
 
-function buildSitemap(aiPosts, ignoreLegacy = false) {
-  const entries = [];
+function buildSitemapIndex(latestPostLastmod) {
+  const today = new Date().toISOString().slice(0, 10);
+  const entries = [
+    sitemapEntry(`${DOMAIN}/sitemap-main.xml`, latestPostLastmod),
+    sitemapEntry(`${DOMAIN}/sitemap-generated.xml`, today),
+    sitemapEntry(`${DOMAIN}/sitemap-people.xml`, today),
+    sitemapEntry(`${DOMAIN}/news-sitemap.xml`, latestPostLastmod),
+  ];
 
-  const latestPostLastmod = computeLatestPostLastmod(aiPosts, ignoreLegacy);
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    entries.join("\n") +
+    `\n</sitemapindex>`
+  );
+}
+
+function buildMainSitemap(
+  aiPosts,
+  ignoreLegacy = false,
+  latestPostLastmod = computeLatestPostLastmod(aiPosts, ignoreLegacy),
+) {
+  const entries = [];
 
   // 1. Core static pages
   for (const page of STATIC_PAGES) {
@@ -251,6 +282,15 @@ function buildSitemap(aiPosts, ignoreLegacy = false) {
     `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
     entries.join("\n") +
     `\n</urlset>`
+  );
+}
+
+function sitemapEntry(loc, lastmod) {
+  return (
+    `  <sitemap>\n` +
+    `    <loc>${loc}</loc>\n` +
+    `    <lastmod>${lastmod}</lastmod>\n` +
+    `  </sitemap>`
   );
 }
 

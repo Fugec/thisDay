@@ -1255,7 +1255,7 @@ ${getSharedPageScripts()}
 </body></html>`;
 }
 
-function serveGeneratedSitemap(siteUrl) {
+function serveEventsDateSitemap(siteUrl) {
   let urls = "";
   for (let m = 0; m < 12; m++) {
     for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
@@ -2451,7 +2451,7 @@ function buildTopicFallbackFacts(
   return facts.map(normalizeDidYouKnowFact).slice(0, 5);
 }
 
-async function handleGeneratedPost(_request, env, ctx, url) {
+async function handleEventsDatePage(_request, env, ctx, url) {
   const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
   // Expect: ['events', 'july', '20']
   if (parts.length !== 3) return new Response("Not Found", { status: 404 });
@@ -2941,7 +2941,7 @@ async function handleFetchRequest(request, env, ctx) {
     });
   }
 
-  // Legacy generated URLs -> /events (SEO-friendly permanent redirect)
+  // Legacy /generated URLs always redirect to the canonical /events route
   if (url.pathname === "/generated" || url.pathname === "/generated/") {
     return Response.redirect(`${url.origin}/events/`, 301);
   }
@@ -3112,7 +3112,7 @@ async function handleFetchRequest(request, env, ctx) {
 
   // Events pages — must be before the HTML pass-through guard
   if (url.pathname.startsWith("/events/")) {
-    return handleGeneratedPost(request, env, ctx, url);
+    return handleEventsDatePage(request, env, ctx, url);
   }
 
   // Sitemap for born/died pages (366 × 2 = 732 URLs)
@@ -3127,10 +3127,10 @@ async function handleFetchRequest(request, env, ctx) {
     });
   }
 
-  // Generated sitemap listing all 366 /events/ pages
+  // Date-route sitemap listing all canonical /events/ pages and /quiz/ pages
   if (url.pathname === "/sitemap-generated.xml") {
     const siteUrl = `${url.protocol}//${url.host}`;
-    return new Response(serveGeneratedSitemap(siteUrl), {
+    return new Response(serveEventsDateSitemap(siteUrl), {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": "public, max-age=3600, s-maxage=86400",

@@ -20,8 +20,8 @@
  *
  * Body (optional):
  *   { "sitemaps": ["https://thisday.info/sitemap.xml", "..."] }
- *   If omitted, defaults to /sitemap.xml, /sitemap-generated.xml,
- *   /sitemap-people.xml, /news-sitemap.xml.
+ *   If omitted, defaults to /sitemap.xml, /sitemap-main.xml,
+ *   /sitemap-generated.xml, /sitemap-people.xml, /news-sitemap.xml.
  *
  * Optional IndexNow:
  *   If INDEXNOW_KEY + INDEXNOW_KEY_LOCATION are set, you can also send:
@@ -34,6 +34,7 @@
 const DOMAIN = "https://thisday.info";
 const DEFAULT_SITEMAPS = [
   `${DOMAIN}/sitemap.xml`,
+  `${DOMAIN}/sitemap-main.xml`,
   `${DOMAIN}/sitemap-generated.xml`,
   `${DOMAIN}/sitemap-people.xml`,
   `${DOMAIN}/news-sitemap.xml`,

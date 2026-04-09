@@ -4,8 +4,8 @@
  * Runs on a cron trigger (daily at 00:05 UTC) and publishes a new blog post
  * every other day using Cloudflare Workers AI (free, no external API key).
  * Posts are stored in Cloudflare KV and served at:
- *   /blog/archive/         → listing of all published posts
- *   /blog/archive/[slug]/  → individual post page
+ *   /blog/                → listing of all published posts
+ *   /blog/[slug]/         → individual post page
  *
  * Manual trigger (for testing):
  *   POST /blog/publish     → immediately publishes today's post
@@ -385,7 +385,16 @@ export default {
       return jsonResponse({ status: "ok", processed: targets.length, results });
     }
 
-    // Listing page: /blog/archive
+    if (path === "/blog/archive" || path === "/blog/archive/") {
+      return Response.redirect(`${url.origin}/blog/`, 301);
+    }
+
+    const legacyArchivePostMatch = path.match(/^\/blog\/archive\/([^/]+)\/?$/);
+    if (legacyArchivePostMatch) {
+      return Response.redirect(`${url.origin}/blog/${legacyArchivePostMatch[1]}/`, 301);
+    }
+
+    // Listing page: /blog/archive (legacy alias handled above)
     if (path === "/blog/archive") {
       return serveListing(env);
     }
@@ -2252,7 +2261,7 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
   }
 
   console.log(
-    `Blog: published post "${content.title}" → /blog/archive/${slug}/`,
+    `Blog: published post "${content.title}" → /blog/${slug}/`,
   );
 }
 
@@ -4270,7 +4279,7 @@ function injectPersonImages(html, personImages) {
  *   1. Wikipedia links — from keyTerms provided by the AI ({term, wikiUrl} pairs).
  *      Only the first occurrence of each term in <p> tags is linked.
  *   2. Internal blog links — scans existingIndex for post titles whose event name
- *      appears verbatim in the new article. Links first occurrence to /blog/archive/SLUG/.
+ *      appears verbatim in the new article. Links first occurrence to /blog/SLUG/.
  *
  * Never links inside an existing <a>...</a> block.
  * Never links the article's own event title.
@@ -4290,7 +4299,7 @@ function injectLinks(html, keyTerms = [], existingIndex = [], ownEventTitle = ""
     const eventName = post.title ? post.title.split(" — ")[0].trim() : "";
     if (!eventName || eventName.length < 5) continue;
     if (ownEventTitle && eventName.toLowerCase() === ownEventTitle.toLowerCase()) continue;
-    links.push({ term: eventName, url: `/blog/archive/${post.slug}/`, isExternal: false });
+    links.push({ term: eventName, url: `/blog/${post.slug}/`, isExternal: false });
   }
 
   // Longest term first to avoid partial-match collisions
@@ -4945,7 +4954,7 @@ ${analysisBadItems}
           <footer class="text-center mt-4 pt-3 border-top">
             <small class="article-meta">
               Part of the <strong>thisDay.</strong> historical blog archive &mdash;
-              <a href="/blog/archive/">Browse more posts</a> &bull;
+              <a href="/blog/">Browse more posts</a> &bull;
               <a href="/blog/">All posts</a>
             </small>
           </footer>
@@ -5308,7 +5317,7 @@ ${supportPopupSnippet()}
 }
 
 /**
- * Builds the /blog/ai/ listing page, styled to match /blog/index.html.
+ * Builds the canonical /blog/ listing page.
  */
 async function buildListingHTML(index) {
   const postItems = index.length
@@ -5334,14 +5343,14 @@ async function buildListingHTML(index) {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>History Blog | thisDay. — Articles on Historical Events</title>
-    <link rel="canonical" href="https://thisday.info/blog/archive/" />
+    <link rel="canonical" href="https://thisday.info/blog/" />
     <meta name="robots" content="index, follow" />
     <meta name="author" content="thisDay. Editorial" />
     <meta name="description" content="Original articles about historical events published regularly by thisDay.info." />
     <meta property="og:title" content="History Blog | thisDay." />
     <meta property="og:description" content="In-depth articles about the events, people, and moments that shaped world history." />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://thisday.info/blog/archive/" />
+    <meta property="og:url" content="https://thisday.info/blog/" />
     <meta property="og:image" content="https://thisday.info/images/logo.png" />
     <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="thisDay." />
@@ -5357,7 +5366,7 @@ ${JSON.stringify(
     "@context": "https://schema.org",
     "@type": "CollectionPage",
     name: "History Blog | thisDay.",
-    url: "https://thisday.info/blog/archive/",
+    url: "https://thisday.info/blog/",
     description:
       "Original articles about historical events published regularly by thisDay.info.",
     publisher: {

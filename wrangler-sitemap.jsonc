@@ -12,9 +12,10 @@
   "compatibility_date": "2026-03-17",
   "main": "js/sitemap-worker.js",
 
-  // Intercepts /sitemap.xml before Cloudflare Pages serves the static file.
+  // Intercepts sitemap index + core sitemap before Cloudflare Pages serves static files.
   "routes": [
     { "pattern": "thisday.info/sitemap.xml", "zone_name": "thisday.info" },
+    { "pattern": "thisday.info/sitemap-main.xml", "zone_name": "thisday.info" },
   ],
 
   // Same KV namespace as the blog worker — read-only access to the post index.

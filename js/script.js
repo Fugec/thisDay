@@ -436,7 +436,7 @@ function renderCarouselItem(container, post, index) {
       <div class="d-flex justify-content-center gap-2">
         <a href="${post.url}" class="btn btn-primary btn-sm"
            ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>Read Full Post</a>
-        <a href="${window.__todayGeneratedUrl || "/events/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
+        <a href="${window.__todayEventsUrl || window.__todayGeneratedUrl || "/events/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
       </div>
     </div>
   `;
@@ -2685,7 +2685,7 @@ function renderFullWidthCarouselItem(container, event, index) {
       <p>${excerpt}</p>
       <div style="display:inline-flex;gap:8px;justify-content:center;flex-direction:row;">
         <a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Read on Wikipedia</a>
-        ${window.__todayGeneratedUrl ? `<a href="${window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Today's Events</a>` : ""}
+        ${window.__todayEventsUrl || window.__todayGeneratedUrl ? `<a href="${window.__todayEventsUrl || window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Today's Events</a>` : ""}
       </div>
     </div>
   `;
@@ -2905,23 +2905,23 @@ async function fetchPostPreviewFromUrl(
   }
 }
 
-// Fetch 3 random blog posts from the current month that have generated images
+// Fetch 3 random blog posts from the current month that have working cover images
 async function fetchBlogPostsForCarousel(monthName, monthIndex) {
   const MAX_CAROUSEL_POSTS = 3;
   const today = new Date();
 
-  // Priority 1: latest AI archive posts (across months), but only with working images.
+  // Priority 1: latest AI index posts (across months), but only with working images.
   try {
-    const archiveResponse = await fetch("/blog/archive.json", {
+    const indexResponse = await fetch("/blog/index.json", {
       cache: "no-cache",
       headers: { Accept: "application/json" },
     });
 
-    if (archiveResponse.ok) {
-      const archive = await archiveResponse.json();
-      if (Array.isArray(archive) && archive.length > 0) {
-        const latest = archive.slice(0, 20);
-        const fromArchive = [];
+    if (indexResponse.ok) {
+      const index = await indexResponse.json();
+      if (Array.isArray(index) && index.length > 0) {
+        const latest = index.slice(0, 20);
+        const fromIndex = [];
 
         for (const entry of latest) {
           if (!entry?.slug || !entry?.imageUrl) continue;
@@ -2942,7 +2942,7 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
           const postMonthIndex =
             slugMonthIndex >= 0 ? slugMonthIndex : monthIndex;
 
-          fromArchive.push({
+          fromIndex.push({
             day: parsedDay,
             year: parsedYear,
             monthIndex: postMonthIndex,
@@ -2954,14 +2954,14 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
             isExternal: false,
           });
 
-          if (fromArchive.length >= MAX_CAROUSEL_POSTS) {
-            return fromArchive;
+          if (fromIndex.length >= MAX_CAROUSEL_POSTS) {
+            return fromIndex;
           }
         }
       }
     }
   } catch (e) {
-    console.warn("Archive post fetch failed for carousel:", e);
+    console.warn("Blog index fetch failed for carousel:", e);
   }
 
   // Priority 2: current month static/AI URL patterns.
@@ -3038,7 +3038,7 @@ async function populateCarousel(month, _year) {
   carouselIndicators.innerHTML = "";
 
   try {
-    // Fetch 3 daily blog posts from this month with generated images
+    // Fetch 3 daily blog posts from this month with working cover images
     const currentMonthName = monthNames[month].toLowerCase();
     const blogPosts = await fetchBlogPostsForCarousel(currentMonthName, month);
 

@@ -12,7 +12,7 @@
  *
  * Endpoints:
  *   GET  /search-ping        → health check
- *   POST /search-ping        → ping Google + Bing for one or more sitemaps
+ *   POST /search-ping        → record sitemap submission intent and optionally send IndexNow URLs
  *
  * Auth (optional):
  *   If SEARCH_PING_SECRET is set, POST requires:
@@ -20,7 +20,8 @@
  *
  * Body (optional):
  *   { "sitemaps": ["https://thisday.info/sitemap.xml", "..."] }
- *   If omitted, defaults to /sitemap.xml, /sitemap-generated.xml, /news-sitemap.xml.
+ *   If omitted, defaults to /sitemap.xml, /sitemap-main.xml,
+ *   /sitemap-generated.xml, /sitemap-people.xml, /news-sitemap.xml.
  *
  * Optional IndexNow:
  *   If INDEXNOW_KEY + INDEXNOW_KEY_LOCATION are set, you can also send:
@@ -33,7 +34,9 @@
 const DOMAIN = "https://thisday.info";
 const DEFAULT_SITEMAPS = [
   `${DOMAIN}/sitemap.xml`,
+  `${DOMAIN}/sitemap-main.xml`,
   `${DOMAIN}/sitemap-generated.xml`,
+  `${DOMAIN}/sitemap-people.xml`,
   `${DOMAIN}/news-sitemap.xml`,
 ];
 
@@ -46,7 +49,12 @@ export default {
     }
 
     if (request.method === "GET") {
-      return jsonResponse({ status: "ok" });
+      return jsonResponse({
+        status: "ok",
+        defaultSitemaps: DEFAULT_SITEMAPS,
+        googleSitemapPing: "deprecated",
+        indexNowEnabled: Boolean(env.INDEXNOW_KEY && env.INDEXNOW_KEY_LOCATION),
+      });
     }
 
     if (request.method !== "POST") {

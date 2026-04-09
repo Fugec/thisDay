@@ -6,15 +6,13 @@ import { resolveGroqModels, resolveHFTextModel } from "./model-resolver.js";
  * accuracy before sending to FLUX / HuggingFace image generation.
  *
  * Provider fallback chain (first available key wins):
- *   1. Gemini 2.5 Flash (thinking, budget 8192) — best free reasoning model
- *              Key: GEMINI_API_KEY
- *   2. Groq  — best free model auto-resolved via resolveGroqModels() (default: llama-3.3-70b-versatile)
+ *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: llama-3.3-70b-versatile)
  *              Keys: GROQ_API_KEY → GROQ_API_KEY_2 → GROQ_API_KEY_3 → GROQ_API_KEY_4
- *   3. HuggingFace — best free instruct model auto-resolved via resolveHFTextModel()
+ *   2. HuggingFace — best free instruct model auto-resolved via resolveHFTextModel()
  *              (default: meta-llama/Llama-3.1-8B-Instruct via router.huggingface.co)
  *              Tokens: HF_TOKEN → HF_TOKEN_2 → HF_TOKEN_3 → HF_TOKEN_4
  *
- * If all providers fail the originals are returned silently — image generation
+ * If both providers fail the originals are returned silently — image generation
  * continues normally without the accuracy review.
  */
 
@@ -23,34 +21,6 @@ import { resolveGroqModels, resolveHFTextModel } from "./model-resolver.js";
 // ---------------------------------------------------------------------------
 
 function buildProviders(textModel, hfModelId, hfUrl) { return [
-  {
-    name: "Gemini 2.5 Flash (thinking)",
-    envKey: "GEMINI_API_KEY",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-    model: "gemini-2.5-flash",
-    timeout: 90_000,
-    headers: (key) => ({
-      "Content-Type": "application/json",
-      "x-goog-api-key": key,
-    }),
-    body: (_model, messages) => {
-      const sys = messages.find((m) => m.role === "system");
-      const rest = messages.filter((m) => m.role !== "system");
-      return {
-        ...(sys ? { systemInstruction: { parts: [{ text: String(sys.content) }] } } : {}),
-        contents: rest.map((m) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: String(m.content) }],
-        })),
-        generationConfig: {
-          maxOutputTokens: 1024,
-          temperature: 1, // required when thinking is enabled
-          thinkingConfig: { thinkingBudget: 8192 },
-        },
-      };
-    },
-    extractText: (data) => data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "",
-  },
   {
     name: "Groq",
     envKey: "GROQ_API_KEY",

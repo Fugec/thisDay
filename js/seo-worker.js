@@ -17,6 +17,7 @@ import {
   marqueeScript,
 } from "./shared/layout.js";
 import { callAI } from "./shared/ai-call.js";
+import { LLMS_TXT_CONTENT } from "./shared/llms-content.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -211,6 +212,16 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function redirectNoStore(url, status = 302) {
+  return new Response(null, {
+    status,
+    headers: {
+      Location: url,
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 // Returns an array of 2-3 original editorial paragraphs for the featured event.
@@ -660,6 +671,13 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
     FOOTER_CSS +
     "\n" +
     `
+.marquee-bar{background:var(--btn-bg);color:#fff;overflow:hidden;white-space:nowrap;padding:.5rem 0;font-size:.82rem}
+.marquee-track{display:inline-flex;gap:0;animation:marquee-scroll 40s linear infinite;will-change:transform}
+.marquee-track:hover{animation-play-state:paused}
+.marquee-item{padding:0 2.5rem;border-right:1px solid rgba(255,255,255,.2)}
+.marquee-item span{color:var(--accent);font-weight:700;margin-right:.5rem}
+@keyframes marquee-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
 .card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
@@ -707,6 +725,14 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .explore-action-quiz{border-color:rgba(0,0,0,.3);color:#1a1a1a}
 .explore-action-quiz:hover{background:rgba(0,0,0,.1);border-color:#1a1a1a}
 
+.date-cluster-card{padding:18px 20px}
+.date-cluster-links{display:grid;grid-template-columns:1fr;gap:.65rem}
+@media(min-width:576px){.date-cluster-links{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.date-cluster-link{display:flex;align-items:center;gap:.7rem;padding:.8rem 1rem;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;color:var(--tc);text-decoration:none;font-weight:600;transition:background .15s,border-color .15s,transform .15s}
+.date-cluster-link:hover{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.35);color:#1a1a1a;text-decoration:none;transform:translateY(-1px)}
+.date-cluster-link i{font-size:1rem;flex-shrink:0}
+.date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
+
 #supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}
 #supportPopup.show{display:flex;opacity:1}
 .support-popup-content{background:var(--cb,#fff);color:var(--tc,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--cbr,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}
@@ -740,7 +766,7 @@ setTimeout(initAds,1200);
 ${marqueeScript()}`;
 }
 
-function generateBlogPostHTML(
+function generateEventsDateHTML(
   monthName,
   day,
   eventsData,
@@ -748,6 +774,7 @@ function generateBlogPostHTML(
   didYouKnowFacts = [],
   quizHtml = "",
   quizData = null,
+  relatedBlogEntry = null,
 ) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
@@ -956,6 +983,12 @@ function generateBlogPostHTML(
       }).replace(/<\//g, "<\\/")
     : null;
 
+  const breadcrumbSchema = buildBreadcrumbSchema([
+    { name: "Home", item: `${siteUrl}/` },
+    { name: "On This Day", item: `${siteUrl}/events/` },
+    { name: `${mDisplay} ${day} in History`, item: canonical },
+  ]);
+
   // Births era range
   const birthYears = topBirths
     .map((b) => parseInt(b.year) || null)
@@ -982,17 +1015,23 @@ function generateBlogPostHTML(
         ? fmtY(dMin)
         : "";
 
-  // Events list — progressive disclosure after 8
-  const renderEventRow = (e) => {
+  // Events list — match the denser two-column treatment used on born/died pages
+  const renderEventGridItem = (e) => {
     const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
     const th = e.pages?.[0]?.thumbnail?.source || "";
-    return `<div class="ev-row d-flex align-items-start gap-3">
-  <div class="flex-grow-1"><span class="yr event-years-ago ms-2">${escapeHtml(String(e.year))}</span> ${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
-  ${th ? `<img src="${escapeHtml(th)}" alt="" width="44" height="44" style="border-radius:4px;object-fit:cover;flex-shrink:0" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : ""}
+    return `<div class="col-12 col-md-6">
+  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
+    ${th ? `<img src="${escapeHtml(th)}" alt="" class="p-thumb flex-shrink-0" style="margin-top:2px;border-radius:8px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px;border-radius:8px"><i class="bi bi-image-alt"></i></div>`}
+    <div style="min-width:0">
+      <div class="fw-semibold" style="font-size:.88rem;line-height:1.4">${escapeHtml(e.text)}</div>
+      ${w ? `<div style="margin-top:2px"><a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="small text-muted">Wikipedia &rarr;</a></div>` : ""}
+      <span class="yr mt-1 d-inline-block event-years-ago ms-2">${escapeHtml(String(e.year))}</span>
+    </div>
+  </div>
 </div>`;
   };
-  const othersVisibleHtml = others.slice(0, 8).map(renderEventRow).join("");
-  const othersHiddenHtml = others.slice(8).map(renderEventRow).join("");
+  const othersVisibleHtml = others.slice(0, 10).map(renderEventGridItem).join("");
+  const othersHiddenHtml = others.slice(10).map(renderEventGridItem).join("");
 
   // Person card renderer — top 3 (col-12 col-md-4)
   const renderPersonCard = (p, isDeaths = false) => {
@@ -1057,6 +1096,10 @@ function generateBlogPostHTML(
     .slice(3)
     .map((d) => renderPersonGridRow(d, true))
     .join("");
+  const relatedBlogHtml = buildRelatedBlogCard(
+    relatedBlogEntry,
+    `${mDisplay} ${day} in the Blog`,
+  );
 
   return `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
@@ -1075,6 +1118,7 @@ function generateBlogPostHTML(
 <script type="application/ld+json">${articleSchema}</script>
 ${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` : ""}
 <script type="application/ld+json">${faqSchema}</script>
+<script type="application/ld+json">${breadcrumbSchema}</script>
 ${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
@@ -1105,8 +1149,10 @@ ${siteNav()}
   </div>
   <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(eventsIntroLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${
-    featured
+	  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
+	  ${relatedBlogHtml}
+	  ${
+	    featured
       ? `
   <div class="card-box">
     ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
@@ -1135,16 +1181,16 @@ ${siteNav()}
   ${
     others.length > 0
       ? `
-  <div class="card-box">
+  <div class="card-box" style="padding:16px 20px">
     <h2 class="h4 mb-2"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
       <span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${others.length} events</span>
       ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
     </div>
-    ${othersVisibleHtml}
+    <div class="row g-0">${othersVisibleHtml}</div>
     ${
       othersHiddenHtml
-        ? `<div id="events-more" style="display:none">${othersHiddenHtml}</div>
+        ? `<div id="events-more" style="display:none"><div class="row g-0">${othersHiddenHtml}</div></div>
     <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>`
         : ""
     }
@@ -1215,7 +1261,7 @@ ${getSharedPageScripts()}
 </body></html>`;
 }
 
-function serveGeneratedSitemap(siteUrl) {
+function serveEventsDateSitemap(siteUrl) {
   let urls = "";
   for (let m = 0; m < 12; m++) {
     for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
@@ -1240,7 +1286,126 @@ function servePeopleSitemap(siteUrl) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
 }
 
-function generateBornHTML(siteUrl, monthName, day, eventsData) {
+function buildDateClusterCard(monthName, day, mDisplay, currentType) {
+  const links = [
+    {
+      type: "events",
+      href: `/events/${monthName}/${day}/`,
+      icon: "bi-calendar-event",
+      label: `Events on ${mDisplay} ${day}`,
+    },
+    {
+      type: "born",
+      href: `/born/${monthName}/${day}/`,
+      icon: "bi-person-heart",
+      label: `Birthdays on ${mDisplay} ${day}`,
+    },
+    {
+      type: "died",
+      href: `/died/${monthName}/${day}/`,
+      icon: "bi-flower1",
+      label: `Deaths on ${mDisplay} ${day}`,
+    },
+    {
+      type: "quiz",
+      href: `/quiz/${monthName}/${day}/`,
+      icon: "bi-patch-question",
+      label: `${mDisplay} ${day} quiz`,
+    },
+  ];
+
+  const buttons = links
+    .map((link) => {
+      const active = link.type === currentType;
+      return `<a href="${link.href}" class="date-cluster-link${active ? " date-cluster-link-active" : ""}"${active ? ' aria-current="page"' : ""}><i class="bi ${link.icon}"></i>${escapeHtml(link.label)}</a>`;
+    })
+    .join("");
+
+  return `<div class="card-box date-cluster-card">
+    <h2 class="h5 mb-3"><i class="bi bi-signpost-split me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h2>
+    <p class="text-muted mb-3" style="font-size:.9rem">Jump between the main pages for this date to compare events, people, and the daily quiz.</p>
+    <div class="date-cluster-links">${buttons}</div>
+  </div>`;
+}
+
+function buildRelatedBlogCard(entry, heading = "Related Story") {
+  if (!entry?.slug) return "";
+  const title = escapeHtml(entry.title || "Read the related historical story");
+  const description = escapeHtml(entry.description || "");
+  const img = entry.imageUrl
+    ? `/image-proxy?src=${encodeURIComponent(entry.imageUrl)}&w=320&q=80`
+    : "";
+  const thumb = img
+    ? `<img src="${img}" alt="${title}" width="96" height="72" style="width:96px;height:72px;min-width:96px;object-fit:cover;border-radius:8px;display:block" loading="lazy">`
+    : `<div style="width:96px;height:72px;min-width:96px;border-radius:8px;background:rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;color:var(--btn-bg,#1b3a2d);font-size:1.1rem"><i class="bi bi-journal-richtext"></i></div>`;
+  return `<div class="card-box">
+    <h3 class="h5 mb-3"><i class="bi bi-journal-richtext me-2" style="color:#1a1a1a"></i>${escapeHtml(heading)}</h3>
+    <a href="/blog/${escapeHtml(entry.slug)}/" class="d-flex align-items-start gap-3 text-decoration-none" style="color:inherit">
+      ${thumb}
+      <div style="min-width:0">
+        <div class="fw-semibold" style="font-size:.96rem;line-height:1.35;color:var(--btn-bg,#1b3a2d)">${title}</div>
+        ${description ? `<p class="mb-2 mt-1 text-muted" style="font-size:.84rem;line-height:1.45">${description}</p>` : ""}
+        <span class="small" style="font-weight:600">Read the full story <i class="bi bi-arrow-right ms-1"></i></span>
+      </div>
+    </a>
+  </div>`;
+}
+
+async function findMatchingDateBlogEntry(env, monthName, day) {
+  if (!env?.BLOG_AI_KV) return null;
+  try {
+    const index = await env.BLOG_AI_KV.get("index", { type: "json" });
+    if (!Array.isArray(index) || !index.length) return null;
+    const currentYear = new Date().getUTCFullYear();
+    const candidates = [`${day}-${monthName}-${currentYear}`, `${day}-${monthName}-${currentYear - 1}`];
+    for (const slug of candidates) {
+      const match = index.find((entry) => entry?.slug === slug);
+      if (match) return match;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return null;
+}
+
+function buildBreadcrumbSchema(items) {
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: item.item,
+    })),
+  }).replace(/<\//g, "<\\/");
+}
+
+function buildPageSchema({
+  type = "WebPage",
+  name,
+  description,
+  url,
+  mainEntityId,
+  about,
+}) {
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": type,
+    name,
+    description,
+    url,
+    isPartOf: {
+      "@type": "WebSite",
+      name: "thisDay.info",
+      url: "https://thisday.info/",
+    },
+    ...(about ? { about } : {}),
+    ...(mainEntityId ? { mainEntity: { "@id": mainEntityId } } : {}),
+  }).replace(/<\//g, "<\\/");
+}
+
+function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry = null) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const MM = String(mNum).padStart(2, "0");
@@ -1333,8 +1498,10 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
     births.length > 0
       ? JSON.stringify({
           "@context": "https://schema.org",
+          "@id": `${canonical}#birthdays`,
           "@type": "ItemList",
           name: `Famous Birthdays on ${mDisplay} ${day}`,
+          url: canonical,
           numberOfItems: births.length,
           itemListElement: births.slice(0, 10).map((b, i) => {
             const jobTitle = b.text.includes(",")
@@ -1357,6 +1524,25 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
           }),
         })
       : null;
+
+  const pageSchema = buildPageSchema({
+    type: "CollectionPage",
+    name: pageTitle.replace(" | thisDay.info", ""),
+    description: pageDesc,
+    url: canonical,
+    mainEntityId: births.length > 0 ? `${canonical}#birthdays` : null,
+    about: { "@type": "Thing", name: `Birthdays on ${mDisplay} ${day}` },
+  });
+
+  const breadcrumbSchema = buildBreadcrumbSchema([
+    { name: "Home", item: `${siteUrl}/` },
+    { name: "On This Day", item: `${siteUrl}/events/` },
+    { name: `Born on ${mDisplay} ${day}`, item: canonical },
+  ]);
+  const relatedBlogHtml = buildRelatedBlogCard(
+    relatedBlogEntry,
+    `${mDisplay} ${day} in the Blog`,
+  );
 
   // Top 3 featured cards
   const top3Html = births
@@ -1457,12 +1643,14 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
 <meta property="og:site_name" content="thisDay."/>
 <meta property="og:image" content="${escapeHtml(ogImg)}"/>
 <meta name="twitter:card" content="summary_large_image"/>
-<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
-<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
-<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
-<meta name="author" content="thisDay.info"/>
-<script type="application/ld+json">${faqSchema}</script>
-${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
+	<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+	<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+	<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
+	<meta name="author" content="thisDay.info"/>
+	<script type="application/ld+json">${pageSchema}</script>
+	<script type="application/ld+json">${faqSchema}</script>
+	<script type="application/ld+json">${breadcrumbSchema}</script>
+	${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -1490,8 +1678,10 @@ ${siteNav()}
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
-  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+	  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+	  ${buildDateClusterCard(monthName, day, mDisplay, "born")}
+	  ${relatedBlogHtml}
+	  ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
@@ -1553,7 +1743,7 @@ ${getSharedPageScripts()}
 </body></html>`;
 }
 
-function generateDiedHTML(siteUrl, monthName, day, eventsData) {
+function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry = null) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const MM = String(mNum).padStart(2, "0");
@@ -1646,8 +1836,10 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
     deaths.length > 0
       ? JSON.stringify({
           "@context": "https://schema.org",
+          "@id": `${canonical}#deaths`,
           "@type": "ItemList",
           name: `Notable Deaths on ${mDisplay} ${day}`,
+          url: canonical,
           numberOfItems: deaths.length,
           itemListElement: deaths.slice(0, 10).map((d, i) => {
             const jobTitle = d.text.includes(",")
@@ -1670,6 +1862,25 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
           }),
         })
       : null;
+
+  const pageSchema = buildPageSchema({
+    type: "CollectionPage",
+    name: pageTitle.replace(" | thisDay.info", ""),
+    description: pageDesc,
+    url: canonical,
+    mainEntityId: deaths.length > 0 ? `${canonical}#deaths` : null,
+    about: { "@type": "Thing", name: `Deaths on ${mDisplay} ${day}` },
+  });
+
+  const breadcrumbSchema = buildBreadcrumbSchema([
+    { name: "Home", item: `${siteUrl}/` },
+    { name: "On This Day", item: `${siteUrl}/events/` },
+    { name: `Died on ${mDisplay} ${day}`, item: canonical },
+  ]);
+  const relatedBlogHtml = buildRelatedBlogCard(
+    relatedBlogEntry,
+    `${mDisplay} ${day} in the Blog`,
+  );
 
   // Top 3 featured cards
   const top3Html = deaths
@@ -1770,12 +1981,14 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
 <meta property="og:site_name" content="thisDay."/>
 <meta property="og:image" content="${escapeHtml(ogImg)}"/>
 <meta name="twitter:card" content="summary_large_image"/>
-<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
-<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
-<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
-<meta name="author" content="thisDay.info"/>
-<script type="application/ld+json">${faqSchema}</script>
-${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
+	<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+	<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+	<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
+	<meta name="author" content="thisDay.info"/>
+	<script type="application/ld+json">${pageSchema}</script>
+	<script type="application/ld+json">${faqSchema}</script>
+	<script type="application/ld+json">${breadcrumbSchema}</script>
+	${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -1803,8 +2016,10 @@ ${siteNav()}
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
-  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+	  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+	  ${buildDateClusterCard(monthName, day, mDisplay, "died")}
+	  ${relatedBlogHtml}
+	  ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
@@ -1871,6 +2086,64 @@ async function handleBlogIndex(env, url) {
     ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
     : null;
   const posts = Array.isArray(index) ? index.slice(0, 3) : [];
+  const latestPost = posts[0] || null;
+  const latestPostIso =
+    latestPost?.publishedAt &&
+    !Number.isNaN(new Date(latestPost.publishedAt).getTime())
+      ? new Date(latestPost.publishedAt).toISOString()
+      : null;
+  const latestPostLabel = latestPostIso
+    ? new Date(latestPostIso).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : null;
+  const canonical = `${url.origin}/blog/`;
+  const collectionSchema = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: "Blog | thisDay.",
+    url: canonical,
+    description:
+      "Latest historical articles from thisDay.info, covering major events, people, and turning points tied to specific calendar dates.",
+    isPartOf: {
+      "@type": "WebSite",
+      name: "thisDay.info",
+      url: `${url.origin}/`,
+    },
+    about: { "@type": "Thing", name: "History" },
+    ...(latestPostIso && { dateModified: latestPostIso }),
+    mainEntity: {
+      "@type": "ItemList",
+      itemListOrder: "https://schema.org/ItemListOrderDescending",
+      numberOfItems: posts.length,
+      itemListElement: posts.map((post, idx) => ({
+        "@type": "ListItem",
+        position: idx + 1,
+        url: `${url.origin}/blog/${post.slug}/`,
+        name: post.title || post.slug,
+      })),
+    },
+  };
+  const breadcrumbSchema = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Home",
+        item: `${url.origin}/`,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "Blog",
+        item: `${url.origin}/blog/`,
+      },
+    ],
+  };
 
   const postsHtml =
     posts.length > 0
@@ -1911,14 +2184,28 @@ async function handleBlogIndex(env, url) {
       : `<div class="card-box text-center py-5"><p class="text-muted mb-0">No posts available yet.</p></div>`;
 
   const pageTitle = "Blog | thisDay.";
-  const canonical = `${url.origin}/blog/`;
+  const pageDesc = latestPostLabel
+    ? `Latest historical articles from thisDay.info. Most recent update: ${latestPostLabel}.`
+    : "Latest historical articles from thisDay.info.";
 
   const html = `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${pageTitle}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
 <meta name="robots" content="index, follow"/>
-<meta name="description" content="Latest historical articles from thisDay.info"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<script type="application/ld+json">${JSON.stringify(collectionSchema)}</script>
+<script type="application/ld+json">${JSON.stringify(breadcrumbSchema)}</script>
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
@@ -1938,6 +2225,11 @@ ${siteNav()}
     </ol>
   </nav>
   <h1 class="mb-4">Latest Posts</h1>
+  ${
+    latestPostLabel
+      ? `<p class="text-muted mb-4" style="font-size:.9rem">Latest article published on <time datetime="${escapeHtml(latestPostIso)}">${escapeHtml(latestPostLabel)}</time>.</p>`
+      : ""
+  }
   ${postsHtml}
 </main>
 ${siteFooter("yr")}
@@ -1963,7 +2255,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v4-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v6-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2013,11 +2305,13 @@ async function handleBornPage(request, env, ctx, url) {
     }
   }
 
+  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
   const html = generateBornHTML(
     "https://thisday.info",
     monthName,
     day,
     eventsData,
+    relatedBlogEntry,
   );
   if (env.EVENTS_KV && eventsData?.births?.length)
     ctx.waitUntil(
@@ -2046,7 +2340,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v4-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v6-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2096,11 +2390,13 @@ async function handleDiedPage(request, env, ctx, url) {
     }
   }
 
+  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
   const html = generateDiedHTML(
     "https://thisday.info",
     monthName,
     day,
     eventsData,
+    relatedBlogEntry,
   );
   if (env.EVENTS_KV && eventsData?.deaths?.length)
     ctx.waitUntil(
@@ -2263,7 +2559,7 @@ function buildTopicFallbackFacts(
   return facts.map(normalizeDidYouKnowFact).slice(0, 5);
 }
 
-async function handleGeneratedPost(_request, env, ctx, url) {
+async function handleEventsDatePage(_request, env, ctx, url) {
   const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
   // Expect: ['events', 'july', '20']
   if (parts.length !== 3) return new Response("Not Found", { status: 404 });
@@ -2277,7 +2573,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v27-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v28-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2431,7 +2727,8 @@ async function handleGeneratedPost(_request, env, ctx, url) {
     ? buildQuizHTML(quizData, mDisplayForQuiz, day)
     : "";
 
-  const html = generateBlogPostHTML(
+  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
+  const html = generateEventsDateHTML(
     monthName,
     day,
     eventsData,
@@ -2439,6 +2736,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
     didYouKnowFacts,
     quizHtml,
     quizData,
+    relatedBlogEntry,
   );
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
@@ -2558,6 +2856,7 @@ async function handleFetchRequest(request, env, ctx) {
       "/",
       "/blog",
       "/blog/",
+      "/blog/index.json",
       "/blog/archive.json",
       "/events",
       "/events/",
@@ -2598,30 +2897,39 @@ async function handleFetchRequest(request, env, ctx) {
         "",
         "# Block AI training crawlers",
         "User-agent: Amazonbot",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: Applebot-Extended",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: Bytespider",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: CCBot",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: ClaudeBot",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: CloudflareBrowserRenderingCrawler",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: Google-Extended",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: GPTBot",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: meta-externalagent",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         `Sitemap: ${url.origin}/sitemap.xml`,
@@ -2639,8 +2947,7 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   if (url.pathname === "/llms.txt") {
-    const llmsContent = `# Site Summary for Large Language Models...`; // your content
-    return new Response(llmsContent, {
+    return new Response(LLMS_TXT_CONTENT, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   }
@@ -2745,7 +3052,7 @@ async function handleFetchRequest(request, env, ctx) {
     });
   }
 
-  // Legacy generated URLs -> /events (SEO-friendly permanent redirect)
+  // Legacy /generated URLs always redirect to the canonical /events route
   if (url.pathname === "/generated" || url.pathname === "/generated/") {
     return Response.redirect(`${url.origin}/events/`, 301);
   }
@@ -2759,7 +3066,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/events/${mn}/${dd}/`, 302);
   }
 
   // /events landing -> today's date page
@@ -2767,7 +3074,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/events/${mn}/${dd}/`, 302);
   }
 
   // /quiz/ or /quiz → today's quiz
@@ -2775,7 +3082,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/quiz/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/quiz/${mn}/${dd}/`, 302);
   }
 
   // Quiz standalone pages: /quiz/{month}/{day}/
@@ -2834,7 +3141,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/events/${mn}/${dd}/`, 302);
   }
 
   // /born/today/ → redirect to today's born page
@@ -2842,7 +3149,15 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/born/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/born/${mn}/${dd}/`, 302);
+  }
+
+  // /born landing -> today's born page
+  if (url.pathname === "/born" || url.pathname === "/born/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return redirectNoStore(`${url.origin}/born/${mn}/${dd}/`, 302);
   }
 
   // /died/today/ → redirect to today's died page
@@ -2850,7 +3165,23 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/died/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/died/${mn}/${dd}/`, 302);
+  }
+
+  // /died landing -> today's died page
+  if (url.pathname === "/died" || url.pathname === "/died/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return redirectNoStore(`${url.origin}/died/${mn}/${dd}/`, 302);
+  }
+
+  // Legacy people aliases -> canonical routes
+  if (url.pathname === "/births" || url.pathname === "/births/") {
+    return Response.redirect(`${url.origin}/born/today/`, 301);
+  }
+  if (url.pathname === "/deaths" || url.pathname === "/deaths/") {
+    return Response.redirect(`${url.origin}/died/today/`, 301);
   }
 
   // Born pages: /born/{month}/{day}/
@@ -2874,9 +3205,12 @@ async function handleFetchRequest(request, env, ctx) {
     return handleBlogIndex(env, url);
   }
 
-  // Serve KV blog index as /blog/archive.json so the homepage carousel
-  // can load latest posts without scanning individual day URLs
-  if (url.pathname === "/blog/archive.json") {
+  // Serve the KV blog index as canonical /blog/index.json.
+  // Keep /blog/archive.json as a legacy alias for older homepage consumers.
+  if (
+    url.pathname === "/blog/index.json" ||
+    url.pathname === "/blog/archive.json"
+  ) {
     const index = env.BLOG_AI_KV
       ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
       : null;
@@ -2892,7 +3226,7 @@ async function handleFetchRequest(request, env, ctx) {
 
   // Events pages — must be before the HTML pass-through guard
   if (url.pathname.startsWith("/events/")) {
-    return handleGeneratedPost(request, env, ctx, url);
+    return handleEventsDatePage(request, env, ctx, url);
   }
 
   // Sitemap for born/died pages (366 × 2 = 732 URLs)
@@ -2902,17 +3236,19 @@ async function handleFetchRequest(request, env, ctx) {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "X-Robots-Tag": "noindex",
       },
     });
   }
 
-  // Generated sitemap listing all 366 /events/ pages
+  // Date-route sitemap listing all canonical /events/ pages and /quiz/ pages
   if (url.pathname === "/sitemap-generated.xml") {
     const siteUrl = `${url.protocol}//${url.host}`;
-    return new Response(serveGeneratedSitemap(siteUrl), {
+    return new Response(serveEventsDateSitemap(siteUrl), {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "X-Robots-Tag": "noindex",
       },
     });
   }
@@ -3555,11 +3891,11 @@ async function handleFetchRequest(request, env, ctx) {
           { html: true },
         );
 
-        // --- Inject today's generated URL so the carousel can link internally ---
+        // --- Inject today's canonical events URL so the carousel can link internally ---
         const mn = MONTHS_ALL[today.getMonth()];
         const dd = today.getDate();
         element.append(
-          `<script>window.__todayGeneratedUrl="/events/${mn}/${dd}/";</script>`,
+          `<script>window.__todayEventsUrl="/events/${mn}/${dd}/";window.__todayGeneratedUrl=window.__todayEventsUrl;</script>`,
           { html: true },
         );
       },
@@ -3725,7 +4061,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v25:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v27:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -3775,6 +4111,8 @@ async function handleScheduledEvent(env) {
     try {
       const urls = [
         `https://thisday.info/events/${monthSlug}/${day}/`,
+        `https://thisday.info/born/${monthSlug}/${day}/`,
+        `https://thisday.info/died/${monthSlug}/${day}/`,
         `https://thisday.info/quiz/${monthSlug}/${day}/`,
       ];
       await fetch("https://thisday.info/search-ping", {
@@ -4085,21 +4423,15 @@ function buildQuizHTML(quiz, monthDisplay, day) {
     `<p class="text-muted mb-2" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out.</p>` +
     `<a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" class="site-btn mb-3"><i class="bi bi-list-check"></i>Full quiz page</a>` +
     `<div id="tdq-questions">${questionsHtml}</div>` +
-    `<button class="btn btn-warning mt-3" id="tdq-submit-btn"><i class="bi bi-check2-circle"></i>Check Answers</button>` +
     `<div id="tdq-score" class="mt-3" hidden></div>` +
     `</div>` +
     `<script>(function(){` +
     `var answers=${answersJson};` +
     `var selected={};` +
-    `document.querySelectorAll('.tdq-opt').forEach(function(opt){` +
-    `opt.addEventListener('click',function(){` +
-    `var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);` +
-    `selected[qi]=oi;` +
-    `document.querySelectorAll('[data-qi="'+qi+'"]').forEach(function(o){o.classList.remove('tdq-opt-selected');o.setAttribute('aria-checked','false');});` +
-    `this.classList.add('tdq-opt-selected');this.setAttribute('aria-checked','true');` +
-    `});` +
-    `});` +
-    `document.getElementById('tdq-submit-btn').addEventListener('click',function(){` +
+    `var graded=false;` +
+    `function grade(){` +
+    `if(graded)return;` +
+    `graded=true;` +
     `var score=0;` +
     `answers.forEach(function(correct,qi){` +
     `var chosen=selected[qi]!==undefined?selected[qi]:-1;` +
@@ -4113,12 +4445,20 @@ function buildQuizHTML(quiz, monthDisplay, day) {
     `fb.innerHTML='<span class="tdq-wrong">✗ Incorrect.</span> Correct answer: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
     `var exp=document.getElementById('tdq-e-'+qi);if(exp)exp.hidden=false;` +
     `});` +
-    `this.hidden=true;` +
     `var pct=Math.round(score/answers.length*100);` +
     `var msg=pct===100?'Perfect score!':pct>=80?'Excellent!':pct>=60?'Good job!':'Keep learning!';` +
     `var el=document.getElementById('tdq-score');` +
     `el.hidden=false;` +
     `el.innerHTML='<div class="tdq-score-box">You scored <span class="tdq-score-num">'+score+'/'+answers.length+'</span> ('+pct+'%) — '+msg+'</div>';` +
+    `}` +
+    `document.querySelectorAll('.tdq-opt').forEach(function(opt){` +
+    `opt.addEventListener('click',function(){` +
+    `var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);` +
+    `selected[qi]=oi;` +
+    `document.querySelectorAll('[data-qi="'+qi+'"]').forEach(function(o){o.classList.remove('tdq-opt-selected');o.setAttribute('aria-checked','false');});` +
+    `this.classList.add('tdq-opt-selected');this.setAttribute('aria-checked','true');` +
+    `if(Object.keys(selected).length===answers.length)grade();` +
+    `});` +
     `});` +
     `})();</script>`
   );
@@ -4381,7 +4721,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v25:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v27:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -4598,6 +4938,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const quizPageSchema = quiz?.questions?.length
     ? JSON.stringify({
         "@context": "https://schema.org",
+        "@id": `${canonical}#quiz`,
         "@type": "Quiz",
         name: quizPageTitle.replace(" | thisDay.info", ""),
         description: quizPageDesc,
@@ -4629,6 +4970,27 @@ async function handleQuizPage(_request, env, monthSlug, day) {
       }).replace(/<\//g, "<\\/")
     : null;
 
+  const quizWebPageSchema = buildPageSchema({
+    type: "WebPage",
+    name: quizPageTitle.replace(" | thisDay.info", ""),
+    description: quizPageDesc,
+    url: canonical,
+    mainEntityId: quiz?.questions?.length ? `${canonical}#quiz` : null,
+    about: quiz?.topic
+      ? { "@type": "Thing", name: quiz.topic }
+      : { "@type": "Thing", name: `${mDisplay} ${day} history quiz` },
+  });
+
+  const breadcrumbSchema = buildBreadcrumbSchema([
+    { name: "Home", item: `${siteUrl}/` },
+    { name: `${mDisplay} ${day} in History`, item: `${siteUrl}/events/${monthSlug}/${day}/` },
+    { name: `${mDisplay} ${day} Quiz`, item: canonical },
+  ]);
+  const relatedBlogHtml = buildRelatedBlogCard(
+    blogEntry,
+    `${mDisplay} ${day} in the Blog`,
+  );
+
   const html = `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(quizPageTitle)}</title>
@@ -4645,9 +5007,11 @@ async function handleQuizPage(_request, env, monthSlug, day) {
 <meta name="twitter:description" content="${escapeHtml(quizPageDesc)}"/>
 <meta name="twitter:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
 <meta property="og:locale" content="en_US"/>
-<meta property="og:site_name" content="thisDay."/>
-<meta name="author" content="thisDay.info"/>
-${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
+	<meta property="og:site_name" content="thisDay."/>
+	<meta name="author" content="thisDay.info"/>
+	<script type="application/ld+json">${quizWebPageSchema}</script>
+	${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
+	<script type="application/ld+json">${breadcrumbSchema}</script>
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -4663,6 +5027,13 @@ body{font-family:Lora,serif;background:var(--bg);color:var(--text);min-height:10
 main{flex:1;padding:28px 0}
 a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--text-muted)}
+/* Marquee (nav + scripts inject items; without CSS it becomes a giant text block) */
+.marquee-bar{background:var(--btn-bg);color:#fff;overflow:hidden;white-space:nowrap;padding:.5rem 0;font-size:.82rem}
+.marquee-track{display:inline-flex;gap:0;animation:marquee-scroll 40s linear infinite;will-change:transform}
+.marquee-track:hover{animation-play-state:paused}
+.marquee-item{padding:0 2.5rem;border-right:1px solid rgba(255,255,255,.2)}
+.marquee-item span{color:var(--accent);font-weight:700;margin-right:.5rem}
+@keyframes marquee-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 /* Base quiz option styles shared with events page */
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.92rem;transition:background .15s,border-color .15s,transform .1s;user-select:none;background:var(--cb)}
 .tdq-opt:hover{border-color:var(--btn-bg);background:var(--bg-alt);transform:translateX(2px)}.tdq-opt-selected{border-color:var(--btn-bg)!important;background:rgba(157,196,58,.15)!important;font-weight:500}
@@ -4757,11 +5128,13 @@ ${siteNav()}
       <li class="breadcrumb-item active">Quiz</li>
     </ol>
   </nav>
-  <div class="qsc-page-header">
-    <h1><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
-    <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
-  </div>
-  ${carouselHtml}
+	  <div class="qsc-page-header">
+	    <h1><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
+	    <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
+	  </div>
+	  ${buildDateClusterCard(monthSlug, day, mDisplay, "quiz")}
+	  ${relatedBlogHtml}
+	  ${carouselHtml}
   ${recSliderHtml}
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
   <div class="ad-unit" style="margin:24px 0">

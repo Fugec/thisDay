@@ -6,7 +6,8 @@
  *
  * Audio:  ElevenLabs TTS narration (from Did You Know / Quick Facts section)
  *         mixed with background music (assets/background.mp3) at 15% volume.
- * Image:  Wikipedia image from the post's imageUrl, or fallback logo.
+ * Image:  Wiki-first. Reuses images embedded in the article HTML, then falls
+ *         back to related Wikipedia/Wikimedia Commons images when needed.
  * Schedule: Mon/Tue/Thu/Fri via GitHub Actions cron at 01:00 UTC
  *
  * Run:        npm start
@@ -16,11 +17,14 @@
  *   CF_ACCOUNT_ID, CF_API_TOKEN, CF_KV_NAMESPACE_ID
  *   YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN
  *   ELEVENLABS_API_KEY     (TTS voiceover, 10k chars/month free)
- *   HF_TOKEN               (HuggingFace FLUX.1-schnell, primary AI image)
- *   HF_TOKEN_2             (HuggingFace fallback account, same model)
- *   HF_TOKEN_3             (HuggingFace fallback account, same model)
+ *   BLOG_WORKER_URL        (needed when this job must trigger /blog/publish)
+ *   YOUTUBE_REGEN_SECRET   (auth for POST /blog/publish regeneration)
  *   YOUTUBE_PRIVACY        (optional: private or public, default public)
- *   USE_AI_IMAGE           (optional: false = Wikipedia image, default true)
+ *   WIKI_IMAGE_MIN_COUNT   (optional: min usable wiki images for multi-scene video; default 3)
+ *
+ * Optional expert-model fallbacks used by helper modules:
+ *   GROQ_API_KEY...        (narration/history review helpers)
+ *   HF_TOKEN...            (narration/history review helpers)
  */
 
 import "dotenv/config";
@@ -337,9 +341,9 @@ async function main() {
         narrationPath = narrPath;
 
         // ── Image pre-check ────────────────────────────────────────────────────
-        // When USE_AI_IMAGE is true we skip the Wikipedia check (AI generates its own).
-        // Otherwise validate stored imageUrl; find a Wikipedia replacement if broken.
-        // Throws IMAGE_UNAVAILABLE if no working image exists — post is skipped.
+        // Multi-scene mode builds from article/Wikipedia images instead of a
+        // single stored post.imageUrl, so the legacy resolvePostImage check is
+        // only needed for the single-scene fallback path.
         const useAiImage = process.env.USE_AI_IMAGE !== "false";
         if (!useAiImage) {
           console.log("  Checking image...");
@@ -353,7 +357,7 @@ async function main() {
             console.log("  ✓ Image OK");
           }
         } else {
-          console.log("  AI image mode — skipping Wikipedia image check.");
+          console.log("  Multi-scene wiki mode — skipping single-image pre-check.");
         }
 
         // ── Generate video (with quality gate + retry) ─────────────────────────

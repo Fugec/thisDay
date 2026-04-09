@@ -30,7 +30,8 @@ export const ROOT_VARS =
  * Returns the canonical site nav HTML (matches index-new.html).
  */
 export function siteNav() {
-  return `<nav class="nav">
+  return `<div class="site-chrome">
+<nav class="nav">
   <div class="nav-inner">
     <a href="/" class="brand">thisDay.</a>
     <div class="nav-links">
@@ -48,7 +49,6 @@ export function siteNav() {
     </button>
   </div>
   <div class="nav-mobile" id="navMobile">
-    <a href="/events/today/">Events</a>
     <a href="/blog/">Blog</a>
     <a href="/quiz/">Quiz</a>
     <a href="/about/">About</a>
@@ -69,6 +69,7 @@ export function siteNav() {
 </nav>
 <div class="marquee-bar" id="marqueeBar" style="display:none">
   <div class="marquee-track" id="marqueeTrack"></div>
+</div>
 </div>`;
 }
 
@@ -121,9 +122,11 @@ export function marqueeScript() {
 
 /** Nav CSS — extracted from css/custom.css. Paste into the page <style> block. */
 export const NAV_CSS =
-  `.nav{background:var(--bg);border-bottom:1px solid var(--border);padding:1rem 0;position:sticky;top:0;z-index:1000}` +
+  `.site-chrome{position:sticky;top:0;z-index:1000;background:var(--bg);box-shadow:0 6px 18px rgba(27,58,45,.08)}` +
+  `.nav{background:var(--bg);border-bottom:1px solid var(--border);padding:1rem 0;position:relative;z-index:1}` +
   `.nav-inner{padding:0 2rem;display:flex;align-items:center;width:100%}` +
   `.brand{font-family:"Lora",Georgia,serif;font-size:1.5rem;font-weight:700;color:var(--text);text-decoration:none}` +
+  `.brand:hover{color:var(--text);text-decoration:none}` +
   `.nav-links{display:flex;gap:1.5rem;font-size:.9rem;margin-left:auto}` +
   `.nav-links a{color:var(--text-muted);text-decoration:none;font-weight:500}` +
   `.nav-links a:hover{color:var(--text)}` +
@@ -138,7 +141,7 @@ export const NAV_CSS =
   `.mobile-menu-link:last-child{border-bottom:none}` +
   `.mobile-menu-social{margin-top:.75rem;display:flex;gap:.6rem}` +
   `.mobile-menu-social a{color:var(--text);font-size:1.1rem}` +
-  `@media(max-width:768px){.nav-links{display:none}.btn#navToggle{display:flex}.nav{position:relative}}`;
+  `@media(max-width:768px){.nav-links{display:none}.btn#navToggle{display:flex}.site-chrome{position:sticky}.nav{position:relative}}`;
 
 /** @deprecated — kept for backward compat; will be removed when workers are updated. */
 export const NAV_CSS_FALLBACK = "";

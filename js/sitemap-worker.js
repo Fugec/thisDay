@@ -1,9 +1,13 @@
 /**
  * Cloudflare Worker — Dynamic Sitemap Generator
  *
- * Serves /sitemap.xml by merging hard-coded static pages with AI-generated
- * blog posts read live from BLOG_AI_KV. The result is cached at the edge for
- * 1 hour so every new post is reflected within an hour of publication.
+ * Serves:
+ *   /sitemap.xml      → sitemap index for crawler discovery
+ *   /sitemap-main.xml → core/static/blog sitemap
+ *
+ * The blog sitemap is built by merging hard-coded static pages with
+ * AI-generated blog posts read live from BLOG_AI_KV. The result is cached at
+ * the edge for 1 hour so every new post is reflected quickly after publish.
  *
  * Deploy:  npx wrangler deploy --config wrangler-sitemap.jsonc
  * Dev:     npx wrangler dev --config wrangler-sitemap.jsonc
@@ -18,6 +22,7 @@
 const DOMAIN = "https://thisday.info";
 const CACHE_MAX_AGE = 3600; // 1 hour (purged immediately after each new publish)
 const KV_INDEX_KEY = "index";
+const SITE_STRUCTURE_LASTMOD = "2026-04-09";
 
 // ---------------------------------------------------------------------------
 // Static pages — core site sections that never change dynamically
@@ -26,65 +31,58 @@ const KV_INDEX_KEY = "index";
 const STATIC_PAGES = [
   {
     loc: "/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "daily",
     priority: "1.0",
     dynamicLastmod: true,
   },
   {
     loc: "/about/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "monthly",
     priority: "0.7",
   },
   {
     loc: "/about/editorial/",
-    lastmod: "2026-04-05",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "monthly",
     priority: "0.7",
   },
   {
     loc: "/contact/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "monthly",
     priority: "0.6",
   },
   {
     loc: "/blog/",
-    lastmod: "2026-03-17",
-    changefreq: "weekly",
-    priority: "0.8",
-    dynamicLastmod: true,
-  },
-  {
-    loc: "/blog/archive/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "weekly",
     priority: "0.8",
     dynamicLastmod: true,
   },
   // Pillar hub pages — /blog/topic/:slug/
-  { loc: "/blog/topic/war-conflict/",          lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/politics-government/",   lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/science-technology/",    lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/arts-culture/",          lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/disasters-accidents/",   lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/social-human-rights/",   lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/economy-business/",      lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/health-medicine/",       lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/exploration-discovery/", lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/famous-persons/",        lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7" },
-  { loc: "/blog/topic/born-on-this-day/",      lastmod: "2026-04-05", changefreq: "weekly", priority: "0.6" },
-  { loc: "/blog/topic/died-on-this-day/",      lastmod: "2026-04-05", changefreq: "weekly", priority: "0.6" },
+  { loc: "/blog/topic/war-conflict/",          lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/politics-government/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/science-technology/",    lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/arts-culture/",          lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/disasters-accidents/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/social-human-rights/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/economy-business/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/health-medicine/",       lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/exploration-discovery/", lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/famous-persons/",        lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/born-on-this-day/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.6", dynamicLastmod: true },
+  { loc: "/blog/topic/died-on-this-day/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.6", dynamicLastmod: true },
   {
     loc: "/privacy-policy/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "yearly",
     priority: "0.3",
   },
   {
     loc: "/terms/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "yearly",
     priority: "0.3",
   },
@@ -155,14 +153,18 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (url.pathname !== "/sitemap.xml") {
+    if (
+      url.pathname !== "/sitemap.xml" &&
+      url.pathname !== "/sitemap-main.xml"
+    ) {
       return fetch(request);
     }
 
     // Helpful for diagnosing Search Console “couldn’t fetch” issues.
     // Logs show up in `wrangler tail` for this worker.
     try {
-      console.log("sitemap.xml request", {
+      console.log("sitemap request", {
+        path: url.pathname,
         ua: request.headers.get("user-agent") || "",
         cf: request.cf || null,
       });
@@ -172,7 +174,7 @@ export default {
 
     // Serve from edge cache if available
     const cache = caches.default;
-    const cacheKey = new Request(`${DOMAIN}/sitemap.xml`);
+    const cacheKey = new Request(`${DOMAIN}${url.pathname}`);
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
 
@@ -188,12 +190,17 @@ export default {
 
     // Allow skipping legacy (static) blog posts via an environment flag
     const ignoreLegacy = env && String(env.IGNORE_LEGACY_BLOG) === "true";
-    const xml = buildSitemap(aiPosts, ignoreLegacy);
+    const latestPostLastmod = computeLatestPostLastmod(aiPosts, ignoreLegacy);
+    const xml =
+      url.pathname === "/sitemap.xml"
+        ? buildSitemapIndex(latestPostLastmod)
+        : buildMainSitemap(aiPosts, ignoreLegacy, latestPostLastmod);
 
     const response = new Response(xml, {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": `public, max-age=${CACHE_MAX_AGE}, s-maxage=${CACHE_MAX_AGE}`,
+        "X-Robots-Tag": "noindex",
       },
     });
 
@@ -208,17 +215,39 @@ export default {
 // XML builder
 // ---------------------------------------------------------------------------
 
-function buildSitemap(aiPosts, ignoreLegacy = false) {
-  const entries = [];
+function buildSitemapIndex(latestPostLastmod) {
+  const today = new Date().toISOString().slice(0, 10);
+  const mainSitemapLastmod = pickNewerDate(latestPostLastmod, SITE_STRUCTURE_LASTMOD);
+  const entries = [
+    sitemapEntry(`${DOMAIN}/sitemap-main.xml`, mainSitemapLastmod),
+    sitemapEntry(`${DOMAIN}/sitemap-generated.xml`, today),
+    sitemapEntry(`${DOMAIN}/sitemap-people.xml`, today),
+    sitemapEntry(`${DOMAIN}/news-sitemap.xml`, latestPostLastmod),
+  ];
 
-  const latestPostLastmod = computeLatestPostLastmod(aiPosts, ignoreLegacy);
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    entries.join("\n") +
+    `\n</sitemapindex>`
+  );
+}
+
+function buildMainSitemap(
+  aiPosts,
+  ignoreLegacy = false,
+  latestPostLastmod = computeLatestPostLastmod(aiPosts, ignoreLegacy),
+) {
+  const entries = [];
 
   // 1. Core static pages
   for (const page of STATIC_PAGES) {
     entries.push(
       urlEntry(
         `${DOMAIN}${page.loc}`,
-        page.dynamicLastmod ? latestPostLastmod : page.lastmod,
+        page.dynamicLastmod
+          ? pickNewerDate(latestPostLastmod, page.lastmod)
+          : page.lastmod,
         page.changefreq,
         page.priority,
       ),
@@ -250,6 +279,24 @@ function buildSitemap(aiPosts, ignoreLegacy = false) {
     `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
     entries.join("\n") +
     `\n</urlset>`
+  );
+}
+
+function pickNewerDate(...dates) {
+  const normalized = dates
+    .filter(Boolean)
+    .map((value) => String(value).slice(0, 10))
+    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+  if (!normalized.length) return new Date().toISOString().slice(0, 10);
+  return normalized.sort().at(-1);
+}
+
+function sitemapEntry(loc, lastmod) {
+  return (
+    `  <sitemap>\n` +
+    `    <loc>${loc}</loc>\n` +
+    `    <lastmod>${lastmod}</lastmod>\n` +
+    `  </sitemap>`
   );
 }
 

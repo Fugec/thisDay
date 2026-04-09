@@ -194,6 +194,7 @@ export default {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": `public, max-age=${CACHE_MAX_AGE}, s-maxage=${CACHE_MAX_AGE}`,
+        "X-Robots-Tag": "noindex",
       },
     });
 

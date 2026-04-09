@@ -4,6 +4,43 @@ Disallow: /blog/preload-quizzes
 Disallow: /blog/quiz-debug/
 Disallow: /search-ping
 Disallow: /warmup
+
+User-agent: Amazonbot
+Allow: /llms.txt
+Disallow: /
+
+User-agent: Applebot-Extended
+Allow: /llms.txt
+Disallow: /
+
+User-agent: Bytespider
+Allow: /llms.txt
+Disallow: /
+
+User-agent: CCBot
+Allow: /llms.txt
+Disallow: /
+
+User-agent: ClaudeBot
+Allow: /llms.txt
+Disallow: /
+
+User-agent: CloudflareBrowserRenderingCrawler
+Allow: /llms.txt
+Disallow: /
+
+User-agent: Google-Extended
+Allow: /llms.txt
+Disallow: /
+
+User-agent: GPTBot
+Allow: /llms.txt
+Disallow: /
+
+User-agent: meta-externalagent
+Allow: /llms.txt
+Disallow: /
+
 Sitemap: https://thisday.info/sitemap.xml
 Sitemap: https://thisday.info/sitemap-generated.xml
 Sitemap: https://thisday.info/sitemap-people.xml

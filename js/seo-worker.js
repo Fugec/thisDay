@@ -17,6 +17,7 @@ import {
   marqueeScript,
 } from "./shared/layout.js";
 import { callAI } from "./shared/ai-call.js";
+import { LLMS_TXT_CONTENT } from "./shared/llms-content.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -211,6 +212,16 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function redirectNoStore(url, status = 302) {
+  return new Response(null, {
+    status,
+    headers: {
+      Location: url,
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 // Returns an array of 2-3 original editorial paragraphs for the featured event.
@@ -660,6 +671,13 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
     FOOTER_CSS +
     "\n" +
     `
+.marquee-bar{background:var(--btn-bg);color:#fff;overflow:hidden;white-space:nowrap;padding:.5rem 0;font-size:.82rem}
+.marquee-track{display:inline-flex;gap:0;animation:marquee-scroll 40s linear infinite;will-change:transform}
+.marquee-track:hover{animation-play-state:paused}
+.marquee-item{padding:0 2.5rem;border-right:1px solid rgba(255,255,255,.2)}
+.marquee-item span{color:var(--accent);font-weight:700;margin-right:.5rem}
+@keyframes marquee-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
 .card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
@@ -982,17 +1000,23 @@ function generateBlogPostHTML(
         ? fmtY(dMin)
         : "";
 
-  // Events list — progressive disclosure after 8
-  const renderEventRow = (e) => {
+  // Events list — match the denser two-column treatment used on born/died pages
+  const renderEventGridItem = (e) => {
     const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
     const th = e.pages?.[0]?.thumbnail?.source || "";
-    return `<div class="ev-row d-flex align-items-start gap-3">
-  <div class="flex-grow-1"><span class="yr event-years-ago ms-2">${escapeHtml(String(e.year))}</span> ${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
-  ${th ? `<img src="${escapeHtml(th)}" alt="" width="44" height="44" style="border-radius:4px;object-fit:cover;flex-shrink:0" onerror="this.style.display=&#39;none&#39;" loading="lazy"/>` : ""}
+    return `<div class="col-12 col-md-6">
+  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
+    ${th ? `<img src="${escapeHtml(th)}" alt="" class="p-thumb flex-shrink-0" style="margin-top:2px;border-radius:8px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px;border-radius:8px"><i class="bi bi-image-alt"></i></div>`}
+    <div style="min-width:0">
+      <div class="fw-semibold" style="font-size:.88rem;line-height:1.4">${escapeHtml(e.text)}</div>
+      ${w ? `<div style="margin-top:2px"><a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="small text-muted">Wikipedia &rarr;</a></div>` : ""}
+      <span class="yr mt-1 d-inline-block event-years-ago ms-2">${escapeHtml(String(e.year))}</span>
+    </div>
+  </div>
 </div>`;
   };
-  const othersVisibleHtml = others.slice(0, 8).map(renderEventRow).join("");
-  const othersHiddenHtml = others.slice(8).map(renderEventRow).join("");
+  const othersVisibleHtml = others.slice(0, 10).map(renderEventGridItem).join("");
+  const othersHiddenHtml = others.slice(10).map(renderEventGridItem).join("");
 
   // Person card renderer — top 3 (col-12 col-md-4)
   const renderPersonCard = (p, isDeaths = false) => {
@@ -1135,16 +1159,16 @@ ${siteNav()}
   ${
     others.length > 0
       ? `
-  <div class="card-box">
+  <div class="card-box" style="padding:16px 20px">
     <h2 class="h4 mb-2"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
     <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
       <span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${others.length} events</span>
       ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
     </div>
-    ${othersVisibleHtml}
+    <div class="row g-0">${othersVisibleHtml}</div>
     ${
       othersHiddenHtml
-        ? `<div id="events-more" style="display:none">${othersHiddenHtml}</div>
+        ? `<div id="events-more" style="display:none"><div class="row g-0">${othersHiddenHtml}</div></div>
     <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>`
         : ""
     }
@@ -1963,7 +1987,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v4-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v5-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2046,7 +2070,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v4-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v5-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2598,30 +2622,39 @@ async function handleFetchRequest(request, env, ctx) {
         "",
         "# Block AI training crawlers",
         "User-agent: Amazonbot",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: Applebot-Extended",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: Bytespider",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: CCBot",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: ClaudeBot",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: CloudflareBrowserRenderingCrawler",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: Google-Extended",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: GPTBot",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         "User-agent: meta-externalagent",
+        "Allow: /llms.txt",
         "Disallow: /",
         "",
         `Sitemap: ${url.origin}/sitemap.xml`,
@@ -2639,8 +2672,7 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   if (url.pathname === "/llms.txt") {
-    const llmsContent = `# Site Summary for Large Language Models...`; // your content
-    return new Response(llmsContent, {
+    return new Response(LLMS_TXT_CONTENT, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   }
@@ -2759,7 +2791,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/events/${mn}/${dd}/`, 302);
   }
 
   // /events landing -> today's date page
@@ -2767,7 +2799,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/events/${mn}/${dd}/`, 302);
   }
 
   // /quiz/ or /quiz → today's quiz
@@ -2775,7 +2807,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/quiz/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/quiz/${mn}/${dd}/`, 302);
   }
 
   // Quiz standalone pages: /quiz/{month}/{day}/
@@ -2834,7 +2866,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/events/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/events/${mn}/${dd}/`, 302);
   }
 
   // /born/today/ → redirect to today's born page
@@ -2842,7 +2874,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/born/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/born/${mn}/${dd}/`, 302);
   }
 
   // /died/today/ → redirect to today's died page
@@ -2850,7 +2882,7 @@ async function handleFetchRequest(request, env, ctx) {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
-    return Response.redirect(`${url.origin}/died/${mn}/${dd}/`, 302);
+    return redirectNoStore(`${url.origin}/died/${mn}/${dd}/`, 302);
   }
 
   // Born pages: /born/{month}/{day}/
@@ -2902,6 +2934,7 @@ async function handleFetchRequest(request, env, ctx) {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "X-Robots-Tag": "noindex",
       },
     });
   }
@@ -2913,6 +2946,7 @@ async function handleFetchRequest(request, env, ctx) {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "X-Robots-Tag": "noindex",
       },
     });
   }
@@ -3725,7 +3759,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v25:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v26:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -3775,6 +3809,8 @@ async function handleScheduledEvent(env) {
     try {
       const urls = [
         `https://thisday.info/events/${monthSlug}/${day}/`,
+        `https://thisday.info/born/${monthSlug}/${day}/`,
+        `https://thisday.info/died/${monthSlug}/${day}/`,
         `https://thisday.info/quiz/${monthSlug}/${day}/`,
       ];
       await fetch("https://thisday.info/search-ping", {
@@ -4085,21 +4121,15 @@ function buildQuizHTML(quiz, monthDisplay, day) {
     `<p class="text-muted mb-2" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out.</p>` +
     `<a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" class="site-btn mb-3"><i class="bi bi-list-check"></i>Full quiz page</a>` +
     `<div id="tdq-questions">${questionsHtml}</div>` +
-    `<button class="btn btn-warning mt-3" id="tdq-submit-btn"><i class="bi bi-check2-circle"></i>Check Answers</button>` +
     `<div id="tdq-score" class="mt-3" hidden></div>` +
     `</div>` +
     `<script>(function(){` +
     `var answers=${answersJson};` +
     `var selected={};` +
-    `document.querySelectorAll('.tdq-opt').forEach(function(opt){` +
-    `opt.addEventListener('click',function(){` +
-    `var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);` +
-    `selected[qi]=oi;` +
-    `document.querySelectorAll('[data-qi="'+qi+'"]').forEach(function(o){o.classList.remove('tdq-opt-selected');o.setAttribute('aria-checked','false');});` +
-    `this.classList.add('tdq-opt-selected');this.setAttribute('aria-checked','true');` +
-    `});` +
-    `});` +
-    `document.getElementById('tdq-submit-btn').addEventListener('click',function(){` +
+    `var graded=false;` +
+    `function grade(){` +
+    `if(graded)return;` +
+    `graded=true;` +
     `var score=0;` +
     `answers.forEach(function(correct,qi){` +
     `var chosen=selected[qi]!==undefined?selected[qi]:-1;` +
@@ -4113,12 +4143,20 @@ function buildQuizHTML(quiz, monthDisplay, day) {
     `fb.innerHTML='<span class="tdq-wrong">✗ Incorrect.</span> Correct answer: <strong>'+String.fromCharCode(65+correct)+'</strong>';}` +
     `var exp=document.getElementById('tdq-e-'+qi);if(exp)exp.hidden=false;` +
     `});` +
-    `this.hidden=true;` +
     `var pct=Math.round(score/answers.length*100);` +
     `var msg=pct===100?'Perfect score!':pct>=80?'Excellent!':pct>=60?'Good job!':'Keep learning!';` +
     `var el=document.getElementById('tdq-score');` +
     `el.hidden=false;` +
     `el.innerHTML='<div class="tdq-score-box">You scored <span class="tdq-score-num">'+score+'/'+answers.length+'</span> ('+pct+'%) — '+msg+'</div>';` +
+    `}` +
+    `document.querySelectorAll('.tdq-opt').forEach(function(opt){` +
+    `opt.addEventListener('click',function(){` +
+    `var qi=parseInt(this.dataset.qi),oi=parseInt(this.dataset.oi);` +
+    `selected[qi]=oi;` +
+    `document.querySelectorAll('[data-qi="'+qi+'"]').forEach(function(o){o.classList.remove('tdq-opt-selected');o.setAttribute('aria-checked','false');});` +
+    `this.classList.add('tdq-opt-selected');this.setAttribute('aria-checked','true');` +
+    `if(Object.keys(selected).length===answers.length)grade();` +
+    `});` +
     `});` +
     `})();</script>`
   );
@@ -4381,7 +4419,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v25:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v26:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -4663,6 +4701,13 @@ body{font-family:Lora,serif;background:var(--bg);color:var(--text);min-height:10
 main{flex:1;padding:28px 0}
 a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--text-muted)}
+/* Marquee (nav + scripts inject items; without CSS it becomes a giant text block) */
+.marquee-bar{background:var(--btn-bg);color:#fff;overflow:hidden;white-space:nowrap;padding:.5rem 0;font-size:.82rem}
+.marquee-track{display:inline-flex;gap:0;animation:marquee-scroll 40s linear infinite;will-change:transform}
+.marquee-track:hover{animation-play-state:paused}
+.marquee-item{padding:0 2.5rem;border-right:1px solid rgba(255,255,255,.2)}
+.marquee-item span{color:var(--accent);font-weight:700;margin-right:.5rem}
+@keyframes marquee-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 /* Base quiz option styles shared with events page */
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.92rem;transition:background .15s,border-color .15s,transform .1s;user-select:none;background:var(--cb)}
 .tdq-opt:hover{border-color:var(--btn-bg);background:var(--bg-alt);transform:translateX(2px)}.tdq-opt-selected{border-color:var(--btn-bg)!important;background:rgba(157,196,58,.15)!important;font-weight:500}

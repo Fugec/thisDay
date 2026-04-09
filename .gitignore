@@ -6,10 +6,14 @@
 
 # Local documentation — personal notes, not for the repo
 documentation/
+*.md
+CONFIGURATION.txt
 
 # Tests — local only, not deployed or committed
 tests/
 package.json
+youtube-upload/test-history-expert.js
+youtube-upload/test-narration-expert.js
 
 # Wrangler build artifacts
 .wrangler/

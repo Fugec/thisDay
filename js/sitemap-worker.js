@@ -61,13 +61,6 @@ const STATIC_PAGES = [
     priority: "0.8",
     dynamicLastmod: true,
   },
-  {
-    loc: "/blog/archive/",
-    lastmod: SITE_STRUCTURE_LASTMOD,
-    changefreq: "weekly",
-    priority: "0.8",
-    dynamicLastmod: true,
-  },
   // Pillar hub pages — /blog/topic/:slug/
   { loc: "/blog/topic/war-conflict/",          lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
   { loc: "/blog/topic/politics-government/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },

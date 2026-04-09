@@ -18,7 +18,6 @@ The most useful pages for AI systems are the current date-based routes, live blo
 - [Died Today](https://thisday.info/died/today/) - Redirects to the current UTC date's deaths page.
 - [Quiz Today](https://thisday.info/quiz/) - Redirects to the current UTC date's quiz page.
 - [Blog Index](https://thisday.info/blog/) - Primary blog landing page.
-- [Blog Archive](https://thisday.info/blog/archive/) - Archive of stored history articles.
 
 ## Date-Based Content
 
@@ -31,7 +30,7 @@ The most useful pages for AI systems are the current date-based routes, live blo
 ## Blog Content
 
 - [Blog Landing](https://thisday.info/blog/) - Main blog discovery page.
-- [Blog Archive](https://thisday.info/blog/archive/) - Archive listing of AI-assisted history posts.
+- [Example Topic Hub](https://thisday.info/blog/topic/war-conflict/) - Canonical route family: `/blog/topic/{pillar-slug}/`
 - [Example Blog Post](https://thisday.info/blog/8-april-2026/) - Canonical route family: `/blog/{slug}/`
 
 ## Discovery Endpoints

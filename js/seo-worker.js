@@ -774,6 +774,7 @@ function generateEventsDateHTML(
   didYouKnowFacts = [],
   quizHtml = "",
   quizData = null,
+  relatedBlogEntry = null,
 ) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
@@ -1095,6 +1096,10 @@ function generateEventsDateHTML(
     .slice(3)
     .map((d) => renderPersonGridRow(d, true))
     .join("");
+  const relatedBlogHtml = buildRelatedBlogCard(
+    relatedBlogEntry,
+    `${mDisplay} ${day} in the Blog`,
+  );
 
   return `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
@@ -1144,9 +1149,10 @@ ${siteNav()}
   </div>
   <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(eventsIntroLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
-  ${
-    featured
+	  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
+	  ${relatedBlogHtml}
+	  ${
+	    featured
       ? `
   <div class="card-box">
     ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
@@ -1322,6 +1328,46 @@ function buildDateClusterCard(monthName, day, mDisplay, currentType) {
   </div>`;
 }
 
+function buildRelatedBlogCard(entry, heading = "Related Story") {
+  if (!entry?.slug) return "";
+  const title = escapeHtml(entry.title || "Read the related historical story");
+  const description = escapeHtml(entry.description || "");
+  const img = entry.imageUrl
+    ? `/image-proxy?src=${encodeURIComponent(entry.imageUrl)}&w=320&q=80`
+    : "";
+  const thumb = img
+    ? `<img src="${img}" alt="${title}" width="96" height="72" style="width:96px;height:72px;min-width:96px;object-fit:cover;border-radius:8px;display:block" loading="lazy">`
+    : `<div style="width:96px;height:72px;min-width:96px;border-radius:8px;background:rgba(0,0,0,.06);display:flex;align-items:center;justify-content:center;color:var(--btn-bg,#1b3a2d);font-size:1.1rem"><i class="bi bi-journal-richtext"></i></div>`;
+  return `<div class="card-box">
+    <h3 class="h5 mb-3"><i class="bi bi-journal-richtext me-2" style="color:#1a1a1a"></i>${escapeHtml(heading)}</h3>
+    <a href="/blog/${escapeHtml(entry.slug)}/" class="d-flex align-items-start gap-3 text-decoration-none" style="color:inherit">
+      ${thumb}
+      <div style="min-width:0">
+        <div class="fw-semibold" style="font-size:.96rem;line-height:1.35;color:var(--btn-bg,#1b3a2d)">${title}</div>
+        ${description ? `<p class="mb-2 mt-1 text-muted" style="font-size:.84rem;line-height:1.45">${description}</p>` : ""}
+        <span class="small" style="font-weight:600">Read the full story <i class="bi bi-arrow-right ms-1"></i></span>
+      </div>
+    </a>
+  </div>`;
+}
+
+async function findMatchingDateBlogEntry(env, monthName, day) {
+  if (!env?.BLOG_AI_KV) return null;
+  try {
+    const index = await env.BLOG_AI_KV.get("index", { type: "json" });
+    if (!Array.isArray(index) || !index.length) return null;
+    const currentYear = new Date().getUTCFullYear();
+    const candidates = [`${day}-${monthName}-${currentYear}`, `${day}-${monthName}-${currentYear - 1}`];
+    for (const slug of candidates) {
+      const match = index.find((entry) => entry?.slug === slug);
+      if (match) return match;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return null;
+}
+
 function buildBreadcrumbSchema(items) {
   return JSON.stringify({
     "@context": "https://schema.org",
@@ -1359,7 +1405,7 @@ function buildPageSchema({
   }).replace(/<\//g, "<\\/");
 }
 
-function generateBornHTML(siteUrl, monthName, day, eventsData) {
+function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry = null) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const MM = String(mNum).padStart(2, "0");
@@ -1493,6 +1539,10 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
     { name: "On This Day", item: `${siteUrl}/events/` },
     { name: `Born on ${mDisplay} ${day}`, item: canonical },
   ]);
+  const relatedBlogHtml = buildRelatedBlogCard(
+    relatedBlogEntry,
+    `${mDisplay} ${day} in the Blog`,
+  );
 
   // Top 3 featured cards
   const top3Html = births
@@ -1628,9 +1678,10 @@ ${siteNav()}
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
-  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${buildDateClusterCard(monthName, day, mDisplay, "born")}
-  ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+	  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+	  ${buildDateClusterCard(monthName, day, mDisplay, "born")}
+	  ${relatedBlogHtml}
+	  ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
@@ -1692,7 +1743,7 @@ ${getSharedPageScripts()}
 </body></html>`;
 }
 
-function generateDiedHTML(siteUrl, monthName, day, eventsData) {
+function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry = null) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const MM = String(mNum).padStart(2, "0");
@@ -1826,6 +1877,10 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
     { name: "On This Day", item: `${siteUrl}/events/` },
     { name: `Died on ${mDisplay} ${day}`, item: canonical },
   ]);
+  const relatedBlogHtml = buildRelatedBlogCard(
+    relatedBlogEntry,
+    `${mDisplay} ${day} in the Blog`,
+  );
 
   // Top 3 featured cards
   const top3Html = deaths
@@ -1961,9 +2016,10 @@ ${siteNav()}
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
-  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${buildDateClusterCard(monthName, day, mDisplay, "died")}
-  ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+	  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+	  ${buildDateClusterCard(monthName, day, mDisplay, "died")}
+	  ${relatedBlogHtml}
+	  ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
@@ -2199,7 +2255,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v5-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v6-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2249,11 +2305,13 @@ async function handleBornPage(request, env, ctx, url) {
     }
   }
 
+  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
   const html = generateBornHTML(
     "https://thisday.info",
     monthName,
     day,
     eventsData,
+    relatedBlogEntry,
   );
   if (env.EVENTS_KV && eventsData?.births?.length)
     ctx.waitUntil(
@@ -2282,7 +2340,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v5-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v6-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2332,11 +2390,13 @@ async function handleDiedPage(request, env, ctx, url) {
     }
   }
 
+  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
   const html = generateDiedHTML(
     "https://thisday.info",
     monthName,
     day,
     eventsData,
+    relatedBlogEntry,
   );
   if (env.EVENTS_KV && eventsData?.deaths?.length)
     ctx.waitUntil(
@@ -2513,7 +2573,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v27-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v28-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2667,6 +2727,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     ? buildQuizHTML(quizData, mDisplayForQuiz, day)
     : "";
 
+  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
   const html = generateEventsDateHTML(
     monthName,
     day,
@@ -2675,6 +2736,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     didYouKnowFacts,
     quizHtml,
     quizData,
+    relatedBlogEntry,
   );
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
@@ -3995,7 +4057,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v26:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v27:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -4655,7 +4717,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v26:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v27:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -4920,6 +4982,10 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     { name: `${mDisplay} ${day} in History`, item: `${siteUrl}/events/${monthSlug}/${day}/` },
     { name: `${mDisplay} ${day} Quiz`, item: canonical },
   ]);
+  const relatedBlogHtml = buildRelatedBlogCard(
+    blogEntry,
+    `${mDisplay} ${day} in the Blog`,
+  );
 
   const html = `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
@@ -5058,12 +5124,13 @@ ${siteNav()}
       <li class="breadcrumb-item active">Quiz</li>
     </ol>
   </nav>
-  <div class="qsc-page-header">
-    <h1><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
-    <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
-  </div>
-  ${buildDateClusterCard(monthSlug, day, mDisplay, "quiz")}
-  ${carouselHtml}
+	  <div class="qsc-page-header">
+	    <h1><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
+	    <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
+	  </div>
+	  ${buildDateClusterCard(monthSlug, day, mDisplay, "quiz")}
+	  ${relatedBlogHtml}
+	  ${carouselHtml}
   ${recSliderHtml}
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
   <div class="ad-unit" style="margin:24px 0">

@@ -818,11 +818,24 @@ export default {
               ".tdq-popup-open{transform:translateY(0)!important;display:flex!important}",
             );
         }
+        // Strip the old "Check Answers" submit button from legacy quiz popups.
+        // The current flow uses per-question Next buttons and a final See Results button.
+        if (patchedHtml.includes("tdq-submit-btn")) {
+          patchedHtml = patchedHtml
+            .replace(
+              /<button[^>]*id="tdq-submit-btn"[\s\S]*?<\/button>/g,
+              "",
+            )
+            .replaceAll("getElementById('tdq-submit-btn')", "null")
+            .replaceAll('getElementById("tdq-submit-btn")', "null");
+        }
         // Patch old show-all quiz JS → step-by-step (posts with quiz already baked in but old JS)
-        // Only apply if post has quiz popup, no finish-btn, and doesn't already have step CSS (tdq-q-active)
+        // Only apply if post has quiz popup, uses legacy submit flow or no finish-btn,
+        // and doesn't already have step CSS (tdq-q-active)
         if (
           patchedHtml.includes('id="tdq-popup"') &&
-          !patchedHtml.includes("tdq-finish-btn") &&
+          (!patchedHtml.includes("tdq-finish-btn") ||
+            patchedHtml.includes("tdq-submit-btn")) &&
           !patchedHtml.includes("tdq-q-active")
         ) {
           const stepOverride = `<script>
@@ -2308,8 +2321,8 @@ async function runPostPublishExtras(env, slug, content) {
       if (sp) {
         const mPad = String(sp.monthIndex + 1).padStart(2, "0");
         const dPad = String(sp.day).padStart(2, "0");
-        await env.EVENTS_KV.delete(`quiz-page-v28:${mPad}-${dPad}`);
-        console.log(`Blog: busted quiz-page-v28:${mPad}-${dPad} cache`);
+        await env.EVENTS_KV.delete(`quiz-page-v29:${mPad}-${dPad}`);
+        console.log(`Blog: busted quiz-page-v29:${mPad}-${dPad} cache`);
       }
     } catch (e) {
       console.error("Blog: quiz page cache bust failed:", e);

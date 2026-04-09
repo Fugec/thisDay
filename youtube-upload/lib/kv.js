@@ -216,6 +216,68 @@ export async function getPostImageUrls(slug, limit = 15) {
   return urls;
 }
 
+/**
+ * Extracts the canonical Wikipedia article URL referenced by the stored post.
+ * Prefers the article's explicit source link/JSON-LD over inferred titles.
+ *
+ * @param {string} slug
+ * @returns {Promise<string|null>}
+ */
+export async function getPostWikipediaUrl(slug) {
+  const raw = await kvGet(`post:${slug}`);
+  if (!raw) return null;
+
+  const normalizeWikipediaArticleUrl = (candidate) => {
+    const decoded = decodeEntities(String(candidate || "").replace(/\\\//g, "/"));
+    if (!decoded) return null;
+    try {
+      const parsed = new URL(decoded, "https://en.wikipedia.org");
+      const host = parsed.hostname.toLowerCase();
+      if (
+        host !== "en.wikipedia.org" &&
+        host !== "www.en.wikipedia.org" &&
+        host !== "m.wikipedia.org"
+      ) {
+        return null;
+      }
+      if (!parsed.pathname.startsWith("/wiki/")) return null;
+      const articlePath = parsed.pathname.slice("/wiki/".length);
+      if (!articlePath) return null;
+      if (/^(File|Special|Help|Template|Category|Portal|Talk):/i.test(articlePath)) {
+        return null;
+      }
+      return `https://en.wikipedia.org/wiki/${articlePath}`;
+    } catch {
+      return null;
+    }
+  };
+
+  const patterns = [
+    /href="(https:\/\/en\.wikipedia\.org\/wiki\/[^"]+)"[^>]*>Wikipedia<\/a>/i,
+    /"wikiUrl"\s*:\s*"((?:https?:)?\/\/en\.wikipedia\.org\/wiki\/[^"]+)"/i,
+    /"jsonLdUrl"\s*:\s*"((?:https?:)?\/\/en\.wikipedia\.org\/wiki\/[^"]+)"/i,
+    /"url"\s*:\s*"((?:https?:)?\/\/en\.wikipedia\.org\/wiki\/[^"]+)"/i,
+    /href="((?:https?:)?\/\/en\.wikipedia\.org\/wiki\/[^"]+)"/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+    const normalized = normalizeWikipediaArticleUrl(match?.[1]);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  for (const match of raw.matchAll(/https?:\\?\/\\?\/en\.wikipedia\.org\\?\/wiki\\?\/[^"'\\\s<]+/gi)) {
+    const normalized = normalizeWikipediaArticleUrl(match[0]);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
 function decodeEntities(str) {
   return str
     .replace(/&amp;/g, "&")

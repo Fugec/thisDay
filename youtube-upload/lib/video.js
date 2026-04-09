@@ -33,6 +33,7 @@ import { getPostImageUrls } from "./kv.js";
 const TMP = join(dirname(fileURLToPath(import.meta.url)), "../tmp");
 const W = 1080;
 const H = 1920;
+const IMAGE_HEADROOM = 1.22;
 /**
  * 3 scenes per video with gentle crossfades across the 45 s runtime.
  */
@@ -56,10 +57,10 @@ function buildKenBurns(sceneIdx, durationS, inLabel, outLabel) {
   // Use round (not ceil) so frame count exactly matches the scene duration
   const d = Math.round(durationS * FPS);
   // Per-frame zoom increment for pzoom accumulation — smoother than on/d formula
-  const Z_RANGE = 0.1; // 10% total zoom travel (reduced from 12% for less distortion)
+  const Z_RANGE = 0.18; // more visible motion without feeling frantic
   const Z_START = 1.0;
-  const Z_END = (Z_START + Z_RANGE).toFixed(4); // 1.1000
-  const Z_MID = (Z_START + Z_RANGE / 2).toFixed(4); // 1.0500
+  const Z_END = (Z_START + Z_RANGE).toFixed(4);
+  const Z_MID = (Z_START + Z_RANGE / 2).toFixed(4);
   const INC = (Z_RANGE / d).toFixed(7); // per-frame increment
 
   let zoom, x, y;
@@ -192,16 +193,11 @@ async function fetchWikipediaImage(title) {
 }
 
 /**
- * Fetches multiple real image buffers from Wikipedia/Wikimedia Commons for a topic.
+ * Fetches multiple real image buffers from one specific Wikipedia article.
  *
- * Uses actual historical/documentary photos from Wikipedia as-is — no AI generation.
- * Works for person portraits, single objects, events, or any other subject.
+ * Uses actual historical/documentary photos from that exact page as-is — no AI generation.
  *
- * Strategy:
- *   1. Wikipedia page images — sorted by pixel count (largest first) for best quality
- *   2. Wikimedia Commons search — extra images when the Wikipedia page alone isn't enough
- *
- * @param {string} eventTitle  Event/topic name (date suffix already stripped)
+ * @param {string} articleUrlOrTitle  Exact Wikipedia article URL, or fallback title
  * @param {number} count       Max images to return (default 2)
  * @returns {Promise<Buffer[]>}
  */
@@ -314,10 +310,28 @@ function scoreImageTitle(candidateTitle, context) {
   return score;
 }
 
-async function fetchWikipediaImageBuffers(eventTitle, count = 2, context = {}) {
+function getWikipediaTitleFromUrl(articleUrlOrTitle) {
+  const raw = String(articleUrlOrTitle || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    if (parsed.hostname.endsWith("wikipedia.org") && parsed.pathname.includes("/wiki/")) {
+      return decodeURIComponent(parsed.pathname.split("/wiki/")[1].split("#")[0])
+        .replace(/_/g, " ")
+        .trim();
+    }
+  } catch {
+    // fall back to raw title below
+  }
+  return raw;
+}
+
+async function fetchWikipediaImageBuffers(articleUrlOrTitle, count = 2, context = {}) {
   const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
   const buffers = [];
-  const searchContext = buildImageSearchContext(eventTitle, context.contentItems);
+  const pageTitle = getWikipediaTitleFromUrl(articleUrlOrTitle);
+  if (!pageTitle) return buffers;
+  const searchContext = buildImageSearchContext(pageTitle, context.contentItems);
 
   // Only skip obvious UI/template images — keep portraits, objects, events
   const BAD =
@@ -363,10 +377,11 @@ async function fetchWikipediaImageBuffers(eventTitle, count = 2, context = {}) {
     }
   }
 
-  // 1. Wikipedia page images
+  // Only exact-page Wikipedia images. No Commons search fallback here:
+  // the video must stay tied to the specific article selected for the post.
   try {
     const listRes = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(searchContext.title)}&prop=images&imlimit=30&format=json`,
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(pageTitle)}&prop=images&imlimit=50&format=json`,
       { headers: ua, signal: AbortSignal.timeout(15_000) },
     );
     if (listRes.ok) {
@@ -378,35 +393,6 @@ async function fetchWikipediaImageBuffers(eventTitle, count = 2, context = {}) {
 
       const urls = await resolveUrls(
         "https://en.wikipedia.org/w/api.php",
-        candidates,
-      );
-      for (const url of urls) {
-        if (buffers.length >= count) break;
-        const buf = await downloadSafe(url);
-        if (buf) buffers.push(buf);
-      }
-    }
-  } catch {
-    /* continue to Commons */
-  }
-
-  if (buffers.length >= count) return buffers;
-
-  // 2. Wikimedia Commons search — broader pool for less-covered topics
-  try {
-    const commonsQuery = searchContext.queries.join(" ");
-    const searchRes = await fetch(
-      `https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&srsearch=${encodeURIComponent(commonsQuery)}&srlimit=20&format=json`,
-      { headers: ua, signal: AbortSignal.timeout(15_000) },
-    );
-    if (searchRes.ok) {
-      const searchData = await searchRes.json();
-      const candidates = (searchData?.query?.search ?? [])
-        .map((r) => r.title)
-        .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !BAD.test(t));
-
-      const urls = await resolveUrls(
-        "https://commons.wikimedia.org/w/api.php",
         candidates,
       );
       for (const url of urls) {
@@ -435,10 +421,64 @@ function buildVignetteSVG(w, h) {
     <defs>
       <radialGradient id="vig" cx="50%" cy="50%" r="72%" gradientUnits="objectBoundingBox">
         <stop offset="30%" stop-color="black" stop-opacity="0"/>
-        <stop offset="100%" stop-color="black" stop-opacity="0.50"/>
+        <stop offset="100%" stop-color="black" stop-opacity="0.62"/>
       </radialGradient>
     </defs>
     <rect width="${w}" height="${h}" fill="url(#vig)"/>
+  </svg>`;
+}
+
+function buildDepthOverlaySVG(w, h) {
+  const frameInset = Math.round(Math.min(w, h) * 0.03);
+  const frameStroke = Math.max(5, Math.round(Math.min(w, h) * 0.006));
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+    <defs>
+      <linearGradient id="topGlow" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="white" stop-opacity="0.12"/>
+        <stop offset="28%" stop-color="white" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="bottomShade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="black" stop-opacity="0"/>
+        <stop offset="100%" stop-color="black" stop-opacity="0.28"/>
+      </linearGradient>
+    </defs>
+    <rect width="${w}" height="${h}" fill="url(#topGlow)"/>
+    <rect width="${w}" height="${h}" fill="url(#bottomShade)"/>
+    <rect
+      x="${frameInset}"
+      y="${frameInset}"
+      width="${w - frameInset * 2}"
+      height="${h - frameInset * 2}"
+      rx="${Math.round(Math.min(w, h) * 0.02)}"
+      fill="none"
+      stroke="rgba(255,255,255,0.22)"
+      stroke-width="${frameStroke}"
+    />
+  </svg>`;
+}
+
+function buildRoundedRectMaskSVG(w, h, radius) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+    <rect width="${w}" height="${h}" rx="${radius}" fill="white"/>
+  </svg>`;
+}
+
+function buildCardShadowSVG(w, h, radius) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+    <defs>
+      <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">
+        <feDropShadow dx="0" dy="28" stdDeviation="22" flood-color="black" flood-opacity="0.55"/>
+      </filter>
+    </defs>
+    <rect
+      x="0"
+      y="0"
+      width="${w}"
+      height="${h}"
+      rx="${radius}"
+      fill="rgba(0,0,0,0.22)"
+      filter="url(#shadow)"
+    />
   </svg>`;
 }
 
@@ -490,22 +530,78 @@ function applyEraGrading(sharpInst, year) {
  * @returns {Promise<Buffer>}  PNG ready for scene compositing
  */
 async function prepareWikipediaSceneBuffer(buffer, year = null) {
-  const TARGET_W = Math.round(W * 1.15); // 15% larger — Ken Burns headroom
-  const TARGET_H = Math.round(H * 1.15);
-  let proc = sharp(buffer)
+  const TARGET_W = Math.round(W * IMAGE_HEADROOM);
+  const TARGET_H = Math.round(H * IMAGE_HEADROOM);
+  const cardW = Math.round(TARGET_W * 0.82);
+  const cardH = Math.round(TARGET_H * 0.68);
+  const cardX = Math.round((TARGET_W - cardW) / 2);
+  const cardY = Math.round((TARGET_H - cardH) / 2 - TARGET_H * 0.035);
+  const cardRadius = Math.round(Math.min(cardW, cardH) * 0.045);
+
+  let background = sharp(buffer)
     .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre" })
-    .sharpen({ sigma: 1.2 });
+    .blur(16)
+    .modulate({ brightness: 0.45, saturation: 0.92 });
+  background = applyEraGrading(background, year);
 
-  proc = applyEraGrading(proc, year);
+  let card = sharp(buffer)
+    .resize(cardW, cardH, { fit: "cover", position: "centre" })
+    .sharpen({ sigma: 1.6 })
+    .modulate({ brightness: 1.03, saturation: 1.12 });
+  card = applyEraGrading(card, year);
 
-  const vignetteBuf = await sharp(
-    Buffer.from(buildVignetteSVG(TARGET_W, TARGET_H)),
-  )
+  const [backgroundBuf, cardBuf, vignetteBuf, depthBuf, shadowBuf, maskBuf] =
+    await Promise.all([
+      background.png().toBuffer(),
+      card.png().toBuffer(),
+      sharp(Buffer.from(buildVignetteSVG(TARGET_W, TARGET_H))).png().toBuffer(),
+      sharp(Buffer.from(buildDepthOverlaySVG(TARGET_W, TARGET_H))).png().toBuffer(),
+      sharp(Buffer.from(buildCardShadowSVG(cardW, cardH, cardRadius))).png().toBuffer(),
+      sharp(Buffer.from(buildRoundedRectMaskSVG(cardW, cardH, cardRadius)))
+        .png()
+        .toBuffer(),
+    ]);
+
+  const maskedCardBuf = await sharp(cardBuf)
+    .composite([{ input: maskBuf, blend: "dest-in" }])
     .png()
     .toBuffer();
 
-  return proc
-    .composite([{ input: vignetteBuf, blend: "over" }])
+  const borderBuf = await sharp({
+    create: {
+      width: cardW,
+      height: cardH,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([
+      {
+        input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${cardW}" height="${cardH}">
+          <rect
+            x="4"
+            y="4"
+            width="${cardW - 8}"
+            height="${cardH - 8}"
+            rx="${Math.max(0, cardRadius - 4)}"
+            fill="none"
+            stroke="rgba(255,255,255,0.28)"
+            stroke-width="6"
+          />
+        </svg>`),
+      },
+    ])
+    .png()
+    .toBuffer();
+
+  return sharp(backgroundBuf)
+    .composite([
+      { input: vignetteBuf, blend: "over" },
+      { input: shadowBuf, left: cardX, top: cardY, blend: "over" },
+      { input: maskedCardBuf, left: cardX, top: cardY, blend: "over" },
+      { input: borderBuf, left: cardX, top: cardY, blend: "over" },
+      { input: depthBuf, blend: "soft-light" },
+    ])
     .png()
     .toBuffer();
 }
@@ -1190,6 +1286,7 @@ async function generateMultiSceneVideo(
     bgMusicPath,
     words,
     contentItems,
+    wikiArticleUrl,
     narrationParts,
     videoPath,
     qualityHint = null,
@@ -1210,25 +1307,17 @@ async function generateMultiSceneVideo(
       : `  Video duration: ${videoDuration} s (default — no word timestamps)`,
   );
 
-  // 1. Fetch real Wikipedia/Commons images (wiki-only mode)
-  const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
-  console.log(`  Fetching article images for "${slug}"...`);
-  const articleBuffers = await fetchArticleImageBuffers(slug, N_SCENES);
-  console.log(`  ✓ Found ${articleBuffers.length} usable image(s) in article HTML`);
-
-  const remainingSlots = Math.max(0, N_SCENES - articleBuffers.length);
-  const wikiBuffers =
-    remainingSlots > 0
-      ? await fetchWikipediaImageBuffers(event, remainingSlots, {
-          contentItems,
-        })
-      : [];
-
-  const imageBuffers = [...articleBuffers, ...wikiBuffers];
+  // 1. Fetch real images only from the exact Wikipedia article tied to this post.
+  const fallbackTitle = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
+  const articleSource = wikiArticleUrl || fallbackTitle;
+  console.log(`  Fetching exact Wikipedia article images for "${slug}"...`);
+  const imageBuffers = await fetchWikipediaImageBuffers(articleSource, N_SCENES, {
+    contentItems,
+  });
 
   if (imageBuffers.length === 0) {
     throw new Error(
-      "IMAGE_UNAVAILABLE: no Wikipedia/Commons images found (wiki-only mode)",
+      "IMAGE_UNAVAILABLE: no usable images found on the exact Wikipedia article",
     );
   }
 
@@ -1240,13 +1329,13 @@ async function generateMultiSceneVideo(
 
   if (imageBuffers.length < minWikiImages) {
     throw new Error(
-      `IMAGE_UNAVAILABLE: wiki-only mode requires ${minWikiImages} usable Wikipedia/Commons images, got ${imageBuffers.length}`,
+      `IMAGE_UNAVAILABLE: exact Wikipedia article mode requires ${minWikiImages} usable article images, got ${imageBuffers.length}`,
     );
   }
 
   const sceneCount = Math.min(N_SCENES, imageBuffers.length);
   console.log(
-    `  ✓ Using ${sceneCount} real Wikipedia/Commons images (article HTML + wiki fallback, min=${minWikiImages})`,
+    `  ✓ Using ${sceneCount} real images from the exact Wikipedia article (min=${minWikiImages})`,
   );
 
   const prepared = await Promise.all(
@@ -1285,9 +1374,8 @@ async function generateMultiSceneVideo(
 
   // 3. Write scene files — video clips saved as .mp4, static images resized to
   //    115% of target (zoompan headroom) and composited with the SVG title overlay.
-  const KB_PAD = 1.15; // 15% larger than W×H so 12% zoom never crops to black
+  const KB_PAD = IMAGE_HEADROOM;
   const sceneFiles = []; // { path, isVideo }
-  let thumbnailPath = null;
   for (let i = 0; i < scenes.length; i++) {
     const { buffer, isVideo } = scenes[i];
     if (isVideo) {
@@ -1326,15 +1414,6 @@ async function generateMultiSceneVideo(
       console.log(
         `  ✓ Scene ${i + 1} frame ready${i === 0 ? " (with title overlay)" : " (clean)"}`,
       );
-
-      // Save scene 0 as the custom thumbnail at exact 1080×1920
-      if (i === 0) {
-        thumbnailPath = join(TMP, `${slug}_thumb.jpg`);
-        await sharp(framePath)
-          .resize(W, H, { fit: "cover", position: "centre" })
-          .jpeg({ quality: 92 })
-          .toFile(thumbnailPath);
-      }
     }
   }
 
@@ -1503,7 +1582,7 @@ async function generateMultiSceneVideo(
       }
     });
   }
-  return { path: videoPath, cuts, thumbnailPath };
+  return { path: videoPath, cuts };
 }
 
 // ---------------------------------------------------------------------------
@@ -1533,6 +1612,7 @@ export async function generateVideo(
     words = [],
     useAiImage = false,
     contentItems = null,
+    wikiArticleUrl = null,
     narrationParts = null,
     qualityHint = null, // remediation directive from a failed quality check
   } = {},
@@ -1550,6 +1630,7 @@ export async function generateVideo(
       bgMusicPath,
       words,
       contentItems,
+      wikiArticleUrl,
       narrationParts,
       videoPath,
       qualityHint,
@@ -1574,11 +1655,15 @@ export async function generateVideo(
       `generateVideo called without a validated imageUrl for "${slug}"`,
     );
   const imgBuffer = await downloadImageBuffer(imageUrl);
+  const preparedBuffer = await prepareWikipediaSceneBuffer(imgBuffer);
 
   // 2. Resize + SVG overlay → PNG frame
   const svgBuffer = Buffer.from(buildSVG(title));
-  await sharp(imgBuffer)
-    .resize(W, H, { fit: "cover", position: "center" })
+  await sharp(preparedBuffer)
+    .resize(Math.round(W * IMAGE_HEADROOM), Math.round(H * IMAGE_HEADROOM), {
+      fit: "cover",
+      position: "center",
+    })
     .composite([{ input: svgBuffer, blend: "over" }])
     .png()
     .toFile(framePath);

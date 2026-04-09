@@ -6,8 +6,8 @@
  *
  * Audio:  ElevenLabs TTS narration (from Did You Know / Quick Facts section)
  *         mixed with background music (assets/background.mp3) at 15% volume.
- * Image:  Wiki-first. Reuses images embedded in the article HTML, then falls
- *         back to related Wikipedia/Wikimedia Commons images when needed.
+ * Image:  Exact Wikipedia-article mode. Pulls scene images only from the
+ *         specific Wikipedia article tied to the post topic.
  * Schedule: Mon/Tue/Thu/Fri via GitHub Actions cron at 01:00 UTC
  *
  * Run:        npm start
@@ -35,6 +35,7 @@ import {
   getDidYouKnow,
   getQuickFacts,
   getArticleText,
+  getPostWikipediaUrl,
   updateIndexEntry,
   deleteIndexEntry,
 } from "./lib/kv.js";
@@ -42,7 +43,7 @@ import { polishNarrationItems } from "./lib/narration-expert.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
 import { verifyKvReadWriteAccess } from "./lib/kv.js";
 import { checkVideoQuality } from "./lib/video-quality.js";
-import { uploadToYoutube, setYoutubeThumbnail, verifyYoutubeAuth } from "./lib/youtube.js";
+import { uploadToYoutube, verifyYoutubeAuth } from "./lib/youtube.js";
 import {
   acquireUploadLock,
   getUploaded,
@@ -298,6 +299,7 @@ async function main() {
       let videoPath;
       let videoCuts = [];
       let narrationPath;
+      let videoResult = null;
       try {
         // ── ElevenLabs TTS narration ───────────────────────────────────────────
         // Source text priority: Did You Know bullets → Quick Facts rows → description
@@ -322,6 +324,9 @@ async function main() {
         const articleText = contentItems
           ? await getArticleText(post.slug).catch(() => null)
           : null;
+        const wikiArticleUrl = await getPostWikipediaUrl(post.slug).catch(
+          () => null,
+        );
         const narrationItems = contentItems
           ? await polishNarrationItems(
               post.title,
@@ -372,12 +377,13 @@ async function main() {
             );
           else console.log("  Generating video...");
 
-          const videoResult = await generateVideo(post, {
+          videoResult = await generateVideo(post, {
             narrationPath,
             bgMusicPath,
             words: narrWords,
             useAiImage,
             contentItems,
+            wikiArticleUrl,
             narrationParts: buildNarrationParts(
               post,
               narrationItems ?? contentItems,
@@ -423,18 +429,6 @@ async function main() {
         console.log("  Uploading to YouTube...");
         const youtubeId = await uploadToYoutube(videoPath, post, videoCuts);
         console.log(`  ✓ https://www.youtube.com/shorts/${youtubeId}`);
-
-        // Set custom thumbnail — scene 1 with centred title text
-        if (videoResult.thumbnailPath) {
-          try {
-            await setYoutubeThumbnail(youtubeId, videoResult.thumbnailPath);
-            console.log("  ✓ Thumbnail set on YouTube");
-          } catch (thumbErr) {
-            console.warn(`  ⚠ Thumbnail upload failed: ${thumbErr.message}`);
-          } finally {
-            try { unlinkSync(videoResult.thumbnailPath); } catch { /* ignore */ }
-          }
-        }
 
         // Record in KV tracker (overwrites previous entry for re-uploads)
         const privacy = privacyMode;

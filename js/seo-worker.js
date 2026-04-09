@@ -3007,12 +3007,36 @@ async function handleFetchRequest(request, env, ctx) {
     return redirectNoStore(`${url.origin}/born/${mn}/${dd}/`, 302);
   }
 
+  // /born landing -> today's born page
+  if (url.pathname === "/born" || url.pathname === "/born/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return redirectNoStore(`${url.origin}/born/${mn}/${dd}/`, 302);
+  }
+
   // /died/today/ → redirect to today's died page
   if (url.pathname === "/died/today" || url.pathname === "/died/today/") {
     const now = new Date();
     const mn = MONTHS_ALL[now.getUTCMonth()];
     const dd = now.getUTCDate();
     return redirectNoStore(`${url.origin}/died/${mn}/${dd}/`, 302);
+  }
+
+  // /died landing -> today's died page
+  if (url.pathname === "/died" || url.pathname === "/died/") {
+    const now = new Date();
+    const mn = MONTHS_ALL[now.getUTCMonth()];
+    const dd = now.getUTCDate();
+    return redirectNoStore(`${url.origin}/died/${mn}/${dd}/`, 302);
+  }
+
+  // Legacy people aliases -> canonical routes
+  if (url.pathname === "/births" || url.pathname === "/births/") {
+    return Response.redirect(`${url.origin}/born/today/`, 301);
+  }
+  if (url.pathname === "/deaths" || url.pathname === "/deaths/") {
+    return Response.redirect(`${url.origin}/died/today/`, 301);
   }
 
   // Born pages: /born/{month}/{day}/

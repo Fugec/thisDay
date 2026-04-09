@@ -2905,7 +2905,7 @@ async function fetchPostPreviewFromUrl(
   }
 }
 
-// Fetch 3 random blog posts from the current month that have generated images
+// Fetch 3 random blog posts from the current month that have working cover images
 async function fetchBlogPostsForCarousel(monthName, monthIndex) {
   const MAX_CAROUSEL_POSTS = 3;
   const today = new Date();
@@ -3038,7 +3038,7 @@ async function populateCarousel(month, _year) {
   carouselIndicators.innerHTML = "";
 
   try {
-    // Fetch 3 daily blog posts from this month with generated images
+    // Fetch 3 daily blog posts from this month with working cover images
     const currentMonthName = monthNames[month].toLowerCase();
     const blogPosts = await fetchBlogPostsForCarousel(currentMonthName, month);
 

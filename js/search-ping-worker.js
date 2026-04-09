@@ -12,7 +12,7 @@
  *
  * Endpoints:
  *   GET  /search-ping        → health check
- *   POST /search-ping        → ping Google + Bing for one or more sitemaps
+ *   POST /search-ping        → record sitemap submission intent and optionally send IndexNow URLs
  *
  * Auth (optional):
  *   If SEARCH_PING_SECRET is set, POST requires:
@@ -49,7 +49,12 @@ export default {
     }
 
     if (request.method === "GET") {
-      return jsonResponse({ status: "ok" });
+      return jsonResponse({
+        status: "ok",
+        defaultSitemaps: DEFAULT_SITEMAPS,
+        googleSitemapPing: "deprecated",
+        indexNowEnabled: Boolean(env.INDEXNOW_KEY && env.INDEXNOW_KEY_LOCATION),
+      });
     }
 
     if (request.method !== "POST") {

@@ -1948,6 +1948,64 @@ async function handleBlogIndex(env, url) {
     ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
     : null;
   const posts = Array.isArray(index) ? index.slice(0, 3) : [];
+  const latestPost = posts[0] || null;
+  const latestPostIso =
+    latestPost?.publishedAt &&
+    !Number.isNaN(new Date(latestPost.publishedAt).getTime())
+      ? new Date(latestPost.publishedAt).toISOString()
+      : null;
+  const latestPostLabel = latestPostIso
+    ? new Date(latestPostIso).toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : null;
+  const canonical = `${url.origin}/blog/`;
+  const collectionSchema = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: "Blog | thisDay.",
+    url: canonical,
+    description:
+      "Latest historical articles from thisDay.info, covering major events, people, and turning points tied to specific calendar dates.",
+    isPartOf: {
+      "@type": "WebSite",
+      name: "thisDay.info",
+      url: `${url.origin}/`,
+    },
+    about: { "@type": "Thing", name: "History" },
+    ...(latestPostIso && { dateModified: latestPostIso }),
+    mainEntity: {
+      "@type": "ItemList",
+      itemListOrder: "https://schema.org/ItemListOrderDescending",
+      numberOfItems: posts.length,
+      itemListElement: posts.map((post, idx) => ({
+        "@type": "ListItem",
+        position: idx + 1,
+        url: `${url.origin}/blog/${post.slug}/`,
+        name: post.title || post.slug,
+      })),
+    },
+  };
+  const breadcrumbSchema = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Home",
+        item: `${url.origin}/`,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "Blog",
+        item: `${url.origin}/blog/`,
+      },
+    ],
+  };
 
   const postsHtml =
     posts.length > 0
@@ -1988,14 +2046,28 @@ async function handleBlogIndex(env, url) {
       : `<div class="card-box text-center py-5"><p class="text-muted mb-0">No posts available yet.</p></div>`;
 
   const pageTitle = "Blog | thisDay.";
-  const canonical = `${url.origin}/blog/`;
+  const pageDesc = latestPostLabel
+    ? `Latest historical articles from thisDay.info. Most recent update: ${latestPostLabel}.`
+    : "Latest historical articles from thisDay.info.";
 
   const html = `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${pageTitle}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
 <meta name="robots" content="index, follow"/>
-<meta name="description" content="Latest historical articles from thisDay.info"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<script type="application/ld+json">${JSON.stringify(collectionSchema)}</script>
+<script type="application/ld+json">${JSON.stringify(breadcrumbSchema)}</script>
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
@@ -2015,6 +2087,11 @@ ${siteNav()}
     </ol>
   </nav>
   <h1 class="mb-4">Latest Posts</h1>
+  ${
+    latestPostLabel
+      ? `<p class="text-muted mb-4" style="font-size:.9rem">Latest article published on <time datetime="${escapeHtml(latestPostIso)}">${escapeHtml(latestPostLabel)}</time>.</p>`
+      : ""
+  }
   ${postsHtml}
 </main>
 ${siteFooter("yr")}

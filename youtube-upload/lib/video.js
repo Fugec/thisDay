@@ -1,9 +1,10 @@
 /**
  * Generates a YouTube Shorts MP4 (1080x1920) from a blog post.
  *
- * Background image:
- *   USE_AI_IMAGE=true  → AI-generated via Replicate / CF Workers AI (more cinematic)
- *   USE_AI_IMAGE=false → Wikipedia image from post (default, free)
+ * Background visuals:
+ *   default path        → multi-scene wiki mode using article images first,
+ *                         then Wikipedia/Wikimedia Commons fallbacks
+ *   USE_AI_IMAGE=false  → legacy single-image path using post.imageUrl
  *
  * Captions:
  *   When ElevenLabs word timestamps are provided, animated bold captions
@@ -26,16 +27,14 @@ import ffmpeg from "fluent-ffmpeg";
 import { mkdirSync, unlinkSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { generateAISceneBatch, enhanceImageWithAI, colorizeImageWithAI } from "./ai-image.js";
-import { reviewPromptsWithHistoryExpert } from "./history-expert.js";
+import { getPostImageUrls } from "./kv.js";
+// Wiki-only mode: no AI scene generation imports
 
 const TMP = join(dirname(fileURLToPath(import.meta.url)), "../tmp");
 const W = 1080;
 const H = 1920;
 /**
- * 2 scenes per video — one cut at ~22s for a 45s total.
- * Images: Pollinations flux-2-dev (free). Animation: WAN 2.2 I2V via HF ZeroGPU
- * (requires HF_TOKEN; falls back to Ken Burns automatically if unavailable).
+ * 3 scenes per video with gentle crossfades across the 45 s runtime.
  */
 const N_SCENES = 3;
 
@@ -57,11 +56,11 @@ function buildKenBurns(sceneIdx, durationS, inLabel, outLabel) {
   // Use round (not ceil) so frame count exactly matches the scene duration
   const d = Math.round(durationS * FPS);
   // Per-frame zoom increment for pzoom accumulation — smoother than on/d formula
-  const Z_RANGE = 0.10; // 10% total zoom travel (reduced from 12% for less distortion)
+  const Z_RANGE = 0.1; // 10% total zoom travel (reduced from 12% for less distortion)
   const Z_START = 1.0;
-  const Z_END   = (Z_START + Z_RANGE).toFixed(4);   // 1.1000
-  const Z_MID   = (Z_START + Z_RANGE / 2).toFixed(4); // 1.0500
-  const INC     = (Z_RANGE / d).toFixed(7);          // per-frame increment
+  const Z_END = (Z_START + Z_RANGE).toFixed(4); // 1.1000
+  const Z_MID = (Z_START + Z_RANGE / 2).toFixed(4); // 1.0500
+  const INC = (Z_RANGE / d).toFixed(7); // per-frame increment
 
   let zoom, x, y;
 
@@ -206,9 +205,119 @@ async function fetchWikipediaImage(title) {
  * @param {number} count       Max images to return (default 2)
  * @returns {Promise<Buffer[]>}
  */
-async function fetchWikipediaImageBuffers(eventTitle, count = 2) {
+function normalizeQueryText(text) {
+  return String(text || "")
+    .replace(/[^a-z0-9\s'&.-]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractSearchPhrases(items) {
+  const phrases = [];
+  for (const item of items || []) {
+    const text = normalizeQueryText(item).slice(0, 240);
+    if (!text) continue;
+    const matches =
+      text.match(
+        /\b(?:[A-Z][A-Za-z0-9'&.-]+(?:\s+[A-Z][A-Za-z0-9'&.-]+){0,4})\b/g,
+      ) || [];
+    for (const phrase of matches) {
+      const cleaned = phrase.trim();
+      if (cleaned.length >= 4) phrases.push(cleaned);
+    }
+  }
+  return [...new Set(phrases)];
+}
+
+function buildImageSearchContext(eventTitle, contentItems) {
+  const title = normalizeQueryText(eventTitle);
+  const joinedItems = (contentItems || []).map(normalizeQueryText).join(" ");
+  const allText = `${title} ${joinedItems}`.trim();
+  const isMilitary = /\b(battle|war|siege|army|navy|air force|combat|bombing|raid|military|fighter|aircraft)\b/i.test(
+    allText,
+  );
+  const isLabor = /\b(strike|union|workers|factory|plant|labor|company|industrial)\b/i.test(
+    allText,
+  );
+
+  const phrases = extractSearchPhrases(contentItems);
+  const subject =
+    phrases.find(
+      (p) =>
+        p.length >= 6 &&
+        !/\b(did you know|quick facts|history|article|today)\b/i.test(p),
+    ) || "";
+
+  const queries = [];
+  if (subject) queries.push(`${subject} ${title}`.trim());
+  queries.push(title);
+
+  if (isLabor) {
+    queries.push(`${title} labor dispute`);
+    queries.push(`${title} workers`);
+    if (subject) queries.push(`${subject} strike`);
+  }
+
+  if (isMilitary) {
+    queries.push(`${title} battle`);
+    queries.push(`${title} military`);
+  }
+
+  if (subject) queries.push(subject);
+
+  return {
+    title,
+    subject,
+    isMilitary,
+    isLabor,
+    queries: [...new Set(queries.filter(Boolean))],
+  };
+}
+
+function scoreImageTitle(candidateTitle, context) {
+  const lower = normalizeQueryText(candidateTitle).toLowerCase();
+  const titleTokens = context.title.toLowerCase().split(/\s+/).filter(Boolean);
+  const subjectTokens = context.subject
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length >= 3);
+
+  let score = 0;
+  for (const token of titleTokens) {
+    if (lower.includes(token)) score += 8;
+  }
+  for (const token of subjectTokens) {
+    if (lower.includes(token)) score += 12;
+  }
+
+  if (context.isLabor) {
+    if (/\b(worker|workers|strike|labor|union|factory|plant|company|industrial|manufactur)/i.test(lower)) {
+      score += 18;
+    }
+    if (/\b(aircraft|airplane|plane|fighter|jet|bomb|war|battle|navy|air force)\b/i.test(lower)) {
+      score -= 60;
+    }
+  }
+
+  if (context.isMilitary) {
+    if (/\b(aircraft|airplane|plane|fighter|jet|bomb|war|battle|navy|air force|soldier|tank)\b/i.test(lower)) {
+      score += 18;
+    }
+  } else if (/\b(aircraft|airplane|plane|fighter|jet|bomb|war|battle|navy|air force|soldier|tank)\b/i.test(lower)) {
+    score -= 45;
+  }
+
+  if (/\b(icon|logo|flag|map|seal|stub|arrow|bullet|placeholder)\b/i.test(lower)) {
+    score -= 100;
+  }
+
+  return score;
+}
+
+async function fetchWikipediaImageBuffers(eventTitle, count = 2, context = {}) {
   const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
   const buffers = [];
+  const searchContext = buildImageSearchContext(eventTitle, context.contentItems);
 
   // Only skip obvious UI/template images — keep portraits, objects, events
   const BAD =
@@ -226,13 +335,20 @@ async function fetchWikipediaImageBuffers(eventTitle, count = 2) {
       const data = await res.json();
       return Object.values(data?.query?.pages ?? {})
         .map((p) => ({
+          title: String(p?.title || ""),
           url: p?.imageinfo?.[0]?.url ?? null,
-          px: (p?.imageinfo?.[0]?.width ?? 0) * (p?.imageinfo?.[0]?.height ?? 0),
+          px:
+            (p?.imageinfo?.[0]?.width ?? 0) * (p?.imageinfo?.[0]?.height ?? 0),
           w: p?.imageinfo?.[0]?.width ?? 0,
           h: p?.imageinfo?.[0]?.height ?? 0,
         }))
         .filter(({ url, w, h }) => url && w >= 800 && h >= 600)
-        .sort((a, b) => b.px - a.px) // largest first → best quality
+        .sort((a, b) => {
+          const scoreA = scoreImageTitle(a.title, searchContext);
+          const scoreB = scoreImageTitle(b.title, searchContext);
+          if (scoreA !== scoreB) return scoreB - scoreA;
+          return b.px - a.px; // largest first → best quality
+        })
         .map(({ url }) => url);
     } catch {
       return [];
@@ -250,7 +366,7 @@ async function fetchWikipediaImageBuffers(eventTitle, count = 2) {
   // 1. Wikipedia page images
   try {
     const listRes = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(eventTitle)}&prop=images&imlimit=30&format=json`,
+      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(searchContext.title)}&prop=images&imlimit=30&format=json`,
       { headers: ua, signal: AbortSignal.timeout(15_000) },
     );
     if (listRes.ok) {
@@ -260,21 +376,27 @@ async function fetchWikipediaImageBuffers(eventTitle, count = 2) {
         .map((i) => i.title)
         .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !BAD.test(t));
 
-      const urls = await resolveUrls("https://en.wikipedia.org/w/api.php", candidates);
+      const urls = await resolveUrls(
+        "https://en.wikipedia.org/w/api.php",
+        candidates,
+      );
       for (const url of urls) {
         if (buffers.length >= count) break;
         const buf = await downloadSafe(url);
         if (buf) buffers.push(buf);
       }
     }
-  } catch { /* continue to Commons */ }
+  } catch {
+    /* continue to Commons */
+  }
 
   if (buffers.length >= count) return buffers;
 
   // 2. Wikimedia Commons search — broader pool for less-covered topics
   try {
+    const commonsQuery = searchContext.queries.join(" ");
     const searchRes = await fetch(
-      `https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&srsearch=${encodeURIComponent(eventTitle)}&srlimit=20&format=json`,
+      `https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&srsearch=${encodeURIComponent(commonsQuery)}&srlimit=20&format=json`,
       { headers: ua, signal: AbortSignal.timeout(15_000) },
     );
     if (searchRes.ok) {
@@ -283,14 +405,19 @@ async function fetchWikipediaImageBuffers(eventTitle, count = 2) {
         .map((r) => r.title)
         .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !BAD.test(t));
 
-      const urls = await resolveUrls("https://commons.wikimedia.org/w/api.php", candidates);
+      const urls = await resolveUrls(
+        "https://commons.wikimedia.org/w/api.php",
+        candidates,
+      );
       for (const url of urls) {
         if (buffers.length >= count) break;
         const buf = await downloadSafe(url);
         if (buf) buffers.push(buf);
       }
     }
-  } catch { /* return what we have */ }
+  } catch {
+    /* return what we have */
+  }
 
   return buffers;
 }
@@ -298,30 +425,6 @@ async function fetchWikipediaImageBuffers(eventTitle, count = 2) {
 // ---------------------------------------------------------------------------
 // Image quality & cinematic helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Returns true when an image is effectively grayscale (B&W or sepia).
- * Samples a 32×32 thumbnail; if the average per-pixel channel spread is below
- * threshold the image has no meaningful chroma and can benefit from colorization.
- */
-async function isGrayscaleBuffer(buffer) {
-  try {
-    const { data } = await sharp(buffer)
-      .resize(32, 32, { fit: "fill" })
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    let totalDiff = 0;
-    const pixels = data.length / 3;
-    for (let i = 0; i < data.length; i += 3) {
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      totalDiff += Math.abs(r - g) + Math.abs(g - b) + Math.abs(r - b);
-    }
-    return totalDiff / pixels < 15; // avg channel diff <15 → grayscale
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Returns an SVG vignette (dark radial gradient) that can be composited over
@@ -341,96 +444,63 @@ function buildVignetteSVG(w, h) {
 
 /**
  * Applies era-appropriate color grading to a Sharp pipeline.
- * Uses the event year extracted from the title to pick a cinematic tone:
- *   pre-1900  → warm sepia (or gentle saturation boost if just colorized)
+ * Uses the event year to pick a cinematic tone:
+ *   pre-1900  → warm sepia
  *   1900-1939 → muted warm film look
- *   1940-1959 → cool, gritty (WWII / post-war)
- *   1960-1979 → slightly faded Kodachrome warmth
+ *   1940-1959 → cool, gritty tone
+ *   1960-1979 → slightly faded warm look
  *   1980+     → punchy, natural
  *
- * @param {object}  sharpInst    A fluent sharp instance
- * @param {number|null} year     Event year, or null for generic boost
- * @param {boolean} wasColorized True if a B&W image was just colorized
- * @returns {object}  The same sharp instance with grading applied
+ * @param {object}  sharpInst  A fluent sharp instance
+ * @param {number|null} year   Event year, or null for generic boost
+ * @returns {object} The same sharp instance with grading applied
  */
-function applyEraGrading(sharpInst, year, wasColorized) {
+function applyEraGrading(sharpInst, year) {
   if (!year) {
     return sharpInst.modulate({ saturation: 1.05, brightness: 0.98 });
   }
   if (year < 1900) {
-    // Likely B&W photography — sepia warmth unless freshly colorized
-    return wasColorized
-      ? sharpInst.modulate({ saturation: 0.85, brightness: 0.95 })
-      : sharpInst.modulate({ saturation: 0.45, brightness: 0.92 }).tint({ r: 112, g: 73, b: 38 });
+    return sharpInst
+      .modulate({ saturation: 0.45, brightness: 0.92 })
+      .tint({ r: 112, g: 73, b: 38 });
   }
   if (year < 1940) {
-    // Early film era — warm but more neutral than full sepia
-    return wasColorized
-      ? sharpInst.modulate({ saturation: 0.80, brightness: 0.93 })
-      : sharpInst.modulate({ saturation: 0.60, brightness: 0.90 }).tint({ r: 95, g: 85, b: 70 });
+    return sharpInst
+      .modulate({ saturation: 0.6, brightness: 0.9 })
+      .tint({ r: 95, g: 85, b: 70 });
   }
   if (year < 1960) {
-    // WWII / post-war — cooler, slightly desaturated, gritty
-    return sharpInst.modulate({ saturation: 0.78, brightness: 0.90 });
+    return sharpInst.modulate({ saturation: 0.78, brightness: 0.9 });
   }
   if (year < 1980) {
-    // 1960s-70s Kodachrome — slight warm fade
-    return sharpInst.modulate({ saturation: 0.90, brightness: 0.95 }).tint({ r: 100, g: 94, b: 84 });
+    return sharpInst
+      .modulate({ saturation: 0.9, brightness: 0.95 })
+      .tint({ r: 100, g: 94, b: 84 });
   }
-  // 1980+ — natural with a small saturation/contrast push
   return sharpInst.modulate({ saturation: 1.08, brightness: 1.0 });
 }
 
 /**
- * Prepares a Wikipedia image buffer for 9:16 vertical video:
- *   1. AI super-resolution (Real-ESRGAN / Swin2SR — best free model auto-selected)
- *   2. B&W detection → colorization via HF if a colorization model is warm
- *   3. Cover-crop to 1080×1920 + 15% Ken Burns headroom
- *   4. Era-appropriate color grading (warm sepia, cool WWII, punchy modern)
- *   5. Cinematic vignette overlay
+ * Prepares a Wikipedia image buffer for 9:16 vertical video.
+ * Cover-crops to 1080×1920 + 15% Ken Burns headroom, then applies
+ * era grading and cinematic vignette overlay.
  *
- * @param {Buffer}      buffer       Raw image bytes from Wikipedia/Commons
- * @param {number|null} year         Event year for era grading, or null
- * @param {boolean}     aiEnhance    Run AI upscale + colorize (default true). Set false
- *                                   for scene 3+ to cap HF API usage at 2 calls/video.
- * @returns {Promise<Buffer>}   PNG ready for scene compositing
+ * @param {Buffer} buffer  Raw image bytes from Wikipedia/Commons
+ * @param {number|null} year  Event year for era grading, or null
+ * @returns {Promise<Buffer>}  PNG ready for scene compositing
  */
-async function prepareWikipediaSceneBuffer(buffer, year = null, aiEnhance = true) {
+async function prepareWikipediaSceneBuffer(buffer, year = null) {
   const TARGET_W = Math.round(W * 1.15); // 15% larger — Ken Burns headroom
   const TARGET_H = Math.round(H * 1.15);
-
-  // 1. AI super-resolution + colorization (capped at 2 images/video to stay within free tier)
-  let wasColorized = false;
-  if (aiEnhance) {
-    buffer = await enhanceImageWithAI(buffer);
-
-    // 2. B&W detection → colorization
-    const bw = await isGrayscaleBuffer(buffer);
-    if (bw) {
-      console.log("  → B&W image detected — attempting colorization...");
-      const colorized = await colorizeImageWithAI(buffer);
-      if (colorized) {
-        buffer = colorized;
-        wasColorized = true;
-        console.log("  ✓ Colorized");
-      } else {
-        console.log("  ℹ Colorization unavailable — keeping original");
-      }
-    }
-  } else {
-    console.log("  ℹ Scene 3: skipping AI enhance to stay within free-tier quota");
-  }
-
-  // 3. Cover-crop to full 9:16 frame with Ken Burns headroom
   let proc = sharp(buffer)
     .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre" })
     .sharpen({ sigma: 1.2 });
 
-  // 4. Era color grading
-  proc = applyEraGrading(proc, year, wasColorized);
+  proc = applyEraGrading(proc, year);
 
-  // 5. Cinematic vignette
-  const vignetteBuf = await sharp(Buffer.from(buildVignetteSVG(TARGET_W, TARGET_H)))
+  const vignetteBuf = await sharp(
+    Buffer.from(buildVignetteSVG(TARGET_W, TARGET_H)),
+  )
     .png()
     .toBuffer();
 
@@ -723,6 +793,21 @@ async function downloadImageBuffer(url) {
   return Buffer.from(await res.arrayBuffer());
 }
 
+async function fetchArticleImageBuffers(slug, limit = 3) {
+  const urls = await getPostImageUrls(slug, Math.max(limit * 4, 12));
+  const buffers = [];
+  for (const url of urls) {
+    try {
+      const buf = await downloadImageBuffer(url);
+      buffers.push(buf);
+      if (buffers.length >= limit) break;
+    } catch {
+      // skip broken article images and keep going
+    }
+  }
+  return buffers;
+}
+
 // ---------------------------------------------------------------------------
 // AI image prompt builder
 // ---------------------------------------------------------------------------
@@ -918,10 +1003,14 @@ function getHistoricalEraContext(rawTitle) {
  */
 function extractPersonName(title) {
   // Pattern: "Name — Date" or "Name - Date" or "Name, Date"
-  const match = title.match(/^([A-Z][a-z]+(?: [A-Z][a-z]+)+?)\s*[—–-]\s*[,]?\s*\w+ \d{1,2},?\s*\d{4}$/);
+  const match = title.match(
+    /^([A-Z][a-z]+(?: [A-Z][a-z]+)+?)\s*[—–-]\s*[,]?\s*\w+ \d{1,2},?\s*\d{4}$/,
+  );
   if (match) return match[1];
   // Also handle titles like "Nikola Tesla — 1943"
-  const simpleMatch = title.match(/^([A-Z][a-z]+(?: [A-Z][a-z]+)+?)\s*[—–-]\s*\d{4}$/);
+  const simpleMatch = title.match(
+    /^([A-Z][a-z]+(?: [A-Z][a-z]+)+?)\s*[—–-]\s*\d{4}$/,
+  );
   if (simpleMatch) return simpleMatch[1];
   return null;
 }
@@ -961,7 +1050,9 @@ function buildScenePrompts(title, contentItems, qualityHint = null) {
 
   const base =
     `ultra-realistic ${era} scene, photorealistic painting or photograph, ` +
-    `${style}` + hint + `, ` +
+    `${style}` +
+    hint +
+    `, ` +
     `vertical 9:16 portrait format, anatomically correct, no text, no logos, no watermarks` +
     (personGuidance ? ` ${personGuidance}` : "");
 
@@ -990,21 +1081,25 @@ function buildScenePrompts(title, contentItems, qualityHint = null) {
 }
 
 /**
- * Finds N_SCENES-1 scene boundary timestamps from ElevenLabs word data.
+ * Finds sceneCount-1 scene boundary timestamps from ElevenLabs word data.
  * Tries to anchor one cut at the "Did you know?" boundary (narration structure),
  * then distributes the remaining cuts evenly before and after it.
  * Falls back to equal spacing when no timestamps are available.
  *
  * @param {{ word: string, start: number, end: number }[]} words
  * @param {string[]|null} narrationParts  from buildNarrationParts()
- * @returns {number[]}  N_SCENES-1 cut timestamps in seconds
+ * @param {number} sceneCount
+ * @returns {number[]}  sceneCount-1 cut timestamps in seconds
  */
-function findSceneBoundaries(words, narrationParts) {
-  const numCuts = N_SCENES - 1;
+function findSceneBoundaries(words, narrationParts, sceneCount = N_SCENES) {
+  const safeSceneCount = Math.max(1, Number(sceneCount) || N_SCENES);
+  const numCuts = safeSceneCount - 1;
+  if (numCuts <= 0) return [];
+
   if (!words?.length) {
     return Array.from(
       { length: numCuts },
-      (_, i) => (DURATION / N_SCENES) * (i + 1),
+      (_, i) => (DURATION / safeSceneCount) * (i + 1),
     );
   }
   const totalDur = words[words.length - 1]?.end ?? DURATION;
@@ -1044,12 +1139,12 @@ function findSceneBoundaries(words, narrationParts) {
 
   // Default: evenly spaced
   return Array.from({ length: numCuts }, (_, i) =>
-    clamp((totalDur / N_SCENES) * (i + 1)),
+    clamp((totalDur / safeSceneCount) * (i + 1)),
   );
 }
 
 /**
- * Multi-scene video: N_SCENES AI images crossfaded at narration section
+ * Multi-scene video: Wikipedia/Commons images with Ken Burns crossfaded at narration sections
  * boundaries, with animated captions burned in synced to the ElevenLabs voice.
  *
  * @param {object} post
@@ -1115,59 +1210,51 @@ async function generateMultiSceneVideo(
       : `  Video duration: ${videoDuration} s (default — no word timestamps)`,
   );
 
-  // 1. Fetch real Wikipedia/Commons images — no AI generation unless necessary
+  // 1. Fetch real Wikipedia/Commons images (wiki-only mode)
   const event = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
-  const yearMatch = title.match(/\b(\d{4})$/);
-  const eventYear = yearMatch ? parseInt(yearMatch[1], 10) : null;
-  console.log(`  Fetching ${N_SCENES} real Wikipedia images for "${event}"...`);
-  const wikiBuffers = await fetchWikipediaImageBuffers(event, N_SCENES);
+  console.log(`  Fetching article images for "${slug}"...`);
+  const articleBuffers = await fetchArticleImageBuffers(slug, N_SCENES);
+  console.log(`  ✓ Found ${articleBuffers.length} usable image(s) in article HTML`);
 
-  let rawScenes;
-  if (wikiBuffers.length >= N_SCENES) {
-    console.log(`  ✓ Using ${N_SCENES} real Wikipedia/Commons images — skipping AI generation`);
-    const MAX_AI_ENHANCE = 2; // cap HF API calls per video — free tier stays healthy
-    const prepared = await Promise.all(
-      wikiBuffers.slice(0, N_SCENES).map((buf, i) => prepareWikipediaSceneBuffer(buf, eventYear, i < MAX_AI_ENHANCE)),
-    );
-    rawScenes = prepared.map((buf) => ({ buffer: buf, isVideo: false }));
-  } else {
-    const aiCount = N_SCENES - wikiBuffers.length;
-    if (wikiBuffers.length > 0) {
-      console.log(`  Got ${wikiBuffers.length}/${N_SCENES} Wikipedia images — AI generating ${aiCount} more`);
-    } else {
-      console.log(`  No Wikipedia images found — generating ${N_SCENES} AI scenes`);
-    }
+  const remainingSlots = Math.max(0, N_SCENES - articleBuffers.length);
+  const wikiBuffers =
+    remainingSlots > 0
+      ? await fetchWikipediaImageBuffers(event, remainingSlots, {
+          contentItems,
+        })
+      : [];
 
-    const { era } = getHistoricalEraContext(title);
+  const imageBuffers = [...articleBuffers, ...wikiBuffers];
 
-    const rawPrompts = buildScenePrompts(title, contentItems, qualityHint);
-    const scenePrompts = await reviewPromptsWithHistoryExpert(event, eventYear, era, rawPrompts);
-    const aiScenes = await generateAISceneBatch(scenePrompts.slice(0, aiCount), event);
-
-    const MAX_AI_ENHANCE = 2;
-    const preparedWiki = await Promise.all(
-      wikiBuffers.map((buf, i) => prepareWikipediaSceneBuffer(buf, eventYear, i < MAX_AI_ENHANCE)),
-    );
-    rawScenes = [
-      ...preparedWiki.map((buf) => ({ buffer: buf, isVideo: false })),
-      ...aiScenes,
-    ];
-  }
-
-  // Fallback for any null slots
-  const fallbackBuf = post.imageUrl
-    ? await downloadImageBuffer(post.imageUrl).catch(() => null)
-    : null;
-  const scenes = rawScenes.map((scene, i) => {
-    if (scene) return scene;
-    console.warn(`  ⚠ Scene ${i + 1} failed — using fallback image`);
-    return fallbackBuf ? { buffer: fallbackBuf, isVideo: false } : null;
-  });
-  if (scenes.some((s) => !s)) {
+  if (imageBuffers.length === 0) {
     throw new Error(
-      "generateMultiSceneVideo: could not acquire images for all scenes",
+      "IMAGE_UNAVAILABLE: no Wikipedia/Commons images found (wiki-only mode)",
     );
   }
+
+  const minWikiImages = Math.max(
+    1,
+    Number.parseInt(process.env.WIKI_IMAGE_MIN_COUNT || `${N_SCENES}`, 10) ||
+      N_SCENES,
+  );
+
+  if (imageBuffers.length < minWikiImages) {
+    throw new Error(
+      `IMAGE_UNAVAILABLE: wiki-only mode requires ${minWikiImages} usable Wikipedia/Commons images, got ${imageBuffers.length}`,
+    );
+  }
+
+  const sceneCount = Math.min(N_SCENES, imageBuffers.length);
+  console.log(
+    `  ✓ Using ${sceneCount} real Wikipedia/Commons images (article HTML + wiki fallback, min=${minWikiImages})`,
+  );
+
+  const prepared = await Promise.all(
+    imageBuffers
+      .slice(0, sceneCount)
+      .map((buf) => prepareWikipediaSceneBuffer(buf)),
+  );
+  const scenes = prepared.map((buf) => ({ buffer: buf, isVideo: false }));
 
   const videoScenes = scenes.filter((s) => s.isVideo).length;
   const imageScenes = scenes.filter((s) => !s.isVideo).length;
@@ -1175,8 +1262,8 @@ async function generateMultiSceneVideo(
     `  Scenes ready: ${videoScenes} animated (WAN I2V), ${imageScenes} static (Ken Burns)`,
   );
 
-  // 2. Find N_SCENES-1 scene boundary timestamps
-  const cuts = findSceneBoundaries(words, narrationParts);
+  // 2. Find scene boundary timestamps for the number of available scenes
+  const cuts = findSceneBoundaries(words, narrationParts, scenes.length);
   const cutLog = [0, ...cuts, videoDuration]
     .map((t, i, arr) =>
       i < arr.length - 1 ? `${t.toFixed(1)}–${arr[i + 1].toFixed(1)}s` : null,
@@ -1186,10 +1273,15 @@ async function generateMultiSceneVideo(
   console.log(`  Scene cuts: ${cutLog}`);
 
   // Per-scene input durations so each scene covers its segment + half-XF overlap
-  const sceneDurations = cuts.map((t, i) =>
-    i === 0 ? t + XF / 2 : t - cuts[i - 1] + XF,
-  );
-  sceneDurations.push(videoDuration - cuts[cuts.length - 1] + XF / 2);
+  const sceneDurations =
+    cuts.length > 0
+      ? cuts.map((t, i) => (i === 0 ? t + XF / 2 : t - cuts[i - 1] + XF))
+      : [];
+  if (cuts.length > 0) {
+    sceneDurations.push(videoDuration - cuts[cuts.length - 1] + XF / 2);
+  } else {
+    sceneDurations.push(videoDuration);
+  }
 
   // 3. Write scene files — video clips saved as .mp4, static images resized to
   //    115% of target (zoompan headroom) and composited with the SVG title overlay.
@@ -1205,10 +1297,14 @@ async function generateMultiSceneVideo(
       console.log(`  ✓ Scene ${i + 1} animated clip ready`);
     } else {
       const framePath = join(TMP, `${slug}_s${i}.png`);
-      const resized = sharp(buffer).resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD), {
-        fit: "cover",
-        position: "center",
-      });
+      const resized = sharp(buffer).resize(
+        Math.round(W * KB_PAD),
+        Math.round(H * KB_PAD),
+        {
+          fit: "cover",
+          position: "center",
+        },
+      );
       // Title overlay only on scene 1 — after "Did you know?" the image takes centre stage
       if (i === 0) {
         await resized
@@ -1227,7 +1323,9 @@ async function generateMultiSceneVideo(
         await resized.png().toFile(framePath);
       }
       sceneFiles.push({ path: framePath, isVideo: false });
-      console.log(`  ✓ Scene ${i + 1} frame ready${i === 0 ? " (with title overlay)" : " (clean)"}`);
+      console.log(
+        `  ✓ Scene ${i + 1} frame ready${i === 0 ? " (with title overlay)" : " (clean)"}`,
+      );
 
       // Save scene 0 as the custom thumbnail at exact 1080×1920
       if (i === 0) {
@@ -1261,128 +1359,143 @@ async function generateMultiSceneVideo(
       const cmd = ffmpeg();
 
       // Add scene inputs — video clips loop, static images freeze
-    for (let i = 0; i < sceneFiles.length; i++) {
-      const { path, isVideo } = sceneFiles[i];
-      if (isVideo) {
-        // stream_loop repeats the clip; -t trims to exact scene duration
-        cmd.input(path).inputOptions(["-stream_loop -1", `-t ${sceneDurations[i]}`]);
+      for (let i = 0; i < sceneFiles.length; i++) {
+        const { path, isVideo } = sceneFiles[i];
+        if (isVideo) {
+          // stream_loop repeats the clip; -t trims to exact scene duration
+          cmd
+            .input(path)
+            .inputOptions(["-stream_loop -1", `-t ${sceneDurations[i]}`]);
+        } else {
+          // -r must match FPS so zoompan reads at the same rate it outputs —
+          // without this the input defaults to 25 fps, causing frame duplication stuttering.
+          // Note: -framerate was removed as a general input option in ffmpeg 7.x; use -r instead.
+          cmd
+            .input(path)
+            .inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
+        }
+      }
+
+      const hasNarr = !!narrationPath;
+      const hasMusic = !!bgMusicPath;
+      const narrIdx = sceneFiles.length;
+      const musicIdx =
+        hasNarr && hasMusic ? sceneFiles.length + 1 : sceneFiles.length;
+      if (hasNarr) cmd.input(narrationPath);
+      if (hasMusic) cmd.input(bgMusicPath).inputOptions(["-stream_loop -1"]);
+
+      // Caption PNGs then end screen PNG (indices must be stable)
+      const captionStartIdx =
+        sceneFiles.length + (hasNarr ? 1 : 0) + (hasMusic ? 1 : 0);
+      captionPNGPaths.forEach((p) => cmd.input(p));
+      const endScreenIdx = captionStartIdx + captionPNGPaths.length;
+      cmd.input(endScreenPath);
+
+      // Per-scene filter: Ken Burns for static images, fps+loop for video clips
+      const sceneParts = sceneFiles.map(({ isVideo }, i) => {
+        if (isVideo) {
+          // Normalise to target FPS; stream_loop handles duration via -t above
+          return `[${i}:v]fps=fps=${FPS},setpts=PTS-STARTPTS[v${i}]`;
+        }
+        return buildKenBurns(i, sceneDurations[i], `[${i}:v]`, `[v${i}]`);
+      });
+      const scenePartFilter = sceneParts.join(";");
+
+      // Xfade chain with varied transitions
+      let xfadeChain = "";
+      if (cuts.length === 0) {
+        // Single-scene mode: forward v0 to vscene so downstream overlays/mapping stay unchanged.
+        xfadeChain = ";[v0]null[vscene]";
       } else {
-        // -r must match FPS so zoompan reads at the same rate it outputs —
-        // without this the input defaults to 25 fps, causing frame duplication stuttering.
-        // Note: -framerate was removed as a general input option in ffmpeg 7.x; use -r instead.
-        cmd.input(path).inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
+        cuts.forEach((t, i) => {
+          const inLabel = i === 0 ? "[v0]" : `[x${i - 1}]`;
+          const outLabel = i === cuts.length - 1 ? "[vscene]" : `[x${i}]`;
+          const xfOff = (t - XF / 2).toFixed(3);
+          const transition = XFADE_TRANSITIONS[i % XFADE_TRANSITIONS.length];
+          xfadeChain += `;${inLabel}[v${i + 1}]xfade=transition=${transition}:duration=${XF}:offset=${xfOff}${outLabel}`;
+        });
       }
-    }
+      const sceneFilter = scenePartFilter + xfadeChain;
 
-    const hasNarr = !!narrationPath;
-    const hasMusic = !!bgMusicPath;
-    const narrIdx = sceneFiles.length;
-    const musicIdx =
-      hasNarr && hasMusic ? sceneFiles.length + 1 : sceneFiles.length;
-    if (hasNarr) cmd.input(narrationPath);
-    if (hasMusic) cmd.input(bgMusicPath).inputOptions(["-stream_loop -1"]);
+      // Caption overlay chain
+      const afterCaptionLabel = hasCaptions ? "[vcap]" : "[vscene]";
+      const captionPart = hasCaptions
+        ? ";" +
+          buildOverlayCaptionFilter(
+            captionChunks,
+            captionStartIdx,
+            "[vscene]",
+            "[vcap]",
+          )
+        : "";
 
-    // Caption PNGs then end screen PNG (indices must be stable)
-    const captionStartIdx =
-      sceneFiles.length + (hasNarr ? 1 : 0) + (hasMusic ? 1 : 0);
-    captionPNGPaths.forEach((p) => cmd.input(p));
-    const endScreenIdx = captionStartIdx + captionPNGPaths.length;
-    cmd.input(endScreenPath);
+      // End screen overlay — centred vertically in the bottom 300px, last 3s
+      const endY = H - 300;
+      const endStart = videoDuration - 3;
+      const endScreenPart =
+        `;${afterCaptionLabel}[${endScreenIdx}:v]` +
+        `overlay=x=0:y=${endY}:format=auto` +
+        `:enable='between(t,${endStart},${videoDuration})'[vfinal]`;
 
-    // Per-scene filter: Ken Burns for static images, fps+loop for video clips
-    const sceneParts = sceneFiles.map(({ isVideo }, i) => {
-      if (isVideo) {
-        // Normalise to target FPS; stream_loop handles duration via -t above
-        return `[${i}:v]fps=fps=${FPS},setpts=PTS-STARTPTS[v${i}]`;
+      const videoFinalLabel = "[vfinal]";
+
+      let audioFilter = "";
+      if (hasNarr && hasMusic) {
+        audioFilter = `;[${musicIdx}:a]volume=0.15[bg];[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`;
       }
-      return buildKenBurns(i, sceneDurations[i], `[${i}:v]`, `[v${i}]`);
-    });
-    const scenePartFilter = sceneParts.join(";");
 
-    // Xfade chain with varied transitions
-    let xfadeChain = "";
-    cuts.forEach((t, i) => {
-      const inLabel = i === 0 ? "[v0]" : `[x${i - 1}]`;
-      const outLabel = i === cuts.length - 1 ? "[vscene]" : `[x${i}]`;
-      const xfOff = (t - XF / 2).toFixed(3);
-      const transition = XFADE_TRANSITIONS[i % XFADE_TRANSITIONS.length];
-      xfadeChain += `;${inLabel}[v${i + 1}]xfade=transition=${transition}:duration=${XF}:offset=${xfOff}${outLabel}`;
-    });
-    const sceneFilter = scenePartFilter + xfadeChain;
+      cmd.complexFilter(
+        sceneFilter + captionPart + endScreenPart + audioFilter,
+      );
 
-    // Caption overlay chain
-    const afterCaptionLabel = hasCaptions ? "[vcap]" : "[vscene]";
-    const captionPart = hasCaptions
-      ? ";" +
-        buildOverlayCaptionFilter(
-          captionChunks,
-          captionStartIdx,
-          "[vscene]",
-          "[vcap]",
-        )
-      : "";
-
-    // End screen overlay — centred vertically in the bottom 300px, last 3s
-    const endY = H - 300;
-    const endStart = videoDuration - 3;
-    const endScreenPart =
-      `;${afterCaptionLabel}[${endScreenIdx}:v]` +
-      `overlay=x=0:y=${endY}:format=auto` +
-      `:enable='between(t,${endStart},${videoDuration})'[vfinal]`;
-
-    const videoFinalLabel = "[vfinal]";
-
-    let audioFilter = "";
-    if (hasNarr && hasMusic) {
-      audioFilter = `;[${musicIdx}:a]volume=0.15[bg];[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`;
-    }
-
-    cmd.complexFilter(sceneFilter + captionPart + endScreenPart + audioFilter);
-
-    const baseOpts = [
-      "-c:v libx264",
-      `-t ${videoDuration}`,
-      "-pix_fmt yuv420p",
-      `-r ${FPS}`,
-      "-movflags +faststart",
-      `-map ${videoFinalLabel}`,
-    ];
-    if (hasNarr && hasMusic) {
-      cmd.outputOptions([...baseOpts, "-map [a]", "-c:a aac", "-b:a 128k"]);
-    } else if (hasNarr) {
-      cmd.outputOptions([
-        ...baseOpts,
-        `-map ${narrIdx}:a`,
-        "-c:a aac",
-        "-b:a 128k",
-      ]);
-    } else if (hasMusic) {
-      cmd.outputOptions([
-        ...baseOpts,
-        `-map ${musicIdx}:a`,
-        "-c:a aac",
-        "-b:a 128k",
-        "-shortest",
-      ]);
-    } else {
-      cmd.outputOptions(baseOpts);
-    }
-    const stderrLines = [];
-    cmd
-      .output(videoPath)
-      .on("stderr", (line) => stderrLines.push(line))
-      .on("end", resolve)
-      .on("error", (err) =>
-        reject(
-          new Error(
-            `${err.message}\nFFmpeg stderr (last 40 lines):\n${stderrLines.slice(-40).join("\n")}`,
+      const baseOpts = [
+        "-c:v libx264",
+        `-t ${videoDuration}`,
+        "-pix_fmt yuv420p",
+        `-r ${FPS}`,
+        "-movflags +faststart",
+        `-map ${videoFinalLabel}`,
+      ];
+      if (hasNarr && hasMusic) {
+        cmd.outputOptions([...baseOpts, "-map [a]", "-c:a aac", "-b:a 128k"]);
+      } else if (hasNarr) {
+        cmd.outputOptions([
+          ...baseOpts,
+          `-map ${narrIdx}:a`,
+          "-c:a aac",
+          "-b:a 128k",
+        ]);
+      } else if (hasMusic) {
+        cmd.outputOptions([
+          ...baseOpts,
+          `-map ${musicIdx}:a`,
+          "-c:a aac",
+          "-b:a 128k",
+          "-shortest",
+        ]);
+      } else {
+        cmd.outputOptions(baseOpts);
+      }
+      const stderrLines = [];
+      cmd
+        .output(videoPath)
+        .on("stderr", (line) => stderrLines.push(line))
+        .on("end", resolve)
+        .on("error", (err) =>
+          reject(
+            new Error(
+              `${err.message}\nFFmpeg stderr (last 40 lines):\n${stderrLines.slice(-40).join("\n")}`,
+            ),
           ),
-        ),
-      )
-      .run();
-  });
+        )
+        .run();
+    });
   } finally {
-    [...sceneFiles.map((s) => s.path), ...captionPNGPaths, endScreenPath].forEach((p) => {
+    [
+      ...sceneFiles.map((s) => s.path),
+      ...captionPNGPaths,
+      endScreenPath,
+    ].forEach((p) => {
       try {
         unlinkSync(p);
       } catch {
@@ -1407,7 +1520,8 @@ async function generateMultiSceneVideo(
  *   narrationPath?: string|null,  ElevenLabs TTS audio — played once at 100% volume
  *   bgMusicPath?:   string|null,  Background music — looped at 15% volume
  *   words?:         { word: string, start: number, end: number }[],  Caption timestamps
- *   useAiImage?:    boolean,      Use AI-generated background instead of Wikipedia image
+ *   useAiImage?:    boolean,      When true, use the multi-scene wiki-image path
+ *                                 (legacy name kept for compatibility)
  * }} [opts]
  * @returns {Promise<{ path: string, cuts: number[] }>} path to the MP4 and scene cut timestamps
  */
@@ -1429,7 +1543,7 @@ export async function generateVideo(
   const framePath = join(TMP, `${slug}_frame.png`);
   const videoPath = join(TMP, `${slug}.mp4`);
 
-  // Multi-scene: 3 AI images crossfaded at narration-timed boundaries
+  // Multi-scene: article/Wikipedia images crossfaded at narration-timed boundaries
   if (useAiImage) {
     return generateMultiSceneVideo(post, {
       narrationPath,
@@ -1442,7 +1556,7 @@ export async function generateVideo(
     });
   }
 
-  // Single-scene: Wikipedia image as static background
+  // Single-scene: validated post.imageUrl as static background
   // Compute duration from narration end + 3 s tail (same logic as multi-scene)
   const narrEnd = words?.length > 0 ? words[words.length - 1].end : null;
   const videoDuration = narrEnd
@@ -1481,7 +1595,7 @@ export async function generateVideo(
       : "  Captions: none (no word timestamps)",
   );
 
-  // 4. Encode PNG frame → 45-second MP4
+  // 4. Encode PNG frame → 45-second MP4 with slow Ken Burns motion
   //    Audio strategy:
   //      narration + music  → amix (narration 100%, music 15%)
   //      narration only     → narration track, video pads to 45 s silently
@@ -1491,127 +1605,132 @@ export async function generateVideo(
     await new Promise((resolve, reject) => {
       const cmd = ffmpeg().input(framePath).inputOptions(["-loop 1"]); // input 0 — image
 
-    const hasNarr = !!narrationPath;
-    const hasMusic = !!bgMusicPath;
+      const hasNarr = !!narrationPath;
+      const hasMusic = !!bgMusicPath;
 
-    // Add audio inputs in fixed order: narration=1, music=2 (when both present)
-    if (hasNarr) cmd.input(narrationPath);
-    if (hasMusic) cmd.input(bgMusicPath).inputOptions(["-stream_loop -1"]);
+      // Add audio inputs in fixed order: narration=1, music=2 (when both present)
+      if (hasNarr) cmd.input(narrationPath);
+      if (hasMusic) cmd.input(bgMusicPath).inputOptions(["-stream_loop -1"]);
 
-    const musicIdx = hasNarr && hasMusic ? 2 : 1;
-    const narrIdx = 1;
-    const captionStartIdx = 1 + (hasNarr ? 1 : 0) + (hasMusic ? 1 : 0);
-    captionPNGPaths.forEach((p) => cmd.input(p));
+      const musicIdx = hasNarr && hasMusic ? 2 : 1;
+      const narrIdx = 1;
+      const captionStartIdx = 1 + (hasNarr ? 1 : 0) + (hasMusic ? 1 : 0);
+      captionPNGPaths.forEach((p) => cmd.input(p));
 
-    const baseOpts = [
-      "-c:v libx264",
-      `-t ${videoDuration}`,
-      "-pix_fmt yuv420p",
-      `-r ${FPS}`,
-      "-movflags +faststart",
-    ];
+      const baseOpts = [
+        "-c:v libx264",
+        `-t ${videoDuration}`,
+        "-pix_fmt yuv420p",
+        `-r ${FPS}`,
+        "-movflags +faststart",
+      ];
 
-    if (hasCaptions) {
-      // Overlay caption PNGs with time-gated enable — no libfreetype needed
-      const captionFilter = buildOverlayCaptionFilter(
-        captionChunks,
-        captionStartIdx,
-        "[0:v]",
-        "[vcap]",
-      );
-      const videoMapLabel = "[vcap]";
+      if (hasCaptions) {
+        // Apply Ken Burns to the single image, then overlay caption PNGs with
+        // time-gated enable — no libfreetype needed.
+        const sceneFilter = buildKenBurns(0, videoDuration, "[0:v]", "[v0]");
+        const captionFilter = buildOverlayCaptionFilter(
+          captionChunks,
+          captionStartIdx,
+          "[v0]",
+          "[vcap]",
+        );
+        const videoMapLabel = "[vcap]";
 
-      if (hasNarr && hasMusic) {
-        cmd
-          .complexFilter(
-            `${captionFilter};` +
+        if (hasNarr && hasMusic) {
+          cmd
+            .complexFilter(
+              `${sceneFilter};${captionFilter};` +
+                `[${musicIdx}:a]volume=0.15[bg];` +
+                `[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`,
+            )
+            .outputOptions([
+              ...baseOpts,
+              `-map ${videoMapLabel}`,
+              "-map [a]",
+              "-c:a aac",
+              "-b:a 128k",
+            ]);
+        } else if (hasNarr) {
+          cmd
+            .complexFilter(`${sceneFilter};${captionFilter}`)
+            .outputOptions([
+              ...baseOpts,
+              `-map ${videoMapLabel}`,
+              `-map ${narrIdx}:a`,
+              "-c:a aac",
+              "-b:a 128k",
+            ]);
+        } else if (hasMusic) {
+          cmd
+            .complexFilter(`${sceneFilter};${captionFilter}`)
+            .outputOptions([
+              ...baseOpts,
+              `-map ${videoMapLabel}`,
+              `-map ${narrIdx}:a`,
+              "-c:a aac",
+              "-b:a 128k",
+              "-shortest",
+            ]);
+        } else {
+          cmd
+            .complexFilter(`${sceneFilter};${captionFilter}`)
+            .outputOptions([...baseOpts, `-map ${videoMapLabel}`]);
+        }
+      } else {
+        // No captions — original simple path with Ken Burns motion.
+        if (hasNarr && hasMusic) {
+          cmd
+            .complexFilter(
+              `${buildKenBurns(0, videoDuration, "[0:v]", "[v0]")};` +
               `[${musicIdx}:a]volume=0.15[bg];` +
               `[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`,
-          )
-          .outputOptions([
+            )
+            .outputOptions([
+              ...baseOpts,
+              "-map [v0]",
+              "-map [a]",
+              "-c:a aac",
+              "-b:a 128k",
+            ]);
+        } else if (hasNarr) {
+          cmd.outputOptions([
             ...baseOpts,
-            `-map ${videoMapLabel}`,
-            "-map [a]",
+            "-map [v0]",
+            "-map 1:a",
             "-c:a aac",
             "-b:a 128k",
           ]);
-      } else if (hasNarr) {
-        cmd
-          .complexFilter(captionFilter)
-          .outputOptions([
+        } else if (hasMusic) {
+          cmd.outputOptions([
             ...baseOpts,
-            `-map ${videoMapLabel}`,
-            `-map ${narrIdx}:a`,
-            "-c:a aac",
-            "-b:a 128k",
-          ]);
-      } else if (hasMusic) {
-        cmd
-          .complexFilter(captionFilter)
-          .outputOptions([
-            ...baseOpts,
-            `-map ${videoMapLabel}`,
-            `-map ${narrIdx}:a`,
+            "-map [v0]",
+            "-map 1:a",
             "-c:a aac",
             "-b:a 128k",
             "-shortest",
           ]);
-      } else {
-        cmd
-          .complexFilter(captionFilter)
-          .outputOptions([...baseOpts, `-map ${videoMapLabel}`]);
+        } else {
+          cmd
+            .complexFilter(buildKenBurns(0, videoDuration, "[0:v]", "[v0]"))
+            .outputOptions([...baseOpts, "-map [v0]"]);
+        }
       }
-    } else {
-      // No captions — original simple path
-      if (hasNarr && hasMusic) {
-        cmd
-          .complexFilter(
-            `[${musicIdx}:a]volume=0.15[bg];` +
-              `[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`,
-          )
-          .outputOptions([
-            ...baseOpts,
-            "-map 0:v",
-            "-map [a]",
-            "-c:a aac",
-            "-b:a 128k",
-          ]);
-      } else if (hasNarr) {
-        cmd.outputOptions([
-          ...baseOpts,
-          "-map 0:v",
-          "-map 1:a",
-          "-c:a aac",
-          "-b:a 128k",
-        ]);
-      } else if (hasMusic) {
-        cmd.outputOptions([
-          ...baseOpts,
-          "-map 0:v",
-          "-map 1:a",
-          "-c:a aac",
-          "-b:a 128k",
-          "-shortest",
-        ]);
-      } else {
-        cmd.outputOptions(baseOpts);
-      }
-    }
 
-    const stderrLines2 = [];
-    cmd
-      .output(videoPath)
-      .on("stderr", (line) => stderrLines2.push(line))
-      .on("end", resolve)
-      .on("error", (err) =>
-        reject(
-          new Error(
-            `${err.message}\nFFmpeg stderr (last 40 lines):\n${stderrLines2.slice(-40).join("\n")}`,
+      const stderrLines2 = [];
+      cmd
+        .output(videoPath)
+        .on("stderr", (line) => stderrLines2.push(line))
+        .on("end", resolve)
+        .on("error", (err) =>
+          reject(
+            new Error(
+              `${err.message}\nFFmpeg stderr (last 40 lines):\n${stderrLines2.slice(-40).join("\n")}`,
+            ),
           ),
-        ),
-      )
-      .run();
-  });
+        )
+        .run();
+    });
   } finally {
     [...captionPNGPaths, framePath].forEach((p) => {
       try {

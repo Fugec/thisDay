@@ -156,6 +156,66 @@ export async function getArticleText(slug) {
   return paras.length > 0 ? paras.join(" ").slice(0, 2000) : null;
 }
 
+/**
+ * Extracts wiki-hosted image URLs from the stored post HTML.
+ * The blog content uses /image-proxy?src=... wrappers; this unwraps them
+ * back to the original Wikimedia/Commons URL so the video pipeline can reuse
+ * the exact article images.
+ *
+ * @param {string} slug
+ * @param {number} [limit=15]
+ * @returns {Promise<string[]>}
+ */
+export async function getPostImageUrls(slug, limit = 15) {
+  const raw = await kvGet(`post:${slug}`);
+  if (!raw) return [];
+
+  const urls = [];
+  const seen = new Set();
+  const imgRe = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
+  for (const match of raw.matchAll(imgRe)) {
+    let src = decodeEntities(match[1]);
+    if (!src) continue;
+
+    try {
+      const parsed = new URL(src, "https://thisday.info");
+      if (parsed.pathname.includes("/image-proxy")) {
+        const proxied = parsed.searchParams.get("src");
+        if (proxied) src = decodeEntities(proxied);
+      } else if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        src = parsed.href;
+      } else {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+
+    if (src.startsWith("//")) src = `https:${src}`;
+    if (!/^https?:\/\//i.test(src)) continue;
+
+    let parsedSrc;
+    try {
+      parsedSrc = new URL(src);
+    } catch {
+      continue;
+    }
+
+    const host = parsedSrc.hostname.toLowerCase();
+    if (!host.endsWith("wikimedia.org") && !host.endsWith("wikipedia.org")) {
+      continue;
+    }
+
+    const dedupeKey = parsedSrc.href.split("#")[0];
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    urls.push(parsedSrc.href);
+    if (urls.length >= limit) break;
+  }
+
+  return urls;
+}
+
 function decodeEntities(str) {
   return str
     .replace(/&amp;/g, "&")

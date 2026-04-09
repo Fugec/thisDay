@@ -22,6 +22,7 @@
 const DOMAIN = "https://thisday.info";
 const CACHE_MAX_AGE = 3600; // 1 hour (purged immediately after each new publish)
 const KV_INDEX_KEY = "index";
+const SITE_STRUCTURE_LASTMOD = "2026-04-09";
 
 // ---------------------------------------------------------------------------
 // Static pages — core site sections that never change dynamically
@@ -30,65 +31,65 @@ const KV_INDEX_KEY = "index";
 const STATIC_PAGES = [
   {
     loc: "/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "daily",
     priority: "1.0",
     dynamicLastmod: true,
   },
   {
     loc: "/about/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "monthly",
     priority: "0.7",
   },
   {
     loc: "/about/editorial/",
-    lastmod: "2026-04-05",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "monthly",
     priority: "0.7",
   },
   {
     loc: "/contact/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "monthly",
     priority: "0.6",
   },
   {
     loc: "/blog/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "weekly",
     priority: "0.8",
     dynamicLastmod: true,
   },
   {
     loc: "/blog/archive/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "weekly",
     priority: "0.8",
     dynamicLastmod: true,
   },
   // Pillar hub pages — /blog/topic/:slug/
-  { loc: "/blog/topic/war-conflict/",          lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/politics-government/",   lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/science-technology/",    lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/arts-culture/",          lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/disasters-accidents/",   lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/social-human-rights/",   lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/economy-business/",      lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/health-medicine/",       lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/exploration-discovery/", lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/famous-persons/",        lastmod: "2026-04-05", changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/born-on-this-day/",      lastmod: "2026-04-05", changefreq: "weekly", priority: "0.6", dynamicLastmod: true },
-  { loc: "/blog/topic/died-on-this-day/",      lastmod: "2026-04-05", changefreq: "weekly", priority: "0.6", dynamicLastmod: true },
+  { loc: "/blog/topic/war-conflict/",          lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/politics-government/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/science-technology/",    lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/arts-culture/",          lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/disasters-accidents/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/social-human-rights/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/economy-business/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/health-medicine/",       lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/exploration-discovery/", lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/famous-persons/",        lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
+  { loc: "/blog/topic/born-on-this-day/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.6", dynamicLastmod: true },
+  { loc: "/blog/topic/died-on-this-day/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.6", dynamicLastmod: true },
   {
     loc: "/privacy-policy/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "yearly",
     priority: "0.3",
   },
   {
     loc: "/terms/",
-    lastmod: "2026-03-17",
+    lastmod: SITE_STRUCTURE_LASTMOD,
     changefreq: "yearly",
     priority: "0.3",
   },
@@ -223,8 +224,9 @@ export default {
 
 function buildSitemapIndex(latestPostLastmod) {
   const today = new Date().toISOString().slice(0, 10);
+  const mainSitemapLastmod = pickNewerDate(latestPostLastmod, SITE_STRUCTURE_LASTMOD);
   const entries = [
-    sitemapEntry(`${DOMAIN}/sitemap-main.xml`, latestPostLastmod),
+    sitemapEntry(`${DOMAIN}/sitemap-main.xml`, mainSitemapLastmod),
     sitemapEntry(`${DOMAIN}/sitemap-generated.xml`, today),
     sitemapEntry(`${DOMAIN}/sitemap-people.xml`, today),
     sitemapEntry(`${DOMAIN}/news-sitemap.xml`, latestPostLastmod),
@@ -250,7 +252,9 @@ function buildMainSitemap(
     entries.push(
       urlEntry(
         `${DOMAIN}${page.loc}`,
-        page.dynamicLastmod ? latestPostLastmod : page.lastmod,
+        page.dynamicLastmod
+          ? pickNewerDate(latestPostLastmod, page.lastmod)
+          : page.lastmod,
         page.changefreq,
         page.priority,
       ),
@@ -283,6 +287,15 @@ function buildMainSitemap(
     entries.join("\n") +
     `\n</urlset>`
   );
+}
+
+function pickNewerDate(...dates) {
+  const normalized = dates
+    .filter(Boolean)
+    .map((value) => String(value).slice(0, 10))
+    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+  if (!normalized.length) return new Date().toISOString().slice(0, 10);
+  return normalized.sort().at(-1);
 }
 
 function sitemapEntry(loc, lastmod) {

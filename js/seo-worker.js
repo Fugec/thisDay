@@ -1335,6 +1335,30 @@ function buildBreadcrumbSchema(items) {
   }).replace(/<\//g, "<\\/");
 }
 
+function buildPageSchema({
+  type = "WebPage",
+  name,
+  description,
+  url,
+  mainEntityId,
+  about,
+}) {
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": type,
+    name,
+    description,
+    url,
+    isPartOf: {
+      "@type": "WebSite",
+      name: "thisDay.info",
+      url: "https://thisday.info/",
+    },
+    ...(about ? { about } : {}),
+    ...(mainEntityId ? { mainEntity: { "@id": mainEntityId } } : {}),
+  }).replace(/<\//g, "<\\/");
+}
+
 function generateBornHTML(siteUrl, monthName, day, eventsData) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
@@ -1428,8 +1452,10 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
     births.length > 0
       ? JSON.stringify({
           "@context": "https://schema.org",
+          "@id": `${canonical}#birthdays`,
           "@type": "ItemList",
           name: `Famous Birthdays on ${mDisplay} ${day}`,
+          url: canonical,
           numberOfItems: births.length,
           itemListElement: births.slice(0, 10).map((b, i) => {
             const jobTitle = b.text.includes(",")
@@ -1452,6 +1478,15 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
           }),
         })
       : null;
+
+  const pageSchema = buildPageSchema({
+    type: "CollectionPage",
+    name: pageTitle.replace(" | thisDay.info", ""),
+    description: pageDesc,
+    url: canonical,
+    mainEntityId: births.length > 0 ? `${canonical}#birthdays` : null,
+    about: { "@type": "Thing", name: `Birthdays on ${mDisplay} ${day}` },
+  });
 
   const breadcrumbSchema = buildBreadcrumbSchema([
     { name: "Home", item: `${siteUrl}/` },
@@ -1558,13 +1593,14 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
 <meta property="og:site_name" content="thisDay."/>
 <meta property="og:image" content="${escapeHtml(ogImg)}"/>
 <meta name="twitter:card" content="summary_large_image"/>
-<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
-<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
-<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
-<meta name="author" content="thisDay.info"/>
-<script type="application/ld+json">${faqSchema}</script>
-<script type="application/ld+json">${breadcrumbSchema}</script>
-${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
+	<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+	<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+	<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
+	<meta name="author" content="thisDay.info"/>
+	<script type="application/ld+json">${pageSchema}</script>
+	<script type="application/ld+json">${faqSchema}</script>
+	<script type="application/ld+json">${breadcrumbSchema}</script>
+	${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -1749,8 +1785,10 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
     deaths.length > 0
       ? JSON.stringify({
           "@context": "https://schema.org",
+          "@id": `${canonical}#deaths`,
           "@type": "ItemList",
           name: `Notable Deaths on ${mDisplay} ${day}`,
+          url: canonical,
           numberOfItems: deaths.length,
           itemListElement: deaths.slice(0, 10).map((d, i) => {
             const jobTitle = d.text.includes(",")
@@ -1773,6 +1811,15 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
           }),
         })
       : null;
+
+  const pageSchema = buildPageSchema({
+    type: "CollectionPage",
+    name: pageTitle.replace(" | thisDay.info", ""),
+    description: pageDesc,
+    url: canonical,
+    mainEntityId: deaths.length > 0 ? `${canonical}#deaths` : null,
+    about: { "@type": "Thing", name: `Deaths on ${mDisplay} ${day}` },
+  });
 
   const breadcrumbSchema = buildBreadcrumbSchema([
     { name: "Home", item: `${siteUrl}/` },
@@ -1879,13 +1926,14 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
 <meta property="og:site_name" content="thisDay."/>
 <meta property="og:image" content="${escapeHtml(ogImg)}"/>
 <meta name="twitter:card" content="summary_large_image"/>
-<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
-<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
-<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
-<meta name="author" content="thisDay.info"/>
-<script type="application/ld+json">${faqSchema}</script>
-<script type="application/ld+json">${breadcrumbSchema}</script>
-${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
+	<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+	<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+	<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
+	<meta name="author" content="thisDay.info"/>
+	<script type="application/ld+json">${pageSchema}</script>
+	<script type="application/ld+json">${faqSchema}</script>
+	<script type="application/ld+json">${breadcrumbSchema}</script>
+	${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -4824,6 +4872,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const quizPageSchema = quiz?.questions?.length
     ? JSON.stringify({
         "@context": "https://schema.org",
+        "@id": `${canonical}#quiz`,
         "@type": "Quiz",
         name: quizPageTitle.replace(" | thisDay.info", ""),
         description: quizPageDesc,
@@ -4855,6 +4904,17 @@ async function handleQuizPage(_request, env, monthSlug, day) {
       }).replace(/<\//g, "<\\/")
     : null;
 
+  const quizWebPageSchema = buildPageSchema({
+    type: "WebPage",
+    name: quizPageTitle.replace(" | thisDay.info", ""),
+    description: quizPageDesc,
+    url: canonical,
+    mainEntityId: quiz?.questions?.length ? `${canonical}#quiz` : null,
+    about: quiz?.topic
+      ? { "@type": "Thing", name: quiz.topic }
+      : { "@type": "Thing", name: `${mDisplay} ${day} history quiz` },
+  });
+
   const breadcrumbSchema = buildBreadcrumbSchema([
     { name: "Home", item: `${siteUrl}/` },
     { name: `${mDisplay} ${day} in History`, item: `${siteUrl}/events/${monthSlug}/${day}/` },
@@ -4877,10 +4937,11 @@ async function handleQuizPage(_request, env, monthSlug, day) {
 <meta name="twitter:description" content="${escapeHtml(quizPageDesc)}"/>
 <meta name="twitter:image" content="${featuredEvent?.pages?.[0]?.thumbnail?.source ? escapeHtml(featuredEvent.pages[0].thumbnail.source) : `https://thisday.info/images/logo.png`}"/>
 <meta property="og:locale" content="en_US"/>
-<meta property="og:site_name" content="thisDay."/>
-<meta name="author" content="thisDay.info"/>
-${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
-<script type="application/ld+json">${breadcrumbSchema}</script>
+	<meta property="og:site_name" content="thisDay."/>
+	<meta name="author" content="thisDay.info"/>
+	<script type="application/ld+json">${quizWebPageSchema}</script>
+	${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
+	<script type="application/ld+json">${breadcrumbSchema}</script>
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>

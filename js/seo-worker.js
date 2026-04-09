@@ -982,6 +982,12 @@ function generateBlogPostHTML(
       }).replace(/<\//g, "<\\/")
     : null;
 
+  const breadcrumbSchema = buildBreadcrumbSchema([
+    { name: "Home", item: `${siteUrl}/` },
+    { name: "On This Day", item: `${siteUrl}/events/` },
+    { name: `${mDisplay} ${day} in History`, item: canonical },
+  ]);
+
   // Births era range
   const birthYears = topBirths
     .map((b) => parseInt(b.year) || null)
@@ -1107,6 +1113,7 @@ function generateBlogPostHTML(
 <script type="application/ld+json">${articleSchema}</script>
 ${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` : ""}
 <script type="application/ld+json">${faqSchema}</script>
+<script type="application/ld+json">${breadcrumbSchema}</script>
 ${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
@@ -1315,6 +1322,19 @@ function buildDateClusterCard(monthName, day, mDisplay, currentType) {
   </div>`;
 }
 
+function buildBreadcrumbSchema(items) {
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: item.item,
+    })),
+  }).replace(/<\//g, "<\\/");
+}
+
 function generateBornHTML(siteUrl, monthName, day, eventsData) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
@@ -1433,6 +1453,12 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
         })
       : null;
 
+  const breadcrumbSchema = buildBreadcrumbSchema([
+    { name: "Home", item: `${siteUrl}/` },
+    { name: "On This Day", item: `${siteUrl}/events/` },
+    { name: `Born on ${mDisplay} ${day}`, item: canonical },
+  ]);
+
   // Top 3 featured cards
   const top3Html = births
     .slice(0, 3)
@@ -1537,6 +1563,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData) {
 <meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
 <meta name="author" content="thisDay.info"/>
 <script type="application/ld+json">${faqSchema}</script>
+<script type="application/ld+json">${breadcrumbSchema}</script>
 ${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
@@ -1747,6 +1774,12 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
         })
       : null;
 
+  const breadcrumbSchema = buildBreadcrumbSchema([
+    { name: "Home", item: `${siteUrl}/` },
+    { name: "On This Day", item: `${siteUrl}/events/` },
+    { name: `Died on ${mDisplay} ${day}`, item: canonical },
+  ]);
+
   // Top 3 featured cards
   const top3Html = deaths
     .slice(0, 3)
@@ -1851,6 +1884,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData) {
 <meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
 <meta name="author" content="thisDay.info"/>
 <script type="application/ld+json">${faqSchema}</script>
+<script type="application/ld+json">${breadcrumbSchema}</script>
 ${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
@@ -4821,6 +4855,12 @@ async function handleQuizPage(_request, env, monthSlug, day) {
       }).replace(/<\//g, "<\\/")
     : null;
 
+  const breadcrumbSchema = buildBreadcrumbSchema([
+    { name: "Home", item: `${siteUrl}/` },
+    { name: `${mDisplay} ${day} in History`, item: `${siteUrl}/events/${monthSlug}/${day}/` },
+    { name: `${mDisplay} ${day} Quiz`, item: canonical },
+  ]);
+
   const html = `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(quizPageTitle)}</title>
@@ -4840,6 +4880,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
 <meta property="og:site_name" content="thisDay."/>
 <meta name="author" content="thisDay.info"/>
 ${quizPageSchema ? `<script type="application/ld+json">${quizPageSchema}</script>` : ""}
+<script type="application/ld+json">${breadcrumbSchema}</script>
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>

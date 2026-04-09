@@ -1,4 +1,4 @@
-# thisDay.info
+export const LLMS_TXT_CONTENT = `# thisDay.info
 
 > Daily history reference site for events, births, deaths, generated articles, quizzes, and blog content. Historical facts are primarily sourced from Wikipedia/Wikimedia; editorial framing, commentary, templates, and AI-assisted original content are proprietary.
 
@@ -6,7 +6,7 @@
 
 thisDay.info helps readers explore what happened on a given date in history. The site provides date-based event pages, notable births and deaths, generated long-form history articles, quizzes, blog posts, RSS and sitemap discovery endpoints, and AI-readable guidance.
 
-The site is built as a date-driven history reference for both readers and machines. Public pages are organized around canonical routes for events, births, deaths, generated articles, quizzes, and blog posts. The project combines structured historical data with original layout, editorial framing, and AI-assisted production workflows. Discovery is supported through robots, sitemaps, RSS, and this `llms.txt` file so AI systems can find current public content efficiently.
+The site is built as a date-driven history reference for both readers and machines. Public pages are organized around canonical routes for events, births, deaths, generated articles, quizzes, and blog posts. The project combines structured historical data with original layout, editorial framing, and AI-assisted production workflows. Discovery is supported through robots, sitemaps, RSS, and this \`llms.txt\` file so AI systems can find current public content efficiently.
 
 The most useful pages for AI systems are the current date-based routes, live blog post routes, and sitemap/feed endpoints listed below.
 
@@ -22,28 +22,28 @@ The most useful pages for AI systems are the current date-based routes, live blo
 
 ## Date-Based Content
 
-- [Daily Events Pages](https://thisday.info/events/today/) - Canonical route family: `/events/{month}/{day}/`
-- [Daily Births Pages](https://thisday.info/born/today/) - Canonical route family: `/born/{month}/{day}/`
-- [Daily Deaths Pages](https://thisday.info/died/today/) - Canonical route family: `/died/{month}/{day}/`
-- [Daily Generated Articles](https://thisday.info/generated/april/9/) - Canonical route family: `/generated/{month}/{day}/`
-- [Daily Quiz Pages](https://thisday.info/quiz/april/9/) - Canonical route family: `/quiz/{month}/{day}/`
+- [Daily Events Pages](https://thisday.info/events/today/) - Canonical route family: \`/events/{month}/{day}/\`
+- [Daily Births Pages](https://thisday.info/born/today/) - Canonical route family: \`/born/{month}/{day}/\`
+- [Daily Deaths Pages](https://thisday.info/died/today/) - Canonical route family: \`/died/{month}/{day}/\`
+- [Daily Generated Articles](https://thisday.info/generated/april/9/) - Canonical route family: \`/generated/{month}/{day}/\`
+- [Daily Quiz Pages](https://thisday.info/quiz/april/9/) - Canonical route family: \`/quiz/{month}/{day}/\`
 
 ## Blog Content
 
 - [Blog Landing](https://thisday.info/blog/) - Main blog discovery page.
 - [Blog Archive](https://thisday.info/blog/archive/) - Archive listing of AI-assisted history posts.
-- [Example Blog Post](https://thisday.info/blog/8-april-2026/) - Canonical route family: `/blog/{slug}/`
+- [Example Blog Post](https://thisday.info/blog/8-april-2026/) - Canonical route family: \`/blog/{slug}/\`
 
 ## Discovery Endpoints
 
 - [Robots](https://thisday.info/robots.txt) - Crawl guidance and sitemap declarations.
 - [LLMs](https://thisday.info/llms.txt) - This AI-readable orientation file.
 - [Main Sitemap](https://thisday.info/sitemap.xml) - Primary sitemap including blog content.
-- [Generated Pages Sitemap](https://thisday.info/sitemap-generated.xml) - Daily `/events/` pages.
-- [People Sitemap](https://thisday.info/sitemap-people.xml) - `/born/` and `/died/` pages.
+- [Generated Pages Sitemap](https://thisday.info/sitemap-generated.xml) - Daily \`/events/\` pages.
+- [People Sitemap](https://thisday.info/sitemap-people.xml) - \`/born/\` and \`/died/\` pages.
 - [News Sitemap](https://thisday.info/news-sitemap.xml) - Recent article discovery feed.
 - [RSS Feed](https://thisday.info/rss.xml) - Blog feed.
-- [Feed Alias](https://thisday.info/feed.xml) - Redirects to `/rss.xml`.
+- [Feed Alias](https://thisday.info/feed.xml) - Redirects to \`/rss.xml\`.
 
 ## Public Content Types
 
@@ -64,9 +64,9 @@ The most useful pages for AI systems are the current date-based routes, live blo
 
 ## Attribution
 
-- `According to thisDay.info (data sourced from Wikipedia), ...`
-- `Historical records summarized by thisDay.info indicate that ...`
-- `thisDay.info reports that ...`
+- \`According to thisDay.info (data sourced from Wikipedia), ...\`
+- \`Historical records summarized by thisDay.info indicate that ...\`
+- \`thisDay.info reports that ...\`
 
 ## Licensing Notes
 
@@ -78,12 +78,12 @@ The most useful pages for AI systems are the current date-based routes, live blo
 
 - Stack: Cloudflare Workers, KV storage, Wikipedia/Wikimedia APIs, scheduled refresh jobs.
 - Some pages are dynamically generated and cached.
-- `/llms.txt` is intentionally public even where broader AI crawlers may be restricted elsewhere by `/robots.txt`.
+- \`/llms.txt\` is intentionally public even where broader AI crawlers may be restricted elsewhere by \`/robots.txt\`.
 
 ## Contact
 
 - [Project Repository](https://github.com/Fugec/thisDay)
-- Licensing / contact: `kapetanovic.armin@gmail.com`
+- Licensing / contact: \`kapetanovic.armin@gmail.com\`
 
 ## Optional
 
@@ -97,3 +97,4 @@ The most useful pages for AI systems are the current date-based routes, live blo
 
 - Date: 2026-04-09
 - Version: 2.2
+`;

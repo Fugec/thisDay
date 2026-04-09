@@ -822,10 +822,9 @@ export default {
             );
         }
         // Patch old show-all quiz JS → step-by-step (posts with quiz already baked in but old JS)
-        // Only apply if post has old quiz (submit-btn, no finish-btn) AND doesn't already have step CSS (tdq-q-active)
+        // Only apply if post has quiz popup, no finish-btn, and doesn't already have step CSS (tdq-q-active)
         if (
           patchedHtml.includes('id="tdq-popup"') &&
-          patchedHtml.includes('id="tdq-submit-btn"') &&
           !patchedHtml.includes("tdq-finish-btn") &&
           !patchedHtml.includes("tdq-q-active")
         ) {
@@ -843,7 +842,6 @@ export default {
     total=Math.min(quiz.questions.length,5);
     var topicEl=document.getElementById('tdq-topic');
     if(topicEl){var h1=document.querySelector('h1');if(h1)topicEl.textContent='Quiz: '+h1.textContent.trim();}
-    var sb=document.getElementById('tdq-submit-btn');if(sb)sb.style.display='none';
     var container=document.getElementById('tdq-questions');
     container.innerHTML=quiz.questions.slice(0,total).map(function(q,qi){
       var optsHtml=(q.options||[]).map(function(opt,oi){return '<div class="tdq-opt" data-qi="'+qi+'" data-oi="'+oi+'"><span class="tdq-opt-key">'+String.fromCharCode(65+oi)+'</span>'+esc(String(opt))+'</div>';}).join('');
@@ -946,7 +944,6 @@ export default {
       <p style="font-size:.85rem;color:var(--text-muted,#5c7a65);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
       <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:var(--accent,#9dc43a);margin-bottom:16px">0 of 5 answered</div>
       <div id="tdq-questions"></div>
-      <button class="btn mt-3" id="tdq-submit-btn" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
       <div id="tdq-score" class="mt-3" hidden></div>
     </div>
   </div>
@@ -1051,7 +1048,6 @@ export default {
         if (inner) inner.scrollTop = 0;
       });
     }
-    document.getElementById("tdq-submit-btn").addEventListener("click", function() {});
     function maybeLoadAndShow() {
       if (quizLoaded) return; quizLoaded = true;
       if (window.__tdqQuiz) { var q=window.__tdqQuiz; window.__tdqQuiz=null; renderQuiz(q); openPopup(); return; }
@@ -5004,7 +5000,6 @@ ${analysisBadItems}
       <p style="font-size:.85rem;color:var(--text-muted,#5c7a65);margin-bottom:6px;opacity:.8">Based on the article you just read — 5 questions, under a minute.</p>
       <div id="tdq-progress" style="font-size:.78rem;font-weight:600;color:var(--accent,#9dc43a);margin-bottom:16px">0 of 5 answered</div>
       <div id="tdq-questions"></div>
-      <button class="btn mt-3" id="tdq-submit-btn" style="background:var(--btn-bg,#1b3a2d);color:var(--btn-text,#fff);border:none" style="display:none"><i class="bi bi-check2-circle me-1"></i>Check Answers</button>
       <div id="tdq-score" class="mt-3" hidden></div>
     </div>
   </div>
@@ -5234,7 +5229,6 @@ ${analysisBadItems}
         var qEl = document.getElementById("tdq-q-" + qi);
         if (qEl) { qEl.classList.add("tdq-q-active"); var nb = document.getElementById("tdq-next-" + qi); if (nb) nb.style.display = "none"; }
       });
-      document.getElementById("tdq-submit-btn").style.display = "none";
       var pct = Math.round(score / total * 100);
       var msg = pct === 100 ? "Perfect score!" : pct >= 80 ? "Excellent!" : pct >= 60 ? "Good job!" : "Keep learning!";
       var el = document.getElementById("tdq-score");
@@ -5246,8 +5240,6 @@ ${analysisBadItems}
       var progEl = document.getElementById("tdq-progress");
       if (progEl) progEl.textContent = "Results — " + score + "/" + total + " correct";
     }
-
-    document.getElementById("tdq-submit-btn").addEventListener("click", function() { showResults(answers.length); });
 
     function maybeLoadAndShow() {
       if (quizLoaded) return;

@@ -38,7 +38,7 @@ The most useful pages for AI systems are the current date-based routes, live blo
 - [Robots](https://thisday.info/robots.txt) - Crawl guidance and sitemap declarations.
 - [LLMs](https://thisday.info/llms.txt) - This AI-readable orientation file.
 - [Main Sitemap](https://thisday.info/sitemap.xml) - Primary sitemap including blog content.
-- [Generated Pages Sitemap](https://thisday.info/sitemap-generated.xml) - Daily \`/events/\` pages.
+- [Date Pages Sitemap](https://thisday.info/sitemap-generated.xml) - Daily \`/events/\` and \`/quiz/\` pages.
 - [People Sitemap](https://thisday.info/sitemap-people.xml) - \`/born/\` and \`/died/\` pages.
 - [News Sitemap](https://thisday.info/news-sitemap.xml) - Recent article discovery feed.
 - [RSS Feed](https://thisday.info/rss.xml) - Blog feed.

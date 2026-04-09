@@ -394,11 +394,6 @@ export default {
       return Response.redirect(`${url.origin}/blog/${legacyArchivePostMatch[1]}/`, 301);
     }
 
-    // Listing page: /blog/archive (legacy alias handled above)
-    if (path === "/blog/archive") {
-      return serveListing(env);
-    }
-
     // Pillar hub pages: /blog/topic/:pillar-slug/
     const topicMatch = path.match(/^\/blog\/topic\/([a-z0-9-]+)$/);
     if (topicMatch) {
@@ -4840,7 +4835,7 @@ ${analysisBadItems}
           </div>
 
           ${(() => {
-            // Cross-link to /generated/ page for the event's month/day
+            // Cross-link to the canonical /events/ page for the event's month/day
             // Always derive the month/day from the publication slug (e.g. "8-april-2026")
             // so the Explore card stays correct even if the AI returns a wrong ISO date.
             const sp = parseSlugDate(slug);

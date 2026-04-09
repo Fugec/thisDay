@@ -2910,18 +2910,18 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
   const MAX_CAROUSEL_POSTS = 3;
   const today = new Date();
 
-  // Priority 1: latest AI archive posts (across months), but only with working images.
+  // Priority 1: latest AI index posts (across months), but only with working images.
   try {
-    const archiveResponse = await fetch("/blog/index.json", {
+    const indexResponse = await fetch("/blog/index.json", {
       cache: "no-cache",
       headers: { Accept: "application/json" },
     });
 
-    if (archiveResponse.ok) {
-      const archive = await archiveResponse.json();
-      if (Array.isArray(archive) && archive.length > 0) {
-        const latest = archive.slice(0, 20);
-        const fromArchive = [];
+    if (indexResponse.ok) {
+      const index = await indexResponse.json();
+      if (Array.isArray(index) && index.length > 0) {
+        const latest = index.slice(0, 20);
+        const fromIndex = [];
 
         for (const entry of latest) {
           if (!entry?.slug || !entry?.imageUrl) continue;
@@ -2942,7 +2942,7 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
           const postMonthIndex =
             slugMonthIndex >= 0 ? slugMonthIndex : monthIndex;
 
-          fromArchive.push({
+          fromIndex.push({
             day: parsedDay,
             year: parsedYear,
             monthIndex: postMonthIndex,
@@ -2954,14 +2954,14 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
             isExternal: false,
           });
 
-          if (fromArchive.length >= MAX_CAROUSEL_POSTS) {
-            return fromArchive;
+          if (fromIndex.length >= MAX_CAROUSEL_POSTS) {
+            return fromIndex;
           }
         }
       }
     }
   } catch (e) {
-    console.warn("Archive post fetch failed for carousel:", e);
+    console.warn("Blog index fetch failed for carousel:", e);
   }
 
   // Priority 2: current month static/AI URL patterns.

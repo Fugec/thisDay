@@ -181,43 +181,11 @@
   </head>
 
   <body>
-    <nav class="nav">
-      <div class="nav-inner">
-        <a href="/" class="brand">thisDay.</a>
-        <div class="nav-links">
-          <a href="/events/today/">Events on this day</a>
-          <a href="/born/today/">Born on this day</a>
-          <a href="/died/today/">Died on this day</a>
-          <a href="/blog/">Blog</a>
-          <a href="/quiz/">Quiz</a>
-          <a href="/about/">About</a>
-          <a href="/contact/">Contact</a>
-          <a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener noreferrer" style="color: var(--accent); font-weight: 600" aria-label="Support this project">☕ Support</a>
-        </div>
-        <button class="btn" id="navToggle" aria-label="Toggle menu">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
-        </button>
-      </div>
-      <div class="nav-mobile" id="navMobile">
-        <a href="/events/today/">Events</a>
-        <a href="/blog/">Blog</a>
-        <a href="/quiz/">Quiz</a>
-        <a href="/about/">About</a>
-        <a href="/contact/">Contact</a>
-        <div class="nav-mobile-bottom">
-          <a href="/events/today/" class="mobile-menu-link">Events on this day</a>
-          <a href="/born/today/" class="mobile-menu-link">Born on this day</a>
-          <a href="/died/today/" class="mobile-menu-link">Died on this day</a>
-          <div class="mobile-menu-social">
-            <a href="https://github.com/Fugec" target="_blank" rel="noopener noreferrer" aria-label="GitHub"><i class="bi bi-github"></i></a>
-            <a href="https://www.facebook.com/profile.php?id=61578009082537" target="_blank" rel="noopener noreferrer" aria-label="Facebook"><i class="bi bi-facebook"></i></a>
-            <a href="https://www.instagram.com/thisday.info/" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="bi bi-instagram"></i></a>
-            <a href="https://www.tiktok.com/@this__day" target="_blank" rel="noopener noreferrer" aria-label="TikTok"><i class="bi bi-tiktok"></i></a>
-            <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" aria-label="YouTube"><i class="bi bi-youtube"></i></a>
-          </div>
-        </div>
-      </div>
-    </nav>
+    <div data-site-nav></div>
+    <script type="module">
+      import { mountStaticNav } from "/js/shared/static-layout.js";
+      mountStaticNav();
+    </script>
 
     <div class="about-hero">
       <h1>About thisDay.</h1>
@@ -462,15 +430,6 @@
     <script>
       document.getElementById("currentYear").textContent =
         new Date().getFullYear();
-
-      (function () {
-        var t = document.getElementById("navToggle"),
-          m = document.getElementById("navMobile");
-        if (t && m)
-          t.addEventListener("click", function () {
-            m.classList.toggle("active");
-          });
-      })();
     </script>
     <style>
       #supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9999;opacity:0;transition:opacity .4s ease}

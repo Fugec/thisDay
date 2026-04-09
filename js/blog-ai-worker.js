@@ -24,6 +24,7 @@ import {
   NAV_CSS,
   FOOTER_CSS,
   navToggleScript,
+  marqueeScript,
 } from "./shared/layout.js";
 import {
   resolveAiModel,
@@ -591,8 +592,44 @@ export default {
         eventsThumbPromise,
       ]);
       if (html) {
+        const extractWikiUrl = (doc) => {
+          const s = String(doc || "");
+          const m =
+            s.match(
+              /href="(https:\/\/en\.wikipedia\.org\/wiki\/[^"]+)"[^>]*>Wikipedia<\/a>/i,
+            ) ||
+            s.match(
+              /"url"\s*:\s*"(https:\\\/\\\/en\.wikipedia\.org\\\/wiki\\\/[^"]+)"/i,
+            );
+          return m ? String(m[1]).replace(/\\\//g, "/") : "";
+        };
+        const extractCoverSrc = (doc) => {
+          const m = String(doc || "").match(
+            /<img[^>]+src="\/image-proxy\?src=([^"&]+)[^"]*"/i,
+          );
+          if (!m) return "";
+          try {
+            return decodeURIComponent(m[1]);
+          } catch {
+            return m[1];
+          }
+        };
+
         // Patch old quiz API path in already-stored HTML
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
+        // Ensure the "Explore [Month Day] in History" card matches the post slug,
+        // not a potentially-wrong AI-provided historicalDateISO.
+        if (slugParsedForThumb) {
+          const md = `${slugParsedForThumb.monthDisplay} ${slugParsedForThumb.day}`;
+          patchedHtml = patchedHtml.replace(
+            /<strong>Explore\s+[^<]+?\s+in History<\/strong>/,
+            `<strong>Explore ${md} in History</strong>`,
+          );
+          patchedHtml = patchedHtml.replace(
+            /<a href="\/events\/[a-z]+\/\d+\/" class="btn mt-2">View\s+[^<]+?<i /,
+            `<a href="/events/${slugParsedForThumb.monthSlug}/${slugParsedForThumb.day}/" class="btn mt-2">View ${md} <i `,
+          );
+        }
         // Patch raw og:image / twitter:image URLs → image-proxy at 1200px for proper social card sizing.
         // Old posts store the raw Wikimedia URL directly; new posts use image-proxy in buildPostHTML.
         if (!patchedHtml.includes('og:image" content="/image-proxy')) {
@@ -691,7 +728,7 @@ export default {
         ) {
           patchedHtml = patchedHtml.replace(
             "</body>",
-            `<script>${navToggleScript()}</script></body>`,
+            `<script>${navToggleScript()}</script>${marqueeScript()}</body>`,
           );
         }
         // Patch legacy H2 headings — old posts used "Overview: EventTitle", "Eyewitness Accounts of EventTitle",
@@ -1170,7 +1207,7 @@ export default {
         );
         // Inject floating quiz bar into stored posts that don't have it yet
         if (!patchedHtml.includes("tdq-float-bar")) {
-          const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}#tdq-float-btn:hover{background:#8ab532;box-shadow:0 2px 16px rgba(157,196,58,.5)}</style>`;
+          const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:#1a3a2d;border:none;border-radius:100px;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(26,58,45,.25);max-width:320px;width:100%}#tdq-float-btn:hover{background:#1a3a2d;box-shadow:0 2px 16px rgba(26,58,45,.35)}</style>`;
           const floatHtml = `<div id="tdq-float-bar"><button id="tdq-float-btn"><i class="bi bi-patch-question-fill"></i> Quiz This Day</button></div>`;
           const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');}function hideBar(){bar.classList.remove('tdq-float-visible');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});var h2s=document.querySelectorAll('h2');var trigger=null;for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}if(trigger){function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else{hideBar();}}window.addEventListener('scroll',updateBar,{passive:true});}else{document.addEventListener('scroll',function onScroll(){var d=document.documentElement;var total=d.scrollHeight-d.clientHeight;if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}},{passive:true});}})();<\/script>`;
           const bodyClose = patchedHtml.includes("</body>")
@@ -1180,6 +1217,42 @@ export default {
             .replace("</head>", floatCss + "</head>")
             .replace(bodyClose, floatHtml + "\n" + floatJs + "\n" + bodyClose);
         }
+        // Normalize float bar button colors on already-stored posts.
+        // Some historic posts shipped with a light-green float button; keep it consistent with the site's primary button color.
+        patchedHtml = patchedHtml
+          .replace(
+            /#tdq-float-btn\{background:(?:var\(--accent,#9dc43a\)|#9dc43a);border:none;border-radius:100px;color:[^;]+;/g,
+            "#tdq-float-btn{background:#1a3a2d;border:none;border-radius:100px;color:#fff;",
+          )
+          .replace(
+            /#tdq-float-btn:hover\{background:[^;]+;/g,
+            "#tdq-float-btn:hover{background:#1a3a2d;",
+          );
+
+        // Backfill inline figures for already-stored posts that shipped without them.
+        // Lazily inject and persist back to KV so the latest article gets figures immediately.
+        if (!/<figure style="float:(?:right|left);/i.test(patchedHtml)) {
+          const wikiUrl = extractWikiUrl(patchedHtml);
+          const coverUrl = extractCoverSrc(patchedHtml);
+          if (wikiUrl) {
+            try {
+              const imgs = await fetchEventImages(wikiUrl, coverUrl, 2);
+              if (imgs.length > 0) {
+                patchedHtml = injectEventImages(patchedHtml, imgs);
+                if (ctx?.waitUntil) {
+                  ctx.waitUntil(
+                    env.BLOG_AI_KV
+                      .put(`${KV_POST_PREFIX}${slug}`, patchedHtml)
+                      .catch(() => {}),
+                  );
+                }
+              }
+            } catch (_) {
+              /* non-fatal */
+            }
+          }
+        }
+
         // Patch old amber/orange quiz colors → green palette
         if (
           patchedHtml.includes("linear-gradient(90deg,#f59e0b") ||
@@ -1212,11 +1285,6 @@ export default {
               "border-left:4px solid #f59e0b",
               "border-left:4px solid var(--accent,#9dc43a)",
             );
-          // Fix float button text: white on light green → dark on light green
-          patchedHtml = patchedHtml.replace(
-            /#tdq-float-btn\{background:#9dc43a;border:none;border-radius:100px;color:#fff;/,
-            "#tdq-float-btn{background:#9dc43a;border:none;border-radius:100px;color:#1a2e20;",
-          );
         }
         // Patch old btn-warning quiz buttons → green
         if (patchedHtml.includes("btn-warning")) {
@@ -1430,7 +1498,7 @@ export default {
       if (!html.includes("navToggle") && html.includes('class="nav"')) {
         html = html.replace(
           "</body>",
-          `<script>${navToggleScript()}</script></body>`,
+          `<script>${navToggleScript()}</script>${marqueeScript()}</body>`,
         );
       }
       // Inject quiz CTA + popup if no quiz present
@@ -1995,73 +2063,118 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
   // written six months ago. Non-blocking — falls back to null on any error.
   const contextHook = await fetchContextHook(env, now, forcedEvent);
 
-  let content = await callWorkersAI(
-    env,
-    now,
-    takenAllTime,
-    activeModel,
-    forcedEvent,
-    preferredPillars,
-    contextHook,
-  );
-
-  // Post-generation banned phrase scan + targeted fix pass.
-  // If violations are found, one focused AI call patches only the offending paragraphs.
-  // Falls back to original paragraphs if the fix call fails or produces worse output.
-  const violations = scanBannedPhrases(content);
-  if (violations.length > 0) {
-    content = await fixBannedPhrases(env, content, violations);
-  }
-
-  // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
-  // sentence length before building HTML. Falls back to original on any error.
-  content = await reviewContentWithSEOExpert(content, env);
-
-  // Fact-check pass: verify date, year, location against the event name.
-  // Applies corrections in-place; never blocks generation on failure.
-  await factCheckContent(env, content);
-
-  // Eyewitness quote validation: confirm the quote is from a verifiable source.
-  // Clears eyewitnessQuote if the AI cannot confirm documented provenance,
-  // preventing fabricated quotes from being published under real names.
-  await validateEyewitnessQuote(env, content);
-
-  // Pillar classification: assign article to 1–3 content pillars for topical
-  // authority tracking and "You Might Also Like" relevance. Non-blocking.
-  const pillars = await classifyPillars(env, content);
-
-  // Validate image URLs and fetch alternatives if broken.
-  // If no working image is found, regenerate once with a different topic.
+  let content = null;
+  let pillars = [];
+  let personImages = [];
+  let eventImages = [];
   const MAX_CONTENT_ATTEMPTS = 2;
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
+    content =
+      attempt === 1
+        ? await callWorkersAI(
+            env,
+            now,
+            takenAllTime,
+            activeModel,
+            forcedEvent,
+            preferredPillars,
+            contextHook,
+          )
+        : content;
+
+    // Post-generation banned phrase scan + targeted fix pass.
+    // If violations are found, one focused AI call patches only the offending paragraphs.
+    // Falls back to original paragraphs if the fix call fails or produces worse output.
+    const violations = scanBannedPhrases(content);
+    if (violations.length > 0) {
+      content = await fixBannedPhrases(env, content, violations);
+    }
+
+    // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
+    // sentence length before building HTML. Falls back to original on any error.
+    content = await reviewContentWithSEOExpert(content, env);
+
+    // Fact-check pass: verify date, year, location against the event name.
+    // Applies corrections in-place; never blocks generation on failure.
+    await factCheckContent(env, content);
+
+    // Eyewitness quote validation: confirm the quote is from a verifiable source.
+    // Clears eyewitnessQuote if the AI cannot confirm documented provenance,
+    // preventing fabricated quotes from being published under real names.
+    await validateEyewitnessQuote(env, content);
+
+    // Pillar classification: assign article to 1–3 content pillars for topical
+    // authority tracking and "You Might Also Like" relevance. Non-blocking.
+    pillars = await classifyPillars(env, content);
+
+    // Validate the main image first.
     const workingImage = await resolveWorkingImageForContent(content);
-    if (workingImage) {
-      content.imageUrl = workingImage;
-      break;
-    }
+    if (!workingImage) {
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content.title].filter(Boolean);
+        console.warn(
+          `Blog AI: no valid image for "${content.title}". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await callWorkersAI(
+          env,
+          now,
+          avoid,
+          activeModel,
+          forcedEvent,
+          preferredPillars,
+          contextHook,
+        );
+        continue;
+      }
 
-    if (attempt < MAX_CONTENT_ATTEMPTS) {
-      const avoid = [...takenAllTime, content.title].filter(Boolean);
-      console.warn(
-        `Blog AI: no valid image for \"${content.title}\". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+      // No working image found after all attempts — throw so the caller retries
+      // with a different topic rather than publishing with a logo background.
+      throw new Error(
+        `No working image for "${content.title}" after ${MAX_CONTENT_ATTEMPTS} attempts.`,
       );
-      content = await callWorkersAI(env, now, avoid, activeModel);
-      continue;
+    }
+    content.imageUrl = workingImage;
+
+    // Precheck wiki image coverage before publishing. The video pipeline needs
+    // at least 3 usable Wikipedia images, so weak topics are regenerated here.
+    [personImages, eventImages] = await Promise.all([
+      fetchKeyPersonImages(env, content.keyTerms).catch(() => []),
+      content.wikiUrl
+        ? fetchEventImages(content.wikiUrl, content.imageUrl, 3).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    const wikiImageTotal = personImages.length + eventImages.length;
+    if (wikiImageTotal < 3) {
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content.title].filter(Boolean);
+        console.warn(
+          `Blog AI: wiki image precheck failed for "${content.title}" (${wikiImageTotal}/3). Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await callWorkersAI(
+          env,
+          now,
+          avoid,
+          activeModel,
+          forcedEvent,
+          preferredPillars,
+          contextHook,
+        );
+        continue;
+      }
+
+      throw new Error(
+        `IMAGE_UNAVAILABLE: wiki-only topic gate requires 3 usable Wikipedia images, got ${wikiImageTotal} for "${content.title}"`,
+      );
     }
 
-    // No working image found after all attempts — throw so the caller retries
-    // with a different topic rather than publishing with a logo background.
-    throw new Error(
-      `No working image for "${content.title}" after ${MAX_CONTENT_ATTEMPTS} attempts.`,
-    );
+    // P4b — separate editorial note: a second isolated AI call that reads the
+    // finished article and writes a perspective section that must reference the
+    // current year. This creates structural differentiation between the research
+    // layer (article body) and the perspective layer (editorial note).
+    // Non-blocking — keeps existing editorialNote on any error.
+    await generateEditorialNote(env, content, now);
+    break;
   }
-
-  // P4b — separate editorial note: a second isolated AI call that reads the
-  // finished article and writes a perspective section that must reference the
-  // current year. This creates structural differentiation between the research
-  // layer (article body) and the perspective layer (editorial note).
-  // Non-blocking — keeps existing editorialNote on any error.
-  await generateEditorialNote(env, content, now);
 
   // Ensure meta description meets minimum SEO length (120 chars)
   if (!content.description || content.description.length < 120) {
@@ -2094,19 +2207,8 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
 
   const slug = buildSlug(now);
 
-  // Fetch person portraits + book cover in parallel (non-blocking)
-  const [personImages, bookCoverUrl] = await Promise.all([
-    fetchKeyPersonImages(env, content.keyTerms).catch(() => []),
-    fetchBookCover(content.bookSearchQuery).catch(() => null),
-  ]);
-
-  // Fallback: if no person portraits found (event/battle/campaign articles),
-  // pull up to 2 real images from the article's own Wikipedia page and inject
-  // them at section boundaries (Aftermath, Legacy, Overview, Eyewitness).
-  let eventImages = [];
-  if (personImages.length === 0 && content.wikiUrl) {
-    eventImages = await fetchEventImages(content.wikiUrl, content.imageUrl).catch(() => []);
-  }
+  // Fetch book cover in parallel with the final HTML assembly.
+  const bookCoverUrl = await fetchBookCover(content.bookSearchQuery).catch(() => null);
 
   const rawHtml = buildPostHTML(content, now, slug, existingIndex, pillars, bookCoverUrl);
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
@@ -2211,8 +2313,8 @@ async function runPostPublishExtras(env, slug, content) {
       if (sp) {
         const mPad = String(sp.monthIndex + 1).padStart(2, "0");
         const dPad = String(sp.day).padStart(2, "0");
-        await env.EVENTS_KV.delete(`quiz-page-v25:${mPad}-${dPad}`);
-        console.log(`Blog: busted quiz-page-v25:${mPad}-${dPad} cache`);
+        await env.EVENTS_KV.delete(`quiz-page-v26:${mPad}-${dPad}`);
+        console.log(`Blog: busted quiz-page-v26:${mPad}-${dPad} cache`);
       }
     } catch (e) {
       console.error("Blog: quiz page cache bust failed:", e);
@@ -2587,7 +2689,9 @@ When choosing the event, rank candidates by click and share potential on YouTube
 4. Political turning points or military events whose consequences are still visible in the modern world
 5. Avoid obscure regional events, minor treaties, and incremental legislative steps unless they have a genuinely surprising story attached
 
-Choose the single event from this date that a curious 25-year-old would most likely stop scrolling to watch a 45-second video about.`;
+Prefer events that are likely to be image-rich on Wikipedia, meaning a real article page plus multiple usable related images. Good fits are named people, major battles, disasters, inventions, launches, assassinations, landmark trials, coups, and widely documented public incidents. Avoid generic labels like "strike", "meeting", or "conference" unless the event is tied to a very specific named subject and is clearly documented with multiple images.
+
+Choose the single event from this date that a curious 25-year-old would most likely stop scrolling to watch a 45-second video about, and that is most likely to pass a 3-image Wikipedia coverage check.`;
 
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.
 ${contextHookSection}
@@ -3858,9 +3962,12 @@ async function reviewContentWithSEOExpert(content, env) {
  * Returns array of { name, imageUrl, wikiUrl }.
  */
 async function fetchKeyPersonImages(env, keyTerms) {
-  const people = (keyTerms || []).filter(
-    (kt) => kt.type === "person" && kt.term && kt.wikiUrl,
-  ).slice(0, 4);
+  const people = (keyTerms || [])
+    .filter((kt) => {
+      const type = String(kt?.type || "").toLowerCase();
+      return type === "person" && kt?.term && kt?.wikiUrl;
+    })
+    .slice(0, 4);
 
   // Sequential: KV cache first (fast), Wikipedia only on miss (1 fetch per person max)
   // Keeps total subrequest count predictable alongside the AI pipeline calls.
@@ -4038,6 +4145,52 @@ function injectEventImages(html, eventImages) {
 function injectPersonImages(html, personImages) {
   if (!personImages || personImages.length === 0) return html;
 
+  const isWordChar = (ch) => /[a-z0-9]/i.test(ch || "");
+  const cleanNameToken = (token) =>
+    String(token || "")
+      .replace(/^[^a-z0-9]+/i, "")
+      .replace(/[^a-z0-9]+$/i, "");
+
+  function findMentionIndex(lowerHtml, lowerNeedle, fromIdx) {
+    let idx = fromIdx;
+    while (true) {
+      idx = lowerHtml.indexOf(lowerNeedle, idx);
+      if (idx === -1) return -1;
+      const before = lowerHtml[idx - 1];
+      const after = lowerHtml[idx + lowerNeedle.length];
+      if (!isWordChar(before) && !isWordChar(after)) return idx;
+      idx = idx + 1;
+    }
+  }
+
+  // Find the opening <p ...> tag that contains a mention at `nameIdx`.
+  // Works for both "<p>" and "<p class='...'>".
+  function findParagraphStart(fullHtml, nameIdx) {
+    const lower = fullHtml.toLowerCase();
+    let searchFrom = nameIdx;
+    while (true) {
+      const pIdx = lower.lastIndexOf("<p", searchFrom);
+      if (pIdx === -1) return -1;
+      const next = lower[pIdx + 2] || "";
+      // Avoid false-positives like <picture>
+      if (next !== ">" && !/\s/.test(next)) {
+        searchFrom = pIdx - 1;
+        continue;
+      }
+      const tagEnd = lower.indexOf(">", pIdx);
+      if (tagEnd === -1 || tagEnd > nameIdx) {
+        searchFrom = pIdx - 1;
+        continue;
+      }
+      const between = lower.slice(tagEnd + 1, nameIdx);
+      if (between.includes("</p>")) {
+        searchFrom = pIdx - 1;
+        continue;
+      }
+      return pIdx;
+    }
+  }
+
   // Build portrait HTML for a given person
   const figHtml = ({ name, imageUrl, wikiUrl }) =>
     `<figure style="float:right;margin:0 0 1.2rem 1.5rem;max-width:min(150px,35%);clear:right;">` +
@@ -4056,21 +4209,41 @@ function injectPersonImages(html, personImages) {
   let lastInjectedAt = -MIN_GAP;
 
   for (const person of personImages) {
-    const lowerName = person.name.toLowerCase();
     const lowerHtml = html.toLowerCase();
+    const fullName = String(person?.name || "").trim();
+    const tokens = fullName.split(/\s+/).filter(Boolean).map(cleanNameToken);
+    const lastName = tokens.length ? tokens[tokens.length - 1] : "";
+    const candidates = [fullName]
+      .filter(Boolean)
+      .concat(
+        lastName && lastName.length >= 4 && lastName.toLowerCase() !== fullName.toLowerCase()
+          ? [lastName]
+          : [],
+      );
     let searchFrom = 0;
 
     while (true) {
-      const nameIdx = lowerHtml.indexOf(lowerName, searchFrom);
+      let nameIdx = -1;
+      for (const c of candidates) {
+        const idx = findMentionIndex(lowerHtml, c.toLowerCase(), searchFrom);
+        if (idx !== -1) {
+          nameIdx = idx;
+          break;
+        }
+      }
       if (nameIdx === -1) break;
 
       // Find the opening <p> that contains this mention
-      const pStart = html.lastIndexOf("<p>", nameIdx);
+      const pStart = findParagraphStart(html, nameIdx);
       if (pStart === -1) { searchFrom = nameIdx + 1; continue; }
 
       // Confirm no </p> closes the tag between pStart and the name (i.e. still in same <p>)
-      const between = html.slice(pStart + 3, nameIdx);
-      if (between.includes("</p>")) { searchFrom = nameIdx + 1; continue; }
+      // (findParagraphStart already enforces this; keep as a belt-and-suspenders check)
+      const afterOpen = html.indexOf(">", pStart);
+      if (afterOpen !== -1) {
+        const between = html.slice(afterOpen + 1, nameIdx);
+        if (between.includes("</p>")) { searchFrom = nameIdx + 1; continue; }
+      }
 
       // Enforce minimum distance from last injected image
       if (pStart - lastInjectedAt < MIN_GAP) { searchFrom = nameIdx + 1; continue; }
@@ -4668,21 +4841,13 @@ ${analysisBadItems}
 
           ${(() => {
             // Cross-link to /generated/ page for the event's month/day
-            if (!c.historicalDateISO) return "";
-            const hd = new Date(c.historicalDateISO + "T12:00:00Z");
-            let hMonthSlug, hDay, hMonthDisplay;
-            if (!isNaN(hd.getTime())) {
-              hMonthSlug = MONTH_SLUGS[hd.getUTCMonth()];
-              hDay = hd.getUTCDate();
-              hMonthDisplay = MONTH_NAMES[hd.getUTCMonth()];
-            } else {
-              // BCE or unparseable date — fall back to publication slug (e.g. "15-march-2026")
-              const sp = parseSlugDate(slug);
-              if (!sp) return "";
-              hDay = sp.day;
-              hMonthSlug = sp.monthSlug;
-              hMonthDisplay = sp.monthDisplay;
-            }
+            // Always derive the month/day from the publication slug (e.g. "8-april-2026")
+            // so the Explore card stays correct even if the AI returns a wrong ISO date.
+            const sp = parseSlugDate(slug);
+            if (!sp) return "";
+            const hDay = sp.day;
+            const hMonthSlug = sp.monthSlug;
+            const hMonthDisplay = sp.monthDisplay;
             const exploreThumb =
               c.eventsImageUrl || c.imageUrl
                 ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="${esc(c.eventTitle)} historical image" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
@@ -4807,6 +4972,7 @@ ${analysisBadItems}
   <script>
     ${footerYearScript()}
     ${navToggleScript()}
+    ${marqueeScript()}
   </script>
 
   <!-- Google Ads: 60 Seconds on Site -->
@@ -4847,8 +5013,8 @@ ${analysisBadItems}
   <style>
     #tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}
     #tdq-float-bar.tdq-float-visible{transform:translateY(0)}
-    #tdq-float-btn{background:var(--accent,#9dc43a);border:none;border-radius:100px;color:#1a2e20;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(157,196,58,.35);max-width:320px;width:100%}
-    #tdq-float-btn:hover{background:#8ab532;box-shadow:0 2px 16px rgba(157,196,58,.5)}
+    #tdq-float-btn{background:#1a3a2d;border:none;border-radius:100px;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(26,58,45,.25);max-width:320px;width:100%}
+    #tdq-float-btn:hover{background:#1a3a2d;box-shadow:0 2px 16px rgba(26,58,45,.35)}
   </style>
   <div id="tdq-float-bar">
     <button id="tdq-float-btn">
@@ -5281,6 +5447,7 @@ ${JSON.stringify(
   <script>
     ${footerYearScript()}
     ${navToggleScript()}
+    ${marqueeScript()}
     if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
       document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
         if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed') && ins.offsetWidth > 0) {
@@ -5552,6 +5719,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
   <script>
     ${footerYearScript()}
     ${navToggleScript()}
+    ${marqueeScript()}
     if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
       document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
         if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed') && ins.offsetWidth > 0) {
@@ -5655,6 +5823,7 @@ ${siteNav()}
 ${siteFooter()}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>${navToggleScript()}${footerYearScript()}</script>
+${marqueeScript()}
 </body>
 </html>`;
 

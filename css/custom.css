@@ -49,17 +49,23 @@ img {
 }
 
 /* Nav */
+.site-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: var(--bg);
+  box-shadow: 0 6px 18px rgba(27, 58, 45, 0.08);
+}
 .nav {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   padding: 1rem 0;
-  position: sticky;
-  top: 0;
-  z-index: 1000;
+  position: relative;
+  z-index: 1;
 }
 
 .marquee-bar {
-  z-index: 900;
+  z-index: 1;
 }
 .nav-inner {
   padding: 0 2rem;
@@ -71,6 +77,10 @@ img {
   font-family: "Lora", Georgia, serif;
   font-size: 1.5rem;
   font-weight: 700;
+  color: var(--text);
+  text-decoration: none;
+}
+.brand:hover {
   color: var(--text);
   text-decoration: none;
 }

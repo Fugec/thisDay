@@ -1086,14 +1086,7 @@ export default {
             const _thumb = eventsThumb
               ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
               : "";
-            exploreHtml = `
-          <div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">
-            ${_thumb}<div style="flex:1;min-width:0">
-              <strong>Explore ${_sp.monthDisplay} ${_sp.day} in History</strong><br/>
-              <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
-              <a href="/events/${_sp.monthSlug}/${_sp.day}/" class="btn mt-2">View ${_sp.monthDisplay} ${_sp.day} <i class="bi bi-arrow-right ms-1"></i></a>
-            </div>
-          </div>`;
+            exploreHtml = "\n          " + buildDateExploreCard(_sp, _thumb);
           }
           // Inject quiz before Wikipedia source box (matching March 14 template order)
           const wikiAnchor =
@@ -1174,7 +1167,7 @@ export default {
           const thumb = eventsThumb
             ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
             : "";
-          const exploreCard = `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">${thumb}<div style="flex:1;min-width:0"><strong>Explore ${sp.monthDisplay} ${sp.day} in History</strong><br/><small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/><a href="/events/${sp.monthSlug}/${sp.day}/" class="btn mt-2">View ${sp.monthDisplay} ${sp.day} <i class="bi bi-arrow-right ms-1"></i></a></div></div>`;
+          const exploreCard = buildDateExploreCard(sp, thumb);
           const anchor = patchedHtml.includes("<!-- Quiz CTA -->")
             ? "<!-- Quiz CTA -->"
             : patchedHtml.includes("You Might Also Like")
@@ -4861,14 +4854,14 @@ ${analysisBadItems}
               c.eventsImageUrl || c.imageUrl
                 ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="${esc(c.eventTitle)} historical image" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
                 : "";
-            return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">
-              ${exploreThumb}
-              <div style="flex:1;min-width:0">
-                <strong>Explore ${esc(hMonthDisplay)} ${hDay} in History</strong><br/>
-                <small class="article-meta">See all events, births, and deaths recorded on this date.</small><br/>
-                <a href="/events/${esc(hMonthSlug)}/${hDay}/" class="btn mt-2">View ${esc(hMonthDisplay)} ${hDay} <i class="bi bi-arrow-right ms-1"></i></a>
-              </div>
-            </div>`;
+            return buildDateExploreCard(
+              {
+                monthDisplay: hMonthDisplay,
+                monthSlug: hMonthSlug,
+                day: hDay,
+              },
+              exploreThumb,
+            );
           })()}
 
           ${(() => {
@@ -5866,6 +5859,25 @@ function parseSlugDate(slug) {
   const monthIndex = MONTH_SLUGS.indexOf(monthSlug);
   if (monthIndex < 0) return null;
   return { day, monthSlug, monthIndex, monthDisplay: MONTH_NAMES[monthIndex] };
+}
+
+function buildDateExploreCard(sp, thumbHtml = "") {
+  if (!sp) return "";
+  const monthDisplay = esc(sp.monthDisplay);
+  const monthSlug = esc(sp.monthSlug);
+  const day = esc(sp.day);
+  return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">
+    ${thumbHtml}<div style="flex:1;min-width:0">
+      <strong>Explore ${monthDisplay} ${day} in History</strong><br/>
+      <small class="article-meta">Jump between the main events, famous births, notable deaths, and quiz for this date.</small>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px">
+        <a href="/events/${monthSlug}/${day}/" class="btn">Events</a>
+        <a href="/born/${monthSlug}/${day}/" class="btn">Born</a>
+        <a href="/died/${monthSlug}/${day}/" class="btn">Died</a>
+        <a href="/quiz/${monthSlug}/${day}/" class="btn">Quiz</a>
+      </div>
+    </div>
+  </div>`;
 }
 
 /** Minimal HTML entity escaping to prevent XSS in generated output. */

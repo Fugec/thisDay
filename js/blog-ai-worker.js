@@ -5307,18 +5307,7 @@ ${supportPopupSnippet()}
 async function buildListingHTML(index) {
   const postItems = index.length
     ? index
-        .map((entry) => {
-          const date = new Date(entry.publishedAt);
-          const dateStr = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
-          return `
-        <a href="/blog/${esc(entry.slug)}/" class="blog-post-link">
-          <i class="bi bi-clock-history post-icon"></i>
-          <div>
-            <div class="post-title">${esc(entry.title)}</div>
-            <small style="color: var(--text-muted,#5c7a65); opacity: 0.7">${esc(dateStr)}</small>
-          </div>
-        </a>`;
-        })
+        .map((entry) => renderBlogPostListItem(entry))
         .join("\n")
     : '<p class="text-muted">No AI-generated posts yet. Check back soon!</p>';
 
@@ -5398,7 +5387,9 @@ ${JSON.stringify(
       a{color:var(--btn-bg);text-decoration:none}a:hover{text-decoration:underline}
       .blog-post-link{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--border);border-radius:8px;background-color:var(--bg);text-decoration:none;color:var(--text);transition:transform .15s ease,box-shadow .15s ease;margin-bottom:10px}
       .blog-post-link:hover{transform:translateX(4px);box-shadow:0 3px 12px rgba(0,0,0,.08);text-decoration:none;color:var(--text)}
-      .post-icon{color:var(--btn-bg);font-size:1.1rem;flex-shrink:0;margin-top:2px}
+      .post-thumb{width:108px;height:78px;object-fit:cover;border-radius:8px;flex-shrink:0;background:rgba(0,0,0,.06)}
+      .post-thumb-placeholder{width:108px;height:78px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(0,0,0,.06);color:var(--btn-bg);font-size:1.15rem}
+      .post-copy{min-width:0}
       .post-title{font-weight:600;font-size:.95rem;line-height:1.4;color:var(--btn-bg)}
       .month-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
       .ad-unit{text-align:center}
@@ -5537,18 +5528,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
 
   const postItems = posts.length
     ? posts
-        .map((entry) => {
-          const date = new Date(entry.publishedAt);
-          const dateStr = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
-          return `
-        <a href="/blog/${esc(entry.slug)}/" class="blog-post-link">
-          <i class="bi bi-clock-history post-icon"></i>
-          <div>
-            <div class="post-title">${esc(entry.title)}</div>
-            <small style="color:var(--text-muted,#5c7a65);opacity:.7">${esc(dateStr)}</small>
-          </div>
-        </a>`;
-        })
+        .map((entry) => renderBlogPostListItem(entry))
         .join("\n")
     : '<p class="text-muted">No articles in this category yet — check back soon.</p>';
 
@@ -5661,7 +5641,9 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
       a{color:var(--btn-bg);text-decoration:none}a:hover{text-decoration:underline}
       .blog-post-link{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--border);border-radius:8px;background-color:var(--bg);text-decoration:none;color:var(--text);transition:transform .15s ease,box-shadow .15s ease;margin-bottom:10px}
       .blog-post-link:hover{transform:translateX(4px);box-shadow:0 3px 12px rgba(0,0,0,.08);text-decoration:none;color:var(--text)}
-      .post-icon{color:var(--btn-bg);font-size:1.1rem;flex-shrink:0;margin-top:2px}
+      .post-thumb{width:108px;height:78px;object-fit:cover;border-radius:8px;flex-shrink:0;background:rgba(0,0,0,.06)}
+      .post-thumb-placeholder{width:108px;height:78px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(0,0,0,.06);color:var(--btn-bg);font-size:1.15rem}
+      .post-copy{min-width:0}
       .post-title{font-weight:600;font-size:.95rem;line-height:1.4;color:var(--btn-bg)}
       .section-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
       .breadcrumb{font-size:.82rem;margin-bottom:1.2rem}
@@ -5735,6 +5717,29 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
 function todayDateString() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function renderBlogPostListItem(entry) {
+  const date = new Date(entry.publishedAt);
+  const dateStr = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+  const rawImg = entry.imageUrl || "";
+  const proxiedImg = rawImg
+    ? `/image-proxy?src=${encodeURIComponent(rawImg)}&w=240&q=80`
+    : "";
+  const fallbackImg = rawImg ? esc(rawImg) : "";
+  const title = esc(entry.title);
+  const slug = esc(entry.slug);
+  const thumbHtml = proxiedImg
+    ? `<img src="${proxiedImg}" alt="${title}" class="post-thumb" loading="lazy" onerror="this.onerror=null;this.src='${fallbackImg}'">`
+    : `<div class="post-thumb-placeholder"><i class="bi bi-image-alt"></i></div>`;
+  return `
+        <a href="/blog/${slug}/" class="blog-post-link">
+          ${thumbHtml}
+          <div class="post-copy">
+            <div class="post-title">${title}</div>
+            <small style="color:var(--text-muted,#5c7a65);opacity:.7">${esc(dateStr)}</small>
+          </div>
+        </a>`;
 }
 
 // ---------------------------------------------------------------------------

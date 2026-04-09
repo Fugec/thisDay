@@ -672,7 +672,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
     "\n" +
     `
 .marquee-bar{background:var(--btn-bg);color:#fff;overflow:hidden;white-space:nowrap;padding:.5rem 0;font-size:.82rem}
-.marquee-track{display:inline-flex;gap:0;animation:marquee-scroll 40s linear infinite;will-change:transform}
+.marquee-track{display:inline-flex;gap:0;animation:marquee-scroll 55s linear infinite;will-change:transform}
 .marquee-track:hover{animation-play-state:paused}
 .marquee-item{padding:0 2.5rem;border-right:1px solid rgba(255,255,255,.2)}
 .marquee-item span{color:var(--accent);font-weight:700;margin-right:.5rem}
@@ -2255,7 +2255,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v6-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v7-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2340,7 +2340,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v6-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v7-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -2573,7 +2573,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v28-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v29-${hostKey}-${monthName}-${day}`;
   try {
     if (env.EVENTS_KV) {
       const cached = await env.EVENTS_KV.get(kvKey);
@@ -3112,7 +3112,7 @@ async function handleFetchRequest(request, env, ctx) {
     }
     const mm = String(monthNum).padStart(2, "0");
     const dd = String(day).padStart(2, "0");
-    const kvKey = `quiz-v14:${mm}-${dd}`;
+    const kvKey = `quiz-v15:${mm}-${dd}`;
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
@@ -4061,7 +4061,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v27:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v28:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -4145,7 +4145,7 @@ async function generateQuizForDate(
 ) {
   const mm = String(MONTH_NUM_MAP[monthName]).padStart(2, "0");
   const dd = String(day).padStart(2, "0");
-  const kvKey = `quiz-v14:${mm}-${dd}`;
+  const kvKey = `quiz-v15:${mm}-${dd}`;
 
   try {
     const cached = await env.EVENTS_KV.get(kvKey);
@@ -4721,7 +4721,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v27:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v28:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -5029,7 +5029,7 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--text-muted)}
 /* Marquee (nav + scripts inject items; without CSS it becomes a giant text block) */
 .marquee-bar{background:var(--btn-bg);color:#fff;overflow:hidden;white-space:nowrap;padding:.5rem 0;font-size:.82rem}
-.marquee-track{display:inline-flex;gap:0;animation:marquee-scroll 40s linear infinite;will-change:transform}
+.marquee-track{display:inline-flex;gap:0;animation:marquee-scroll 55s linear infinite;will-change:transform}
 .marquee-track:hover{animation-play-state:paused}
 .marquee-item{padding:0 2.5rem;border-right:1px solid rgba(255,255,255,.2)}
 .marquee-item span{color:var(--accent);font-weight:700;margin-right:.5rem}

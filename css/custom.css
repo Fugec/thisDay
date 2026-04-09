@@ -196,7 +196,7 @@ img {
 .marquee-track {
   display: inline-flex;
   gap: 0;
-  animation: marquee-scroll 40s linear infinite;
+  animation: marquee-scroll 55s linear infinite;
   will-change: transform;
 }
 .marquee-track:hover {

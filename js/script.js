@@ -886,6 +886,9 @@ async function populateMarquee() {
   const marqueeTrack = document.getElementById("marqueeTrack");
 
   if (!marqueeBar || !marqueeTrack) return;
+  if (marqueeTrack.dataset.marqueeReady === "true") return;
+
+  marqueeTrack.dataset.marqueeReady = "true";
 
   marqueeTrack.innerHTML = "";
 

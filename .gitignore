@@ -6,6 +6,7 @@
 
 # Local documentation — personal notes, not for the repo
 documentation/
+documentation/todo-remaining.txt
 *.md
 CONFIGURATION.txt
 

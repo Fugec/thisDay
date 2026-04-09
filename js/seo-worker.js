@@ -766,7 +766,7 @@ setTimeout(initAds,1200);
 ${marqueeScript()}`;
 }
 
-function generateBlogPostHTML(
+function generateEventsDateHTML(
   monthName,
   day,
   eventsData,
@@ -2619,7 +2619,7 @@ async function handleGeneratedPost(_request, env, ctx, url) {
     ? buildQuizHTML(quizData, mDisplayForQuiz, day)
     : "";
 
-  const html = generateBlogPostHTML(
+  const html = generateEventsDateHTML(
     monthName,
     day,
     eventsData,
@@ -3777,11 +3777,11 @@ async function handleFetchRequest(request, env, ctx) {
           { html: true },
         );
 
-        // --- Inject today's generated URL so the carousel can link internally ---
+        // --- Inject today's canonical events URL so the carousel can link internally ---
         const mn = MONTHS_ALL[today.getMonth()];
         const dd = today.getDate();
         element.append(
-          `<script>window.__todayGeneratedUrl="/events/${mn}/${dd}/";</script>`,
+          `<script>window.__todayEventsUrl="/events/${mn}/${dd}/";window.__todayGeneratedUrl=window.__todayEventsUrl;</script>`,
           { html: true },
         );
       },

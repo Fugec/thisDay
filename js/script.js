@@ -436,7 +436,7 @@ function renderCarouselItem(container, post, index) {
       <div class="d-flex justify-content-center gap-2">
         <a href="${post.url}" class="btn btn-primary btn-sm"
            ${post.isExternal ? 'target="_blank" rel="noopener noreferrer"' : ""}>Read Full Post</a>
-        <a href="${window.__todayGeneratedUrl || "/events/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
+        <a href="${window.__todayEventsUrl || window.__todayGeneratedUrl || "/events/" + new Date().toLocaleString("en-US", { month: "long" }).toLowerCase() + "/" + new Date().getDate() + "/"}" class="btn btn-primary btn-sm">Today's Events</a>
       </div>
     </div>
   `;
@@ -2685,7 +2685,7 @@ function renderFullWidthCarouselItem(container, event, index) {
       <p>${excerpt}</p>
       <div style="display:inline-flex;gap:8px;justify-content:center;flex-direction:row;">
         <a href="${event.url}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">Read on Wikipedia</a>
-        ${window.__todayGeneratedUrl ? `<a href="${window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Today's Events</a>` : ""}
+        ${window.__todayEventsUrl || window.__todayGeneratedUrl ? `<a href="${window.__todayEventsUrl || window.__todayGeneratedUrl}" class="btn btn-primary btn-sm">Today's Events</a>` : ""}
       </div>
     </div>
   `;

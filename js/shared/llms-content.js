@@ -1,12 +1,12 @@
 export const LLMS_TXT_CONTENT = `# thisDay.info
 
-> Daily history reference site for events, births, deaths, generated articles, quizzes, and blog content. Historical facts are primarily sourced from Wikipedia/Wikimedia; editorial framing, commentary, templates, and AI-assisted original content are proprietary.
+> Daily history reference site for events, births, deaths, quizzes, and blog content. Historical facts are primarily sourced from Wikipedia/Wikimedia; editorial framing, commentary, templates, and AI-assisted original content are proprietary.
 
 ## Project Details
 
-thisDay.info helps readers explore what happened on a given date in history. The site provides date-based event pages, notable births and deaths, generated long-form history articles, quizzes, blog posts, RSS and sitemap discovery endpoints, and AI-readable guidance.
+thisDay.info helps readers explore what happened on a given date in history. The site provides date-based event pages, notable births and deaths, quizzes, blog posts, RSS and sitemap discovery endpoints, and AI-readable guidance.
 
-The site is built as a date-driven history reference for both readers and machines. Public pages are organized around canonical routes for events, births, deaths, generated articles, quizzes, and blog posts. The project combines structured historical data with original layout, editorial framing, and AI-assisted production workflows. Discovery is supported through robots, sitemaps, RSS, and this \`llms.txt\` file so AI systems can find current public content efficiently.
+The site is built as a date-driven history reference for both readers and machines. Public pages are organized around canonical routes for events, births, deaths, quizzes, and blog posts. Legacy \`/generated/\` URLs redirect permanently to the matching \`/events/\` route. The project combines structured historical data with original layout, editorial framing, and AI-assisted production workflows. Discovery is supported through robots, sitemaps, RSS, and this \`llms.txt\` file so AI systems can find current public content efficiently.
 
 The most useful pages for AI systems are the current date-based routes, live blog post routes, and sitemap/feed endpoints listed below.
 
@@ -25,7 +25,7 @@ The most useful pages for AI systems are the current date-based routes, live blo
 - [Daily Events Pages](https://thisday.info/events/today/) - Canonical route family: \`/events/{month}/{day}/\`
 - [Daily Births Pages](https://thisday.info/born/today/) - Canonical route family: \`/born/{month}/{day}/\`
 - [Daily Deaths Pages](https://thisday.info/died/today/) - Canonical route family: \`/died/{month}/{day}/\`
-- [Daily Generated Articles](https://thisday.info/generated/april/9/) - Canonical route family: \`/generated/{month}/{day}/\`
+- [Legacy Generated Route Example](https://thisday.info/generated/april/9/) - Redirects permanently to the canonical \`/events/{month}/{day}/\` route.
 - [Daily Quiz Pages](https://thisday.info/quiz/april/9/) - Canonical route family: \`/quiz/{month}/{day}/\`
 
 ## Blog Content

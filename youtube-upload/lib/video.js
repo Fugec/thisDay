@@ -40,7 +40,7 @@ const IMAGE_HEADROOM = 1.22;
 const N_SCENES = 3;
 
 // Gentle crossfade only — slide/wipe transitions are too jarring for a calm history channel
-const XFADE_TRANSITIONS = ["fade", "dissolve", "fade"];
+const XFADE_TRANSITIONS = ["fade"];
 
 /**
  * Builds an FFmpeg zoompan filter string for a static-image scene (Ken Burns).
@@ -77,10 +77,10 @@ function buildKenBurns(sceneIdx, durationS, inLabel, outLabel) {
       x = `iw/2-(iw/zoom/2)`;
       y = `ih/2-(ih/zoom/2)`;
       break;
-    case 2: // zoom-in + slow pan up
+    case 2: // zoom-in + diagonal drift (pan right + up) — cinematic handhold feel
       zoom = `if(eq(on,0),${Z_START},min(${Z_END},pzoom+${INC}))`;
-      x = `iw/2-(iw/zoom/2)`;
-      y = `max(0,ih/2-(ih/zoom/2)-ih*0.04*on/${d})`;
+      x = `min(iw*(1-1/zoom),iw/2-(iw/zoom/2)+iw*0.025*on/${d})`;
+      y = `max(0,ih/2-(ih/zoom/2)-ih*0.025*on/${d})`;
       break;
     case 3: // zoom-in + slow pan down
       zoom = `if(eq(on,0),${Z_START},min(${Z_END},pzoom+${INC}))`;
@@ -520,6 +520,42 @@ function applyEraGrading(sharpInst, year) {
   return sharpInst.modulate({ saturation: 1.08, brightness: 1.0 });
 }
 
+function getQualityTuning(qualityHint = null) {
+  const hint = String(qualityHint || "").toLowerCase();
+  const tuning = {
+    bgBlur: 16,
+    bgBrightness: 0.45,
+    bgSaturation: 0.92,
+    cardBrightness: 1.03,
+    cardSaturation: 1.12,
+    cardSharpenSigma: 1.6,
+    cardLinearA: 1.0,
+    cardLinearB: 0,
+  };
+
+  if (!hint) return tuning;
+
+  if (/\bsharp|sharper|detail|detailed|crisp|clear\b/.test(hint)) {
+    tuning.bgBlur = 12;
+    tuning.cardSharpenSigma = 2.2;
+    tuning.cardLinearA = 1.07;
+  }
+
+  if (/\blighting|contrast|richer|depth|dim|flat\b/.test(hint)) {
+    tuning.bgBrightness = 0.4;
+    tuning.cardBrightness = 1.08;
+    tuning.cardSaturation = 1.18;
+    tuning.cardLinearA = Math.max(tuning.cardLinearA, 1.09);
+  }
+
+  if (/\bcolor|colour|vibrant|saturation\b/.test(hint)) {
+    tuning.cardSaturation = Math.max(tuning.cardSaturation, 1.2);
+    tuning.bgSaturation = 0.96;
+  }
+
+  return tuning;
+}
+
 /**
  * Prepares a Wikipedia image buffer for 9:16 vertical video.
  * Cover-crops to 1080×1920 + 15% Ken Burns headroom, then applies
@@ -529,7 +565,7 @@ function applyEraGrading(sharpInst, year) {
  * @param {number|null} year  Event year for era grading, or null
  * @returns {Promise<Buffer>}  PNG ready for scene compositing
  */
-async function prepareWikipediaSceneBuffer(buffer, year = null) {
+async function prepareWikipediaSceneBuffer(buffer, year = null, qualityHint = null) {
   const TARGET_W = Math.round(W * IMAGE_HEADROOM);
   const TARGET_H = Math.round(H * IMAGE_HEADROOM);
   const cardW = Math.round(TARGET_W * 0.82);
@@ -537,17 +573,25 @@ async function prepareWikipediaSceneBuffer(buffer, year = null) {
   const cardX = Math.round((TARGET_W - cardW) / 2);
   const cardY = Math.round((TARGET_H - cardH) / 2 - TARGET_H * 0.035);
   const cardRadius = Math.round(Math.min(cardW, cardH) * 0.045);
+  const tuning = getQualityTuning(qualityHint);
 
   let background = sharp(buffer)
     .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre" })
-    .blur(16)
-    .modulate({ brightness: 0.45, saturation: 0.92 });
+    .blur(tuning.bgBlur)
+    .modulate({
+      brightness: tuning.bgBrightness,
+      saturation: tuning.bgSaturation,
+    });
   background = applyEraGrading(background, year);
 
   let card = sharp(buffer)
     .resize(cardW, cardH, { fit: "cover", position: "centre" })
-    .sharpen({ sigma: 1.6 })
-    .modulate({ brightness: 1.03, saturation: 1.12 });
+    .sharpen({ sigma: tuning.cardSharpenSigma })
+    .modulate({
+      brightness: tuning.cardBrightness,
+      saturation: tuning.cardSaturation,
+    })
+    .linear(tuning.cardLinearA, tuning.cardLinearB);
   card = applyEraGrading(card, year);
 
   const [backgroundBuf, cardBuf, vignetteBuf, depthBuf, shadowBuf, maskBuf] =
@@ -604,6 +648,90 @@ async function prepareWikipediaSceneBuffer(buffer, year = null) {
     ])
     .png()
     .toBuffer();
+}
+
+/**
+ * Like prepareWikipediaSceneBuffer but returns TWO layers instead of one composite:
+ *   bgBuf       — blurred background at TARGET_W×TARGET_H (Ken Burns headroom for zoom-out).
+ *   cardLayerBuf — card + vignette + depth at W×H on a transparent canvas, static overlay.
+ *
+ * Background slowly zooms out (Ken Burns); the framed card stays fixed on top.
+ */
+async function prepareWikipediaSceneLayers(buffer, year = null, qualityHint = null) {
+  const TARGET_W = Math.round(W * IMAGE_HEADROOM);
+  const TARGET_H = Math.round(H * IMAGE_HEADROOM);
+  const cardW = Math.round(W * 0.82);
+  const cardH = Math.round(H * 0.68);
+  const cardX = Math.round((W - cardW) / 2);
+  const cardY = Math.round((H - cardH) / 2 - H * 0.035);
+  const cardRadius = Math.round(Math.min(cardW, cardH) * 0.045);
+  const tuning = getQualityTuning(qualityHint);
+
+  // Background: blurred, darkened — oversized for zoompan headroom
+  let background = sharp(buffer)
+    .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre" })
+    .blur(tuning.bgBlur)
+    .modulate({
+      brightness: tuning.bgBrightness,
+      saturation: tuning.bgSaturation,
+    });
+  background = applyEraGrading(background, year);
+
+  // Card image: sharp, enhanced, at card dimensions
+  let card = sharp(buffer)
+    .resize(cardW, cardH, { fit: "cover", position: "centre" })
+    .sharpen({ sigma: tuning.cardSharpenSigma })
+    .modulate({
+      brightness: tuning.cardBrightness,
+      saturation: tuning.cardSaturation,
+    })
+    .linear(tuning.cardLinearA, tuning.cardLinearB);
+  card = applyEraGrading(card, year);
+
+  const [bgBuf, cardImgBuf, vignetteBuf, depthBuf, shadowBuf, maskBuf] =
+    await Promise.all([
+      background.png().toBuffer(),
+      card.png().toBuffer(),
+      sharp(Buffer.from(buildVignetteSVG(W, H))).png().toBuffer(),
+      sharp(Buffer.from(buildDepthOverlaySVG(W, H))).png().toBuffer(),
+      sharp(Buffer.from(buildCardShadowSVG(cardW, cardH, cardRadius))).png().toBuffer(),
+      sharp(Buffer.from(buildRoundedRectMaskSVG(cardW, cardH, cardRadius))).png().toBuffer(),
+    ]);
+
+  const maskedCardBuf = await sharp(cardImgBuf)
+    .composite([{ input: maskBuf, blend: "dest-in" }])
+    .png()
+    .toBuffer();
+
+  const borderBuf = await sharp({
+    create: { width: cardW, height: cardH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  })
+    .composite([{
+      input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${cardW}" height="${cardH}">
+          <rect x="4" y="4"
+            width="${cardW - 8}" height="${cardH - 8}"
+            rx="${Math.max(0, cardRadius - 4)}"
+            fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="6"/>
+        </svg>`),
+    }])
+    .png()
+    .toBuffer();
+
+  // Card layer: W×H transparent canvas — shadow, masked card, border, vignette, depth
+  const cardLayerBuf = await sharp({
+    create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  })
+    .composite([
+      { input: shadowBuf,     left: cardX, top: cardY, blend: "over" },
+      { input: maskedCardBuf, left: cardX, top: cardY, blend: "over" },
+      { input: borderBuf,     left: cardX, top: cardY, blend: "over" },
+      { input: vignetteBuf,   blend: "over" },
+      { input: depthBuf,      blend: "over" },
+    ])
+    .png()
+    .toBuffer();
+
+  return { bgBuf, cardLayerBuf };
 }
 
 /** URLs that must never be used as a video background image. */
@@ -863,17 +991,26 @@ function buildOverlayCaptionFilter(
   outputLabel = "[vcap]",
 ) {
   if (!chunks.length) return "";
-  // Top edge of the 220px caption PNG sits so text visually lands at ~80% height
+  // Top edge of the caption PNG sits so text visually lands at ~80% height
   const Y_POS = Math.round(H * 0.8) - Math.round(220 * 0.5);
+  const SLIDE_PX = 20;   // pixels to travel upward during entry
+  const SLIDE_DUR = 0.18; // seconds for slide to complete
   const parts = [];
   for (let i = 0; i < chunks.length; i++) {
     const { start, end } = chunks[i];
     const inLabel = i === 0 ? inputLabel : `[ov${i - 1}]`;
     const outLabel = i === chunks.length - 1 ? outputLabel : `[ov${i}]`;
+    // Slide up from Y+SLIDE_PX → Y over SLIDE_DUR seconds using output time t.
+    // t is always >= start inside enable, so the subtraction is safe.
+    const S = start.toFixed(3);
+    const yExpr =
+      `if(lt(t-${S},${SLIDE_DUR}),` +
+        `${Y_POS}+${SLIDE_PX}*(1-(t-${S})/${SLIDE_DUR}),` +
+        `${Y_POS})`;
     parts.push(
       `${inLabel}[${captionStartIdx + i}:v]` +
-        `overlay=x=0:y=${Y_POS}:format=auto` +
-        `:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'${outLabel}`,
+        `overlay=x=0:y='${yExpr}':format=auto` +
+        `:enable='between(t,${S},${end.toFixed(3)})'${outLabel}`,
     );
   }
   return parts.join(";");
@@ -1338,21 +1475,17 @@ async function generateMultiSceneVideo(
     `  ✓ Using ${sceneCount} real images from the exact Wikipedia article (min=${minWikiImages})`,
   );
 
-  const prepared = await Promise.all(
+  const sceneLayers = await Promise.all(
     imageBuffers
       .slice(0, sceneCount)
-      .map((buf) => prepareWikipediaSceneBuffer(buf)),
+      .map((buf) => prepareWikipediaSceneLayers(buf, null, qualityHint)),
   );
-  const scenes = prepared.map((buf) => ({ buffer: buf, isVideo: false }));
-
-  const videoScenes = scenes.filter((s) => s.isVideo).length;
-  const imageScenes = scenes.filter((s) => !s.isVideo).length;
   console.log(
-    `  Scenes ready: ${videoScenes} animated (WAN I2V), ${imageScenes} static (Ken Burns)`,
+    `  Scenes ready: ${sceneCount} (zoom-out background, fixed card)`,
   );
 
   // 2. Find scene boundary timestamps for the number of available scenes
-  const cuts = findSceneBoundaries(words, narrationParts, scenes.length);
+  const cuts = findSceneBoundaries(words, narrationParts, sceneLayers.length);
   const cutLog = [0, ...cuts, videoDuration]
     .map((t, i, arr) =>
       i < arr.length - 1 ? `${t.toFixed(1)}–${arr[i + 1].toFixed(1)}s` : null,
@@ -1372,49 +1505,34 @@ async function generateMultiSceneVideo(
     sceneDurations.push(videoDuration);
   }
 
-  // 3. Write scene files — video clips saved as .mp4, static images resized to
-  //    115% of target (zoompan headroom) and composited with the SVG title overlay.
-  const KB_PAD = IMAGE_HEADROOM;
-  const sceneFiles = []; // { path, isVideo }
-  for (let i = 0; i < scenes.length; i++) {
-    const { buffer, isVideo } = scenes[i];
-    if (isVideo) {
-      const clipPath = join(TMP, `${slug}_s${i}.mp4`);
-      writeFileSync(clipPath, buffer);
-      sceneFiles.push({ path: clipPath, isVideo: true });
-      console.log(`  ✓ Scene ${i + 1} animated clip ready`);
+  // 3. Write scene files — two PNGs per scene:
+  //    bgPath   = blurred background at Ken Burns headroom size (animated by FFmpeg)
+  //    cardPath = card + vignette + depth at output size on transparent canvas (static overlay)
+  const bgFiles = [];
+  const cardFiles = [];
+  for (let i = 0; i < sceneLayers.length; i++) {
+    const { bgBuf, cardLayerBuf } = sceneLayers[i];
+    const bgPath   = join(TMP, `${slug}_s${i}_bg.png`);
+    const cardPath = join(TMP, `${slug}_s${i}_card.png`);
+
+    await sharp(bgBuf).png().toFile(bgPath);
+
+    // Title overlay on scene 0 only — placed on the static card layer
+    if (i === 0) {
+      await sharp(cardLayerBuf)
+        .composite([{
+          input: await sharp(Buffer.from(buildSVG(title))).png().toBuffer(),
+          blend: "over",
+        }])
+        .png()
+        .toFile(cardPath);
     } else {
-      const framePath = join(TMP, `${slug}_s${i}.png`);
-      const resized = sharp(buffer).resize(
-        Math.round(W * KB_PAD),
-        Math.round(H * KB_PAD),
-        {
-          fit: "cover",
-          position: "center",
-        },
-      );
-      // Title overlay only on scene 1 — after "Did you know?" the image takes centre stage
-      if (i === 0) {
-        await resized
-          .composite([
-            {
-              input: await sharp(Buffer.from(buildSVG(title)))
-                .resize(Math.round(W * KB_PAD), Math.round(H * KB_PAD))
-                .png()
-                .toBuffer(),
-              blend: "over",
-            },
-          ])
-          .png()
-          .toFile(framePath);
-      } else {
-        await resized.png().toFile(framePath);
-      }
-      sceneFiles.push({ path: framePath, isVideo: false });
-      console.log(
-        `  ✓ Scene ${i + 1} frame ready${i === 0 ? " (with title overlay)" : " (clean)"}`,
-      );
+      await sharp(cardLayerBuf).png().toFile(cardPath);
     }
+
+    bgFiles.push(bgPath);
+    cardFiles.push(cardPath);
+    console.log(`  ✓ Scene ${i + 1} ready${i === 0 ? " (with title overlay)" : ""}`);
   }
 
   // 4. FFmpeg: dynamic xfade chain + animated captions + end screen + audio
@@ -1437,46 +1555,47 @@ async function generateMultiSceneVideo(
     await new Promise((resolve, reject) => {
       const cmd = ffmpeg();
 
-      // Add scene inputs — video clips loop, static images freeze
-      for (let i = 0; i < sceneFiles.length; i++) {
-        const { path, isVideo } = sceneFiles[i];
-        if (isVideo) {
-          // stream_loop repeats the clip; -t trims to exact scene duration
-          cmd
-            .input(path)
-            .inputOptions(["-stream_loop -1", `-t ${sceneDurations[i]}`]);
-        } else {
-          // -r must match FPS so zoompan reads at the same rate it outputs —
-          // without this the input defaults to 25 fps, causing frame duplication stuttering.
-          // Note: -framerate was removed as a general input option in ffmpeg 7.x; use -r instead.
-          cmd
-            .input(path)
-            .inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
-        }
+      // Background inputs: looped stills for Ken Burns animation
+      // -r must match FPS so zoompan reads at the same rate it outputs.
+      for (let i = 0; i < bgFiles.length; i++) {
+        cmd.input(bgFiles[i]).inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
+      }
+      // Card inputs: static W×H RGBA overlays (no loop/duration needed — single frame held)
+      for (let i = 0; i < cardFiles.length; i++) {
+        cmd
+          .input(cardFiles[i])
+          .inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
       }
 
       const hasNarr = !!narrationPath;
       const hasMusic = !!bgMusicPath;
-      const narrIdx = sceneFiles.length;
-      const musicIdx =
-        hasNarr && hasMusic ? sceneFiles.length + 1 : sceneFiles.length;
+      const audioBase = bgFiles.length + cardFiles.length;
+      const narrIdx  = audioBase;
+      const musicIdx = hasNarr && hasMusic ? audioBase + 1 : audioBase;
       if (hasNarr) cmd.input(narrationPath);
       if (hasMusic) cmd.input(bgMusicPath).inputOptions(["-stream_loop -1"]);
 
       // Caption PNGs then end screen PNG (indices must be stable)
-      const captionStartIdx =
-        sceneFiles.length + (hasNarr ? 1 : 0) + (hasMusic ? 1 : 0);
+      const captionStartIdx = audioBase + (hasNarr ? 1 : 0) + (hasMusic ? 1 : 0);
       captionPNGPaths.forEach((p) => cmd.input(p));
       const endScreenIdx = captionStartIdx + captionPNGPaths.length;
       cmd.input(endScreenPath);
 
-      // Per-scene filter: Ken Burns for static images, fps+loop for video clips
-      const sceneParts = sceneFiles.map(({ isVideo }, i) => {
-        if (isVideo) {
-          // Normalise to target FPS; stream_loop handles duration via -t above
-          return `[${i}:v]fps=fps=${FPS},setpts=PTS-STARTPTS[v${i}]`;
-        }
-        return buildKenBurns(i, sceneDurations[i], `[${i}:v]`, `[v${i}]`);
+      // Per-scene filter: slow zoom-out on background, static card overlay on top
+      const Z_RANGE = 0.18;
+      const Z_START = 1.0;
+      const Z_END   = (Z_START + Z_RANGE).toFixed(4);
+      const sceneParts = bgFiles.map((_, i) => {
+        const d   = Math.round(sceneDurations[i] * FPS);
+        const inc = (Z_RANGE / d).toFixed(7);
+        // Zoom out: start fully zoomed in, gradually pull back to Z_START
+        const zoom = `if(eq(on,0),${Z_END},max(${Z_START},pzoom-${inc}))`;
+        const x    = `iw/2-(iw/zoom/2)`;
+        const y    = `ih/2-(ih/zoom/2)`;
+        const zp   =
+          `[${i}:v]zoompan=z='${zoom}':x='${x}':y='${y}'` +
+          `:d=${d}:s=${W}x${H}:fps=${FPS},setpts=PTS-STARTPTS,fps=fps=${FPS}[kb${i}]`;
+        return `${zp};[kb${i}][${bgFiles.length + i}:v]overlay=x=0:y=0:format=auto[v${i}]`;
       });
       const scenePartFilter = sceneParts.join(";");
 
@@ -1520,7 +1639,9 @@ async function generateMultiSceneVideo(
 
       let audioFilter = "";
       if (hasNarr && hasMusic) {
-        audioFilter = `;[${musicIdx}:a]volume=0.15[bg];[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`;
+        audioFilter =
+          `;[${musicIdx}:a]volume=0.15[bg]` +
+          `;[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`;
       }
 
       cmd.complexFilter(
@@ -1570,11 +1691,7 @@ async function generateMultiSceneVideo(
         .run();
     });
   } finally {
-    [
-      ...sceneFiles.map((s) => s.path),
-      ...captionPNGPaths,
-      endScreenPath,
-    ].forEach((p) => {
+    [...bgFiles, ...cardFiles, ...captionPNGPaths, endScreenPath].forEach((p) => {
       try {
         unlinkSync(p);
       } catch {
@@ -1655,7 +1772,11 @@ export async function generateVideo(
       `generateVideo called without a validated imageUrl for "${slug}"`,
     );
   const imgBuffer = await downloadImageBuffer(imageUrl);
-  const preparedBuffer = await prepareWikipediaSceneBuffer(imgBuffer);
+  const preparedBuffer = await prepareWikipediaSceneBuffer(
+    imgBuffer,
+    null,
+    qualityHint,
+  );
 
   // 2. Resize + SVG overlay → PNG frame
   const svgBuffer = Buffer.from(buildSVG(title));

@@ -39,20 +39,60 @@ const MODEL_ID = "eleven_turbo_v2_5"; // fastest + lowest character cost
  * @param {string[]|null} contentItems  — DYK bullets or Quick Facts rows
  * @returns {string}
  */
-export function buildNarrationScript(post, contentItems) {
-  const title = post.title.replace(/ [—–] /g, ", ");
-  const parts = ["On this day in history.", title + "."];
+function buildNarrationIntro(post) {
+  const rawTitle = String(post?.title || "").trim();
+  const parts = rawTitle.split(/ [—–] /);
+  const lead = parts[0]?.trim() || rawTitle;
+  const datePart = parts[1]?.trim() || "";
+  const yearMatch = datePart.match(/\b(\d{4})\b/);
+  const year = yearMatch ? yearMatch[1] : "";
+  return year ? `${lead}, ${year}.` : `${lead}.`;
+}
 
-  if (contentItems && contentItems.length > 0) {
-    // Use only the first DYK item — most impactful fact, keeps the Short tight
-    const item = contentItems[0];
-    parts.push("Did you know?");
-    parts.push(item.endsWith(".") ? item : item + ".");
-  } else {
-    parts.push(post.description + ".");
+function trimRedundantDateLead(text, post) {
+  let out = String(text || "").trim();
+  if (!out) return out;
+
+  const rawTitle = String(post?.title || "").trim();
+  const datePart = rawTitle.split(/ [—–] /)[1]?.trim() || "";
+  const yearMatch = datePart.match(/\b(\d{4})\b/);
+  const year = yearMatch ? yearMatch[1] : "";
+  const escapedDate = datePart.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  if (datePart) {
+    out = out.replace(new RegExp(`^on\\s+${escapedDate},?\\s*`, "i"), "");
+    out = out.replace(new RegExp(`^${escapedDate},?\\s*`, "i"), "");
+  }
+  if (year) {
+    out = out.replace(new RegExp(`^in\\s+${year},?\\s*`, "i"), "");
+    out = out.replace(new RegExp(`^by\\s+${year},?\\s*`, "i"), "");
+    out = out.replace(new RegExp(`^${year},?\\s*`, "i"), "");
   }
 
-  parts.push("Discover more at thisday.info.");
+  return out.trim();
+}
+
+function buildNarrationFactBlock(post, contentItems) {
+  if (contentItems && contentItems.length > 0) {
+    const factA = trimRedundantDateLead(contentItems[0], post);
+    const factB = contentItems[1]
+      ? trimRedundantDateLead(contentItems[1], post)
+      : "";
+    const facts = [factA, factB].filter(Boolean);
+    if (facts.length === 0) return "";
+    return facts.map((item) => (item.endsWith(".") ? item : item + ".")).join(" ");
+  }
+
+  const description = trimRedundantDateLead(post.description, post);
+  return description ? (description.endsWith(".") ? description : description + ".") : "";
+}
+
+export function buildNarrationScript(post, contentItems) {
+  const parts = ["On this day in history.", buildNarrationIntro(post)];
+  const factBlock = buildNarrationFactBlock(post, contentItems);
+  if (factBlock) parts.push(factBlock);
+
+  parts.push("Discover more at thisday.info");
   return parts.join(" ");
 }
 
@@ -65,17 +105,10 @@ export function buildNarrationScript(post, contentItems) {
  * @returns {string[]}
  */
 export function buildNarrationParts(post, contentItems) {
-  const title = post.title.replace(/ [—–] /g, ", ");
-  const parts = ["On this day in history.", title + "."];
-  if (contentItems && contentItems.length > 0) {
-    // Use only the first DYK item — most impactful fact, keeps the Short tight
-    const item = contentItems[0];
-    parts.push("Did you know?");
-    parts.push(item.endsWith(".") ? item : item + ".");
-  } else {
-    parts.push(post.description + ".");
-  }
-  parts.push("Discover more at thisday.info.");
+  const parts = ["On this day in history.", buildNarrationIntro(post)];
+  const factBlock = buildNarrationFactBlock(post, contentItems);
+  if (factBlock) parts.push(factBlock);
+  parts.push("Discover more at thisday.info");
   return parts;
 }
 

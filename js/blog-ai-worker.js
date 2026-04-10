@@ -4503,6 +4503,19 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
     null,
     2,
   );
+  const pillarPills =
+    currentPillars.length > 0
+      ? `<div class="pillar-pill-row justify-content-center mt-3">
+${currentPillars
+  .slice(0, 3)
+  .map((pillar, idx) => {
+    const ps = pillarSlug(pillar);
+    const featuredClass = idx === 0 ? " pillar-pill-featured" : "";
+    return `              <a href="/blog/topic/${ps}/" class="pillar-pill${featuredClass}">${esc(pillar)}</a>`;
+  })
+  .join("\n")}
+            </div>`
+      : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -4642,6 +4655,11 @@ ${JSON.stringify({
       a{color:var(--btn-bg)}a:hover{color:var(--accent);text-decoration:underline}
       h1,h2,h3{color:var(--text)}
       .article-meta{color:var(--text-muted);font-size:.875rem}
+      .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px}
+      .pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:.82rem;font-weight:700;letter-spacing:.01em;text-decoration:none;transition:background .15s ease,border-color .15s ease,color .15s ease}
+      .pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg);color:var(--btn-bg);text-decoration:none}
+      .pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
+      .pillar-pill-featured:hover{background:var(--btn-hover);border-color:var(--btn-hover);color:#fff}
       .breadcrumb{background:transparent;padding:0;margin-bottom:1rem}
       .breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
       .did-you-know{background:rgba(0,0,0,.04);border-left:4px solid var(--btn-bg);border-radius:0 .5rem .5rem 0}
@@ -4697,6 +4715,7 @@ ${JSON.stringify({
                 By <a href="/about/editorial/" rel="author" style="color:inherit">thisDay. Editorial Team</a>${readingTime}
               </small>
             </p>
+            ${pillarPills}
           </header>
 
           ${c.imageUrl ? `<figure class="text-center mb-4">
@@ -5401,6 +5420,8 @@ ${JSON.stringify(
       .post-thumb-placeholder{width:108px;height:78px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(0,0,0,.06);color:var(--btn-bg);font-size:1.15rem}
       .post-copy{min-width:0}
       .post-title{font-weight:600;font-size:.95rem;line-height:1.4;color:var(--btn-bg)}
+      .post-pillars{margin:.35rem 0 .2rem}
+      .post-pillar-badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:var(--bg-alt);border:1px solid var(--border);color:var(--btn-bg);font-size:.72rem;font-weight:700;line-height:1}
       .month-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
       .ad-unit{text-align:center}
       .ad-unit-label{font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
@@ -5655,6 +5676,8 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
       .post-thumb-placeholder{width:108px;height:78px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(0,0,0,.06);color:var(--btn-bg);font-size:1.15rem}
       .post-copy{min-width:0}
       .post-title{font-weight:600;font-size:.95rem;line-height:1.4;color:var(--btn-bg)}
+      .post-pillars{margin:.35rem 0 .2rem}
+      .post-pillar-badge{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:var(--bg-alt);border:1px solid var(--border);color:var(--btn-bg);font-size:.72rem;font-weight:700;line-height:1}
       .section-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
       .breadcrumb{font-size:.82rem;margin-bottom:1.2rem}
       .breadcrumb a{color:var(--text-muted)}
@@ -5739,6 +5762,11 @@ function renderBlogPostListItem(entry) {
   const fallbackImg = rawImg ? esc(rawImg) : "";
   const title = esc(entry.title);
   const slug = esc(entry.slug);
+  const firstPillar =
+    Array.isArray(entry.pillars) && entry.pillars.length > 0 ? entry.pillars[0] : null;
+  const pillarBadge = firstPillar
+    ? `<div class="post-pillars"><span class="post-pillar-badge">${esc(firstPillar)}</span></div>`
+    : "";
   const thumbHtml = proxiedImg
     ? `<img src="${proxiedImg}" alt="${title}" class="post-thumb" loading="lazy" onerror="this.onerror=null;this.src='${fallbackImg}'">`
     : `<div class="post-thumb-placeholder"><i class="bi bi-image-alt"></i></div>`;
@@ -5747,6 +5775,7 @@ function renderBlogPostListItem(entry) {
           ${thumbHtml}
           <div class="post-copy">
             <div class="post-title">${title}</div>
+            ${pillarBadge}
             <small style="color:var(--text-muted,#5c7a65);opacity:.7">${esc(dateStr)}</small>
           </div>
         </a>`;

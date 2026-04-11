@@ -24,7 +24,6 @@ import {
   NAV_CSS,
   FOOTER_CSS,
   navToggleScript,
-  marqueeScript,
 } from "./shared/layout.js";
 import {
   resolveAiModel,
@@ -786,7 +785,7 @@ export default {
         ) {
           patchedHtml = patchedHtml.replace(
             "</body>",
-            `<script>${navToggleScript()}</script>${marqueeScript()}</body>`,
+            `<script>${navToggleScript()}</script></body>`,
           );
         }
         // Patch legacy H2 headings — old posts used "Overview: EventTitle", "Eyewitness Accounts of EventTitle",
@@ -1558,7 +1557,7 @@ export default {
       if (!html.includes("navToggle") && html.includes('class="nav"')) {
         html = html.replace(
           "</body>",
-          `<script>${navToggleScript()}</script>${marqueeScript()}</body>`,
+          `<script>${navToggleScript()}</script></body>`,
         );
       }
       // Inject quiz CTA + popup if no quiz present
@@ -5051,7 +5050,6 @@ ${analysisBadItems}
   <script>
     ${footerYearScript()}
     ${navToggleScript()}
-    ${marqueeScript()}
   </script>
 
   <!-- Google Ads: 60 Seconds on Site -->
@@ -5515,7 +5513,6 @@ ${JSON.stringify(
   <script>
     ${footerYearScript()}
     ${navToggleScript()}
-    ${marqueeScript()}
     if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
       document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
         if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed') && ins.offsetWidth > 0) {
@@ -5780,7 +5777,6 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
   <script>
     ${footerYearScript()}
     ${navToggleScript()}
-    ${marqueeScript()}
     if (location.hostname === 'thisday.info' || location.hostname === 'www.thisday.info') {
       document.querySelectorAll('ins.adsbygoogle').forEach((ins) => {
         if (!ins.getAttribute('data-adsbygoogle-status') && !ins.getAttribute('data-ad-pushed') && ins.offsetWidth > 0) {

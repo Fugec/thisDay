@@ -23,6 +23,7 @@ import {
   footerYearScript,
   NAV_CSS,
   FOOTER_CSS,
+  marqueeScript,
   navToggleScript,
 } from "./shared/layout.js";
 import {
@@ -118,6 +119,8 @@ const KV_LAST_GEN_KEY = "last_gen_date";
 const KV_PERSON_IMAGE_PREFIX = "person-image:";
 const KV_PERSON_IMAGE_TTL = 60 * 60 * 24 * 30; // 30 days
 const EVERY_OTHER_DAYS = 1; // Generate every N days
+const BLOG_NAV_WIDTH_FIX_CSS =
+  `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 
 // Content pillars — mirrors the 10 event filter categories in script.js,
 // plus "Born on This Day" and "Died on This Day" matching the site's nav sections.
@@ -732,16 +735,22 @@ export default {
             siteFooter(),
           );
         }
-        // Patch old Bootstrap navbar → new siteNav()
-        if (
-          patchedHtml.includes('class="navbar') &&
-          !patchedHtml.includes('class="nav"')
-        ) {
-          patchedHtml = patchedHtml.replace(
-            /<nav class="navbar[\s\S]*?<\/nav>/,
-            siteNav(),
-          );
+        // Patch old or partial nav chrome → canonical site nav
+        if (!patchedHtml.includes('class="site-chrome"')) {
+          if (patchedHtml.includes('class="navbar')) {
+            patchedHtml = patchedHtml.replace(
+              /<nav class="navbar[\s\S]*?<\/nav>/,
+              siteNav(),
+            );
+          } else if (patchedHtml.includes('class="nav"')) {
+            patchedHtml = patchedHtml.replace(
+              /<nav class="nav"[\s\S]*?<\/nav>\s*(?:<div class="marquee-bar"[\s\S]*?<\/div>)?/,
+              siteNav(),
+            );
+          }
         }
+        patchedHtml = ensureBlogChromeAssets(patchedHtml);
+        patchedHtml = injectBlogNavWidthFix(patchedHtml);
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace(
           "</head>",
@@ -778,21 +787,23 @@ export default {
           /body\.dark-theme[^{]*\{[^}]*\}/g,
           "",
         );
-        // Hide marquee on blog posts — CSS !important beats JS-set inline styles
-        if (patchedHtml.includes('id="marqueeBar"')) {
-          patchedHtml = patchedHtml.replace(
-            "</head>",
-            `<style>#marqueeBar{display:none!important}</style></head>`,
-          );
-        }
         // Add navToggle script if missing
         if (
-          !patchedHtml.includes("navToggle") &&
+          !patchedHtml.includes('classList.toggle("active")') &&
           patchedHtml.includes('class="nav"')
         ) {
           patchedHtml = patchedHtml.replace(
             "</body>",
             `<script>${navToggleScript()}</script></body>`,
+          );
+        }
+        if (
+          patchedHtml.includes('id="marqueeBar"') &&
+          !patchedHtml.includes("api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/")
+        ) {
+          patchedHtml = patchedHtml.replace(
+            "</body>",
+            `${marqueeScript()}</body>`,
           );
         }
         // Patch legacy H2 headings — old posts used "Overview: EventTitle", "Eyewitness Accounts of EventTitle",
@@ -1514,10 +1525,19 @@ export default {
         return originResp;
       }
       let html = await originResp.text();
-      // Patch old Bootstrap navbar → new siteNav()
-      if (html.includes('class="navbar') && !html.includes('class="nav"')) {
-        html = html.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
+      // Patch old or partial nav chrome → canonical site nav
+      if (!html.includes('class="site-chrome"')) {
+        if (html.includes('class="navbar')) {
+          html = html.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
+        } else if (html.includes('class="nav"')) {
+          html = html.replace(
+            /<nav class="nav"[\s\S]*?<\/nav>\s*(?:<div class="marquee-bar"[\s\S]*?<\/div>)?/,
+            siteNav(),
+          );
+        }
       }
+      html = ensureBlogChromeAssets(html);
+      html = injectBlogNavWidthFix(html);
       // Patch old footer
       if (html.includes('class="footer"') && !html.includes("footer-inner")) {
         html = html.replace(
@@ -1561,10 +1581,22 @@ export default {
         );
       }
       // Add navToggle script if missing
-      if (!html.includes("navToggle") && html.includes('class="nav"')) {
+      if (
+        !html.includes('classList.toggle("active")') &&
+        html.includes('class="nav"')
+      ) {
         html = html.replace(
           "</body>",
           `<script>${navToggleScript()}</script></body>`,
+        );
+      }
+      if (
+        html.includes('id="marqueeBar"') &&
+        !html.includes("api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/")
+      ) {
+        html = html.replace(
+          "</body>",
+          `${marqueeScript()}</body>`,
         );
       }
       // Inject quiz CTA + popup if no quiz present
@@ -4688,6 +4720,7 @@ ${JSON.stringify({
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/custom.css" />
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
@@ -4741,6 +4774,7 @@ ${JSON.stringify({
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
       .site-table th{background:var(--bg-alt);font-weight:600;white-space:nowrap;width:40%}
       .tdq-cta-sub{color:var(--text-muted)}
+      ${BLOG_NAV_WIDTH_FIX_CSS}
       ${NAV_CSS}
       ${FOOTER_CSS}
     </style>
@@ -5458,6 +5492,7 @@ ${JSON.stringify(
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/custom.css" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -5482,6 +5517,7 @@ ${JSON.stringify(
       .month-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
       .ad-unit{text-align:center}
       .ad-unit-label{font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+      ${BLOG_NAV_WIDTH_FIX_CSS}
       ${NAV_CSS}
       ${FOOTER_CSS}
     </style>
@@ -5717,6 +5753,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/custom.css" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
@@ -5737,6 +5774,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
       .section-header{font-size:1.3rem;font-weight:700;color:var(--btn-bg)!important;border-bottom:2px solid var(--border);padding-bottom:6px;margin-bottom:14px}
       .breadcrumb{font-size:.82rem;margin-bottom:1.2rem}
       .breadcrumb a{color:var(--text-muted)}
+      ${BLOG_NAV_WIDTH_FIX_CSS}
       ${NAV_CSS}
       ${FOOTER_CSS}
     </style>
@@ -5881,11 +5919,13 @@ async function serve404(env) {
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/custom.css" />
   <style>
     :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
     body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
     main{flex:1}
     .hero-code{font-size:6rem;font-weight:700;color:var(--btn-bg);line-height:1}
+    ${BLOG_NAV_WIDTH_FIX_CSS}
     ${NAV_CSS}
     ${FOOTER_CSS}
   </style>
@@ -6004,4 +6044,28 @@ function jsonResponse(obj, status = 200) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function ensureStylesheetLink(html, href) {
+  if (html.includes(`href="${href}"`)) return html;
+  if (!html.includes("</head>")) return html;
+  return html.replace(
+    "</head>",
+    `  <link rel="stylesheet" href="${href}" />\n</head>`,
+  );
+}
+
+function ensureBlogChromeAssets(html) {
+  let nextHtml = ensureStylesheetLink(html, "/css/style.css");
+  nextHtml = ensureStylesheetLink(nextHtml, "/css/custom.css");
+  return nextHtml;
+}
+
+function injectBlogNavWidthFix(html) {
+  if (html.includes(BLOG_NAV_WIDTH_FIX_CSS)) return html;
+  if (!html.includes("</head>")) return html;
+  return html.replace(
+    "</head>",
+    `<style>${BLOG_NAV_WIDTH_FIX_CSS}</style></head>`,
+  );
 }

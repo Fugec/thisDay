@@ -83,6 +83,9 @@ export function marqueeScript() {
   var bar=document.getElementById('marqueeBar');
   var track=document.getElementById('marqueeTrack');
   if(!bar||!track)return;
+  if(track.dataset.marqueeReady==="true")return;
+  track.dataset.marqueeReady="true";
+  track.innerHTML="";
   var now=new Date();
   var mm=String(now.getMonth()+1).padStart(2,'0');
   var dd=String(now.getDate()).padStart(2,'0');
@@ -90,25 +93,29 @@ export function marqueeScript() {
     .then(function(r){return r.ok?r.json():null;})
     .then(function(d){
       var items=(d&&d.events)||[];
-      if(!items.length)return;
-      items.slice(0,12).forEach(function(e){
+      var selected=items.slice(0,12);
+      if(!selected.length){bar.style.display='none';return;}
+      selected.forEach(function(e){
         var el=document.createElement('div');
         el.className='marquee-item';
         var yr=document.createElement('span');
-        yr.textContent=e.year||'';
+        yr.textContent=e.year||'Unknown';
         el.appendChild(yr);
         var pages=e.pages&&e.pages[0];
         var url=pages&&pages.content_urls&&pages.content_urls.desktop&&pages.content_urls.desktop.page;
-        var txt=' '+(e.text||'');
+        var title=e.title||e.description||e.text||'Historical event';
         if(url){
           var a=document.createElement('a');
           a.href=url;a.target='_blank';a.rel='noopener noreferrer';
-          a.style.cssText='color:inherit;text-decoration:none;font-weight:600';
-          a.textContent=txt;
+          a.style.color='inherit';
+          a.style.textDecoration='none';
+          a.textContent=title;
+          el.appendChild(document.createTextNode(' '));
           el.appendChild(a);
         }else{
           var s=document.createElement('span');
-          s.style.fontWeight='600';s.textContent=txt;
+          s.style.fontWeight='600';
+          s.textContent=' '+title;
           el.appendChild(s);
         }
         track.appendChild(el);
@@ -124,7 +131,7 @@ export function marqueeScript() {
 export const NAV_CSS =
   `.site-chrome{position:sticky;top:0;z-index:1000;background:var(--bg);box-shadow:0 6px 18px rgba(27,58,45,.08)}` +
   `.nav{background:var(--bg);border-bottom:1px solid var(--border);padding:1rem 0;position:relative;z-index:1}` +
-  `.nav-inner{padding:0 2rem;display:flex;align-items:center;width:100%}` +
+  `.nav-inner{padding:0 2rem;display:flex;align-items:center;width:100%;max-width:1920px;margin:0 auto}` +
   `.brand{font-family:"Lora",Georgia,serif;font-size:1.5rem;font-weight:700;color:var(--text);text-decoration:none}` +
   `.brand:hover{color:var(--text);text-decoration:none}` +
   `.nav-links{display:flex;gap:1.5rem;font-size:.9rem;margin-left:auto}` +

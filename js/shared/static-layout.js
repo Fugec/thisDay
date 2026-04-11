@@ -42,6 +42,7 @@ function initMarquee() {
   if (!bar || !track || track.dataset.marqueeReady === "true") return;
 
   track.dataset.marqueeReady = "true";
+  track.innerHTML = "";
 
   const now = new Date();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
@@ -53,14 +54,18 @@ function initMarquee() {
     .then((response) => (response.ok ? response.json() : null))
     .then((data) => {
       const items = (data && data.events) || [];
-      if (!items.length) return;
+      const selected = items.slice(0, 12);
+      if (!selected.length) {
+        bar.style.display = "none";
+        return;
+      }
 
-      items.slice(0, 12).forEach((event) => {
+      selected.forEach((event) => {
         const item = document.createElement("div");
         item.className = "marquee-item";
 
         const year = document.createElement("span");
-        year.textContent = event.year || "";
+        year.textContent = event.year || "Unknown";
         item.appendChild(year);
 
         const page = event.pages && event.pages[0];
@@ -69,20 +74,23 @@ function initMarquee() {
           page.content_urls &&
           page.content_urls.desktop &&
           page.content_urls.desktop.page;
-        const text = ` ${event.text || ""}`;
+        const title =
+          event.title || event.description || event.text || "Historical event";
 
         if (url) {
           const link = document.createElement("a");
           link.href = url;
           link.target = "_blank";
           link.rel = "noopener noreferrer";
-          link.style.cssText = "color:inherit;text-decoration:none;font-weight:600";
-          link.textContent = text;
+          link.style.color = "inherit";
+          link.style.textDecoration = "none";
+          link.textContent = title;
+          item.appendChild(document.createTextNode(" "));
           item.appendChild(link);
         } else {
           const label = document.createElement("span");
           label.style.fontWeight = "600";
-          label.textContent = text;
+          label.textContent = ` ${title}`;
           item.appendChild(label);
         }
 

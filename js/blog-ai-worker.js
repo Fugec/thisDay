@@ -778,15 +778,13 @@ export default {
           /body\.dark-theme[^{]*\{[^}]*\}/g,
           "",
         );
-        // Strip any marquee script and force display:none on the bar for article pages
-        patchedHtml = patchedHtml.replace(
-          /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*marqueeBar(?:(?!<\/script>)[\s\S])*<\/script>/g,
-          "",
-        );
-        patchedHtml = patchedHtml.replace(
-          /(<div[^>]*id="marqueeBar"[^>]*)style="[^"]*"/,
-          '$1style="display:none"',
-        );
+        // Hide marquee on blog posts — CSS !important beats JS-set inline styles
+        if (patchedHtml.includes('id="marqueeBar"')) {
+          patchedHtml = patchedHtml.replace(
+            "</head>",
+            `<style>#marqueeBar{display:none!important}</style></head>`,
+          );
+        }
         // Add navToggle script if missing
         if (
           !patchedHtml.includes("navToggle") &&

@@ -30,9 +30,28 @@ function initNavToggle() {
   if (!toggle || !mobile || toggle.dataset.navReady === "true") return;
 
   toggle.dataset.navReady = "true";
-  toggle.addEventListener("click", () => {
+  const syncExpanded = () => {
+    toggle.setAttribute(
+      "aria-expanded",
+      mobile.classList.contains("active") ? "true" : "false",
+    );
+  };
+  const toggleMenu = (event) => {
+    if (event) event.preventDefault();
     mobile.classList.toggle("active");
+    syncExpanded();
+  };
+
+  toggle.addEventListener("click", toggleMenu);
+  toggle.addEventListener("touchend", toggleMenu, { passive: false });
+  document.addEventListener("click", (event) => {
+    if (!mobile.classList.contains("active")) return;
+    if (event.target === toggle || toggle.contains(event.target)) return;
+    if (mobile.contains(event.target)) return;
+    mobile.classList.remove("active");
+    syncExpanded();
   });
+  syncExpanded();
 }
 
 function initMarquee() {

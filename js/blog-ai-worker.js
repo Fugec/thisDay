@@ -180,6 +180,21 @@ function supportPopupSnippet() {
 <script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{var _t=localStorage.getItem('supportPopupClosed');if(_t&&Date.now()-Number(_t)<86400000)return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed',String(Date.now()));}catch(e){}});})();<\/script>`;
 }
 
+function staticNavMountMarkup({
+  includeMarquee = false,
+  supportPopup = false,
+} = {}) {
+  const opts = [];
+  if (includeMarquee) opts.push("includeMarquee: true");
+  if (supportPopup) opts.push("supportPopup: true");
+  const arg = opts.length ? `{ ${opts.join(", ")} }` : "";
+  return `<div data-site-nav></div>
+  <script type="module">
+    import { mountStaticNav } from "/js/shared/static-layout.js";
+    mountStaticNav(${arg});
+  </script>`;
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -736,16 +751,16 @@ export default {
           );
         }
         // Patch old or partial nav chrome → canonical site nav
-        if (!patchedHtml.includes('class="site-chrome"')) {
+        if (!patchedHtml.includes("data-site-nav")) {
           if (patchedHtml.includes('class="navbar')) {
             patchedHtml = patchedHtml.replace(
-              /<nav class="navbar[\s\S]*?<\/nav>/,
-              siteNav(),
+              /<nav class="navbar[\s\S]*?<\/nav>\s*(?:<div class="marquee-bar"[\s\S]*?<\/div>)?/,
+              staticNavMountMarkup({ includeMarquee: true, supportPopup: true }),
             );
           } else if (patchedHtml.includes('class="nav"')) {
             patchedHtml = patchedHtml.replace(
               /<nav class="nav"[\s\S]*?<\/nav>\s*(?:<div class="marquee-bar"[\s\S]*?<\/div>)?/,
-              siteNav(),
+              staticNavMountMarkup({ includeMarquee: true, supportPopup: true }),
             );
           }
         }
@@ -788,24 +803,14 @@ export default {
           "",
         );
         // Add navToggle script if missing
-        if (
-          !patchedHtml.includes('classList.toggle("active")') &&
-          patchedHtml.includes('class="nav"')
-        ) {
-          patchedHtml = patchedHtml.replace(
-            "</body>",
-            `<script>${navToggleScript()}</script></body>`,
-          );
-        }
-        if (
-          patchedHtml.includes('id="marqueeBar"') &&
-          !patchedHtml.includes("api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/")
-        ) {
-          patchedHtml = patchedHtml.replace(
-            "</body>",
-            `${marqueeScript()}</body>`,
-          );
-        }
+        patchedHtml = patchedHtml.replace(
+          /<script>\s*\(function\(\)\{var t=document.getElementById\("navToggle"\),m=document.getElementById\("navMobile"\)[\s\S]*?<\/script>/g,
+          "",
+        );
+        patchedHtml = patchedHtml.replace(
+          /<script>\s*\(function\(\)\{var bar=document.getElementById\('marqueeBar'\),track=document.getElementById\('marqueeTrack'\)[\s\S]*?<\/script>/g,
+          "",
+        );
         // Patch legacy H2 headings — old posts used "Overview: EventTitle", "Eyewitness Accounts of EventTitle",
         // "Aftermath of EventTitle", "Legacy of EventTitle". Strip the suffix so headings are clean and short.
         patchedHtml = patchedHtml
@@ -1526,13 +1531,16 @@ export default {
       }
       let html = await originResp.text();
       // Patch old or partial nav chrome → canonical site nav
-      if (!html.includes('class="site-chrome"')) {
+      if (!html.includes("data-site-nav")) {
         if (html.includes('class="navbar')) {
-          html = html.replace(/<nav class="navbar[\s\S]*?<\/nav>/, siteNav());
+          html = html.replace(
+            /<nav class="navbar[\s\S]*?<\/nav>\s*(?:<div class="marquee-bar"[\s\S]*?<\/div>)?/,
+            staticNavMountMarkup({ includeMarquee: true, supportPopup: true }),
+          );
         } else if (html.includes('class="nav"')) {
           html = html.replace(
             /<nav class="nav"[\s\S]*?<\/nav>\s*(?:<div class="marquee-bar"[\s\S]*?<\/div>)?/,
-            siteNav(),
+            staticNavMountMarkup({ includeMarquee: true, supportPopup: true }),
           );
         }
       }
@@ -1581,24 +1589,14 @@ export default {
         );
       }
       // Add navToggle script if missing
-      if (
-        !html.includes('classList.toggle("active")') &&
-        html.includes('class="nav"')
-      ) {
-        html = html.replace(
-          "</body>",
-          `<script>${navToggleScript()}</script></body>`,
-        );
-      }
-      if (
-        html.includes('id="marqueeBar"') &&
-        !html.includes("api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/")
-      ) {
-        html = html.replace(
-          "</body>",
-          `${marqueeScript()}</body>`,
-        );
-      }
+      html = html.replace(
+        /<script>\s*\(function\(\)\{var t=document.getElementById\("navToggle"\),m=document.getElementById\("navMobile"\)[\s\S]*?<\/script>/g,
+        "",
+      );
+      html = html.replace(
+        /<script>\s*\(function\(\)\{var bar=document.getElementById\('marqueeBar'\),track=document.getElementById\('marqueeTrack'\)[\s\S]*?<\/script>/g,
+        "",
+      );
       // Inject quiz CTA + popup if no quiz present
       if (!html.includes("tdq-cta-btn")) {
         const quizCta = `
@@ -4782,7 +4780,7 @@ ${JSON.stringify({
   <body>
 
   <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-  ${siteNav()}
+  ${staticNavMountMarkup({ includeMarquee: true, supportPopup: true })}
 
   <main class="container my-5">
     <div class="row justify-content-center">
@@ -5090,7 +5088,6 @@ ${analysisBadItems}
   <script src="/js/script.js"></script>
   <script>
     ${footerYearScript()}
-    ${navToggleScript()}
   </script>
 
   <!-- Google Ads: 60 Seconds on Site -->

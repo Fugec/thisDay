@@ -44,7 +44,7 @@ export function siteNav() {
       <a href="/contact/">Contact</a>
       <a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:600" aria-label="Support this project">☕ Support</a>
     </div>
-    <button class="btn" id="navToggle" aria-label="Toggle menu">
+    <button class="btn" id="navToggle" type="button" aria-label="Toggle menu" aria-controls="navMobile" aria-expanded="false">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
     </button>
   </div>
@@ -130,17 +130,17 @@ export function marqueeScript() {
 /** Nav CSS — extracted from css/custom.css. Paste into the page <style> block. */
 export const NAV_CSS =
   `.site-chrome{position:sticky;top:0;z-index:1000;background:var(--bg);box-shadow:0 6px 18px rgba(27,58,45,.08)}` +
-  `.nav{background:var(--bg);border-bottom:1px solid var(--border);padding:1rem 0;position:relative;z-index:1}` +
-  `.nav-inner{padding:0 2rem;display:flex;align-items:center;width:100%;max-width:1920px;margin:0 auto}` +
+  `.nav{background:var(--bg);border-bottom:1px solid var(--border);padding:1rem 0;position:relative;z-index:2}` +
+  `.nav-inner{padding:0 2rem;display:flex;align-items:center;width:100%;max-width:1920px;margin:0 auto;position:relative;z-index:2}` +
   `.brand{font-family:"Lora",Georgia,serif;font-size:1.5rem;font-weight:700;color:var(--text);text-decoration:none}` +
   `.brand:hover{color:var(--text);text-decoration:none}` +
   `.nav-links{display:flex;gap:1.5rem;font-size:.9rem;margin-left:auto}` +
   `.nav-links a{color:var(--text-muted);text-decoration:none;font-weight:500}` +
   `.nav-links a:hover{color:var(--text)}` +
-  `.btn#navToggle{display:none;background:none;color:var(--text);padding:.4rem;margin-left:auto}` +
+  `.btn#navToggle{display:none;background:none;color:var(--text);padding:.4rem;margin-left:auto;position:relative;z-index:4;pointer-events:auto;cursor:pointer}` +
   `.btn#navToggle:hover{background:var(--bg-alt);color:var(--text)}` +
   `.btn#navToggle svg{width:20px;height:20px;display:block}` +
-  `.nav-mobile{display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg);border-bottom:1px solid var(--border);padding:0 1.5rem}` +
+  `.nav-mobile{display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg);border-bottom:1px solid var(--border);padding:0 1.5rem;z-index:3}` +
   `.nav-mobile.active{display:block}` +
   `.nav-mobile a{display:block;padding:1rem 0;color:var(--text);text-decoration:none;font-size:1rem;border-bottom:1px solid var(--border)}` +
   `.nav-mobile a:last-child{border-bottom:none}` +
@@ -218,5 +218,5 @@ export function footerYearScript(spanId = "yr") {
  * Inline JS snippet for the mobile nav hamburger toggle.
  */
 export function navToggleScript() {
-  return `(function(){var t=document.getElementById("navToggle"),m=document.getElementById("navMobile");if(t&&m)t.addEventListener("click",function(){m.classList.toggle("active");});})();`;
+  return `(function(){var t=document.getElementById("navToggle"),m=document.getElementById("navMobile");if(!t||!m||t.dataset.navReady==="true")return;t.dataset.navReady="true";function sync(){t.setAttribute("aria-expanded",m.classList.contains("active")?"true":"false");}function toggle(e){if(e)e.preventDefault();m.classList.toggle("active");sync();}t.addEventListener("click",toggle);t.addEventListener("touchend",toggle,{passive:false});document.addEventListener("click",function(e){if(!m.classList.contains("active"))return;if(e.target===t||t.contains(e.target)||m.contains(e.target))return;m.classList.remove("active");sync();});sync();})();`;
 }

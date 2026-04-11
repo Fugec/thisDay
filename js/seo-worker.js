@@ -214,6 +214,132 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
+function buildEventAnswerBlock({
+  mDisplay,
+  day,
+  featured,
+  events,
+  evEraRange,
+}) {
+  if (!featured) return "";
+
+  const location = extractLocationFromName(featured.text || "");
+  const eventText = String(featured.text || "").trim();
+  const summaryLead = `On ${mDisplay} ${day}, one notable event in history was ${featured.year}: ${eventText}`;
+  const summaryContext = `This date currently highlights ${events.length} recorded events on thisDay.info${evEraRange ? `, spanning ${evEraRange}` : ""}.`;
+
+  return `<section class="ai-answer-card" aria-labelledby="short-answer-title">
+    <div class="ai-answer-kicker">Short answer</div>
+    <h2 id="short-answer-title" class="h4 mb-2">What happened on ${escapeHtml(mDisplay)} ${day} in history?</h2>
+    <p>${escapeHtml(summaryLead)}.</p>
+    <p class="mb-0">${escapeHtml(summaryContext)}</p>
+    <div class="ai-answer-grid" aria-label="Key facts">
+      <div class="ai-answer-item"><strong>Date</strong><span>${escapeHtml(mDisplay)} ${day}</span></div>
+      <div class="ai-answer-item"><strong>Featured year</strong><span>${escapeHtml(String(featured.year))}</span></div>
+      <div class="ai-answer-item"><strong>Location</strong><span>${escapeHtml(location)}</span></div>
+      <div class="ai-answer-item"><strong>Events listed</strong><span>${escapeHtml(String(events.length))}</span></div>
+    </div>
+  </section>`;
+}
+
+function buildQuizAnswerBlock({ mDisplay, day, quiz, featuredEvent }) {
+  if (!quiz?.topic) return "";
+
+  const topicText = escapeHtml(quiz.topic);
+  const sourceEvent = quiz.sourceEvent
+    ? escapeHtml(String(quiz.sourceEvent).trim().split(".")[0])
+    : "";
+  const summaryLead = sourceEvent
+    ? `This quiz focuses on ${topicText}. ${sourceEvent}.`
+    : `Test your knowledge of key events on ${mDisplay} ${day} — this quiz covers ${topicText}.`;
+  const eventYear = featuredEvent?.year ? escapeHtml(String(featuredEvent.year)) : "";
+
+  return `<section class="ai-answer-card" aria-labelledby="quiz-answer-title">
+    <div class="ai-answer-kicker">About this quiz</div>
+    <h2 id="quiz-answer-title" class="h4 mb-2">What is the ${mDisplay} ${day} history quiz about?</h2>
+    <p class="mb-0">${summaryLead}</p>
+    <div class="ai-answer-grid" aria-label="Quiz facts">
+      <div class="ai-answer-item"><strong>Date</strong><span>${mDisplay} ${day}</span></div>
+      <div class="ai-answer-item"><strong>Topic</strong><span>${topicText}</span></div>
+      <div class="ai-answer-item"><strong>Questions</strong><span>${quiz.questions?.length ?? 5}</span></div>
+      ${eventYear ? `<div class="ai-answer-item"><strong>Featured year</strong><span>${eventYear}</span></div>` : ""}
+    </div>
+  </section>`;
+}
+
+function buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange }) {
+  if (!featured) return "";
+
+  const personNameRaw = featured.text.split(",")[0].trim();
+  const personDescRaw = featured.text.includes(",")
+    ? featured.text.split(",").slice(1).join(",").trim()
+    : "";
+  const personName = escapeHtml(personNameRaw);
+  const summaryLead = `On ${mDisplay} ${day}, ${personNameRaw}${personDescRaw ? ` — ${personDescRaw} —` : ""} was among the notable people born on this date. ${births.length} people with recorded birthdays on ${mDisplay} ${day} are listed on thisDay.info${eraRange ? `, spanning ${eraRange}` : ""}.`;
+
+  return `<section class="ai-answer-card" aria-labelledby="born-answer-title">
+    <div class="ai-answer-kicker">Short answer</div>
+    <h2 id="born-answer-title" class="h4 mb-2">Who was born on ${mDisplay} ${day}?</h2>
+    <p class="mb-0">${escapeHtml(summaryLead)}</p>
+    <div class="ai-answer-grid" aria-label="Key facts">
+      <div class="ai-answer-item"><strong>Date</strong><span>${mDisplay} ${day}</span></div>
+      <div class="ai-answer-item"><strong>Featured person</strong><span>${personName}</span></div>
+      <div class="ai-answer-item"><strong>Birthdays listed</strong><span>${escapeHtml(String(births.length))}</span></div>
+      ${eraRange ? `<div class="ai-answer-item"><strong>Era span</strong><span>${escapeHtml(eraRange)}</span></div>` : ""}
+    </div>
+  </section>`;
+}
+
+function buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange }) {
+  if (!featured) return "";
+
+  const personNameRaw = featured.text.split(",")[0].trim();
+  const personDescRaw = featured.text.includes(",")
+    ? featured.text.split(",").slice(1).join(",").trim()
+    : "";
+  const personName = escapeHtml(personNameRaw);
+  const summaryLead = `On ${mDisplay} ${day}, ${personNameRaw}${personDescRaw ? ` — ${personDescRaw} —` : ""} was among the notable people who died on this date. ${deaths.length} recorded deaths on ${mDisplay} ${day} are listed on thisDay.info${eraRange ? `, spanning ${eraRange}` : ""}.`;
+
+  return `<section class="ai-answer-card" aria-labelledby="died-answer-title">
+    <div class="ai-answer-kicker">Short answer</div>
+    <h2 id="died-answer-title" class="h4 mb-2">Who died on ${mDisplay} ${day}?</h2>
+    <p class="mb-0">${escapeHtml(summaryLead)}</p>
+    <div class="ai-answer-grid" aria-label="Key facts">
+      <div class="ai-answer-item"><strong>Date</strong><span>${mDisplay} ${day}</span></div>
+      <div class="ai-answer-item"><strong>Featured person</strong><span>${personName}</span></div>
+      <div class="ai-answer-item"><strong>Deaths listed</strong><span>${escapeHtml(String(deaths.length))}</span></div>
+      ${eraRange ? `<div class="ai-answer-item"><strong>Era span</strong><span>${escapeHtml(eraRange)}</span></div>` : ""}
+    </div>
+  </section>`;
+}
+
+function buildPersonMentions(items = [], dateKey) {
+  return items.slice(0, 8).map((item) => {
+    const name = String(item?.text || "").split(",")[0].trim();
+    const description = String(item?.text || "").trim();
+    return {
+      "@type": "Person",
+      name,
+      ...(item?.year ? { [dateKey]: `${item.year}` } : {}),
+      ...(description ? { description } : {}),
+      ...(item?.pages?.[0]?.content_urls?.desktop?.page
+        ? { sameAs: item.pages[0].content_urls.desktop.page }
+        : {}),
+    };
+  });
+}
+
+function buildEventMentions(items = []) {
+  return items.slice(0, 8).map((item) => ({
+    "@type": "Event",
+    name: String(item?.text || "").split(".")[0].trim(),
+    ...(item?.year ? { startDate: String(item.year) } : {}),
+    ...(item?.pages?.[0]?.content_urls?.desktop?.page
+      ? { sameAs: item.pages[0].content_urls.desktop.page }
+      : {}),
+  }));
+}
+
 function redirectNoStore(url, status = 302) {
   return new Response(null, {
     status,
@@ -684,6 +810,14 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 
 .did-you-know{background:rgba(34,113,54,.08);border-left:4px solid #166534;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
 
+.ai-answer-card{background:linear-gradient(180deg,rgba(157,196,58,.12),rgba(157,196,58,.05));border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px;margin:0 0 22px}
+.ai-answer-card p{margin-bottom:.7rem}
+.ai-answer-kicker{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:rgba(27,58,45,.08);color:var(--btn-bg);font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
+.ai-answer-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
+@media(min-width:640px){.ai-answer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px}
+.ai-answer-item strong{font-size:.74rem;letter-spacing:.03em;text-transform:uppercase;color:var(--text-muted)}
+
 .yr{color:#1a1a1a;font-size:.95rem;font-weight:700;margin-right:8px;white-space:nowrap;font-family:Georgia,serif}
 .ev-scroll-wrap{max-height:320px;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:var(--cbr) transparent;border:1px solid var(--cbr);border-radius:8px;padding:0 8px 0 0}.ev-scroll-wrap::-webkit-scrollbar{width:4px}.ev-scroll-wrap::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:4px}.ev-scroll-wrap .ev-row,.ev-scroll-wrap .person-row{padding-left:10px}
 .ev-row{padding:11px 0;border-bottom:1px solid var(--cbr)}.ev-row:last-child{border-bottom:none}
@@ -921,6 +1055,17 @@ function generateEventsDateHTML(
       logo: { "@type": "ImageObject", url: `${siteUrl}/images/logo.png` },
     },
     ...(featImg && { image: { "@type": "ImageObject", url: featImg } }),
+    about: { "@type": "Thing", name: `Historical events on ${mDisplay} ${day}` },
+    ...(events.length > 0 && {
+      mentions: events.slice(0, 6).map((ev) => ({
+        "@type": "Event",
+        name: String(ev.text || "").split(".")[0].trim(),
+        startDate: String(ev.year),
+        ...(ev.pages?.[0]?.content_urls?.desktop?.page
+          ? { sameAs: ev.pages[0].content_urls.desktop.page }
+          : {}),
+      })),
+    }),
   }).replace(/<\//g, "<\\/");
 
   const eventsSchema =
@@ -1149,6 +1294,7 @@ ${siteNav()}
   </div>
   <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(eventsIntroLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${buildEventAnswerBlock({ mDisplay, day, featured, events, evEraRange })}
 	  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
 	  ${relatedBlogHtml}
 	  ${
@@ -1388,6 +1534,7 @@ function buildPageSchema({
   url,
   mainEntityId,
   about,
+  mentions,
 }) {
   return JSON.stringify({
     "@context": "https://schema.org",
@@ -1401,6 +1548,7 @@ function buildPageSchema({
       url: "https://thisday.info/",
     },
     ...(about ? { about } : {}),
+    ...(mentions?.length ? { mentions } : {}),
     ...(mainEntityId ? { mainEntity: { "@id": mainEntityId } } : {}),
   }).replace(/<\//g, "<\\/");
 }
@@ -1532,6 +1680,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     url: canonical,
     mainEntityId: births.length > 0 ? `${canonical}#birthdays` : null,
     about: { "@type": "Thing", name: `Birthdays on ${mDisplay} ${day}` },
+    mentions: buildPersonMentions(births, "birthDate"),
   });
 
   const breadcrumbSchema = buildBreadcrumbSchema([
@@ -1679,6 +1828,7 @@ ${siteNav()}
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
 	  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+	  ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange })}
 	  ${buildDateClusterCard(monthName, day, mDisplay, "born")}
 	  ${relatedBlogHtml}
 	  ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
@@ -1870,6 +2020,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     url: canonical,
     mainEntityId: deaths.length > 0 ? `${canonical}#deaths` : null,
     about: { "@type": "Thing", name: `Deaths on ${mDisplay} ${day}` },
+    mentions: buildPersonMentions(deaths, "deathDate"),
   });
 
   const breadcrumbSchema = buildBreadcrumbSchema([
@@ -2017,6 +2168,7 @@ ${siteNav()}
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
 	  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+	  ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange })}
 	  ${buildDateClusterCard(monthName, day, mDisplay, "died")}
 	  ${relatedBlogHtml}
 	  ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
@@ -4979,6 +5131,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     about: quiz?.topic
       ? { "@type": "Thing", name: quiz.topic }
       : { "@type": "Thing", name: `${mDisplay} ${day} history quiz` },
+    mentions: buildEventMentions(topEvents),
   });
 
   const breadcrumbSchema = buildBreadcrumbSchema([
@@ -5132,6 +5285,7 @@ ${siteNav()}
 	  </div>
 	  ${buildDateClusterCard(monthSlug, day, mDisplay, "quiz")}
 	  ${relatedBlogHtml}
+	  ${buildQuizAnswerBlock({ mDisplay, day, quiz, featuredEvent })}
 	  ${carouselHtml}
   ${recSliderHtml}
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>

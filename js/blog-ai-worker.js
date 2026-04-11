@@ -122,6 +122,25 @@ const EVERY_OTHER_DAYS = 1; // Generate every N days
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 
+function buildArticleAnswerBlock(content) {
+  const significance =
+    (content.quickFacts || []).find((f) => /significance|impact|legacy/i.test(f.label))
+      ?.value || content.description;
+  const summaryLead = `${content.eventTitle} took place on ${content.historicalDate}${content.location ? ` in ${content.location}` : ""}. ${content.description}`;
+
+  return `<section class="ai-answer-card mb-4" aria-labelledby="article-short-answer-title">
+    <div class="ai-answer-kicker">Short answer</div>
+    <h2 id="article-short-answer-title" class="h4 mb-2">What was ${esc(content.eventTitle)}?</h2>
+    <p>${esc(summaryLead)}</p>
+    <div class="ai-answer-grid" aria-label="Key facts">
+      <div class="ai-answer-item"><strong>Event</strong><span>${esc(content.eventTitle)}</span></div>
+      <div class="ai-answer-item"><strong>Date</strong><span>${esc(content.historicalDate)}</span></div>
+      <div class="ai-answer-item"><strong>Location</strong><span>${esc(content.location || content.country || "Historical location")}</span></div>
+      <div class="ai-answer-item"><strong>Why it matters</strong><span>${esc(significance)}</span></div>
+    </div>
+  </section>`;
+}
+
 // Content pillars — mirrors the 10 event filter categories in script.js,
 // plus "Born on This Day" and "Died on This Day" matching the site's nav sections.
 // Used to classify blog posts for topical authority tracking and depth rotation.
@@ -4541,6 +4560,13 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
         eventStatus: "https://schema.org/EventCompleted",
         organizer: { "@type": "Organization", name: c.organizerName },
       },
+      ...((c.keyTerms || []).length > 0 && {
+        mentions: (c.keyTerms || []).map((kt) => ({
+          "@type": kt.type === "person" ? "Person" : kt.type === "place" ? "Place" : kt.type === "organization" ? "Organization" : "Thing",
+          name: kt.term,
+          ...(kt.wikiUrl ? { sameAs: kt.wikiUrl } : {}),
+        })),
+      }),
     },
     null,
     2,
@@ -4771,6 +4797,13 @@ ${JSON.stringify({
       .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--border);text-align:left;color:var(--text)}
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
       .site-table th{background:var(--bg-alt);font-weight:600;white-space:nowrap;width:40%}
+      .ai-answer-card{background:linear-gradient(180deg,rgba(157,196,58,.12),rgba(157,196,58,.05));border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px}
+      .ai-answer-card p{margin-bottom:.75rem}
+      .ai-answer-kicker{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:rgba(27,58,45,.08);color:var(--btn-bg);font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
+      .ai-answer-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
+      @media(min-width:640px){.ai-answer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      .ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px}
+      .ai-answer-item strong{font-size:.74rem;letter-spacing:.03em;text-transform:uppercase;color:var(--text-muted)}
       .tdq-cta-sub{color:var(--text-muted)}
       ${BLOG_NAV_WIDTH_FIX_CSS}
       ${NAV_CSS}
@@ -4807,6 +4840,8 @@ ${JSON.stringify({
             </p>
             ${pillarPills}
           </header>
+
+          ${buildArticleAnswerBlock(c)}
 
           ${c.imageUrl ? `<figure class="text-center mb-4">
             <img

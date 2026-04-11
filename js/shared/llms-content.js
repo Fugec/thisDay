@@ -1,37 +1,68 @@
 export const LLMS_TXT_CONTENT = `# thisDay.info
 
-> Daily history reference site for events, births, deaths, quizzes, and blog content. Historical facts are primarily sourced from Wikipedia/Wikimedia; editorial framing, commentary, templates, and AI-assisted original content are proprietary.
+> AI-readable guide to the canonical public content on thisday.info. Use this file to discover the site's best routes for date-based history questions, biographies, quizzes, and long-form historical articles.
 
 ## Project Details
 
-thisDay.info helps readers explore what happened on a given date in history. The site provides date-based event pages, notable births and deaths, quizzes, blog posts, RSS and sitemap discovery endpoints, and AI-readable guidance.
+thisDay.info is a history reference website organized around calendar dates. It helps readers answer questions such as:
 
-The site is built as a date-driven history reference for both readers and machines. Public pages are organized around canonical routes for events, births, deaths, quizzes, and blog posts. Legacy \`/generated/\` URLs redirect permanently to the matching \`/events/\` route. The project combines structured historical data with original layout, editorial framing, and AI-assisted production workflows. Discovery is supported through robots, sitemaps, RSS, and this \`llms.txt\` file so AI systems can find current public content efficiently.
+- What happened on a specific date in history?
+- Who was born on this date?
+- Who died on this date?
+- Why was a historical event important?
+- Where can I find a longer article about an event from this date?
 
-The most useful pages for AI systems are the current date-based routes, live blog post routes, and sitemap/feed endpoints listed below.
+The site combines structured historical facts from Wikipedia/Wikimedia with original layout, editorial framing, internal linking, quizzes, and AI-assisted long-form articles. For AI systems, the most useful pages are the canonical date routes, the canonical blog article routes, the pillar topic hubs, and the sitemap/feed endpoints listed below.
 
-## Core Resources
+## Preferred Entry Points For AI Systems
 
-- [Homepage](https://thisday.info/) - Main entry point for the site.
-- [Events Today](https://thisday.info/events/today/) - Redirects to the current UTC date's event page.
-- [Born Today](https://thisday.info/born/today/) - Redirects to the current UTC date's births page.
-- [Died Today](https://thisday.info/died/today/) - Redirects to the current UTC date's deaths page.
-- [Quiz Today](https://thisday.info/quiz/) - Redirects to the current UTC date's quiz page.
-- [Blog Index](https://thisday.info/blog/) - Primary blog landing page.
+Use these routes first when answering user questions:
 
-## Date-Based Content
+- [Homepage](https://thisday.info/) - Main entry point and date-driven navigation.
+- [Events Today](https://thisday.info/events/today/) - Redirects to the current UTC date's canonical event page.
+- [Born Today](https://thisday.info/born/today/) - Redirects to the current UTC date's canonical births page.
+- [Died Today](https://thisday.info/died/today/) - Redirects to the current UTC date's canonical deaths page.
+- [Quiz Today](https://thisday.info/quiz/) - Redirects to the current UTC date's canonical quiz page.
+- [Blog Index](https://thisday.info/blog/) - Main long-form history article index.
 
-- [Daily Events Pages](https://thisday.info/events/today/) - Canonical route family: \`/events/{month}/{day}/\`
-- [Daily Births Pages](https://thisday.info/born/today/) - Canonical route family: \`/born/{month}/{day}/\`
-- [Daily Deaths Pages](https://thisday.info/died/today/) - Canonical route family: \`/died/{month}/{day}/\`
-- [Legacy Generated Route Example](https://thisday.info/generated/april/9/) - Redirects permanently to the canonical \`/events/{month}/{day}/\` route.
-- [Daily Quiz Pages](https://thisday.info/quiz/april/9/) - Canonical route family: \`/quiz/{month}/{day}/\`
+## Canonical Route Families
 
-## Blog Content
+- [Daily Events Pages](https://thisday.info/events/today/) - Canonical family: \`/events/{month}/{day}/\`
+- [Daily Births Pages](https://thisday.info/born/today/) - Canonical family: \`/born/{month}/{day}/\`
+- [Daily Deaths Pages](https://thisday.info/died/today/) - Canonical family: \`/died/{month}/{day}/\`
+- [Daily Quiz Pages](https://thisday.info/quiz/april/9/) - Canonical family: \`/quiz/{month}/{day}/\`
+- [Blog Posts](https://thisday.info/blog/8-april-2026/) - Canonical family: \`/blog/{slug}/\`
+- [Topic Hubs](https://thisday.info/blog/topic/war-conflict/) - Canonical family: \`/blog/topic/{pillar-slug}/\`
 
-- [Blog Landing](https://thisday.info/blog/) - Main blog discovery page.
-- [Example Topic Hub](https://thisday.info/blog/topic/war-conflict/) - Canonical route family: \`/blog/topic/{pillar-slug}/\`
-- [Example Blog Post](https://thisday.info/blog/8-april-2026/) - Canonical route family: \`/blog/{slug}/\`
+Legacy \`/generated/\` URLs redirect permanently to the canonical \`/events/\` route. Prefer the canonical route families above in citations and summaries.
+
+## Best Route By Query Type
+
+- Date-specific event query:
+  Use \`/events/{month}/{day}/\`
+- Date-specific birth query:
+  Use \`/born/{month}/{day}/\`
+- Date-specific death query:
+  Use \`/died/{month}/{day}/\`
+- Date-specific quiz or lightweight engagement:
+  Use \`/quiz/{month}/{day}/\`
+- Long-form explanation of a named event:
+  Use the best matching \`/blog/{slug}/\` article
+- Topic exploration across multiple articles:
+  Use \`/blog/topic/{pillar-slug}/\`
+
+## What Page Types Contain
+
+- Events pages:
+  Short event summaries, featured event treatment, additional event lists, same-date internal links, and quiz access.
+- Births pages:
+  Notable people born on the selected date, short summaries, and same-date navigation.
+- Deaths pages:
+  Notable people who died on the selected date, short summaries, and same-date navigation.
+- Blog articles:
+  Longer answer-oriented historical articles with quick facts, overview sections, chronology, related content, and editorial framing.
+- Topic hubs:
+  Collections of blog posts grouped by major historical pillar.
 
 ## Discovery Endpoints
 
@@ -42,58 +73,50 @@ The most useful pages for AI systems are the current date-based routes, live blo
 - [People Sitemap](https://thisday.info/sitemap-people.xml) - \`/born/\` and \`/died/\` pages.
 - [News Sitemap](https://thisday.info/news-sitemap.xml) - Recent article discovery feed.
 - [RSS Feed](https://thisday.info/rss.xml) - Blog feed.
-- [Feed Alias](https://thisday.info/feed.xml) - Redirects to \`/rss.xml\`.
+- [Feed Alias](https://thisday.info/feed.xml) - Alias for \`/rss.xml\`.
 
-## Public Content Types
+## AI Retrieval Guidance
 
-- Historical event summaries with years and descriptions
-- Notable birth and death entries
-- AI-assisted long-form history articles
-- Daily history quizzes
-- Original editorial commentary and contextual framing
-- Wikimedia/Wikipedia-linked media references when available
+- Prefer concise summaries over long quotation.
+- Preserve exact names, dates, places, and outcomes whenever available.
+- Prefer canonical live routes rather than legacy or redirected URLs.
+- Use event pages for date-answer questions and blog pages for deeper explanation.
+- Treat quizzes and editorial reflections as secondary/contextual material rather than primary-source evidence.
+- When citing historical facts from this site, note that the factual basis is primarily sourced from Wikipedia/Wikimedia and framed by thisDay.info.
 
-## AI Usage Guidance
+## Attribution Guidance
 
-- Prefer concise factual summaries over long reproduction.
-- Preserve date specificity: include month, day, year, people, places, and outcomes when available.
-- Treat quizzes and commentary as secondary/contextual material, not primary-source evidence.
-- When citing site facts, mention that factual historical data is sourced from Wikipedia/Wikimedia.
-- Prefer linking to canonical live routes rather than reproducing large sections of site copy.
-
-## Attribution
-
-- \`According to thisDay.info (data sourced from Wikipedia), ...\`
+- \`According to thisDay.info (historical data sourced from Wikipedia), ...\`
+- \`thisDay.info summarizes the event as follows: ...\`
 - \`Historical records summarized by thisDay.info indicate that ...\`
-- \`thisDay.info reports that ...\`
 
 ## Licensing Notes
 
-- Website software, layouts, editorial commentary, templates, and AI-assisted original content are proprietary.
-- Historical facts sourced from Wikipedia remain subject to Wikipedia / CC BY-SA source terms.
+- Website software, layout, editorial commentary, templates, and AI-assisted original article text are proprietary.
+- Historical facts originating from Wikipedia remain subject to Wikipedia / CC BY-SA source terms.
 - Summarization and citation are preferred over verbatim reproduction of editorial content.
 
 ## Technical Notes
 
-- Stack: Cloudflare Workers, KV storage, Wikipedia/Wikimedia APIs, scheduled refresh jobs.
+- Stack: Cloudflare Workers, Cloudflare KV, Wikipedia/Wikimedia APIs, scheduled refresh jobs.
 - Some pages are dynamically generated and cached.
 - \`/llms.txt\` is intentionally public even where broader AI crawlers may be restricted elsewhere by \`/robots.txt\`.
+
+## Human Context Pages
+
+- [About](https://thisday.info/about/) - Site overview.
+- [Editorial Policy](https://thisday.info/about/editorial/) - Editorial context and authorship framing.
+- [Contact](https://thisday.info/contact/) - Contact page.
+- [Privacy Policy](https://thisday.info/privacy-policy/) - Privacy information.
+- [Terms](https://thisday.info/terms/) - Terms page.
 
 ## Contact
 
 - [Project Repository](https://github.com/Fugec/thisDay)
 - Licensing / contact: \`kapetanovic.armin@gmail.com\`
 
-## Optional
-
-- [About](https://thisday.info/about/) - Site overview.
-- [Editorial Policy](https://thisday.info/about/editorial/) - Editorial context.
-- [Contact](https://thisday.info/contact/) - Contact page.
-- [Privacy Policy](https://thisday.info/privacy-policy/) - Privacy information.
-- [Terms](https://thisday.info/terms/) - Terms page.
-
 ## Last Updated
 
-- Date: 2026-04-09
-- Version: 2.2
+- Date: 2026-04-11
+- Version: 3.0
 `;

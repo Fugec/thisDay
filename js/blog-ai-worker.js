@@ -778,10 +778,14 @@ export default {
           /body\.dark-theme[^{]*\{[^}]*\}/g,
           "",
         );
-        // Strip any marquee script (standalone or nested) from article pages
+        // Strip any marquee script and force display:none on the bar for article pages
         patchedHtml = patchedHtml.replace(
           /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*marqueeBar(?:(?!<\/script>)[\s\S])*<\/script>/g,
           "",
+        );
+        patchedHtml = patchedHtml.replace(
+          /(<div[^>]*id="marqueeBar"[^>]*)style="[^"]*"/,
+          '$1style="display:none"',
         );
         // Add navToggle script if missing
         if (

@@ -778,6 +778,11 @@ export default {
           /body\.dark-theme[^{]*\{[^}]*\}/g,
           "",
         );
+        // Strip any marquee script (standalone or nested) from article pages
+        patchedHtml = patchedHtml.replace(
+          /<script\b[^>]*>(?:(?!<\/script>)[\s\S])*marqueeBar(?:(?!<\/script>)[\s\S])*<\/script>/g,
+          "",
+        );
         // Add navToggle script if missing
         if (
           !patchedHtml.includes("navToggle") &&

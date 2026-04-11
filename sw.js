@@ -1,7 +1,7 @@
 // thisDay. Service Worker
 // Caches static assets for instant repeat visits and basic offline support.
 
-const CACHE_NAME = "thisday-v3";
+const CACHE_NAME = "thisday-v4";
 const CACHE_VERSION_KEY = "thisday-sw-version";
 
 // Static assets to cache on install (shell of the app)
@@ -19,12 +19,19 @@ const STATIC_ASSETS = [
   "/images/logo.png",
 ];
 
-// Install: pre-cache the app shell
+// Install: pre-cache the app shell — each asset cached independently so one
+// failure (e.g. a CDN miss) doesn't abort the entire service worker install.
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    }),
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.allSettled(
+        STATIC_ASSETS.map((url) =>
+          fetch(url)
+            .then((res) => { if (res.ok) cache.put(url, res); })
+            .catch(() => {}),
+        ),
+      ),
+    ),
   );
   self.skipWaiting();
 });

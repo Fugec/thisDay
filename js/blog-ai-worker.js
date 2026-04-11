@@ -141,6 +141,329 @@ function buildArticleAnswerBlock(content) {
   </section>`;
 }
 
+const AI_REFERRER_SOURCES = [
+  { label: "chatgpt", hosts: ["chatgpt.com", "chat.openai.com"] },
+  { label: "claude", hosts: ["claude.ai"] },
+  { label: "perplexity", hosts: ["perplexity.ai"] },
+  { label: "gemini", hosts: ["gemini.google.com", "bard.google.com"] },
+  {
+    label: "copilot",
+    hosts: ["copilot.microsoft.com", "copilot.cloud.microsoft"],
+  },
+];
+
+const ARTICLE_TOPIC_HUBS = [
+  {
+    slug: "world-war-ii",
+    title: "World War II",
+    keywords: ["world war ii", "second world war", "wwii", "nazi", "axis", "allied"],
+    pillars: ["War & Conflict"],
+  },
+  {
+    slug: "cold-war",
+    title: "Cold War",
+    keywords: ["cold war", "soviet", "berlin wall", "cuban missile crisis", "communist"],
+    pillars: ["War & Conflict", "Politics & Government"],
+  },
+  {
+    slug: "french-revolution",
+    title: "French Revolution",
+    keywords: ["french revolution", "robespierre", "bastille", "napoleon", "jacobin"],
+    pillars: ["Politics & Government", "War & Conflict"],
+  },
+  {
+    slug: "roman-empire",
+    title: "Roman Empire",
+    keywords: ["roman empire", "rome", "roman", "caesar", "augustus", "constantinople"],
+    pillars: ["Politics & Government", "War & Conflict"],
+  },
+  {
+    slug: "space-exploration",
+    title: "Space Exploration",
+    keywords: ["space", "apollo", "nasa", "astronaut", "moon", "rocket", "satellite"],
+    pillars: ["Science & Technology", "Exploration & Discovery"],
+  },
+  {
+    slug: "civil-rights",
+    title: "Civil Rights",
+    keywords: ["civil rights", "segregation", "suffrage", "voting rights", "human rights"],
+    pillars: ["Social & Human Rights", "Politics & Government"],
+  },
+  {
+    slug: "medical-breakthroughs",
+    title: "Medical Breakthroughs",
+    keywords: ["vaccine", "medicine", "medical", "pandemic", "epidemic", "surgery"],
+    pillars: ["Health & Medicine", "Science & Technology", "Disasters & Accidents"],
+  },
+  {
+    slug: "exploration-and-discovery",
+    title: "Exploration and Discovery",
+    keywords: ["expedition", "voyage", "explorer", "navigator", "discovery", "polar", "pacific", "atlantic"],
+    pillars: ["Exploration & Discovery"],
+  },
+];
+
+// Maps each blog pillar to the hub slugs that best represent it.
+// Used as the primary (pillar-first) signal before keyword fallback.
+const PILLAR_TO_HUB_SLUGS = {
+  "War & Conflict":          ["world-war-ii", "cold-war", "french-revolution"],
+  "Politics & Government":   ["cold-war", "civil-rights", "french-revolution"],
+  "Science & Technology":    ["space-exploration", "medical-breakthroughs"],
+  "Health & Medicine":       ["medical-breakthroughs"],
+  "Exploration & Discovery": ["exploration-and-discovery", "space-exploration"],
+  "Social & Human Rights":   ["civil-rights"],
+  "Disasters & Accidents":   ["medical-breakthroughs"],
+};
+
+// Per-pillar question heading sets. Each entry is [overview, eyewitness, aftermath, legacy].
+// Falls back to the "default" set for pillars not listed here.
+const PILLAR_QUESTION_HEADINGS = {
+  "War & Conflict": [
+    (t) => `What triggered ${t}?`,
+    (t) => `Which forces were involved in ${t}?`,
+    ()  => `What was the immediate outcome?`,
+    (t) => `Why is ${t} still studied today?`,
+  ],
+  "Politics & Government": [
+    (t) => `What led to ${t}?`,
+    (t) => `Who held power during ${t}?`,
+    ()  => `What changed in its aftermath?`,
+    (t) => `Why does ${t} still matter?`,
+  ],
+  "Science & Technology": [
+    (t) => `What made ${t} possible?`,
+    (t) => `Who drove the work behind ${t}?`,
+    ()  => `What changed as a result?`,
+    (t) => `Why is ${t} still significant?`,
+  ],
+  "Health & Medicine": [
+    (t) => `What caused ${t}?`,
+    (t) => `Who was behind the breakthrough in ${t}?`,
+    ()  => `How did medicine change afterward?`,
+    (t) => `Why is ${t} still remembered?`,
+  ],
+  "Disasters & Accidents": [
+    (t) => `What caused ${t}?`,
+    ()  => `Who was most affected?`,
+    ()  => `How did authorities respond?`,
+    (t) => `What changed after ${t}?`,
+  ],
+  "Exploration & Discovery": [
+    (t) => `What drove ${t}?`,
+    ()  => `Who made it possible?`,
+    ()  => `What did the world learn from it?`,
+    (t) => `Why is ${t} still remembered?`,
+  ],
+  "Social & Human Rights": [
+    (t) => `What conditions led to ${t}?`,
+    (t) => `Who were the key figures in ${t}?`,
+    ()  => `What rights or changes resulted?`,
+    (t) => `Why does ${t} still resonate?`,
+  ],
+  "Arts & Culture": [
+    (t) => `What inspired ${t}?`,
+    (t) => `Who shaped ${t}?`,
+    ()  => `How did it influence what came after?`,
+    (t) => `Why is ${t} still remembered?`,
+  ],
+  "Economy & Business": [
+    (t) => `What caused ${t}?`,
+    (t) => `Who were the key players in ${t}?`,
+    ()  => `What were the economic consequences?`,
+    (t) => `Why does ${t} still matter?`,
+  ],
+  "Famous Persons": [
+    (t) => `Who was behind ${t}?`,
+    ()  => `What are they best known for?`,
+    ()  => `What came later?`,
+    (t) => `Why is ${t} remembered today?`,
+  ],
+  "Born on This Day": [
+    (t) => `Who was ${t}?`,
+    ()  => `What are they best known for?`,
+    ()  => `What did they go on to achieve?`,
+    ()  => `Why are they still remembered?`,
+  ],
+  "Died on This Day": [
+    (t) => `Who was ${t}?`,
+    ()  => `What was their greatest achievement?`,
+    ()  => `What happened in their final years?`,
+    ()  => `What is their lasting legacy?`,
+  ],
+  default: [
+    (t) => `What caused ${t}?`,
+    (t) => `Who was involved in ${t}?`,
+    ()  => `What happened next?`,
+    ()  => `Why is it remembered today?`,
+  ],
+};
+
+function normalizeTopicMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Returns up to `limit` hub objects for an article.
+// Primary signal: pillars (AI-classified, reliable).
+// Fallback signal: keyword match against title/description/keyTerms/quickFacts.
+function getArticleTopicHubMatches(content, limit = 3, pillars = []) {
+  const seen = new Set();
+  const results = [];
+
+  // Pillar-first: deterministic match from AI classification
+  for (const pillar of pillars) {
+    const slugs = PILLAR_TO_HUB_SLUGS[pillar] || [];
+    for (const slug of slugs) {
+      if (!seen.has(slug)) {
+        const hub = ARTICLE_TOPIC_HUBS.find((h) => h.slug === slug);
+        if (hub) { seen.add(slug); results.push(hub); }
+      }
+      if (results.length >= limit) return results;
+    }
+  }
+
+  // Keyword fallback: catches specific topics not covered by pillar mapping
+  const haystack = normalizeTopicMatchText(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.description,
+      ...(content?.keyTerms || []).map((kt) => kt?.term || ""),
+      ...(content?.quickFacts || []).map((f) => `${f?.label || ""} ${f?.value || ""}`),
+    ].join(" "),
+  );
+  if (haystack) {
+    for (const hub of ARTICLE_TOPIC_HUBS) {
+      if (!seen.has(hub.slug) && hub.keywords.some((kw) => haystack.includes(normalizeTopicMatchText(kw)))) {
+        seen.add(hub.slug);
+        results.push(hub);
+        if (results.length >= limit) break;
+      }
+    }
+  }
+
+  return results;
+}
+
+// Returns 4 question heading strings tuned to the article's dominant pillar.
+function getQuestionHeadings(eventTitle, pillars = []) {
+  const dominantPillar = pillars[0] || "default";
+  const set = PILLAR_QUESTION_HEADINGS[dominantPillar] || PILLAR_QUESTION_HEADINGS.default;
+  return set.map((fn) => fn(eventTitle));
+}
+
+function extractPlainSentence(text, maxLength = 220) {
+  const sentence = String(text || "")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)[0];
+
+  if (!sentence) return "";
+  return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 1).trim()}…` : sentence;
+}
+
+function ensureFactDenseOpening(paragraphs, leadSentence, requiredTerms = []) {
+  if (!Array.isArray(paragraphs) || paragraphs.length === 0 || !leadSentence) return paragraphs;
+
+  const first = String(paragraphs[0] || "").trim();
+  const haystack = normalizeTopicMatchText(first);
+  const hasRequiredTerm = requiredTerms.some((term) =>
+    haystack.includes(normalizeTopicMatchText(term)),
+  );
+  const startsFactFirst =
+    hasRequiredTerm ||
+    /^(in|by|after|during|when)\b/i.test(first) ||
+    /\b\d{3,4}\b/.test(first);
+
+  if (startsFactFirst) return paragraphs;
+
+  const cleanLead = leadSentence.replace(/\s+/g, " ").trim();
+  paragraphs[0] = `${cleanLead} ${first}`.trim();
+  return paragraphs;
+}
+
+function enforceAnswerFirstSections(content) {
+  const locationPart = content.location ? ` in ${content.location}` : "";
+  ensureFactDenseOpening(
+    content.overviewParagraphs,
+    `${content.eventTitle} happened on ${content.historicalDate}${locationPart}.`,
+    [content.eventTitle, content.historicalDate, content.location],
+  );
+  ensureFactDenseOpening(
+    content.eyewitnessParagraphs,
+    `Contemporary accounts described ${content.eventTitle} as it unfolded on ${content.historicalDate}${locationPart}.`,
+    [content.eventTitle, "witness", "account", content.historicalDate],
+  );
+  ensureFactDenseOpening(
+    content.aftermathParagraphs,
+    `The immediate aftermath of ${content.eventTitle} began as soon as events on ${content.historicalDate} were over.`,
+    [content.eventTitle, "aftermath", "response", content.historicalDate],
+  );
+  ensureFactDenseOpening(
+    content.conclusionParagraphs,
+    `The lasting importance of ${content.eventTitle} lies in what changed after ${content.historicalDate}.`,
+    [content.eventTitle, "legacy", "importance", content.historicalDate],
+  );
+}
+
+function buildArticleRelatedQuestionsBlock(content, pillars = []) {
+  const overviewAnswer =
+    extractPlainSentence(content?.overviewParagraphs?.[0]) || content.description;
+  const eyewitnessAnswer =
+    extractPlainSentence(content?.eyewitnessParagraphs?.[0]) ||
+    `The article follows contemporary accounts connected to ${content.eventTitle}.`;
+  const aftermathAnswer =
+    extractPlainSentence(content?.aftermathParagraphs?.[0]) ||
+    `The aftermath section explains what changed in the days and months after ${content.eventTitle}.`;
+  const legacyAnswer =
+    extractPlainSentence(content?.conclusionParagraphs?.[0]) ||
+    ((content.quickFacts || []).find((fact) => /significance|legacy|impact/i.test(fact.label))?.value || content.description);
+  const topicLinks = getArticleTopicHubMatches(content, 3, pillars);
+  const [q1, q2, q3, q4] = getQuestionHeadings(content.eventTitle, pillars);
+
+  return `<section class="mt-5 p-4 rounded border" style="background-color:rgba(0,0,0,.03);color:var(--text)">
+    <div class="ai-answer-kicker">Related questions</div>
+    <h2 class="h3 mb-3">Questions readers ask about ${esc(content.eventTitle)}</h2>
+    <div class="related-question-grid">
+      <article class="related-question-card">
+        <h3>${esc(q1)}</h3>
+        <p>${esc(overviewAnswer)}</p>
+      </article>
+      <article class="related-question-card">
+        <h3>${esc(q2)}</h3>
+        <p>${esc(eyewitnessAnswer)}</p>
+      </article>
+      <article class="related-question-card">
+        <h3>${esc(q3)}</h3>
+        <p>${esc(aftermathAnswer)}</p>
+      </article>
+      <article class="related-question-card">
+        <h3>${esc(q4)}</h3>
+        <p>${esc(legacyAnswer)}</p>
+      </article>
+    </div>
+    ${
+      topicLinks.length > 0
+        ? `<div class="topic-hub-links mt-3">
+      <h3 class="h6 mb-2">Explore connected topic hubs</h3>
+      <div class="topic-hub-chip-row">
+        ${topicLinks
+          .map(
+            (hub) =>
+              `<a href="/topics/${hub.slug}/" class="topic-hub-chip">${esc(hub.title)}</a>`,
+          )
+          .join("")}
+      </div>
+    </div>`
+        : ""
+    }
+  </section>`;
+}
+
 // Content pillars — mirrors the 10 event filter categories in script.js,
 // plus "Born on This Day" and "Died on This Day" matching the site's nav sections.
 // Used to classify blog posts for topical authority tracking and depth rotation.
@@ -2345,6 +2668,14 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
     description: content.description,
     imageUrl: content.imageUrl,
     publishedAt: now.toISOString(),
+    ...(content.keywords ? { keywords: content.keywords } : {}),
+    ...(content.eventTitle ? { eventTitle: content.eventTitle } : {}),
+    ...(Number.isInteger(content.historicalYear)
+      ? { historicalYear: content.historicalYear }
+      : {}),
+    ...(Array.isArray(content.keyTerms) && content.keyTerms.length > 0
+      ? { keyTerms: content.keyTerms }
+      : {}),
     ...(pillars && pillars.length > 0 ? { pillars } : {}),
     ...(content.contentRationale
       ? { contentRationale: content.contentRationale }
@@ -2836,6 +3167,7 @@ Sentence and paragraph rules:
 - VARY SENTENCE FORMS, not just lengths. If one sentence is conditional ("If X, then Y"), the next should be a short declarative. Follow that with a cause-and-effect. Never write three consecutive sentences with the same grammatical structure — structural repetition kills energy even when length varies.
 - Target an average of 18-22 words per sentence across each paragraph. This creates readable depth without choppiness.
 - Every paragraph must contain at least one specific, verifiable fact: a real name, an exact year or number, a specific place, or a direct quote. No paragraph may consist entirely of vague generalizations.
+- FACT FIRST IN EVERY SECTION: The first sentence of Overview, Eyewitness Accounts, Aftermath, and Legacy must state the key fact before any scene-setting. Answer the implied reader question immediately, then expand.
 - NO REPETITION ACROSS SECTIONS: Each paragraph must introduce new information. Never restate a point, conclusion, or fact already made in a previous section. Do not name the same person, institution, or concept more than three times in the full article — use pronouns or contextual references after the first mention.
 - Include at least one clear "what would need to be true for this to be wrong" check somewhere in the article when you make a strong claim.
 - Start with the takeaway, then walk backward to the evidence. Avoid "Picture..." and "This was not some minor accident." Write like a human: a little uneven, a little opinionated, and not overly polished.
@@ -3001,6 +3333,8 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     ).trim();
     parsed.title = `${cleanTitle} — ${expectedDateSuffix}`;
   }
+
+  enforceAnswerFirstSections(parsed);
 
   return parsed;
 }
@@ -4755,6 +5089,39 @@ ${JSON.stringify({
       gtag("config", "AW-17262488503");
     </script>
     <script>
+      (function(){
+        var ref=document.referrer||"";
+        if(!ref) return;
+        var slug=${JSON.stringify(slug)};
+        var sources=${JSON.stringify(AI_REFERRER_SOURCES)};
+        var host="";
+        try{host=new URL(ref).hostname.toLowerCase();}catch(_){return;}
+        var match=sources.find(function(source){
+          return (source.hosts||[]).some(function(candidate){
+            candidate=String(candidate||"").toLowerCase();
+            return host===candidate || host.endsWith("."+candidate);
+          });
+        });
+        if(!match || typeof gtag!=="function") return;
+        try{
+          sessionStorage.setItem("td_ai_referrer_source", match.label);
+          sessionStorage.setItem("td_ai_referrer_host", host);
+        }catch(_){}
+        gtag("event","ai_referrer_visit",{
+          ai_source: match.label,
+          ai_referrer_host: host,
+          page_type: "blog-article",
+          page_slug: slug,
+          page_location: location.pathname
+        });
+        gtag("event","citation_target_visit",{
+          ai_source: match.label,
+          page_type: "blog-article",
+          page_slug: slug
+        });
+      })();
+    </script>
+    <script>
       function gtag_report_conversion(url) {
         var callback = function () { if (typeof url != "undefined") { window.location = url; } };
         gtag("event", "conversion", { send_to: "AW-17262488503/WsLuCMLVweEaELfXsqdA", event_callback: callback });
@@ -4782,6 +5149,15 @@ ${JSON.stringify({
       .analysis-bad{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
       .related-card{border:1px solid var(--border);background:var(--bg);transition:transform .15s ease,box-shadow .15s ease}
       .related-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1);text-decoration:none}
+      .related-question-grid{display:grid;grid-template-columns:1fr;gap:14px}
+      @media(min-width:640px){.related-question-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      .related-question-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72)}
+      .related-question-card h3{font-size:1rem;margin-bottom:8px}
+      .related-question-card p{margin-bottom:0;font-size:.94rem;line-height:1.55}
+      .topic-hub-links{border-top:1px solid var(--border);padding-top:14px}
+      .topic-hub-chip-row{display:flex;flex-wrap:wrap;gap:8px}
+      .topic-hub-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 12px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:.82rem;font-weight:700;text-decoration:none}
+      .topic-hub-chip:hover{background:#e7f0e7;border-color:var(--btn-bg);color:var(--btn-bg);text-decoration:none}
       blockquote.historical-quote{border-left:3px solid var(--btn-bg);padding-left:1rem;margin-left:.5rem;font-style:italic}
       .border{border:1px solid var(--border)!important;box-shadow:none}
       .shadow-sm{box-shadow:none!important}
@@ -4953,6 +5329,8 @@ ${conclusionParas}
           </section>`
               : ""
           }
+
+          ${buildArticleRelatedQuestionsBlock(c, currentPillars)}
 
           <!-- Personal Analysis -->
           ${

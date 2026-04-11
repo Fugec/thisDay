@@ -17,7 +17,10 @@ import {
   marqueeScript,
 } from "./shared/layout.js";
 import { callAI } from "./shared/ai-call.js";
-import { LLMS_TXT_CONTENT } from "./shared/llms-content.js";
+import {
+  LLMS_TXT_CONTENT,
+  LLMS_FULL_TXT_CONTENT,
+} from "./shared/llms-content.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -204,6 +207,972 @@ const MONTHS_ALL = [
   "december",
 ];
 const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]; // Feb=29 to cover all possible dates
+
+const AI_REFERRER_SOURCES = [
+  { label: "chatgpt", hosts: ["chatgpt.com", "chat.openai.com"] },
+  { label: "claude", hosts: ["claude.ai"] },
+  { label: "perplexity", hosts: ["perplexity.ai"] },
+  { label: "gemini", hosts: ["gemini.google.com", "bard.google.com"] },
+  {
+    label: "copilot",
+    hosts: ["copilot.microsoft.com", "copilot.cloud.microsoft"],
+  },
+];
+
+const TOPIC_HUBS = [
+  {
+    slug: "world-war-ii",
+    title: "World War II",
+    summary:
+      "A topic hub for battles, invasions, political decisions, and turning points tied to the Second World War.",
+    keywords: [
+      "world war ii",
+      "second world war",
+      "wwii",
+      "nazi",
+      "hitler",
+      "allied",
+      "axis",
+      "d-day",
+      "normandy",
+      "stalingrad",
+      "holocaust",
+      "pearl harbor",
+    ],
+    pillars: ["War & Conflict", "Politics & Government"],
+  },
+  {
+    slug: "cold-war",
+    title: "Cold War",
+    summary:
+      "Articles about nuclear brinkmanship, proxy conflicts, espionage, and the rivalry that shaped the late twentieth century.",
+    keywords: [
+      "cold war",
+      "soviet",
+      "nato",
+      "warsaw pact",
+      "berlin wall",
+      "cuban missile crisis",
+      "arms race",
+      "communist",
+    ],
+    pillars: ["Politics & Government", "War & Conflict"],
+  },
+  {
+    slug: "french-revolution",
+    title: "French Revolution",
+    summary:
+      "A hub for uprisings, leaders, and political shocks connected to the French Revolution and the Napoleonic age.",
+    keywords: [
+      "french revolution",
+      "robespierre",
+      "bastille",
+      "napoleon",
+      "directory",
+      "jacobin",
+      "bourbon",
+    ],
+    pillars: ["Politics & Government", "War & Conflict"],
+  },
+  {
+    slug: "roman-empire",
+    title: "Roman Empire",
+    summary:
+      "A hub for emperors, conquests, collapses, and political dramas from the Roman world.",
+    keywords: [
+      "roman empire",
+      "rome",
+      "roman",
+      "caesar",
+      "augustus",
+      "constantinople",
+      "byzantine",
+      "republic",
+    ],
+    pillars: ["Politics & Government", "War & Conflict"],
+  },
+  {
+    slug: "space-exploration",
+    title: "Space Exploration",
+    summary:
+      "Launches, missions, disasters, discoveries, and the people who pushed human exploration beyond Earth.",
+    keywords: [
+      "space",
+      "apollo",
+      "nasa",
+      "cosmos",
+      "moon landing",
+      "astronaut",
+      "satellite",
+      "mars",
+      "rocket",
+    ],
+    pillars: ["Science & Technology", "Exploration & Discovery"],
+  },
+  {
+    slug: "civil-rights",
+    title: "Civil Rights",
+    summary:
+      "A topic hub for protests, landmark rulings, reform movements, and the people who fought for equal rights.",
+    keywords: [
+      "civil rights",
+      "segregation",
+      "abolition",
+      "suffrage",
+      "voting rights",
+      "freedom riders",
+      "human rights",
+      "desegregation",
+    ],
+    pillars: ["Social & Human Rights", "Politics & Government"],
+  },
+  {
+    slug: "medical-breakthroughs",
+    title: "Medical Breakthroughs",
+    summary:
+      "Discoveries, vaccines, surgeries, and public health turning points that changed how people lived and survived.",
+    keywords: [
+      "vaccine",
+      "medicine",
+      "medical",
+      "epidemic",
+      "pandemic",
+      "surgery",
+      "penicillin",
+      "hospital",
+    ],
+    pillars: ["Health & Medicine", "Science & Technology"],
+  },
+  {
+    slug: "exploration-and-discovery",
+    title: "Exploration and Discovery",
+    summary:
+      "Voyages, expeditions, maps, and discoveries that expanded what people thought the world could be.",
+    keywords: [
+      "expedition",
+      "voyage",
+      "exploration",
+      "discovery",
+      "navigator",
+      "polar",
+      "atlantic",
+      "pacific",
+    ],
+    pillars: ["Exploration & Discovery", "Science & Technology"],
+  },
+];
+
+function getTopicHubBySlug(slug) {
+  return TOPIC_HUBS.find((hub) => hub.slug === slug) || null;
+}
+
+function normalizeTopicMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTopicHubMatches(sourceText = "", limit = 3) {
+  const haystack = normalizeTopicMatchText(sourceText);
+  if (!haystack) return [];
+
+  return TOPIC_HUBS.filter((hub) =>
+    hub.keywords.some((keyword) => haystack.includes(normalizeTopicMatchText(keyword))),
+  ).slice(0, limit);
+}
+
+function buildTopicHubLinks(sourceText = "", heading = "Explore Related Topics") {
+  const matches = getTopicHubMatches(sourceText, 3);
+  if (matches.length === 0) return "";
+
+  return `<div class="topic-hub-links mt-3">
+    <h3 class="h6 mb-2">${escapeHtml(heading)}</h3>
+    <div class="topic-hub-chip-row">
+      ${matches
+        .map(
+          (hub) =>
+            `<a href="/topics/${hub.slug}/" class="topic-hub-chip">${escapeHtml(hub.title)}</a>`,
+        )
+        .join("")}
+    </div>
+  </div>`;
+}
+
+function buildRelatedQuestionsBlock(title, questions = [], sourceText = "") {
+  if (!Array.isArray(questions) || questions.length === 0) return "";
+
+  return `<section class="card-box ai-question-block">
+    <div class="ai-answer-kicker">Related questions</div>
+    <h2 class="h4 mb-3">${escapeHtml(title)}</h2>
+    <div class="ai-question-grid">
+      ${questions
+        .filter((item) => item?.question && item?.answer)
+        .map(
+          (item) => `<article class="ai-question-card">
+            <h3>${escapeHtml(item.question)}</h3>
+            <p>${escapeHtml(item.answer)}</p>
+            ${
+              item.href
+                ? `<a href="${escapeHtml(item.href)}" class="site-btn site-btn-primary">${escapeHtml(item.cta || "Explore")}</a>`
+                : ""
+            }
+          </article>`,
+        )
+        .join("")}
+    </div>
+    ${buildTopicHubLinks(sourceText)}
+  </section>`;
+}
+
+function buildEventRelatedQuestionsBlock({
+  mDisplay,
+  day,
+  featured,
+  events,
+  births,
+  deaths,
+  relatedBlogEntry,
+}) {
+  if (!featured) return "";
+
+  const eventText = String(featured.text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.\s]+$/, "");
+  const birthNames = births
+    .slice(0, 3)
+    .map((item) => String(item?.text || "").split(",")[0].trim())
+    .filter(Boolean);
+  const deathNames = deaths
+    .slice(0, 3)
+    .map((item) => String(item?.text || "").split(",")[0].trim())
+    .filter(Boolean);
+  const questions = [
+    {
+      question: `What happened on ${mDisplay} ${day}?`,
+      answer: `A featured event on this date is ${featured.year}: ${eventText}. This page also lists ${events.length} events from other years on the same day.`,
+    },
+    {
+      question: `Why is ${mDisplay} ${day} remembered in history?`,
+      answer: `${mDisplay} ${day} brings together events, births, and deaths across many eras, which makes it useful for seeing how one calendar date connects different historical turning points.`,
+    },
+    birthNames.length > 0
+      ? {
+          question: `Who was born on ${mDisplay} ${day}?`,
+          answer: `Notable birthdays on this date include ${birthNames.join(", ")}.`,
+          href: `/born/${MONTHS_ALL[MONTH_DISPLAY_NAMES.indexOf(mDisplay)]}/${day}/`,
+          cta: "See birthdays",
+        }
+      : null,
+    deathNames.length > 0
+      ? {
+          question: `Who died on ${mDisplay} ${day}?`,
+          answer: `Notable deaths on this date include ${deathNames.join(", ")}.`,
+          href: `/died/${MONTHS_ALL[MONTH_DISPLAY_NAMES.indexOf(mDisplay)]}/${day}/`,
+          cta: "See deaths",
+        }
+      : relatedBlogEntry
+        ? {
+            question: "What should I read next about this date?",
+            answer: `The blog article "${relatedBlogEntry.title}" goes deeper on one of this date's most compelling stories.`,
+            href: `/blog/${relatedBlogEntry.slug}/`,
+            cta: "Read the article",
+          }
+        : null,
+  ].filter(Boolean);
+
+  return buildRelatedQuestionsBlock(
+    `More questions about ${mDisplay} ${day}`,
+    questions,
+    `${eventText} ${birthNames.join(" ")} ${deathNames.join(" ")}`,
+  );
+}
+
+async function getBlogIndexEntries(env) {
+  const index = env.BLOG_AI_KV
+    ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
+    : null;
+  return Array.isArray(index) ? index : [];
+}
+
+function slugifyArchiveLabel(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function getHistoricalYearFromPost(post) {
+  if (Number.isInteger(post?.historicalYear)) return post.historicalYear;
+
+  const title = String(post?.title || "");
+  const titleYearMatch = title.match(/,\s*(-?\d{3,4})\s*$/);
+  if (titleYearMatch) return parseInt(titleYearMatch[1], 10);
+
+  const desc = String(post?.description || "");
+  const descYearMatch = desc.match(/\b(1[0-9]{3}|20[0-9]{2})\b/);
+  if (descYearMatch) return parseInt(descYearMatch[1], 10);
+
+  return null;
+}
+
+function normalizeKeywordLabel(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getKeywordPhrasesFromPost(post) {
+  const phrases = [];
+  const pushPhrase = (value) => {
+    const cleaned = normalizeKeywordLabel(value);
+    if (!cleaned) return;
+    if (/^\d{4}$/.test(cleaned)) return;
+    if (cleaned.length < 3 || cleaned.length > 50) return;
+    if (/^(history|historical|event|events|article|articles)$/i.test(cleaned)) return;
+    phrases.push(cleaned);
+  };
+
+  if (typeof post?.keywords === "string" && post.keywords.trim()) {
+    for (const keyword of post.keywords.split(",")) pushPhrase(keyword);
+  }
+
+  if (Array.isArray(post?.keyTerms)) {
+    for (const term of post.keyTerms) pushPhrase(term?.term || "");
+  }
+
+  if (post?.eventTitle) pushPhrase(post.eventTitle);
+
+  const title = String(post?.title || "");
+  const titleLead = title.split("—")[0].trim();
+  if (titleLead && titleLead !== title) pushPhrase(titleLead);
+
+  if (Array.isArray(post?.pillars) && post.pillars.length > 0) {
+    pushPhrase(post.pillars[0]);
+  }
+
+  const deduped = [];
+  const seen = new Set();
+  for (const phrase of phrases) {
+    const slug = slugifyArchiveLabel(phrase);
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    deduped.push({ label: phrase, slug });
+  }
+  return deduped.slice(0, 8);
+}
+
+function buildYearArchiveEntries(posts) {
+  const map = new Map();
+  for (const post of posts) {
+    const year = getHistoricalYearFromPost(post);
+    if (!year) continue;
+    if (!map.has(year)) map.set(year, []);
+    map.get(year).push(post);
+  }
+
+  return Array.from(map.entries())
+    .map(([year, yearPosts]) => ({
+      year,
+      posts: yearPosts.sort(
+        (a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0),
+      ),
+    }))
+    .sort((a, b) => b.year - a.year);
+}
+
+function buildKeywordArchiveEntries(posts) {
+  const map = new Map();
+  for (const post of posts) {
+    for (const keyword of getKeywordPhrasesFromPost(post)) {
+      if (!map.has(keyword.slug)) {
+        map.set(keyword.slug, { slug: keyword.slug, label: keyword.label, posts: [] });
+      }
+      map.get(keyword.slug).posts.push(post);
+    }
+  }
+
+  return Array.from(map.values())
+    .map((entry) => ({
+      ...entry,
+      posts: entry.posts
+        .filter(
+          (post, idx, arr) =>
+            arr.findIndex((candidate) => candidate.slug === post.slug) === idx,
+        )
+        .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0)),
+    }))
+    .filter((entry) => entry.posts.length > 0)
+    .sort((a, b) => {
+      if (b.posts.length !== a.posts.length) return b.posts.length - a.posts.length;
+      return a.label.localeCompare(b.label);
+    });
+}
+
+function renderArchiveCards(items, options = {}) {
+  const {
+    makeHref,
+    makeLabel,
+    makeMeta,
+    emptyText = "No archive entries available yet.",
+  } = options;
+
+  if (!items.length) {
+    return `<div class="card-box"><p class="text-muted mb-0">${escapeHtml(emptyText)}</p></div>`;
+  }
+
+  return items
+    .map((item) => `<article class="card-box">
+      <h2 class="h4 mb-2"><a href="${escapeHtml(makeHref(item))}" style="color:inherit;text-decoration:none">${escapeHtml(makeLabel(item))}</a></h2>
+      <p class="text-muted mb-3" style="font-size:.9rem">${escapeHtml(makeMeta(item))}</p>
+      <a href="${escapeHtml(makeHref(item))}" class="site-btn site-btn-primary">Open archive</a>
+    </article>`)
+    .join("");
+}
+
+async function handleYearsIndex(env, url) {
+  const posts = await getBlogIndexEntries(env);
+  const yearEntries = buildYearArchiveEntries(posts);
+  const canonical = `${url.origin}/years/`;
+  const pageTitle = "Years | thisDay.";
+  const pageDesc =
+    "Browse thisDay.info historical articles by event year to explore connected coverage across eras.";
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: pageTitle,
+    url: canonical,
+    description: pageDesc,
+    about: { "@type": "Thing", name: "Historical year archives" },
+  };
+
+  const html = `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${pageTitle}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<script type="application/ld+json">${JSON.stringify(schema)}</script>
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<link rel="stylesheet" href="/css/style.css"/>
+<link rel="stylesheet" href="/css/custom.css"/>
+<style>${getSharedPageStyles()}</style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Years</li>
+    </ol>
+  </nav>
+  <section class="ai-answer-card">
+    <div class="ai-answer-kicker">Archive hub</div>
+    <h1 class="h3 mb-2">Browse historical coverage by year</h1>
+    <p class="mb-0">Use year archives to move from one cited event into the broader historical moment around it.</p>
+  </section>
+  ${renderArchiveCards(yearEntries.slice(0, 80), {
+    makeHref: (item) => `/years/${item.year}/`,
+    makeLabel: (item) => String(item.year),
+    makeMeta: (item) => `${item.posts.length} matched article${item.posts.length === 1 ? "" : "s"}`,
+    emptyText: "No year archives available yet.",
+  })}
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts({ pageType: "years-index", pageSlug: "years" })}
+</body></html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=1800",
+    },
+  });
+}
+
+async function handleYearArchivePage(env, url, year) {
+  const posts = await getBlogIndexEntries(env);
+  const yearEntry = buildYearArchiveEntries(posts).find((entry) => entry.year === year);
+  if (!yearEntry) return new Response("Not Found", { status: 404 });
+
+  const canonical = `${url.origin}/years/${year}/`;
+  const pageTitle = `${year} | thisDay.`;
+  const pageDesc = `Historical articles on thisDay.info connected to the year ${year}.`;
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: pageTitle,
+    url: canonical,
+    description: pageDesc,
+    about: { "@type": "Thing", name: `History in ${year}` },
+  };
+
+  const html = `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${escapeHtml(pageTitle)}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<script type="application/ld+json">${JSON.stringify(schema)}</script>
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<link rel="stylesheet" href="/css/style.css"/>
+<link rel="stylesheet" href="/css/custom.css"/>
+<style>${getSharedPageStyles()}</style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="/years/">Years</a></li>
+      <li class="breadcrumb-item active" aria-current="page">${year}</li>
+    </ol>
+  </nav>
+  <section class="ai-answer-card">
+    <div class="ai-answer-kicker">Year archive</div>
+    <h1 class="h3 mb-2">${year} in the thisDay.info archive</h1>
+    <p class="mb-0">${yearEntry.posts.length} article${yearEntry.posts.length === 1 ? "" : "s"} currently connect to this historical year.</p>
+  </section>
+  ${renderTopicHubPostCards(yearEntry.posts)}
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts({ pageType: "year-archive", pageSlug: String(year) })}
+</body></html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=1800",
+    },
+  });
+}
+
+async function handleKeywordsIndex(env, url) {
+  const posts = await getBlogIndexEntries(env);
+  const keywordEntries = buildKeywordArchiveEntries(posts).filter(
+    (entry) => entry.posts.length >= 1,
+  );
+  const canonical = `${url.origin}/keywords/`;
+  const pageTitle = "Keywords | thisDay.";
+  const pageDesc =
+    "Browse thisDay.info articles by recurring historical subject, named entity, or archive keyword cluster.";
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: pageTitle,
+    url: canonical,
+    description: pageDesc,
+    about: { "@type": "Thing", name: "Historical keyword archives" },
+  };
+
+  const html = `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${pageTitle}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<script type="application/ld+json">${JSON.stringify(schema)}</script>
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<link rel="stylesheet" href="/css/style.css"/>
+<link rel="stylesheet" href="/css/custom.css"/>
+<style>${getSharedPageStyles()}</style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Keywords</li>
+    </ol>
+  </nav>
+  <section class="ai-answer-card">
+    <div class="ai-answer-kicker">Archive hub</div>
+    <h1 class="h3 mb-2">Browse historical coverage by keyword cluster</h1>
+    <p class="mb-0">Keyword archives connect related articles around recurring names, subjects, and historical phrases.</p>
+  </section>
+  ${renderArchiveCards(keywordEntries.slice(0, 120), {
+    makeHref: (item) => `/keywords/${item.slug}/`,
+    makeLabel: (item) => item.label,
+    makeMeta: (item) => `${item.posts.length} matched article${item.posts.length === 1 ? "" : "s"}`,
+    emptyText: "No keyword archives available yet.",
+  })}
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts({ pageType: "keywords-index", pageSlug: "keywords" })}
+</body></html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=1800",
+    },
+  });
+}
+
+async function handleKeywordArchivePage(env, url, slug) {
+  const posts = await getBlogIndexEntries(env);
+  const keywordEntry = buildKeywordArchiveEntries(posts).find((entry) => entry.slug === slug);
+  if (!keywordEntry) return new Response("Not Found", { status: 404 });
+
+  const canonical = `${url.origin}/keywords/${slug}/`;
+  const pageTitle = `${keywordEntry.label} | thisDay.`;
+  const pageDesc = `Historical articles on thisDay.info connected to the keyword ${keywordEntry.label}.`;
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: pageTitle,
+    url: canonical,
+    description: pageDesc,
+    about: { "@type": "Thing", name: keywordEntry.label },
+  };
+
+  const html = `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${escapeHtml(pageTitle)}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<script type="application/ld+json">${JSON.stringify(schema)}</script>
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<link rel="stylesheet" href="/css/style.css"/>
+<link rel="stylesheet" href="/css/custom.css"/>
+<style>${getSharedPageStyles()}</style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="/keywords/">Keywords</a></li>
+      <li class="breadcrumb-item active" aria-current="page">${escapeHtml(keywordEntry.label)}</li>
+    </ol>
+  </nav>
+  <section class="ai-answer-card">
+    <div class="ai-answer-kicker">Keyword archive</div>
+    <h1 class="h3 mb-2">${escapeHtml(keywordEntry.label)}</h1>
+    <p class="mb-0">${keywordEntry.posts.length} article${keywordEntry.posts.length === 1 ? "" : "s"} currently connect to this keyword cluster.</p>
+  </section>
+  ${renderTopicHubPostCards(keywordEntry.posts)}
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts({ pageType: "keyword-archive", pageSlug: slug })}
+</body></html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=1800",
+    },
+  });
+}
+
+function scorePostForTopicHub(post, hub) {
+  const haystack = normalizeTopicMatchText(
+    [post?.title, post?.description, post?.slug, ...(post?.pillars || [])].join(" "),
+  );
+  if (!haystack) return 0;
+
+  let score = 0;
+  for (const keyword of hub.keywords) {
+    if (haystack.includes(normalizeTopicMatchText(keyword))) score += 3;
+  }
+  for (const pillar of hub.pillars || []) {
+    if (Array.isArray(post?.pillars) && post.pillars.includes(pillar)) score += 2;
+  }
+  return score;
+}
+
+function getPostsForTopicHub(posts, hub, limit = 12) {
+  return posts
+    .map((post) => ({ post, score: scorePostForTopicHub(post, hub) }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return new Date(b.post?.publishedAt || 0) - new Date(a.post?.publishedAt || 0);
+    })
+    .slice(0, limit)
+    .map((entry) => entry.post);
+}
+
+function renderTopicHubPostCards(posts) {
+  if (posts.length === 0) {
+    return `<div class="card-box"><p class="text-muted mb-0">This topic hub is live, but it does not have matched articles yet. New articles will appear here as the archive grows.</p></div>`;
+  }
+
+  return posts
+    .map((post) => {
+      const title = escapeHtml(post.title || post.slug || "Historical article");
+      const desc = escapeHtml(post.description || "");
+      const slug = escapeHtml(post.slug || "");
+      const published = post.publishedAt
+        ? new Date(post.publishedAt).toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          })
+        : "";
+      const pillars = Array.isArray(post.pillars)
+        ? post.pillars
+            .slice(0, 3)
+            .map((pillar) => `<span class="topic-hub-chip">${escapeHtml(pillar)}</span>`)
+            .join("")
+        : "";
+
+      return `<article class="card-box">
+        <h2 class="h4 mb-2"><a href="/blog/${slug}/" style="color:inherit;text-decoration:none">${title}</a></h2>
+        ${published ? `<p class="text-muted mb-2" style="font-size:.85rem">${escapeHtml(published)}</p>` : ""}
+        ${desc ? `<p class="mb-3">${desc}</p>` : ""}
+        ${pillars ? `<div class="topic-hub-chip-row mb-3">${pillars}</div>` : ""}
+        <a href="/blog/${slug}/" class="site-btn site-btn-primary">Read article</a>
+      </article>`;
+    })
+    .join("");
+}
+
+async function handleTopicsIndex(env, url) {
+  const posts = await getBlogIndexEntries(env);
+  const hubs = TOPIC_HUBS.map((hub) => ({
+    ...hub,
+    articleCount: getPostsForTopicHub(posts, hub, 6).length,
+  }));
+
+  const canonical = `${url.origin}/topics/`;
+  const pageTitle = "Topics | thisDay.";
+  const pageDesc =
+    "Explore major historical subjects on thisDay.info through topic hubs that connect related articles, themes, and turning points.";
+  const collectionSchema = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: pageTitle,
+    url: canonical,
+    description: pageDesc,
+    about: { "@type": "Thing", name: "History topics" },
+  };
+
+  const cards = hubs
+    .map(
+      (hub) => `<article class="card-box">
+        <div class="ai-answer-kicker">Topic hub</div>
+        <h2 class="h4 mb-2"><a href="/topics/${hub.slug}/" style="color:inherit;text-decoration:none">${escapeHtml(hub.title)}</a></h2>
+        <p class="mb-3">${escapeHtml(hub.summary)}</p>
+        <p class="text-muted mb-3" style="font-size:.85rem">${hub.articleCount} matched article${hub.articleCount === 1 ? "" : "s"} so far.</p>
+        <a href="/topics/${hub.slug}/" class="site-btn site-btn-primary">Open hub</a>
+      </article>`,
+    )
+    .join("");
+
+  const html = `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${pageTitle}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<script type="application/ld+json">${JSON.stringify(collectionSchema)}</script>
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<link rel="stylesheet" href="/css/style.css"/>
+<link rel="stylesheet" href="/css/custom.css"/>
+<style>${getSharedPageStyles()}</style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Topics</li>
+    </ol>
+  </nav>
+  <section class="ai-answer-card">
+    <div class="ai-answer-kicker">Knowledge graph</div>
+    <h1 class="h3 mb-2">Topic hubs for major historical subjects</h1>
+    <p class="mb-0">These hubs connect thisDay.info articles into broader themes so readers and AI systems can move from one event page to a wider historical subject.</p>
+  </section>
+  ${cards}
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts({ pageType: "topics-index", pageSlug: "topics" })}
+</body></html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=1800",
+    },
+  });
+}
+
+async function handleTopicHubPage(env, url, slug) {
+  const hub = getTopicHubBySlug(slug);
+  if (!hub) return new Response("Not Found", { status: 404 });
+
+  const posts = await getBlogIndexEntries(env);
+  const matchedPosts = getPostsForTopicHub(posts, hub, 12);
+  const canonical = `${url.origin}/topics/${slug}/`;
+  const pageTitle = `${hub.title} | thisDay.`;
+  const pageDesc = hub.summary;
+  const schema = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: pageTitle,
+    url: canonical,
+    description: pageDesc,
+    about: { "@type": "Thing", name: hub.title },
+    hasPart: matchedPosts.slice(0, 10).map((post) => ({
+      "@type": "NewsArticle",
+      headline: post.title,
+      url: `${url.origin}/blog/${post.slug}/`,
+      description: post.description,
+    })),
+  };
+
+  const pillarLinks = (hub.pillars || [])
+    .map((pillar) => {
+      const pillarSlug = pillar
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "");
+      return `<a href="/blog/topic/${pillarSlug}/" class="topic-hub-chip">${escapeHtml(pillar)}</a>`;
+    })
+    .join("");
+
+  const html = `<!DOCTYPE html><html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>${escapeHtml(pageTitle)}</title>
+<link rel="canonical" href="${escapeHtml(canonical)}"/>
+<meta name="robots" content="index, follow"/>
+<meta name="description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:title" content="${escapeHtml(pageTitle)}"/>
+<meta property="og:description" content="${escapeHtml(pageDesc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:url" content="${escapeHtml(canonical)}"/>
+<meta property="og:site_name" content="thisDay."/>
+<meta property="og:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
+<meta name="twitter:description" content="${escapeHtml(pageDesc)}"/>
+<meta name="twitter:image" content="${escapeHtml(`${url.origin}/images/logo.png`)}"/>
+<script type="application/ld+json">${JSON.stringify(schema)}</script>
+<link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+<link rel="stylesheet" href="/css/style.css"/>
+<link rel="stylesheet" href="/css/custom.css"/>
+<style>${getSharedPageStyles()}</style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-4" style="max-width:860px">
+  <nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="/">Home</a></li>
+      <li class="breadcrumb-item"><a href="/topics/">Topics</a></li>
+      <li class="breadcrumb-item active" aria-current="page">${escapeHtml(hub.title)}</li>
+    </ol>
+  </nav>
+  <section class="ai-answer-card">
+    <div class="ai-answer-kicker">Topic hub</div>
+    <h1 class="h3 mb-2">${escapeHtml(hub.title)}</h1>
+    <p>${escapeHtml(hub.summary)}</p>
+    <div class="ai-answer-grid" aria-label="Topic hub facts">
+      <div class="ai-answer-item"><strong>Articles</strong><span>${matchedPosts.length}</span></div>
+      <div class="ai-answer-item"><strong>Primary pillars</strong><span>${escapeHtml((hub.pillars || []).join(", "))}</span></div>
+      <div class="ai-answer-item"><strong>Hub URL</strong><span>/topics/${escapeHtml(hub.slug)}/</span></div>
+      <div class="ai-answer-item"><strong>Use case</strong><span>Connected reading and citation-friendly topic discovery</span></div>
+    </div>
+  </section>
+  ${pillarLinks ? `<div class="topic-hub-chip-row mb-4">${pillarLinks}</div>` : ""}
+  ${renderTopicHubPostCards(matchedPosts)}
+</main>
+${siteFooter("yr")}
+${getSharedPageScripts({ pageType: "topic-hub", pageSlug: slug })}
+</body></html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=1800",
+    },
+  });
+}
 
 function escapeHtml(s) {
   return String(s || "")
@@ -867,6 +1836,17 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .date-cluster-link i{font-size:1rem;flex-shrink:0}
 .date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
 
+.ai-question-block{padding:20px}
+.ai-question-grid{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:640px){.ai-question-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.ai-question-card{padding:16px;border:1px solid var(--cbr);border-radius:10px;background:rgba(255,255,255,.7)}
+.ai-question-card h3{font-size:1rem;margin-bottom:8px}
+.ai-question-card p{margin-bottom:12px;font-size:.94rem;line-height:1.55}
+.topic-hub-links{border-top:1px solid var(--cbr);padding-top:14px}
+.topic-hub-chip-row{display:flex;flex-wrap:wrap;gap:8px}
+.topic-hub-chip{display:inline-flex;align-items:center;padding:7px 12px;border:1px solid var(--cbr);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);text-decoration:none;font-size:.82rem;font-weight:600}
+.topic-hub-chip:hover{background:#e7f0e7;color:var(--btn-bg);text-decoration:none}
+
 #supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}
 #supportPopup.show{display:flex;opacity:1}
 .support-popup-content{background:var(--cb,#fff);color:var(--tc,#1e293b);padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid var(--cbr,rgba(0,0,0,.1));box-shadow:0 8px 25px rgba(0,0,0,.2);position:relative;animation:popupFadeIn .35s ease}
@@ -876,8 +1856,50 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
   );
 }
 
-function getSharedPageScripts() {
-  return `<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+function getSharedPageScripts({ pageType = "page", pageSlug = "" } = {}) {
+  return `<script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag("js", new Date());
+gtag("config", "G-WXEZ3868VN");
+gtag("config", "AW-17262488503");
+</script>
+<script>
+(function(){
+  var ref=document.referrer||"";
+  if(!ref) return;
+  var pageType=${JSON.stringify(pageType)};
+  var pageSlug=${JSON.stringify(pageSlug)};
+  var sources=${JSON.stringify(AI_REFERRER_SOURCES)};
+  var host="";
+  try{host=new URL(ref).hostname.toLowerCase();}catch(_){return;}
+  var match=sources.find(function(source){
+    return (source.hosts||[]).some(function(candidate){
+      candidate=String(candidate||"").toLowerCase();
+      return host===candidate || host.endsWith("."+candidate);
+    });
+  });
+  if(!match || typeof gtag!=="function") return;
+  try{
+    sessionStorage.setItem("td_ai_referrer_source", match.label);
+    sessionStorage.setItem("td_ai_referrer_host", host);
+  }catch(_){}
+  gtag("event","ai_referrer_visit",{
+    ai_source: match.label,
+    ai_referrer_host: host,
+    page_type: pageType,
+    page_slug: pageSlug,
+    page_location: location.pathname
+  });
+  gtag("event","citation_target_visit",{
+    ai_source: match.label,
+    page_type: pageType,
+    page_slug: pageSlug
+  });
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 (function(){var t=document.getElementById('navToggle'),m=document.getElementById('navMobile');if(t&&m)t.addEventListener('click',function(){m.classList.toggle('active');});})();
 const yrEl=document.getElementById('yr');
@@ -1245,6 +2267,15 @@ function generateEventsDateHTML(
     relatedBlogEntry,
     `${mDisplay} ${day} in the Blog`,
   );
+  const relatedQuestionsHtml = buildEventRelatedQuestionsBlock({
+    mDisplay,
+    day,
+    featured,
+    events,
+    births,
+    deaths,
+    relatedBlogEntry,
+  });
 
   return `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
@@ -1297,6 +2328,7 @@ ${siteNav()}
   ${buildEventAnswerBlock({ mDisplay, day, featured, events, evEraRange })}
 	  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
 	  ${relatedBlogHtml}
+    ${relatedQuestionsHtml}
 	  ${
 	    featured
       ? `
@@ -1403,7 +2435,7 @@ ${siteNav()}
   </div>
 </main>
 ${siteFooter("yr")}
-${getSharedPageScripts()}
+${getSharedPageScripts({ pageType: "events-date", pageSlug: `${monthName}-${day}` })}
 </body></html>`;
 }
 
@@ -1889,7 +2921,7 @@ ${siteNav()}
   </div>
 </main>
 ${siteFooter("yr")}
-${getSharedPageScripts()}
+${getSharedPageScripts({ pageType: "born-date", pageSlug: `${monthName}-${day}` })}
 </body></html>`;
 }
 
@@ -2229,7 +3261,7 @@ ${siteNav()}
   </div>
 </main>
 ${siteFooter("yr")}
-${getSharedPageScripts()}
+${getSharedPageScripts({ pageType: "died-date", pageSlug: `${monthName}-${day}` })}
 </body></html>`;
 }
 
@@ -2385,7 +3417,7 @@ ${siteNav()}
   ${postsHtml}
 </main>
 ${siteFooter("yr")}
-${getSharedPageScripts()}
+${getSharedPageScripts({ pageType: "blog-index", pageSlug: "blog" })}
 </body></html>`;
 
   return new Response(html, {
@@ -3000,7 +4032,8 @@ async function handleFetchRequest(request, env, ctx) {
     url.pathname === "/favicon.ico" ||
     url.pathname === "/manifest.json" ||
     url.pathname === "/robots.txt" ||
-    url.pathname === "/llms.txt";
+    url.pathname === "/llms.txt" ||
+    url.pathname === "/llms-full.txt";
 
   if (MAINTENANCE_ENABLED && !isPreview && !isExcludedRoute) {
     // Check if this is a worker route that should show maintenance
@@ -3050,38 +4083,47 @@ async function handleFetchRequest(request, env, ctx) {
         "# Block AI training crawlers",
         "User-agent: Amazonbot",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         "User-agent: Applebot-Extended",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         "User-agent: Bytespider",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         "User-agent: CCBot",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         "User-agent: ClaudeBot",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         "User-agent: CloudflareBrowserRenderingCrawler",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         "User-agent: Google-Extended",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         "User-agent: GPTBot",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         "User-agent: meta-externalagent",
         "Allow: /llms.txt",
+        "Allow: /llms-full.txt",
         "Disallow: /",
         "",
         `Sitemap: ${url.origin}/sitemap.xml`,
@@ -3100,6 +4142,12 @@ async function handleFetchRequest(request, env, ctx) {
 
   if (url.pathname === "/llms.txt") {
     return new Response(LLMS_TXT_CONTENT, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  if (url.pathname === "/llms-full.txt") {
+    return new Response(LLMS_FULL_TXT_CONTENT, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   }
@@ -3355,6 +4403,33 @@ async function handleFetchRequest(request, env, ctx) {
   // Blog index page
   if (url.pathname === "/blog" || url.pathname === "/blog/") {
     return handleBlogIndex(env, url);
+  }
+
+  if (url.pathname === "/topics" || url.pathname === "/topics/") {
+    return handleTopicsIndex(env, url);
+  }
+
+  const topicHubMatch = url.pathname.match(/^\/topics\/([a-z0-9-]+)\/?$/);
+  if (topicHubMatch) {
+    return handleTopicHubPage(env, url, topicHubMatch[1]);
+  }
+
+  if (url.pathname === "/years" || url.pathname === "/years/") {
+    return handleYearsIndex(env, url);
+  }
+
+  const yearArchiveMatch = url.pathname.match(/^\/years\/(\d{3,4})\/?$/);
+  if (yearArchiveMatch) {
+    return handleYearArchivePage(env, url, parseInt(yearArchiveMatch[1], 10));
+  }
+
+  if (url.pathname === "/keywords" || url.pathname === "/keywords/") {
+    return handleKeywordsIndex(env, url);
+  }
+
+  const keywordArchiveMatch = url.pathname.match(/^\/keywords\/([a-z0-9-]+)\/?$/);
+  if (keywordArchiveMatch) {
+    return handleKeywordArchivePage(env, url, keywordArchiveMatch[1]);
   }
 
   // Serve the KV blog index as canonical /blog/index.json.
@@ -5300,7 +6375,7 @@ ${siteNav()}
   </div>
 </main>
 ${siteFooter("yr")}
-${getSharedPageScripts()}
+${getSharedPageScripts({ pageType: "quiz-date", pageSlug: `${monthSlug}-${day}` })}
 </body></html>`;
 
   // Cache the full rendered page for future visits

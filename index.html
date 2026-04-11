@@ -329,6 +329,8 @@
             videos.forEach(function (v) {
               var title = v.title || "";
               var shortTitle = title.length > 55 ? title.slice(0, 52) + "…" : title;
+              var desc = v.description || "";
+              var shortDesc = desc.length > 90 ? desc.slice(0, 87) + "…" : desc;
               var ytUrl = "https://www.youtube.com/shorts/" + v.youtubeId;
               var card = document.createElement("a");
               card.className = "blog-card video-card";
@@ -344,6 +346,7 @@
                 '<div class="blog-card-body">' +
                 '<div class="blog-card-date">YouTube Shorts</div>' +
                 '<h3>' + escHtml(shortTitle) + '</h3>' +
+                (shortDesc ? '<p>' + escHtml(shortDesc) + '</p>' : '') +
                 '<span class="btn" style="align-self:flex-start;margin-top:auto">Watch <i class="bi bi-arrow-right"></i></span>' +
                 '</div>';
               grid.appendChild(card);

@@ -470,6 +470,7 @@ export default {
             slug,
             youtubeId: v.youtubeId,
             title: post.title ?? slug,
+            description: post.description ?? "",
             uploadedAt: v.uploadedAt,
             thumbnail: `https://img.youtube.com/vi/${v.youtubeId}/hqdefault.jpg`,
           };

@@ -385,6 +385,57 @@ export default {
       return jsonResponse({ status: "ok", processed: targets.length, results });
     }
 
+    // POST /blog/backfill-pillar-pills — inject pillar pill HTML into stored posts that lack it
+    if (path === "/blog/backfill-pillar-pills" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const targets = index.filter(
+        (e) => Array.isArray(e.pillars) && e.pillars.length > 0,
+      );
+      const results = [];
+      for (const entry of targets) {
+        try {
+          const html = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${entry.slug}`);
+          if (!html || html.includes("pillar-pill-row")) {
+            results.push({ slug: entry.slug, status: "skipped" });
+            continue;
+          }
+          const ps = (str) =>
+            str.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+          const pillsHtml =
+            `<div class="pillar-pill-row justify-content-center mt-3">` +
+            entry.pillars
+              .slice(0, 3)
+              .map((pillar, idx) => {
+                const featuredClass = idx === 0 ? " pillar-pill-featured" : "";
+                return `<a href="/blog/topic/${ps(pillar)}/" class="pillar-pill${featuredClass}">${pillar}</a>`;
+              })
+              .join("") +
+            `</div>`;
+          // Inject just before </header> (new posts) or after article-meta (older posts)
+          let patched = html.includes("</header>")
+            ? html.replace("</header>", `${pillsHtml}\n          </header>`)
+            : html.replace(
+                /(<\/p>\s*<\/div>\s*(?=.*?<article))/,
+                `$1${pillsHtml}`,
+              );
+          if (patched === html) {
+            results.push({ slug: entry.slug, status: "no-anchor" });
+            continue;
+          }
+          await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${entry.slug}`, patched);
+          results.push({ slug: entry.slug, status: "injected", pillars: entry.pillars });
+        } catch (err) {
+          results.push({ slug: entry.slug, status: "error", error: err.message });
+        }
+      }
+      return jsonResponse({ status: "ok", processed: targets.length, results });
+    }
+
     if (path === "/blog/archive" || path === "/blog/archive/") {
       return Response.redirect(`${url.origin}/blog/`, 301);
     }
@@ -694,7 +745,7 @@ export default {
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace(
           "</head>",
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}</style></head>`,
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:.82rem;font-weight:700;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}</style></head>`,
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml

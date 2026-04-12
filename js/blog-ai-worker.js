@@ -4605,7 +4605,7 @@ function injectEventImages(html, eventImages) {
       ` style="display:block;width:100%;height:auto;">` +
       `</a>` +
       `<figcaption class="article-meta mt-1" style="font-size:0.72rem;text-align:center;">` +
-      `${esc(name)}<br><a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">via Wikimedia</a>` +
+      `<a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">via Wikimedia</a>` +
       `</figcaption></figure>`;
   };
 

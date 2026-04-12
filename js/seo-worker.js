@@ -1155,9 +1155,10 @@ ${siteNav()}
     <div class="ai-answer-grid" aria-label="Topic hub facts">
       <div class="ai-answer-item"><strong>Articles</strong><span>${matchedPosts.length}</span></div>
       <div class="ai-answer-item"><strong>Primary pillars</strong><span>${escapeHtml((hub.pillars || []).join(", "))}</span></div>
-      <div class="ai-answer-item"><strong>Hub URL</strong><span>/topics/${escapeHtml(hub.slug)}/</span></div>
-      <div class="ai-answer-item"><strong>Use case</strong><span>Connected reading and citation-friendly topic discovery</span></div>
     </div>
+    <!-- machine-readable only -->
+    <meta itemprop="url" content="https://thisday.info/topics/${escapeHtml(hub.slug)}/">
+    <meta itemprop="description" content="Connected reading and citation-friendly topic discovery">
   </section>
   ${pillarLinks ? `<div class="topic-hub-chip-row mb-4">${pillarLinks}</div>` : ""}
   ${renderTopicHubPostCards(matchedPosts)}

@@ -123,20 +123,31 @@ const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 
 function buildArticleAnswerBlock(content) {
-  const significance =
-    (content.quickFacts || []).find((f) => /significance|impact|legacy/i.test(f.label))
-      ?.value || content.description;
-  const summaryLead = `${content.eventTitle} took place on ${content.historicalDate}${content.location ? ` in ${content.location}` : ""}. ${content.description}`;
+  // Use the AI description if it's a real one; avoid the "Discover the story of…" boilerplate.
+  const isBoilerplate = !content.description || /^Discover the story of /i.test(content.description);
+  const summaryLead = isBoilerplate
+    ? `${content.eventTitle} took place on ${content.historicalDate}${content.location ? ` in ${content.location}` : ""}.`
+    : content.description;
+
+  // Build grid rows from quickFacts; fall back to the four core fields when empty.
+  const facts = content.quickFacts?.length
+    ? content.quickFacts
+    : [
+        { label: "Event",     value: content.eventTitle },
+        { label: "Date",      value: content.historicalDate },
+        { label: "Location",  value: content.location || content.country || "Historical location" },
+        { label: "Significance", value: (content.quickFacts || []).find((f) => /significance|impact|legacy/i.test(f.label))?.value || content.description },
+      ];
+  const gridItems = facts
+    .map((f) => `      <div class="ai-answer-item"><strong>${esc(f.label)}</strong><span>${esc(f.value)}</span></div>`)
+    .join("\n");
 
   return `<section class="ai-answer-card mb-4" aria-labelledby="article-short-answer-title">
     <div class="ai-answer-kicker">Short answer</div>
     <h2 id="article-short-answer-title" class="h4 mb-2">What was ${esc(content.eventTitle)}?</h2>
     <p>${esc(summaryLead)}</p>
     <div class="ai-answer-grid" aria-label="Key facts">
-      <div class="ai-answer-item"><strong>Event</strong><span>${esc(content.eventTitle)}</span></div>
-      <div class="ai-answer-item"><strong>Date</strong><span>${esc(content.historicalDate)}</span></div>
-      <div class="ai-answer-item"><strong>Location</strong><span>${esc(content.location || content.country || "Historical location")}</span></div>
-      <div class="ai-answer-item"><strong>Why it matters</strong><span>${esc(significance)}</span></div>
+${gridItems}
     </div>
   </section>`;
 }
@@ -4576,6 +4587,11 @@ function injectEventImages(html, eventImages) {
     const pPos = html.indexOf("<p", anchorPos);
     if (pPos === -1) continue;
 
+    // Skip this section if a <figure already exists within MIN_GAP chars (person image already placed)
+    const windowEnd = Math.min(pPos + MIN_GAP, html.length);
+    const windowStart = Math.max(0, pPos - MIN_GAP);
+    if (html.slice(windowStart, windowEnd).includes("<figure")) continue;
+
     const fig = figHtml(eventImages[imageIdx], floats[floatIdx % 2]);
     html = html.slice(0, pPos) + fig + html.slice(pPos);
     lastInjectedAt = pPos;
@@ -4786,13 +4802,6 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
   const publishYear = date.getFullYear();
   const canonicalUrl = `https://thisday.info/blog/${slug}/`;
   const publishedStr = `${monthName} ${day}, ${publishYear}`;
-
-  const quickFactsRows = (c.quickFacts || [])
-    .map(
-      (f) =>
-        `              <tr><th>${esc(f.label)}</th><td>${esc(f.value)}</td></tr>`,
-    )
-    .join("\n");
 
   const didYouKnowItems = (c.didYouKnowFacts || [])
     .map((f) => `              <li>${esc(f)}</li>`)
@@ -5234,18 +5243,6 @@ ${JSON.stringify({
               <small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small>
             </figcaption>
           </figure>` : ""}
-
-          <!-- Quick Facts -->
-          ${
-            quickFactsRows
-              ? `<h2 class="mt-4 h3">Quick Facts</h2>
-          <table class="site-table">
-            <tbody>
-${quickFactsRows}
-            </tbody>
-          </table>`
-              : ""
-          }
 
           <!-- Did You Know -->
           ${

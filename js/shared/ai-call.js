@@ -37,6 +37,7 @@ const GROQ_MODEL = "llama-3.3-70b-versatile";
  * @param {string}   [env.GROQ_API_KEY_2] Groq API key secret (optional rotation)
  * @param {string}   [env.GROQ_API_KEY_3] Groq API key secret (optional rotation)
  * @param {string}   [env.GROQ_API_KEY_4] Groq API key secret (optional rotation)
+ * @param {string}   [env.GROQ_API_KEY_5] Groq API key secret (optional rotation)
  * @param {object}   [env.BLOG_AI_KV]   KV for resolving the best CF model name
  * @param {Array}    messages            OpenAI-style chat messages array
  * @param {object}   [opts]
@@ -67,7 +68,7 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
   }
 
   // 2. Groq — fallback when Workers AI quota is exhausted or unavailable
-  const groqKeys = [env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3, env.GROQ_API_KEY_4].filter(Boolean);
+  const groqKeys = [env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3, env.GROQ_API_KEY_4, env.GROQ_API_KEY_5].filter(Boolean);
   for (const key of groqKeys) {
     try {
       const res = await fetch(GROQ_URL, {

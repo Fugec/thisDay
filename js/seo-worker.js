@@ -1911,7 +1911,7 @@ const syncAdUnitVisibility=(ins)=>{if(!ins)return;const unit=ins.closest('.ad-un
 const adObserver=new MutationObserver((mutations)=>{for(const m of mutations){if(m.type==='attributes'&&m.attributeName==='data-ad-status'){syncAdUnitVisibility(m.target);}}});
 document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{syncAdUnitVisibility(ins);adObserver.observe(ins,{attributes:true,attributeFilter:['data-ad-status']});});
 setTimeout(()=>{document.querySelectorAll('ins.adsbygoogle').forEach(syncAdUnitVisibility);},5000);
-const initAds=()=>{if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{if(ins.getAttribute('data-adsbygoogle-status')||ins.getAttribute('data-ad-pushed'))return;if((ins.offsetWidth||0)<120)return;ins.setAttribute('data-ad-pushed','1');try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch{}});};
+const initAds=()=>{if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;document.querySelectorAll('ins.adsbygoogle').forEach((ins)=>{if(ins.getAttribute('data-adsbygoogle-status')||ins.getAttribute('data-ad-pushed'))return;if((ins.offsetWidth||0)===0)return;ins.setAttribute('data-ad-pushed','1');try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch{}});};
 if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',initAds,{once:true});}else{initAds();}
 setTimeout(initAds,1200);
 </script>
@@ -2382,8 +2382,8 @@ ${siteNav()}
          style="display:block;border-radius:8px;overflow:hidden"
          data-ad-client="ca-pub-8565025017387209"
          data-ad-slot="9477779891"
-         data-ad-format="fluid"
-         data-ad-layout="in-article"></ins>
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
   </div>
   ${
     topBirths.length > 0
@@ -2422,6 +2422,14 @@ ${siteNav()}
       <a href="/born/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
       <a href="/died/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
     </div>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle"
+         style="display:block"
+         data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209"
+         data-ad-slot="9183511632"></ins>
   </div>
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -2792,7 +2800,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   visibleGrid.forEach((b, i) => {
     gridHtml += renderGridItem(b);
     if (i === 9 && visibleGrid.length > 10) {
-      gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="fluid" data-ad-layout="in-article"></ins></div></div>`;
+      gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-8565025017387209" data-ad-slot="4828593028" data-ad-format="fluid" data-ad-layout-key="-6s+ea+2i-1i-4k"></ins></div></div>`;
     }
   });
 
@@ -3132,7 +3140,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   visibleGrid.forEach((d, i) => {
     gridHtml += renderGridItem(d);
     if (i === 9 && visibleGrid.length > 10) {
-      gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="fluid" data-ad-layout="in-article"></ins></div></div>`;
+      gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-8565025017387209" data-ad-slot="4828593028" data-ad-format="fluid" data-ad-layout-key="-6s+ea+2i-1i-4k"></ins></div></div>`;
     }
   });
 

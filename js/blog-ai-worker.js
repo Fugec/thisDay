@@ -1788,8 +1788,8 @@ export default {
           !patchedHtml.includes('<ins class="adsbygoogle"') &&
           patchedHtml.includes("</article>")
         ) {
-          const adUnit = `<div class="ad-unit-container"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>`;
-          const adInitJs = `<script>(function(){if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;var ins=document.querySelector('ins.adsbygoogle');if(!ins)return;function push(){if(!ins.getAttribute('data-adsbygoogle-status')){try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}}if('IntersectionObserver' in window){new IntersectionObserver(function(e,o){if(e[0].isIntersecting){push();o.disconnect();}},{threshold:0.1}).observe(ins);}else{push();}})();<\/script>`;
+          const adUnit = `<div class="ad-unit-container"><span class="ad-unit-label">Advertisement</span><ins id="ad-post-end" class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div><div class="ad-unit-container mt-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins></div>`;
+          const adInitJs = `<script>(function(){if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;function pushIns(el){if(!el.getAttribute('data-adsbygoogle-status')&&!el.getAttribute('data-ad-pushed')){el.setAttribute('data-ad-pushed','1');try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}}var units=document.querySelectorAll('ins.adsbygoogle');if('IntersectionObserver' in window){var io=new IntersectionObserver(function(e,o){e.forEach(function(en){if(en.isIntersecting){pushIns(en.target);o.unobserve(en.target);}});},{threshold:0.1});units.forEach(function(el){io.observe(el);});}else{units.forEach(pushIns);}})();<\/script>`;
           const bodyClose2 = patchedHtml.includes("</body>")
             ? "</body>"
             : "</html>";
@@ -5184,6 +5184,8 @@ ${JSON.stringify({
       }
     </script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+    <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
+    <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
 
     <style>
       :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
@@ -5539,6 +5541,14 @@ ${analysisBadItems}
                data-ad-slot="9477779891"
                data-ad-format="auto"
                data-full-width-responsive="true"></ins>
+        </div>
+        <div class="ad-unit-container mt-4">
+          <span class="ad-unit-label">Advertisement</span>
+          <ins class="adsbygoogle"
+               style="display:block"
+               data-ad-format="autorelaxed"
+               data-ad-client="ca-pub-8565025017387209"
+               data-ad-slot="9183511632"></ins>
         </div>
       </div>
     </div>
@@ -5960,6 +5970,8 @@ ${JSON.stringify(
       gtag("js", new Date()); gtag("config", "G-WXEZ3868VN");
     </script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+    <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
+    <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
     <style>
       :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
       body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
@@ -6217,6 +6229,8 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+    <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
+    <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
     <style>
       :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
       body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
@@ -6254,8 +6268,10 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
         <h1 class="fw-bold mb-2" style="font-size:1.8rem">${esc(pillarName)}</h1>
         <p class="mb-4" style="color:var(--text-muted,#5c7a65)">${esc(description)}</p>
 
-        <div class="mb-4">
+        <div class="ad-unit-container mb-4">
+          <span class="ad-unit-label">Advertisement</span>
           <ins class="adsbygoogle"
+               style="display:block;border-radius:8px;overflow:hidden"
                data-ad-client="ca-pub-8565025017387209"
                data-ad-slot="9477779891"
                data-ad-format="auto"
@@ -6267,6 +6283,16 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
             <i class="bi bi-journals me-2"></i>Articles (${posts.length})
           </h2>
           ${postItems}
+        </div>
+
+        <div class="ad-unit-container mb-5">
+          <span class="ad-unit-label">Advertisement</span>
+          <ins class="adsbygoogle"
+               style="display:block;border-radius:8px;overflow:hidden"
+               data-ad-client="ca-pub-8565025017387209"
+               data-ad-slot="9477779891"
+               data-ad-format="auto"
+               data-full-width-responsive="true"></ins>
         </div>
 
         <div class="mb-5">

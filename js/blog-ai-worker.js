@@ -475,6 +475,43 @@ function buildArticleRelatedQuestionsBlock(content, pillars = []) {
   </section>`;
 }
 
+// Maps each pillar to a third authority link (Britannica + History.com are always present).
+const PILLAR_AUTHORITY_EXTRA = {
+  "Science & Technology":    { name: "NASA",             url: (q) => `https://www.nasa.gov/search/?q=${q}` },
+  "Exploration & Discovery": { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
+  "Health & Medicine":       { name: "MedlinePlus (NIH)",url: (q) => `https://medlineplus.gov/search/?query=${q}` },
+  "Arts & Culture":          { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
+  "Social & Human Rights":   { name: "PBS",              url: (q) => `https://www.pbs.org/search/?q=${q}` },
+  "Disasters & Accidents":   { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
+  "War & Conflict":          { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
+  "Politics & Government":   { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
+  "Economy & Business":      { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
+  "Famous Persons":          { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
+};
+
+function buildAuthorityLinksBlock(content, pillars = []) {
+  const query = encodeURIComponent(
+    String(content.eventTitle || "").replace(/[^\w\s]/g, " ").trim().substring(0, 80),
+  );
+  const extra = PILLAR_AUTHORITY_EXTRA[pillars[0] || ""] ||
+    { name: "Khan Academy", url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` };
+
+  const links = [
+    { name: "Encyclopædia Britannica", url: `https://www.britannica.com/search?query=${query}` },
+    { name: "History.com",             url: `https://www.history.com/search#q=${query}` },
+    { name: extra.name,                url: extra.url(query) },
+  ];
+
+  const chips = links
+    .map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" class="authority-link">${esc(l.name)}</a>`)
+    .join("");
+
+  return `<div class="authority-links mt-3 mb-4">
+    <span class="authority-links-label">Learn more at trusted sources</span>
+    <div class="authority-links-row">${chips}</div>
+  </div>`;
+}
+
 // Content pillars — mirrors the 10 event filter categories in script.js,
 // plus "Born on This Day" and "Died on This Day" matching the site's nav sections.
 // Used to classify blog posts for topical authority tracking and depth rotation.
@@ -2625,14 +2662,23 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
     break;
   }
 
-  // Ensure meta description meets minimum SEO length (120 chars)
-  if (!content.description || content.description.length < 120) {
-    const loc = content.location ? ` in ${content.location}` : "";
-    content.description =
-      `Discover the story of ${content.eventTitle} on ${content.historicalDate}${loc}.`.substring(
-        0,
-        155,
-      );
+  // Ensure meta description meets minimum SEO length (120 chars).
+  // Prefer the first sentence of the overview paragraph — specific and fact-dense.
+  // Avoid the "Discover the story of…" boilerplate which AI engines treat as low-signal.
+  if (!content.description || content.description.length < 120 || /^Discover the story of /i.test(content.description)) {
+    const overviewLead = String(content.overviewParagraphs?.[0] || "")
+      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const firstSentence = overviewLead.split(/(?<=[.!?])\s+/)[0] || "";
+    if (firstSentence.length >= 60) {
+      content.description = firstSentence.length > 155
+        ? firstSentence.substring(0, 152).trimEnd() + "..."
+        : firstSentence;
+    } else {
+      // Factual fallback: "EventTitle (Date, Location): Significance."
+      const sig = (content.quickFacts || []).find((f) => /significance|legacy|impact/i.test(f.label))?.value || "";
+      const loc = content.location ? `, ${content.location}` : "";
+      content.description = `${content.eventTitle} (${content.historicalDate}${loc})${sig ? `: ${sig}.` : "."}`.substring(0, 155);
+    }
   }
   // Clamp meta description to 155 chars maximum (Google truncates beyond this)
   if (content.description.length > 155) {
@@ -5167,6 +5213,11 @@ ${JSON.stringify({
       .topic-hub-chip-row{display:flex;flex-wrap:wrap;gap:8px}
       .topic-hub-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 12px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:.82rem;font-weight:700;text-decoration:none}
       .topic-hub-chip:hover{background:#e7f0e7;border-color:var(--btn-bg);color:var(--btn-bg);text-decoration:none}
+      .authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
+      .authority-links-label{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}
+      .authority-links-row{display:flex;flex-wrap:wrap;gap:8px}
+      .authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:.84rem;font-weight:600;color:var(--btn-bg);background:#fff;text-decoration:none}
+      .authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
       blockquote.historical-quote{border-left:3px solid var(--btn-bg);padding-left:1rem;margin-left:.5rem;font-style:italic}
       .border{border:1px solid var(--border)!important;box-shadow:none}
       .shadow-sm{box-shadow:none!important}
@@ -5280,6 +5331,8 @@ ${overviewParas}
               </small>
             </div>
           </div>` : ""}
+
+          ${buildAuthorityLinksBlock(c, currentPillars)}
 
           <!-- Eyewitness / Chronicle Accounts -->
           ${

@@ -44,9 +44,7 @@ function buildNarrationIntro(post) {
   const parts = rawTitle.split(/ [—–] /);
   const lead = parts[0]?.trim() || rawTitle;
   const datePart = parts[1]?.trim() || "";
-  const yearMatch = datePart.match(/\b(\d{4})\b/);
-  const year = yearMatch ? yearMatch[1] : "";
-  return year ? `${lead}, ${year}.` : `${lead}.`;
+  return datePart ? `${lead}, ${datePart}.` : `${lead}.`;
 }
 
 function trimRedundantDateLead(text, post) {
@@ -60,8 +58,9 @@ function trimRedundantDateLead(text, post) {
   const escapedDate = datePart.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   if (datePart) {
-    out = out.replace(new RegExp(`^on\\s+${escapedDate},?\\s*`, "i"), "");
-    out = out.replace(new RegExp(`^${escapedDate},?\\s*`, "i"), "");
+    // Remove anywhere in the text — covers both sentence-start and mid-sentence repeats
+    out = out.replace(new RegExp(`\\bon\\s+${escapedDate},?\\s*`, "gi"), "");
+    out = out.replace(new RegExp(`${escapedDate},?\\s*`, "gi"), "");
   }
   if (year) {
     out = out.replace(new RegExp(`^in\\s+${year},?\\s*`, "i"), "");
@@ -130,10 +129,11 @@ async function callElevenLabsWithTimestamps(apiKey, script) {
         text: script,
         model_id: MODEL_ID,
         voice_settings: {
-          stability: 0.62, // steadier, documentary cadence
+          stability: 0.42,        // lower = more natural variation, less robotic
           similarity_boost: 0.78, // keep voice identity consistent
-          style: 0.25, // lower style for e-learning clarity
+          style: 0.48,            // higher = more expressive, less flat
           use_speaker_boost: true,
+          speed: 0.97,            // near-natural pace, slightly relaxed
         },
       }),
     },

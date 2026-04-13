@@ -24,20 +24,31 @@
 
 import sharp from "sharp";
 import ffmpeg from "fluent-ffmpeg";
-import { mkdirSync, unlinkSync, writeFileSync } from "fs";
+import { readFileSync, mkdirSync, unlinkSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { getPostImageUrls } from "./kv.js";
 // Wiki-only mode: no AI scene generation imports
 
 const TMP = join(dirname(fileURLToPath(import.meta.url)), "../tmp");
+const FONTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "../assets/fonts");
 const W = 1080;
 const H = 1920;
 const IMAGE_HEADROOM = 1.22;
+
+// Lora Bold — file:// reference in @font-face (librsvg resolves local paths reliably)
+const LORA_BOLD_PATH = join(FONTS_DIR, "Lora-Bold.ttf");
+const LORA_BOLD_EXISTS = (() => {
+  try { readFileSync(LORA_BOLD_PATH, { flag: "r" }); return true; } catch { return false; }
+})();
+if (!LORA_BOLD_EXISTS) console.warn("  ⚠ Lora-Bold.ttf not found — falling back to DejaVu Sans Bold");
+
+// Custom background image for the title panel (1080×480, dark green textured bg)
+const TEXT_BG_PATH = join(dirname(fileURLToPath(import.meta.url)), "../assets/text-bg.png");
 /**
- * 3 scenes per video with gentle crossfades across the 45 s runtime.
+ * Single scene per video — one full-bleed image with pulsing zoom.
  */
-const N_SCENES = 3;
+const N_SCENES = 1;
 
 // Gentle crossfade only — slide/wipe transitions are too jarring for a calm history channel
 const XFADE_TRANSITIONS = ["fade"];
@@ -734,6 +745,43 @@ async function prepareWikipediaSceneLayers(buffer, year = null, qualityHint = nu
   return { bgBuf, cardLayerBuf };
 }
 
+/**
+ * Full-bleed single-image layout for the new single-scene mode.
+ *
+ * Returns two buffers:
+ *   bgBuf       — enhanced image at TARGET_W×TARGET_H (with Ken Burns headroom
+ *                 so the pulsing zoom never reveals black edges).
+ *   cardLayerBuf — transparent W×H canvas (title overlay is composited on top
+ *                 of this by the caller via buildSVG).
+ *
+ * Unlike prepareWikipediaSceneLayers, this version shows the image full-bleed:
+ * no blurred background, no card, no rounded corners — the raw photograph fills
+ * the entire 9:16 frame so the subject is always clearly visible.
+ */
+async function prepareSingleSceneFullBleed(buffer, year = null, qualityHint = null) {
+  const TARGET_W = Math.round(W * IMAGE_HEADROOM);
+  const TARGET_H = Math.round(H * IMAGE_HEADROOM);
+  const tuning = getQualityTuning(qualityHint);
+
+  // Slightly enhance the image but keep it natural — no blur, no card crop.
+  let img = sharp(buffer)
+    .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre" })
+    .sharpen({ sigma: tuning.cardSharpenSigma })
+    .modulate({ brightness: tuning.cardBrightness, saturation: tuning.cardSaturation })
+    .linear(tuning.cardLinearA, tuning.cardLinearB);
+  img = applyEraGrading(img, year);
+  const bgBuf = await img.png().toBuffer();
+
+  // Transparent overlay canvas — the caller composites buildSVG() text on top.
+  const cardLayerBuf = await sharp({
+    create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+  })
+    .png()
+    .toBuffer();
+
+  return { bgBuf, cardLayerBuf };
+}
+
 /** URLs that must never be used as a video background image. */
 function isPlaceholderImage(url) {
   if (!url) return true;
@@ -845,57 +893,98 @@ function wrapLines(text, maxChars) {
 }
 
 // ---------------------------------------------------------------------------
-// SVG overlay builder (static title + branding)
+// Overlay builders
 // ---------------------------------------------------------------------------
 
-function buildSVG(title) {
-  const titleLines = wrapLines(title, 18).slice(0, 5);
+// Lora is installed system-wide (~/Library/Fonts on macOS, ~/.fonts on Linux via CI step).
+// No @font-face embedding needed — just reference by family name.
+const FONT = "Lora,DejaVu Sans Bold,Arial Black,serif";
+const FONT_FACE = "";
 
-  const titleLineH = 62;
-  const titleStartY = 1020;
+/**
+ * Returns the text-bg.png scaled to 1080×480 as a PNG Buffer.
+ * Used as a permanent top-of-frame panel overlay (always visible).
+ */
+async function buildBgPanelBuffer() {
+  return sharp(TEXT_BG_PATH)
+    .resize(1080, 480, { fit: "fill" })
+    .png()
+    .toBuffer();
+}
 
-  const titleSVG = titleLines
-    .map(
-      (line, i) => `
-    <text x="540" y="${titleStartY + i * titleLineH}"
-      font-family="DejaVu Sans Bold,DejaVu Sans,Arial Black,sans-serif"
-      font-size="46" font-weight="900"
+/**
+ * Returns a transparent 1080×480 PNG with "ON THIS DAY" + Lora title text.
+ * Composited on top of the bg panel; disappears after TEXT_SHOW_S seconds.
+ */
+function buildTitleTextSVG(title) {
+  const PW = 1080, PH = 480;
+  const lines       = wrapLines(title, 24).slice(0, 2);
+  const lineH       = 66;
+  const titleStartY = lines.length === 1 ? 300 : 270;
+
+  const titleSVG = lines.map((line, i) => `
+    <text x="${PW / 2}" y="${titleStartY + i * lineH}"
+      font-family="${FONT}" font-size="60" font-weight="700"
       fill="white" text-anchor="middle" dominant-baseline="middle"
-      stroke="black" stroke-width="4" paint-order="stroke fill"
-    >${escapeXml(line)}</text>`,
-    )
-    .join("");
+      stroke="rgba(0,0,0,0.45)" stroke-width="3" paint-order="stroke fill"
+    >${escapeXml(line)}</text>`).join("");
 
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${PW}" height="${PH}">
+    <defs><style>${FONT_FACE}</style></defs>
+    <text x="${PW / 2}" y="148"
+      font-family="${FONT}" font-size="30" font-weight="700"
+      fill="#c9a84c" text-anchor="middle" dominant-baseline="middle"
+      stroke="rgba(0,0,0,0.4)" stroke-width="2" paint-order="stroke fill"
+      letter-spacing="12"
+    >ON THIS DAY</text>
+    ${titleSVG}
+  </svg>`;
+}
+
+/**
+ * Builds the permanent branding overlay (1080×1920 transparent canvas):
+ * just "thisday.info" at the very bottom with a subtle dark fade.
+ */
+function buildBrandingSVG() {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
     <defs>
-      <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#000" stop-opacity="0.08"/>
-        <stop offset="48%"  stop-color="#000" stop-opacity="0.68"/>
-        <stop offset="100%" stop-color="#000" stop-opacity="0.92"/>
+      <style>${FONT_FACE}</style>
+      <linearGradient id="bBot" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#000000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
       </linearGradient>
     </defs>
-    <rect width="${W}" height="${H}" fill="url(#g)"/>
-
-    <!-- "ON THIS DAY" label -->
-    <text x="540" y="960"
-      font-family="DejaVu Sans Bold,DejaVu Sans,Arial Black,sans-serif"
-      font-size="48" font-weight="900"
-      fill="#9dc43a" text-anchor="middle" dominant-baseline="middle"
-      stroke="black" stroke-width="4" paint-order="stroke fill"
-      letter-spacing="10"
-    >ON THIS DAY</text>
-
-    ${titleSVG}
-
-    <!-- Branding -->
-    <text x="540" y="1868"
-      font-family="DejaVu Sans Bold,DejaVu Sans,Arial Black,sans-serif"
-      font-size="42" font-weight="900"
-      fill="#9dc43a" text-anchor="middle" dominant-baseline="middle"
-      stroke="black" stroke-width="3" paint-order="stroke fill"
+    <!-- Subtle full-frame dark overlay so captions pop against any image -->
+    <rect width="${W}" height="${H}" fill="black" fill-opacity="0.22"/>
+    <rect y="${H - 220}" width="${W}" height="220" fill="url(#bBot)"/>
+    <text x="540" y="${H - 52}"
+      font-family="${FONT}" font-size="42" font-weight="700"
+      fill="white" text-anchor="middle" dominant-baseline="middle"
+      stroke="rgba(0,0,0,0.7)" stroke-width="3" paint-order="stroke fill"
     >thisday.info</text>
   </svg>`;
 }
+
+/**
+ * Legacy single-image path: combined overlay (title panel composited at top
+ * + branding at bottom) as a single 1080×1920 SVG.  Used when useAiImage=false.
+ */
+async function buildLegacyOverlayBuffer(title) {
+  const bgPanel  = await buildBgPanelBuffer();
+  const textBuf  = await sharp(Buffer.from(buildTitleTextSVG(title))).png().toBuffer();
+  return sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([
+      { input: bgPanel, left: 0, top: 0, blend: "over" },
+      { input: textBuf, left: 0, top: 0, blend: "over" },
+      { input: Buffer.from(buildBrandingSVG()), blend: "over" },
+    ])
+    .png()
+    .toBuffer();
+}
+
+// Keep buildSVG as a thin wrapper used by the legacy single-image path.
+// (Returns a flat SVG for the branding only; title panel is handled separately.)
+function buildSVG() { return buildBrandingSVG(); }
 
 // ---------------------------------------------------------------------------
 // Animated caption builder
@@ -911,7 +1000,7 @@ function buildSVG(title) {
  */
 function buildCaptionChunks(words) {
   if (!words?.length) return [];
-  const WORDS_PER_CHUNK = 3;
+  const WORDS_PER_CHUNK = 6;
   const chunks = [];
   let group = [];
 
@@ -946,26 +1035,34 @@ function buildCaptionChunks(words) {
  * @returns {Promise<string[]>}  Paths to generated PNG files (same order as chunks)
  */
 async function renderCaptionPNGs(chunks, slug) {
-  const CAP_H = 140;
-  const FONT_SIZE = 42;
-  const PAD = 16;
+  // Caption bar: up to 2 lines, no background — text stands out via dark green
+  // stroke + drop shadow. Height adjusts to 1 or 2 lines automatically.
+  const FONT_SIZE = 54;
+  const LINE_H = 64;
+  const MAX_CHARS_PER_LINE = 28;
   const paths = [];
   for (let i = 0; i < chunks.length; i++) {
-    const text = escapeXml(chunks[i].text.toUpperCase());
-    const svg = [
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${CAP_H}">`,
-      // Semi-transparent black pill for readability on any background
-      `<rect x="${PAD}" y="${PAD}" width="${W - PAD * 2}" height="${CAP_H - PAD * 2}"`,
-      `  rx="18" fill="black" fill-opacity="0.55"/>`,
-      // White text with black stroke — centred
-      `<text x="${W / 2}" y="${Math.round(CAP_H / 2 + FONT_SIZE * 0.36)}"`,
-      `  font-family="DejaVu Sans Bold,Arial Black,sans-serif"`,
-      `  font-size="${FONT_SIZE}" font-weight="900"`,
-      `  fill="white" text-anchor="middle"`,
-      `  stroke="black" stroke-width="4" paint-order="stroke fill"`,
-      `>${text}</text>`,
-      `</svg>`,
-    ].join("\n");
+    const lines = wrapLines(chunks[i].text, MAX_CHARS_PER_LINE).slice(0, 2);
+    const CAP_H = lines.length === 1 ? LINE_H + 20 : LINE_H * 2 + 20;
+    const startY = lines.length === 1
+      ? CAP_H / 2
+      : CAP_H / 2 - (LINE_H * (lines.length - 1)) / 2;
+    const textEls = lines.map((line, li) =>
+      `<text x="${W / 2}" y="${startY + li * LINE_H}"
+        font-family="${FONT}" font-size="${FONT_SIZE}" font-weight="700"
+        fill="white" text-anchor="middle" dominant-baseline="middle"
+        stroke="#1b3a2d" stroke-width="5" paint-order="stroke fill"
+        filter="url(#sh)"
+      >${escapeXml(line)}</text>`
+    ).join("\n");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${CAP_H}">
+      <defs>
+        <filter id="sh" x="-5%" y="-20%" width="110%" height="140%">
+          <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#000000" flood-opacity="0.9"/>
+        </filter>
+      </defs>
+      ${textEls}
+    </svg>`;
     const p = join(TMP, `${slug}_cap${i}.png`);
     await sharp(Buffer.from(svg)).png().toFile(p);
     paths.push(p);
@@ -989,30 +1086,27 @@ function buildOverlayCaptionFilter(
   captionStartIdx,
   inputLabel = "[0:v]",
   outputLabel = "[vcap]",
+  minStart = 0,
 ) {
   if (!chunks.length) return "";
-  // Top edge of the caption PNG sits so text visually lands at ~80% height
-  const Y_POS = Math.round(H * 0.8) - Math.round(220 * 0.5);
-  const SLIDE_PX = 20;   // pixels to travel upward during entry
-  const SLIDE_DUR = 0.18; // seconds for slide to complete
-  const parts = [];
-  for (let i = 0; i < chunks.length; i++) {
-    const { start, end } = chunks[i];
-    const inLabel = i === 0 ? inputLabel : `[ov${i - 1}]`;
-    const outLabel = i === chunks.length - 1 ? outputLabel : `[ov${i}]`;
-    // Slide up from Y+SLIDE_PX → Y over SLIDE_DUR seconds using output time t.
-    // t is always >= start inside enable, so the subtraction is safe.
-    const S = start.toFixed(3);
-    const yExpr =
-      `if(lt(t-${S},${SLIDE_DUR}),` +
-        `${Y_POS}+${SLIDE_PX}*(1-(t-${S})/${SLIDE_DUR}),` +
-        `${Y_POS})`;
-    parts.push(
-      `${inLabel}[${captionStartIdx + i}:v]` +
-        `overlay=x=0:y='${yExpr}':format=auto` +
-        `:enable='between(t,${S},${end.toFixed(3)})'${outLabel}`,
+  // Captions centred vertically. Max height = 2 lines × 64 + 20 = 148px.
+  // Well clear of the title panel (top 480px) and branding (bottom 220px).
+  const CAP_H = 148;
+  const Y_POS = Math.round(H / 2 - CAP_H / 2);
+  const eligible = chunks
+    .map((c, i) => ({ ...c, origIdx: i }))
+    .filter((c) => c.end > minStart);
+  if (!eligible.length) return "";
+  const parts = eligible.map((chunk, pos) => {
+    const S = Math.max(chunk.start, minStart).toFixed(3);
+    const inLabel  = pos === 0 ? inputLabel : `[ov${eligible[pos - 1].origIdx}]`;
+    const outLabel = pos === eligible.length - 1 ? outputLabel : `[ov${chunk.origIdx}]`;
+    return (
+      `${inLabel}[${captionStartIdx + chunk.origIdx}:v]` +
+      `overlay=x=0:y=${Y_POS}:format=auto` +
+      `:enable='between(t,${S},${chunk.end.toFixed(3)})'${outLabel}`
     );
-  }
+  });
   return parts.join(";");
 }
 
@@ -1396,19 +1490,19 @@ async function buildEndScreenPNG() {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="300">
     <rect width="${W}" height="300" fill="black" fill-opacity="0.72" rx="0"/>
     <text x="${W / 2}" y="110"
-      font-family="DejaVu Sans Bold,Arial Black,sans-serif"
-      font-size="52" font-weight="900"
+      font-family="${FONT}"
+      font-size="52" font-weight="700"
       fill="white" text-anchor="middle" dominant-baseline="middle"
       stroke="black" stroke-width="3" paint-order="stroke fill"
     >Follow for daily history</text>
     <text x="${W / 2}" y="195"
-      font-family="DejaVu Sans Bold,Arial Black,sans-serif"
-      font-size="44" font-weight="900"
+      font-family="${FONT}"
+      font-size="44" font-weight="700"
       fill="#9dc43a" text-anchor="middle" dominant-baseline="middle"
       stroke="black" stroke-width="3" paint-order="stroke fill"
     >thisday.info</text>
     <text x="${W / 2}" y="263"
-      font-family="DejaVu Sans,Arial,sans-serif"
+      font-family="${FONT}"
       font-size="30" font-weight="400"
       fill="#cbd5e1" text-anchor="middle" dominant-baseline="middle"
     >New history every day.</text>
@@ -1478,7 +1572,7 @@ async function generateMultiSceneVideo(
   const sceneLayers = await Promise.all(
     imageBuffers
       .slice(0, sceneCount)
-      .map((buf) => prepareWikipediaSceneLayers(buf, null, qualityHint)),
+      .map((buf) => prepareSingleSceneFullBleed(buf, null, qualityHint)),
   );
   console.log(
     `  Scenes ready: ${sceneCount} (zoom-out background, fixed card)`,
@@ -1505,35 +1599,44 @@ async function generateMultiSceneVideo(
     sceneDurations.push(videoDuration);
   }
 
-  // 3. Write scene files — two PNGs per scene:
-  //    bgPath   = blurred background at Ken Burns headroom size (animated by FFmpeg)
-  //    cardPath = card + vignette + depth at output size on transparent canvas (static overlay)
-  const bgFiles = [];
+  // 3. Write scene files.
+  //    bgPath        = full-bleed image at Ken Burns headroom size (pulsing zoom in FFmpeg)
+  //    cardPath      = permanent branding overlay (thisday.info, always visible)
+  //    titleCardPath = text-bg.png panel with "ON THIS DAY" + title (disappears after TEXT_SHOW_S)
+  const TEXT_SHOW_S = 8;
+  const bgFiles   = [];
   const cardFiles = [];
+
   for (let i = 0; i < sceneLayers.length; i++) {
     const { bgBuf, cardLayerBuf } = sceneLayers[i];
     const bgPath   = join(TMP, `${slug}_s${i}_bg.png`);
     const cardPath = join(TMP, `${slug}_s${i}_card.png`);
-
     await sharp(bgBuf).png().toFile(bgPath);
-
-    // Title overlay on scene 0 only — placed on the static card layer
-    if (i === 0) {
-      await sharp(cardLayerBuf)
-        .composite([{
-          input: await sharp(Buffer.from(buildSVG(title))).png().toBuffer(),
-          blend: "over",
-        }])
-        .png()
-        .toFile(cardPath);
-    } else {
-      await sharp(cardLayerBuf).png().toFile(cardPath);
-    }
-
+    await sharp(cardLayerBuf)
+      .composite([{ input: Buffer.from(buildBrandingSVG()), blend: "over" }])
+      .png()
+      .toFile(cardPath);
     bgFiles.push(bgPath);
     cardFiles.push(cardPath);
-    console.log(`  ✓ Scene ${i + 1} ready${i === 0 ? " (with title overlay)" : ""}`);
+    console.log(`  ✓ Scene ${i + 1} background ready`);
   }
+
+  // bg panel: text-bg.png at top, always visible — no text, just the decorative background
+  const bgPanelCardPath = join(TMP, `${slug}_bgpanel.png`);
+  const bgPanelBuf = await buildBgPanelBuffer();
+  await sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: bgPanelBuf, left: 0, top: 0, blend: "over" }])
+    .png()
+    .toFile(bgPanelCardPath);
+
+  // Title text: "ON THIS DAY" + Lora title — transparent canvas, disappears after TEXT_SHOW_S
+  const titleCardPath = join(TMP, `${slug}_title.png`);
+  const titleTextBuf = await sharp(Buffer.from(buildTitleTextSVG(title))).png().toBuffer();
+  await sharp({ create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite([{ input: titleTextBuf, left: 0, top: 0, blend: "over" }])
+    .png()
+    .toFile(titleCardPath);
+  console.log(`  ✓ Title panel ready (bg always on, text fades at ${TEXT_SHOW_S}s)`);
 
   // 4. FFmpeg: dynamic xfade chain + animated captions + end screen + audio
   const captionChunks = buildCaptionChunks(words);
@@ -1560,16 +1663,20 @@ async function generateMultiSceneVideo(
       for (let i = 0; i < bgFiles.length; i++) {
         cmd.input(bgFiles[i]).inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
       }
-      // Card inputs: static W×H RGBA overlays (no loop/duration needed — single frame held)
+      // Card inputs: permanent branding overlays
       for (let i = 0; i < cardFiles.length; i++) {
-        cmd
-          .input(cardFiles[i])
-          .inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
+        cmd.input(cardFiles[i]).inputOptions(["-loop 1", `-r ${FPS}`, `-t ${sceneDurations[i]}`]);
       }
+      // bg panel (text-bg.png): always visible at top — permanent
+      const bgPanelIdx = bgFiles.length + cardFiles.length;
+      cmd.input(bgPanelCardPath).inputOptions(["-loop 1", `-r ${FPS}`, `-t ${videoDuration}`]);
+      // Title text: ON THIS DAY + title — disappears after TEXT_SHOW_S seconds
+      const titleCardIdx = bgPanelIdx + 1;
+      cmd.input(titleCardPath).inputOptions(["-loop 1", `-r ${FPS}`, `-t ${TEXT_SHOW_S}`]);
 
       const hasNarr = !!narrationPath;
       const hasMusic = !!bgMusicPath;
-      const audioBase = bgFiles.length + cardFiles.length;
+      const audioBase = bgFiles.length + cardFiles.length + 2; // +2 for bgPanel + titleCard
       const narrIdx  = audioBase;
       const musicIdx = hasNarr && hasMusic ? audioBase + 1 : audioBase;
       if (hasNarr) cmd.input(narrationPath);
@@ -1581,21 +1688,30 @@ async function generateMultiSceneVideo(
       const endScreenIdx = captionStartIdx + captionPNGPaths.length;
       cmd.input(endScreenPath);
 
-      // Per-scene filter: slow zoom-out on background, static card overlay on top
-      const Z_RANGE = 0.18;
-      const Z_START = 1.0;
-      const Z_END   = (Z_START + Z_RANGE).toFixed(4);
+      // Per-scene filter: pulsing zoom — image breathes in then out over full scene.
+      // Z_MIN=1.0 → Z_MAX=1.18 → Z_MIN creates a gentle heartbeat feel.
+      const Z_MIN = 1.0;
+      const Z_MAX = 1.18;
+      const Z_RANGE_STR = (Z_MAX - Z_MIN).toFixed(4);
       const sceneParts = bgFiles.map((_, i) => {
-        const d   = Math.round(sceneDurations[i] * FPS);
-        const inc = (Z_RANGE / d).toFixed(7);
-        // Zoom out: start fully zoomed in, gradually pull back to Z_START
-        const zoom = `if(eq(on,0),${Z_END},max(${Z_START},pzoom-${inc}))`;
-        const x    = `iw/2-(iw/zoom/2)`;
-        const y    = `ih/2-(ih/zoom/2)`;
-        const zp   =
+        const d    = Math.round(sceneDurations[i] * FPS);
+        const half = Math.floor(d / 2);
+        // First half: zoom in Z_MIN → Z_MAX; second half: zoom out Z_MAX → Z_MIN
+        const zoom =
+          `if(lte(on,${half}),` +
+            `${Z_MIN.toFixed(4)}+${Z_RANGE_STR}*(on/${half}),` +
+            `${Z_MAX.toFixed(4)}-${Z_RANGE_STR}*((on-${half})/${d - half}))`;
+        const x = `iw/2-(iw/zoom/2)`;
+        const y = `ih/2-(ih/zoom/2)`;
+        // Cinematic grade: slight warmth (lift reds, drop blues) + desaturation + film grain
+        const grade = `eq=saturation=0.82:contrast=1.06:gamma_r=1.04:gamma_b=0.94,noise=alls=9:allf=t`;
+        const zp =
           `[${i}:v]zoompan=z='${zoom}':x='${x}':y='${y}'` +
-          `:d=${d}:s=${W}x${H}:fps=${FPS},setpts=PTS-STARTPTS,fps=fps=${FPS}[kb${i}]`;
-        return `${zp};[kb${i}][${bgFiles.length + i}:v]overlay=x=0:y=0:format=auto[v${i}]`;
+          `:d=${d}:s=${W}x${H}:fps=${FPS},setpts=PTS-STARTPTS,fps=fps=${FPS},${grade}[kb${i}]`;
+        const brandPart   = `[kb${i}][${bgFiles.length + i}:v]overlay=x=0:y=0:format=auto[vbrand${i}]`;
+        const bgPanelPart = `[vbrand${i}][${bgPanelIdx}:v]overlay=x=0:y=0:format=auto[vbgp${i}]`;
+        const titlePart   = `[vbgp${i}][${titleCardIdx}:v]overlay=x=0:y=0:format=auto[v${i}]`;
+        return `${zp};${brandPart};${bgPanelPart};${titlePart}`;
       });
       const scenePartFilter = sceneParts.join(";");
 
@@ -1640,7 +1756,7 @@ async function generateMultiSceneVideo(
       let audioFilter = "";
       if (hasNarr && hasMusic) {
         audioFilter =
-          `;[${musicIdx}:a]volume=0.15[bg]` +
+          `;[${musicIdx}:a]volume=0.11[bg]` +
           `;[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`;
       }
 
@@ -1691,7 +1807,7 @@ async function generateMultiSceneVideo(
         .run();
     });
   } finally {
-    [...bgFiles, ...cardFiles, ...captionPNGPaths, endScreenPath].forEach((p) => {
+    [...bgFiles, ...cardFiles, bgPanelCardPath, titleCardPath, ...captionPNGPaths, endScreenPath].forEach((p) => {
       try {
         unlinkSync(p);
       } catch {
@@ -1847,7 +1963,7 @@ export async function generateVideo(
           cmd
             .complexFilter(
               `${sceneFilter};${captionFilter};` +
-                `[${musicIdx}:a]volume=0.15[bg];` +
+                `[${musicIdx}:a]volume=0.11[bg];` +
                 `[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`,
             )
             .outputOptions([
@@ -1889,7 +2005,7 @@ export async function generateVideo(
           cmd
             .complexFilter(
               `${buildKenBurns(0, videoDuration, "[0:v]", "[v0]")};` +
-              `[${musicIdx}:a]volume=0.15[bg];` +
+              `[${musicIdx}:a]volume=0.11[bg];` +
               `[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`,
             )
             .outputOptions([

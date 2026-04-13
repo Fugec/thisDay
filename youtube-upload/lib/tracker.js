@@ -83,15 +83,10 @@ export async function acquireUploadLock(owner = "youtube-upload") {
   };
 
   await kvPut(UPLOAD_LOCK_KEY, JSON.stringify(lock));
-  const verifiedRaw = await kvGet(UPLOAD_LOCK_KEY);
-  if (!verifiedRaw) return null;
-
-  try {
-    const verified = JSON.parse(verifiedRaw);
-    return verified?.token === token ? token : null;
-  } catch {
-    return null;
-  }
+  // Skip read-back verification — CF KV eventual consistency means an immediate
+  // GET after PUT can return stale null, causing false "lock not acquired" errors.
+  // The write either succeeded (and we hold the lock) or threw (and we never reach here).
+  return token;
 }
 
 /**

@@ -1171,6 +1171,17 @@ img {
   background: var(--bg);
 }
 
+/* Lora font for daily history event items */
+.event-year-text {
+  font-family: "Lora", Georgia, serif;
+}
+.event-item-body > p {
+  font-family: "Lora", Georgia, serif;
+}
+.event-years-ago {
+  font-family: "Lora", Georgia, serif;
+}
+
 /* Event items full width layout stacked image + content */
 .event-item-inner {
   display: flex;

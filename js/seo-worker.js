@@ -1818,8 +1818,8 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 
 .site-btn{display:inline-flex;align-items:center;gap:8px;padding:.5rem 1.1rem;background:transparent;color:var(--text);border:1.5px solid var(--border);border-radius:4px;font-size:.875rem;font-family:Lora,serif;font-weight:500;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s;user-select:none;white-space:nowrap}
 .site-btn:hover{background:var(--bg-alt);color:var(--text);border-color:var(--border);text-decoration:none}
-.site-btn-primary{background:transparent;color:var(--text);border-color:var(--border)}
-.site-btn-primary:hover{background:var(--bg-alt);color:var(--text);border-color:var(--border)}
+.site-btn-primary{background:#1a3a2d!important;color:#fff!important;border-color:#1a3a2d!important}
+.site-btn-primary:hover{background:#2a4d3a!important;border-color:#2a4d3a!important;color:#fff!important}
 
 #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg);z-index:9999;transition:width .1s linear;pointer-events:none}
 
@@ -2255,7 +2255,7 @@ function generateEventsDateHTML(
       <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
     </tbody>
   </table>
-  ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn site-btn-primary mt-3" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Full Article on Wikipedia</a>` : ""}
+  ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn w-100 mt-3" style="justify-content:center" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Full Article on Wikipedia</a>` : ""}
 </div>`;
     const media = featImg
       ? `<div class="tl-media"><img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=400&q=85" alt="${escapeHtml(featured.text.substring(0, 80))}" class="tl-thumb" style="max-height:220px" loading="eager" onerror="this.closest('.tl-media').innerHTML='<div class=\\'tl-thumb-blank\\'><i class=\\'bi bi-calendar-event\\'></i></div>'"/></div>`
@@ -2443,7 +2443,7 @@ ${siteNav()}
       ${birthEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(birthEraRange)}</span>` : ""}
     </div>
     <div class="tl-wrap">${birthTimelineHtml}</div>
-    <a href="/born/${monthName}/${day}/" class="site-btn site-btn-primary mt-3"><i class="bi bi-person-heart"></i>See all birthdays on ${escapeHtml(mDisplay)} ${day}</a>
+    <a href="/born/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-person-heart"></i>See all birthdays on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
@@ -2457,7 +2457,7 @@ ${siteNav()}
       ${deathEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(deathEraRange)}</span>` : ""}
     </div>
     <div class="tl-wrap">${deathTimelineHtml}</div>
-    <a href="/died/${monthName}/${day}/" class="site-btn mt-3"><i class="bi bi-flower1"></i>See all deaths on ${escapeHtml(mDisplay)} ${day}</a>
+    <a href="/died/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-flower1"></i>See all deaths on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
@@ -2922,7 +2922,7 @@ ${siteNav()}
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
     ${eventsSnippetHtml}
-    <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
+    <a href="/events/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
   </div>` : ""}
   <div class="ad-unit-container my-4">
     <span class="ad-unit-label">Advertisement</span>
@@ -3224,7 +3224,7 @@ ${siteNav()}
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
     ${eventsSnippetHtml}
-    <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
+    <a href="/events/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
   </div>` : ""}
   <div class="ad-unit-container my-4">
     <span class="ad-unit-label">Advertisement</span>
@@ -3422,7 +3422,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v9-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v10-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -3512,7 +3512,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v9-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v10-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -3750,7 +3750,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v32-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v33-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";

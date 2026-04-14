@@ -2410,10 +2410,10 @@ ${siteNav()}
   ${
     featured || others.length > 0
       ? `
+  ${featImg && featured ? `<div class="card-box" style="padding:0;overflow:hidden"><img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager" style="width:100%;display:block;border-radius:10px;max-height:380px;object-fit:cover"/></div>` : ""}
   <div class="card-box" style="padding:20px 24px">
     ${featured ? `
-    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager" style="margin-left:-24px;margin-right:-24px;margin-top:-20px;width:calc(100% + 48px);border-radius:10px 10px 0 0"/>` : ""}
-    <h2 style="margin-top:${featImg ? "16px" : "0"}">${featTitle}</h2>
+    <h2 style="margin-top:0">${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
     ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:var(--accent,#9dc43a)"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
@@ -3750,7 +3750,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v31-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v32-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";

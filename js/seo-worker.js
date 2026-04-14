@@ -104,8 +104,10 @@ async function handleImageProxy(_request, url, ctx) {
 
   let imageUrl;
   try {
-    const decoded = decodeURIComponent(src);
-    const parsed = new URL(decoded);
+    // URLSearchParams already decoded the src param once — use it directly.
+    // A second decodeURIComponent() would turn %C3%BC into ü (raw Unicode)
+    // which Wikimedia rejects; percent-encoded form is the correct fetch URL.
+    const parsed = new URL(src);
     if (!parsed.hostname.endsWith("wikimedia.org")) {
       return new Response("Forbidden: only Wikimedia images allowed", {
         status: 403,
@@ -113,7 +115,7 @@ async function handleImageProxy(_request, url, ctx) {
     }
     // Resize by swapping the pixel-width segment in Wikipedia thumbnail paths
     // e.g. /320px-File.jpg  →  /1200px-File.jpg
-    imageUrl = decoded.replace(/\/\d+px-/, `/${width}px-`);
+    imageUrl = src.replace(/\/\d+px-/, `/${width}px-`);
   } catch {
     return new Response("Invalid URL", { status: 400 });
   }
@@ -1837,6 +1839,53 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .date-cluster-link i{font-size:1rem;flex-shrink:0}
 .date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
 
+/* ── Events Timeline ─────────────────────────────────────────── */
+.tl-wrap{position:relative;padding:4px 0 8px}
+.tl-wrap::before{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--border);transform:translateX(-50%);z-index:0;pointer-events:none}
+.tl-item{display:flex;align-items:flex-start;position:relative;margin-bottom:28px}
+.tl-body{flex:1;min-width:0}
+.tl-media{flex:1;min-width:0}
+.tl-item-odd .tl-body{order:1;padding-right:44px}
+.tl-item-odd .tl-node{order:2}
+.tl-item-odd .tl-media{order:3;padding-left:44px}
+.tl-item-even .tl-media{order:1;padding-right:44px}
+.tl-item-even .tl-node{order:2}
+.tl-item-even .tl-body{order:3;padding-left:44px}
+.tl-node{flex:0 0 72px;display:flex;justify-content:center;padding-top:10px;position:relative;z-index:1}
+.tl-node-badge{display:inline-block;background:var(--btn-bg);color:#fff;font-size:.68rem;font-weight:700;padding:4px 9px;border-radius:20px;white-space:nowrap;font-family:Georgia,serif;letter-spacing:.01em;box-shadow:0 0 0 3px var(--bg)}
+.tl-card{border:1px solid var(--cbr);border-radius:10px;padding:13px 15px;background:var(--bg);transition:box-shadow .15s}
+.tl-card:hover{box-shadow:var(--shadow)}
+.tl-card-title{font-weight:600;font-size:.88rem;line-height:1.4;color:var(--text);margin-bottom:4px}
+.tl-card-desc{font-size:.79rem;color:#333;line-height:1.5;margin-bottom:6px}
+.tl-card-extract{font-size:.76rem;color:#333;line-height:1.45;margin-bottom:6px;opacity:.85;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.tl-card-inner{display:flex;gap:10px;align-items:flex-start}
+.tl-card-img{flex:0 0 78px;width:78px;height:auto;max-height:92px;object-fit:contain;border-radius:7px;background:rgba(0,0,0,.04);padding:2px;display:block;align-self:center}
+.tl-card-img-blank{flex:0 0 78px;width:78px;height:72px;border-radius:7px;background:rgba(0,0,0,.05);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.3rem;align-self:center}
+.tl-card-content{flex:1;min-width:0}
+.tl-btn{font-size:.72rem!important;padding:4px 10px!important;margin-top:5px;display:inline-flex!important}
+.tl-thumb{width:100%;height:auto;max-height:130px;object-fit:contain;border-radius:8px;display:block;background:rgba(0,0,0,.04);padding:4px}
+.tl-thumb-blank{width:100%;height:100px;border-radius:8px;background:rgba(0,0,0,.05);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.6rem}
+@media(max-width:767px){
+  .tl-card-img,.tl-card-img-blank{flex:0 0 62px;width:62px;max-height:72px}
+  .tl-card-img-blank{height:58px}
+}
+/* Featured first-event style */
+.tl-card-feat{border-color:var(--btn-bg);border-width:2px;padding:16px 18px}
+.tl-feat-img{width:100%;max-height:180px;object-fit:contain;border-radius:8px;margin-bottom:10px;background:rgba(0,0,0,.04);padding:4px;display:block}
+.tl-feat-title{font-weight:700;font-size:1rem;line-height:1.4;color:var(--text);margin-bottom:8px}
+.tl-feat-body{font-size:.84rem;line-height:1.55;margin-bottom:10px}
+.tl-node-badge-feat{font-size:.78rem;padding:5px 11px}
+/* Mobile — single column with line + badge on left */
+@media(max-width:767px){
+  .tl-wrap::before{left:23px;transform:none}
+  .tl-item{display:flex;flex-direction:row;align-items:flex-start;margin-bottom:16px;padding:0}
+  .tl-item-odd .tl-node,.tl-item-even .tl-node{order:1!important;flex:0 0 46px;min-width:46px;display:flex;justify-content:center;padding-top:4px;position:static}
+  .tl-item-odd .tl-body,.tl-item-even .tl-body{order:2!important;flex:1;min-width:0;padding:0 0 0 10px}
+  .tl-item-odd .tl-media,.tl-item-even .tl-media{display:none}
+  .tl-node-badge{font-size:.6rem;padding:3px 6px;letter-spacing:0;box-shadow:0 0 0 2px var(--bg)}
+  .tl-node-badge-feat{font-size:.65rem;padding:4px 7px}
+}
+
 .ai-question-block{padding:20px}
 .ai-question-grid{display:grid;grid-template-columns:1fr;gap:14px}
 @media(min-width:640px){.ai-question-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -1943,8 +1992,8 @@ function generateEventsDateHTML(
   const featured =
     events.find((e) => e.pages?.[0]?.thumbnail?.source) || events[0] || null;
   const others = events.filter((e) => e !== featured);
-  const topBirths = births.slice(0, 10);
-  const topDeaths = deaths.slice(0, 10);
+  const topBirths = births.slice(0, 20);
+  const topDeaths = deaths.slice(0, 20);
 
   const pageTitle = featured
     ? `What Happened on ${mDisplay} ${day}: ${featured.text.split(".")[0]} | thisDay.info`
@@ -2183,86 +2232,118 @@ function generateEventsDateHTML(
         ? fmtY(dMin)
         : "";
 
-  // Events list — match the denser two-column treatment used on born/died pages
-  const renderEventGridItem = (e) => {
+  // Featured event as first timeline item (hero)
+  const renderFeaturedTimelineItem = () => {
+    if (!featured) return "";
+    const yearStr = escapeHtml(String(featured.year));
+    const mobileImg = featImg
+      ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=600&q=80" alt="${escapeHtml(featured.text.substring(0, 80))}" class="tl-feat-img d-md-none" loading="eager"/>`
+      : "";
+    const didYouKnowHtml = didYouKnowFacts.length > 0
+      ? `<div class="did-you-know" style="margin:10px 0"><h3><i class="bi bi-lightbulb-fill me-1" style="color:var(--accent,#9dc43a)"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>`
+      : `<div class="commentary" style="margin:10px 0"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`;
+    const card = `<div class="tl-card tl-card-feat">
+  ${mobileImg}
+  <div class="tl-feat-title">${featTitle}</div>
+  <p class="tl-feat-body">${escapeHtml(featured.text)}</p>
+  ${didYouKnowHtml}
+  <table class="site-table" style="margin-top:10px">
+    <tbody>
+      <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
+      <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
+      <tr><th>Events recorded</th><td>${events.length}</td></tr>
+      <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
+    </tbody>
+  </table>
+  ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn site-btn-primary mt-3" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Full Article on Wikipedia</a>` : ""}
+</div>`;
+    const media = featImg
+      ? `<div class="tl-media"><img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=400&q=85" alt="${escapeHtml(featured.text.substring(0, 80))}" class="tl-thumb" style="max-height:220px" loading="eager" onerror="this.closest('.tl-media').innerHTML='<div class=\\'tl-thumb-blank\\'><i class=\\'bi bi-calendar-event\\'></i></div>'"/></div>`
+      : `<div class="tl-media"><div class="tl-thumb-blank"><i class="bi bi-calendar-event"></i></div></div>`;
+    const node = `<div class="tl-node"><span class="tl-node-badge tl-node-badge-feat event-years-ago">${yearStr}</span></div>`;
+    return `<div class="tl-item tl-item-odd">
+  <div class="tl-body">${card}</div>${node}${media}
+</div>`;
+  };
+
+  // Events timeline — alternating left/right layout with center line
+  const renderTimelineItem = (e, idx) => {
     const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
     const th = e.pages?.[0]?.thumbnail?.source || "";
-    return `<div class="col-12 col-md-6">
-  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
-    ${th ? `<img src="${escapeHtml(th)}" alt="" class="p-thumb flex-shrink-0" style="margin-top:2px;border-radius:8px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px;border-radius:8px"><i class="bi bi-image-alt"></i></div>`}
-    <div style="min-width:0">
-      <div class="fw-semibold" style="font-size:.88rem;line-height:1.4">${escapeHtml(e.text)}</div>
-      ${w ? `<div style="margin-top:2px"><a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="small text-muted">Wikipedia &rarr;</a></div>` : ""}
-      <span class="yr mt-1 d-inline-block event-years-ago ms-2">${escapeHtml(String(e.year))}</span>
+    const yearStr = escapeHtml(String(e.year));
+    const fullText = e.text;
+    const dotIdx = fullText.indexOf(". ");
+    const titleText = dotIdx > 0 ? escapeHtml(fullText.slice(0, dotIdx + 1)) : escapeHtml(fullText);
+    const descText = dotIdx > 0 ? escapeHtml(fullText.slice(dotIdx + 2).trim()) : "";
+    const isEven = idx % 2 === 1;
+    const imgHtml = th
+      ? w
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
+      : `<div class="tl-card-img-blank"><i class="bi bi-image-alt"></i></div>`;
+    const card = `<div class="tl-card">
+  <div class="tl-card-inner">
+    ${imgHtml}
+    <div class="tl-card-content">
+      <div class="tl-card-title">${titleText}</div>
+      ${descText ? `<div class="tl-card-desc">${descText}</div>` : ""}
+      ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
     </div>
   </div>
 </div>`;
+    const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago">${yearStr}</span></div>`;
+    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}">
+  <div class="tl-body">${card}</div>
+  ${node}
+  <div class="tl-media"></div>
+</div>`;
   };
-  const othersVisibleHtml = others.slice(0, 10).map(renderEventGridItem).join("");
-  const othersHiddenHtml = others.slice(10).map(renderEventGridItem).join("");
+  const othersVisibleHtml = others.slice(0, 10).map((e, i) => renderTimelineItem(e, i)).join("");
+  const othersHiddenHtml = others.slice(10).map((e, i) => renderTimelineItem(e, i + 10)).join("");
 
-  // Person card renderer — top 3 (col-12 col-md-4)
-  const renderPersonCard = (p, isDeaths = false) => {
+  // Person timeline item renderer (replaces card + grid row)
+  const renderPersonTimelineItem = (p, idx, isDeaths = false) => {
     const th = p.pages?.[0]?.thumbnail?.source || "";
     const w = p.pages?.[0]?.content_urls?.desktop?.page || "";
     const name = escapeHtml(p.text.split(",")[0]);
     const desc = p.text.includes(",")
       ? escapeHtml(p.text.slice(p.text.indexOf(",") + 1).trim())
       : "";
-    const year = escapeHtml(String(p.year));
-    const yrStyle = isDeaths ? ' style="background:#6c757d"' : "";
-    return `<div class="col-12 col-md-4">
-  <div class="card-box h-100 d-flex flex-column" style="padding:16px">
-    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(0,0,0,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
-    <div class="flex-grow-1">
-      <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
-      ${desc ? `<p class="text-muted mb-0" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
-    </div>
-    <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
-      <span class="yr event-years-ago ms-2"${yrStyle}>${year}</span>
-      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
-    </div>
-  </div>
-</div>`;
-  };
-
-  // Person grid row renderer — items 4+ (col-12 col-md-6)
-  const renderPersonGridRow = (p, isDeaths = false) => {
-    const th = p.pages?.[0]?.thumbnail?.source || "";
-    const w = p.pages?.[0]?.content_urls?.desktop?.page || "";
-    const name = escapeHtml(p.text.split(",")[0]);
-    const desc = p.text.includes(",")
-      ? escapeHtml(p.text.slice(p.text.indexOf(",") + 1).trim())
+    const rawExtract = p.pages?.[0]?.extract || "";
+    const extract = rawExtract
+      ? escapeHtml(rawExtract.length > 220 ? rawExtract.slice(0, 220).replace(/\s\S*$/, "") + "…" : rawExtract)
       : "";
     const year = escapeHtml(String(p.year));
-    const yrStyle = isDeaths ? ' style="background:#6c757d"' : "";
-    return `<div class="col-12 col-md-6">
-  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
-    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb flex-shrink-0" style="margin-top:2px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px"><i class="bi bi-person"></i></div>`}
-    <div style="min-width:0">
-      <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
-      ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
-      <span class="yr mt-1 d-inline-block event-years-ago ms-2"${yrStyle}>${year}</span>
+    const badgeStyle = isDeaths ? ' style="background:#6c757d"' : "";
+    const isEven = idx % 2 === 1;
+    const imgHtml = th
+      ? w
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
+      : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
+    const card = `<div class="tl-card">
+  <div class="tl-card-inner">
+    ${imgHtml}
+    <div class="tl-card-content">
+      <div class="tl-card-title">${name}</div>
+      ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
+      ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
+      ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
     </div>
   </div>
 </div>`;
+    const media = `<div class="tl-media"></div>`;
+    const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago"${badgeStyle}>${year}</span></div>`;
+    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}">
+  <div class="tl-body">${card}</div>${node}${media}
+</div>`;
   };
 
-  const birthTop3Html = topBirths
-    .slice(0, 3)
-    .map((b) => renderPersonCard(b, false))
+  const birthTimelineHtml = topBirths
+    .map((b, i) => renderPersonTimelineItem(b, i, false))
     .join("");
-  const birthGridHtml = topBirths
-    .slice(3)
-    .map((b) => renderPersonGridRow(b, false))
-    .join("");
-  const deathTop3Html = topDeaths
-    .slice(0, 3)
-    .map((d) => renderPersonCard(d, true))
-    .join("");
-  const deathGridHtml = topDeaths
-    .slice(3)
-    .map((d) => renderPersonGridRow(d, true))
+  const deathTimelineHtml = topDeaths
+    .map((d, i) => renderPersonTimelineItem(d, i, true))
     .join("");
   const relatedBlogHtml = buildRelatedBlogCard(
     relatedBlogEntry,
@@ -2326,55 +2407,22 @@ ${siteNav()}
   </div>
   <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(eventsIntroLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${buildEventAnswerBlock({ mDisplay, day, featured, events, evEraRange })}
-	  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
-	  ${relatedBlogHtml}
-    ${relatedQuestionsHtml}
-	  ${
-	    featured
+  ${
+    featured || others.length > 0
       ? `
-  <div class="card-box">
-    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager"/>` : ""}
-    <h2>${featTitle}</h2>
+  <div class="card-box" style="padding:20px 24px">
+    ${featured ? `
+    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager" style="margin-left:-24px;margin-right:-24px;margin-top:-20px;width:calc(100% + 48px);border-radius:10px 10px 0 0"/>` : ""}
+    <h2 style="margin-top:${featImg ? "16px" : "0"}">${featTitle}</h2>
     <p class="mb-3">${escapeHtml(featured.text)}</p>
     ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:var(--accent,#9dc43a)"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
-    <table class="site-table">
-      <tbody><tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
-      <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
-      <tr><th>Events recorded</th><td>${events.length}</td></tr>
-      <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
-    </tbody></table>
-    ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn site-btn-primary mt-3" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Full Article on Wikipedia</a>` : ""}
+    <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
+    ${others.length > 0 ? `
+    <div class="tl-wrap">${othersVisibleHtml}</div>
+    ${othersHiddenHtml ? `<div id="events-more" style="display:none"><div class="tl-wrap">${othersHiddenHtml}</div></div>
+    <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>` : ""}` : ""}
   </div>`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
-  }
-  <div class="ad-unit">
-    <div class="ad-unit-label">Advertisement</div>
-    <ins class="adsbygoogle"
-         style="display:block;border-radius:8px;overflow:hidden"
-         data-ad-client="ca-pub-8565025017387209"
-         data-ad-slot="9477779891"
-         data-ad-format="auto"
-         data-full-width-responsive="true"></ins>
-  </div>
-  ${
-    others.length > 0
-      ? `
-  <div class="card-box" style="padding:16px 20px">
-    <h2 class="h4 mb-2"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>More Events on ${escapeHtml(mDisplay)} ${day}</h2>
-    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-      <span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${others.length} events</span>
-      ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
-    </div>
-    <div class="row g-0">${othersVisibleHtml}</div>
-    ${
-      othersHiddenHtml
-        ? `<div id="events-more" style="display:none"><div class="row g-0">${othersHiddenHtml}</div></div>
-    <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>`
-        : ""
-    }
-  </div>`
-      : ""
   }
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
@@ -2394,8 +2442,7 @@ ${siteNav()}
       <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${topBirths.length} people</span>
       ${birthEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(birthEraRange)}</span>` : ""}
     </div>
-    <div class="row g-3 mb-3">${birthTop3Html}</div>
-    ${birthGridHtml ? `<div style="padding:0 4px"><div class="row g-0">${birthGridHtml}</div></div>` : ""}
+    <div class="tl-wrap">${birthTimelineHtml}</div>
     <a href="/born/${monthName}/${day}/" class="site-btn site-btn-primary mt-3"><i class="bi bi-person-heart"></i>See all birthdays on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
@@ -2409,12 +2456,15 @@ ${siteNav()}
       <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${topDeaths.length} people</span>
       ${deathEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(deathEraRange)}</span>` : ""}
     </div>
-    <div class="row g-3 mb-3">${deathTop3Html}</div>
-    ${deathGridHtml ? `<div style="padding:0 4px"><div class="row g-0">${deathGridHtml}</div></div>` : ""}
+    <div class="tl-wrap">${deathTimelineHtml}</div>
     <a href="/died/${monthName}/${day}/" class="site-btn mt-3"><i class="bi bi-flower1"></i>See all deaths on ${escapeHtml(mDisplay)} ${day}</a>
   </div>`
       : ""
   }
+  ${relatedBlogHtml}
+  ${relatedQuestionsHtml}
+  ${buildEventAnswerBlock({ mDisplay, day, featured, events, evEraRange })}
+	  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
   <div class="card-box">
     <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="explore-actions">
@@ -2692,7 +2742,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
           name: `Famous Birthdays on ${mDisplay} ${day}`,
           url: canonical,
           numberOfItems: births.length,
-          itemListElement: births.slice(0, 10).map((b, i) => {
+          itemListElement: births.slice(0, 20).map((b, i) => {
             const jobTitle = b.text.includes(",")
               ? b.text.slice(b.text.indexOf(",") + 1).trim()
               : "";
@@ -2734,77 +2784,52 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     `${mDisplay} ${day} in the Blog`,
   );
 
-  // Top 3 featured cards
-  const top3Html = births
-    .slice(0, 3)
-    .map((b) => {
-      const th = b.pages?.[0]?.thumbnail?.source || "";
-      const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
-      const name = escapeHtml(b.text.split(",")[0]);
-      const desc = b.text.includes(",")
-        ? escapeHtml(b.text.slice(b.text.indexOf(",") + 1).trim())
-        : "";
-      const rawExtract = b.pages?.[0]?.extract || "";
-      const extract = rawExtract
-        ? escapeHtml(
-            rawExtract.length > 160
-              ? rawExtract.slice(0, 160).replace(/\s\S*$/, "") + "…"
-              : rawExtract,
-          )
-        : "";
-      const year = escapeHtml(String(b.year));
-      return `<div class="col-12 col-md-4">
-  <div class="card-box h-100 d-flex flex-column" style="padding:16px">
-    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(0,0,0,.07);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
-    <div class="flex-grow-1">
-      <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
-      ${desc ? `<p class="text-muted mb-1" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
-      ${extract ? `<p class="mb-0" style="font-size:.78rem;line-height:1.45;opacity:.85">${extract}</p>` : ""}
-    </div>
-    <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
-      <span class="yr event-years-ago ms-2">${year}</span>
-      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
-    </div>
-  </div>
-</div>`;
-    })
-    .join("");
-
-  // Grid for remaining births (items 4+)
-  const gridBirths = births.slice(3);
-  const visibleGrid = gridBirths.slice(0, 9);
-  const hiddenGrid = gridBirths.slice(9);
-
-  const renderGridItem = (b) => {
+  // Timeline item renderer for born page
+  const renderBornTlItem = (b, idx) => {
     const th = b.pages?.[0]?.thumbnail?.source || "";
     const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
     const name = escapeHtml(b.text.split(",")[0]);
     const desc = b.text.includes(",")
       ? escapeHtml(b.text.slice(b.text.indexOf(",") + 1).trim())
       : "";
+    const rawExtract = b.pages?.[0]?.extract || "";
+    const extract = rawExtract
+      ? escapeHtml(rawExtract.length > 220 ? rawExtract.slice(0, 220).replace(/\s\S*$/, "") + "…" : rawExtract)
+      : "";
     const year = escapeHtml(String(b.year));
-    return `<div class="col-12 col-md-6">
-  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
-    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb flex-shrink-0" style="margin-top:2px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px"><i class="bi bi-person"></i></div>`}
-    <div style="min-width:0">
-      <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
-      ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
-      <span class="yr mt-1 d-inline-block event-years-ago ms-2">${year}</span>
+    const isEven = idx % 2 === 1;
+    const imgHtml = th
+      ? w
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
+      : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
+    const card = `<div class="tl-card">
+  <div class="tl-card-inner">
+    ${imgHtml}
+    <div class="tl-card-content">
+      <div class="tl-card-title">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
+      ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
+      ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
+      ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
     </div>
   </div>
 </div>`;
+    const media = `<div class="tl-media"></div>`;
+    const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago">${year}</span></div>`;
+    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}">
+  <div class="tl-body">${card}</div>${node}${media}
+</div>`;
   };
 
-  // Build grid HTML with in-list ad injected after item index 5 (6th item)
-  let gridHtml = "";
-  visibleGrid.forEach((b, i) => {
-    gridHtml += renderGridItem(b);
-    if (i === 9 && visibleGrid.length > 10) {
-      gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-8565025017387209" data-ad-slot="4828593028" data-ad-format="fluid" data-ad-layout-key="-6s+ea+2i-1i-4k"></ins></div></div>`;
-    }
+  const visibleBirths = births.slice(0, 20);
+  const hiddenBirths = births.slice(20);
+
+  let visibleTlHtml = "";
+  visibleBirths.forEach((b, i) => {
+    visibleTlHtml += renderBornTlItem(b, i);
   });
 
-  const hiddenGridHtml = hiddenGrid.map((b) => renderGridItem(b)).join("");
+  const hiddenTlHtml = hiddenBirths.map((b, i) => renderBornTlItem(b, i + visibleBirths.length)).join("");
 
   // Events snippet — left-border accent style
   const eventsSnippetHtml = topEvents
@@ -2868,55 +2893,41 @@ ${siteNav()}
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
-	  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-	  ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange })}
-	  ${buildDateClusterCard(monthName, day, mDisplay, "born")}
-	  ${relatedBlogHtml}
-	  ${births.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(introLine)}</p>
+  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${births.length > 0 ? `
+  <div class="card-box" style="padding:20px 24px">
+    <div class="tl-wrap">${visibleTlHtml}</div>
+    ${hiddenTlHtml ? `<div id="births-more" style="display:none"><div class="tl-wrap">${hiddenTlHtml}</div></div>
+    <button onclick="var m=document.getElementById('births-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${births.length} birthdays':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${births.length} birthdays</button>` : ""}
+  </div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
          data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
-  ${
-    gridBirths.length > 0
-      ? `
-  <div class="card-box" style="padding:16px 20px">
-    <h2 class="h4 mb-3"><i class="bi bi-person-heart me-2" style="color:#1a1a1a"></i>All Birthdays on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${births.length})</small></h2>
-    <div class="row g-0">${gridHtml}</div>
-    ${
-      hiddenGrid.length > 0
-        ? `<div id="births-more" style="display:none"><div class="row g-0">${hiddenGridHtml}</div></div>
-    <button onclick="var m=document.getElementById('births-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${births.length} birthdays':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${births.length} birthdays</button>`
-        : ""
-    }
-  </div>`
-      : ""
-  }
-  ${
-    topEvents.length > 0
-      ? `
+  ${relatedBlogHtml}
+  ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange })}
+  ${buildDateClusterCard(monthName, day, mDisplay, "born")}
+  <div class="card-box">
+    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <div class="explore-actions">
+      <a href="/events/${monthName}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-calendar-event me-2"></i>Historical Events</a>
+      <a href="/died/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
+      <a href="/quiz/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
+    </div>
+  </div>
+  ${topEvents.length > 0 ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
     ${eventsSnippetHtml}
     <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
-  </div>`
-      : ""
-  }
-  <div class="ad-unit">
-    <div class="ad-unit-label">Advertisement</div>
-    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
-         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
-         data-ad-format="auto" data-full-width-responsive="true"></ins>
-  </div>
-  <div class="card-box">
-    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
-    <div class="d-flex flex-wrap gap-2">
-      <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
-      <a href="/died/${monthName}/${day}/" class="site-btn"><i class="bi bi-flower1"></i>Notable Deaths</a>
-      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Test Your Knowledge</a>
-    </div>
+  </div>` : ""}
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
   </div>
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -2924,6 +2935,7 @@ ${siteNav()}
       <a href="/born/${nextMonth}/${nextDay}/" class="site-btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
     </div>
     <div class="text-center">
+      <p class="text-muted mb-3">Explore famous birthdays on the interactive calendar.</p>
       <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
       <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
@@ -3032,7 +3044,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
           name: `Notable Deaths on ${mDisplay} ${day}`,
           url: canonical,
           numberOfItems: deaths.length,
-          itemListElement: deaths.slice(0, 10).map((d, i) => {
+          itemListElement: deaths.slice(0, 20).map((d, i) => {
             const jobTitle = d.text.includes(",")
               ? d.text.slice(d.text.indexOf(",") + 1).trim()
               : "";
@@ -3074,77 +3086,52 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     `${mDisplay} ${day} in the Blog`,
   );
 
-  // Top 3 featured cards
-  const top3Html = deaths
-    .slice(0, 3)
-    .map((d) => {
-      const th = d.pages?.[0]?.thumbnail?.source || "";
-      const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
-      const name = escapeHtml(d.text.split(",")[0]);
-      const desc = d.text.includes(",")
-        ? escapeHtml(d.text.slice(d.text.indexOf(",") + 1).trim())
-        : "";
-      const rawExtract = d.pages?.[0]?.extract || "";
-      const extract = rawExtract
-        ? escapeHtml(
-            rawExtract.length > 160
-              ? rawExtract.slice(0, 160).replace(/\s\S*$/, "") + "…"
-              : rawExtract,
-          )
-        : "";
-      const year = escapeHtml(String(d.year));
-      return `<div class="col-12 col-md-4">
-  <div class="card-box h-100 d-flex flex-column" style="padding:16px">
-    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" style="width:100%;height:160px;object-fit:cover;border-radius:8px;margin-bottom:12px" loading="eager" onerror="this.style.display='none'">` : `<div style="width:100%;height:160px;border-radius:8px;margin-bottom:12px;background:rgba(100,116,139,.08);display:flex;align-items:center;justify-content:center;font-size:3rem;color:#94a3b8"><i class="bi bi-person"></i></div>`}
-    <div class="flex-grow-1">
-      <div class="fw-bold mb-1" style="font-size:.95rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
-      ${desc ? `<p class="text-muted mb-1" style="font-size:.78rem;line-height:1.4">${desc}</p>` : ""}
-      ${extract ? `<p class="mb-0" style="font-size:.78rem;line-height:1.45;opacity:.85">${extract}</p>` : ""}
-    </div>
-    <div class="d-flex align-items-center justify-content-between flex-wrap gap-1 mt-2 pt-2" style="border-top:1px solid var(--cbr)">
-      <span class="yr event-years-ago ms-2" style="background:#6c757d">${year}</span>
-      ${w ? `<a href="${escapeHtml(w)}" class="site-btn site-btn-primary" style="padding:4px 10px;font-size:.75rem" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia</a>` : ""}
-    </div>
-  </div>
-</div>`;
-    })
-    .join("");
-
-  // Grid for remaining deaths (items 4+)
-  const gridDeaths = deaths.slice(3);
-  const visibleGrid = gridDeaths.slice(0, 9);
-  const hiddenGrid = gridDeaths.slice(9);
-
-  const renderGridItem = (d) => {
+  // Timeline item renderer for died page
+  const renderDiedTlItem = (d, idx) => {
     const th = d.pages?.[0]?.thumbnail?.source || "";
     const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
     const name = escapeHtml(d.text.split(",")[0]);
     const desc = d.text.includes(",")
       ? escapeHtml(d.text.slice(d.text.indexOf(",") + 1).trim())
       : "";
+    const rawExtract = d.pages?.[0]?.extract || "";
+    const extract = rawExtract
+      ? escapeHtml(rawExtract.length > 220 ? rawExtract.slice(0, 220).replace(/\s\S*$/, "") + "…" : rawExtract)
+      : "";
     const year = escapeHtml(String(d.year));
-    return `<div class="col-12 col-md-6">
-  <div class="d-flex align-items-start gap-3 py-2" style="border-bottom:1px solid var(--cbr)">
-    ${th ? `<img src="${escapeHtml(th)}" alt="${name}" class="p-thumb flex-shrink-0" style="margin-top:2px" loading="lazy" onerror="this.style.display='none'">` : `<div class="p-thumb-blank flex-shrink-0" style="margin-top:2px"><i class="bi bi-person"></i></div>`}
-    <div style="min-width:0">
-      <div class="fw-semibold" style="font-size:.88rem;line-height:1.3">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer">${name}</a>` : name}</div>
-      ${desc ? `<div class="text-muted" style="font-size:.76rem;line-height:1.35;margin-top:2px">${desc}</div>` : ""}
-      <span class="yr mt-1 d-inline-block event-years-ago ms-2" style="background:#6c757d">${year}</span>
+    const isEven = idx % 2 === 1;
+    const imgHtml = th
+      ? w
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
+      : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
+    const card = `<div class="tl-card">
+  <div class="tl-card-inner">
+    ${imgHtml}
+    <div class="tl-card-content">
+      <div class="tl-card-title">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
+      ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
+      ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
+      ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
     </div>
   </div>
 </div>`;
+    const media = `<div class="tl-media"></div>`;
+    const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago" style="background:#6c757d">${year}</span></div>`;
+    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}">
+  <div class="tl-body">${card}</div>${node}${media}
+</div>`;
   };
 
-  // Build grid HTML with in-list ad injected after item index 5 (6th item)
-  let gridHtml = "";
-  visibleGrid.forEach((d, i) => {
-    gridHtml += renderGridItem(d);
-    if (i === 9 && visibleGrid.length > 10) {
-      gridHtml += `<div class="col-12"><div class="ad-unit my-1"><div class="ad-unit-label">Advertisement</div><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-8565025017387209" data-ad-slot="4828593028" data-ad-format="fluid" data-ad-layout-key="-6s+ea+2i-1i-4k"></ins></div></div>`;
-    }
+  const visibleDeaths = deaths.slice(0, 20);
+  const hiddenDeaths = deaths.slice(20);
+
+  let visibleDiedTlHtml = "";
+  visibleDeaths.forEach((d, i) => {
+    visibleDiedTlHtml += renderDiedTlItem(d, i);
   });
 
-  const hiddenGridHtml = hiddenGrid.map((d) => renderGridItem(d)).join("");
+  const hiddenDiedTlHtml = hiddenDeaths.map((d, i) => renderDiedTlItem(d, i + visibleDeaths.length)).join("");
 
   // Events snippet — consistent style with born page
   const eventsSnippetHtml = topEvents
@@ -3208,55 +3195,41 @@ ${siteNav()}
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
-	  <p class="text-muted mb-4" style="font-size:.9rem">${escapeHtml(introLine)} &mdash; sourced from <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-	  ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange })}
-	  ${buildDateClusterCard(monthName, day, mDisplay, "died")}
-	  ${relatedBlogHtml}
-	  ${deaths.length > 0 ? `<div class="row g-3 mb-4">${top3Html}</div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(introLine)}</p>
+  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  ${deaths.length > 0 ? `
+  <div class="card-box" style="padding:20px 24px">
+    <div class="tl-wrap">${visibleDiedTlHtml}</div>
+    ${hiddenDiedTlHtml ? `<div id="deaths-more" style="display:none"><div class="tl-wrap">${hiddenDiedTlHtml}</div></div>
+    <button onclick="var m=document.getElementById('deaths-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${deaths.length} deaths':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${deaths.length} deaths</button>` : ""}
+  </div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
          data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
-  ${
-    gridDeaths.length > 0
-      ? `
-  <div class="card-box" style="padding:16px 20px">
-    <h2 class="h4 mb-3"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>All Deaths on ${escapeHtml(mDisplay)} ${day} <small class="text-muted fw-normal" style="font-size:.75rem">(${deaths.length})</small></h2>
-    <div class="row g-0">${gridHtml}</div>
-    ${
-      hiddenGrid.length > 0
-        ? `<div id="deaths-more" style="display:none"><div class="row g-0">${hiddenGridHtml}</div></div>
-    <button onclick="var m=document.getElementById('deaths-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${deaths.length} deaths':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${deaths.length} deaths</button>`
-        : ""
-    }
-  </div>`
-      : ""
-  }
-  ${
-    topEvents.length > 0
-      ? `
+  ${relatedBlogHtml}
+  ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange })}
+  ${buildDateClusterCard(monthName, day, mDisplay, "died")}
+  <div class="card-box">
+    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
+    <div class="explore-actions">
+      <a href="/events/${monthName}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-calendar-event me-2"></i>Historical Events</a>
+      <a href="/born/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
+      <a href="/quiz/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
+    </div>
+  </div>
+  ${topEvents.length > 0 ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
     ${eventsSnippetHtml}
     <a href="/events/${monthName}/${day}/" class="site-btn mt-1"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
-  </div>`
-      : ""
-  }
-  <div class="ad-unit">
-    <div class="ad-unit-label">Advertisement</div>
-    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
-         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
-         data-ad-format="auto" data-full-width-responsive="true"></ins>
-  </div>
-  <div class="card-box">
-    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
-    <div class="d-flex flex-wrap gap-2">
-      <a href="/events/${monthName}/${day}/" class="site-btn site-btn-primary"><i class="bi bi-calendar-event"></i>Historical Events</a>
-      <a href="/born/${monthName}/${day}/" class="site-btn"><i class="bi bi-person-heart"></i>Famous Birthdays</a>
-      <a href="/quiz/${monthName}/${day}/" class="site-btn"><i class="bi bi-patch-question"></i>Test Your Knowledge</a>
-    </div>
+  </div>` : ""}
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
   </div>
   <div class="my-5 pt-3 border-top">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -3264,6 +3237,7 @@ ${siteNav()}
       <a href="/died/${nextMonth}/${nextDay}/" class="site-btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
     </div>
     <div class="text-center">
+      <p class="text-muted mb-3">Explore notable deaths on the interactive calendar.</p>
       <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
       <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
@@ -3448,9 +3422,12 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v7-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v8-${hostKey}-${monthName}-${day}`;
+  const bypassCache =
+    url.searchParams.get("fresh") === "1" ||
+    url.searchParams.get("nocache") === "1";
   try {
-    if (env.EVENTS_KV) {
+    if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached)
         return new Response(cached, {
@@ -3516,8 +3493,10 @@ async function handleBornPage(request, env, ctx, url) {
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=3600, s-maxage=604800",
-      "X-Cache": "MISS",
+      "Cache-Control": bypassCache
+        ? "no-store, no-cache"
+        : "public, max-age=3600, s-maxage=604800",
+      "X-Cache": bypassCache ? "BYPASS" : "MISS",
     },
   });
 }
@@ -3533,9 +3512,12 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v7-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v8-${hostKey}-${monthName}-${day}`;
+  const bypassCache =
+    url.searchParams.get("fresh") === "1" ||
+    url.searchParams.get("nocache") === "1";
   try {
-    if (env.EVENTS_KV) {
+    if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached)
         return new Response(cached, {
@@ -3601,8 +3583,10 @@ async function handleDiedPage(request, env, ctx, url) {
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=3600, s-maxage=604800",
-      "X-Cache": "MISS",
+      "Cache-Control": bypassCache
+        ? "no-store, no-cache"
+        : "public, max-age=3600, s-maxage=604800",
+      "X-Cache": bypassCache ? "BYPASS" : "MISS",
     },
   });
 }
@@ -3766,9 +3750,12 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v29-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v30-${hostKey}-${monthName}-${day}`;
+  const bypassCache =
+    url.searchParams.get("fresh") === "1" ||
+    url.searchParams.get("nocache") === "1";
   try {
-    if (env.EVENTS_KV) {
+    if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
         return new Response(cached, {
@@ -3944,8 +3931,10 @@ async function handleEventsDatePage(_request, env, ctx, url) {
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=3600, s-maxage=604800",
-      "X-Cache": "MISS",
+      "Cache-Control": bypassCache
+        ? "no-store, no-cache"
+        : "public, max-age=3600, s-maxage=604800",
+      "X-Cache": bypassCache ? "BYPASS" : "MISS",
     },
   });
 }
@@ -5252,7 +5241,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v29:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v30:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -5912,7 +5901,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v29:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v30:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -6322,20 +6311,25 @@ ${siteNav()}
 	    <h1><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
 	    <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
 	  </div>
-	  ${buildDateClusterCard(monthSlug, day, mDisplay, "quiz")}
-	  ${relatedBlogHtml}
-	  ${buildQuizAnswerBlock({ mDisplay, day, quiz, featuredEvent })}
 	  ${carouselHtml}
   ${recSliderHtml}
+  ${buildDateClusterCard(monthSlug, day, mDisplay, "quiz")}
+  ${relatedBlogHtml}
+  ${buildQuizAnswerBlock({ mDisplay, day, quiz, featuredEvent })}
   <p class="text-center" style="font-size:.85rem;color:var(--mu)"><a href="/events/${monthSlug}/${day}/" style="color:var(--mu)">← All events on ${escapeHtml(mDisplay)} ${day}</a></p>
-  <div class="ad-unit" style="margin:24px 0">
+  <div class="ad-unit" style="margin:24px 0;overflow:hidden">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle"
-         style="display:block;border-radius:8px;overflow:hidden"
+         style="display:block;width:100%;overflow:hidden"
          data-ad-client="ca-pub-8565025017387209"
          data-ad-slot="9477779891"
          data-ad-format="auto"
          data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4" style="overflow:hidden">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block;width:100%" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
   </div>
 </main>
 ${siteFooter("yr")}

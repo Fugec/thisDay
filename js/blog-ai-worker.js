@@ -342,7 +342,7 @@ function getArticleTopicHubMatches(content, limit = 3, pillars = []) {
       content?.title,
       content?.eventTitle,
       content?.description,
-      ...(content?.keyTerms || []).map((kt) => kt?.term || ""),
+      ...(Array.isArray(content?.keyTerms) ? content.keyTerms.map((kt) => kt?.term || "") : []),
       ...(content?.quickFacts || []).map((f) => `${f?.label || ""} ${f?.value || ""}`),
     ].join(" "),
   );
@@ -626,7 +626,8 @@ export default {
         const publishUrl = new URL(request.url);
         const forcedEvent = publishUrl.searchParams.get("force-event") || null;
         const forceDate = publishUrl.searchParams.get("force-date") || null;
-        await generateAndStore(env, ctx, forcedEvent, forceDate);
+        const forceImage = publishUrl.searchParams.get("force-image") || null;
+        await generateAndStore(env, ctx, forcedEvent, forceDate, forceImage);
         return jsonResponse({ status: "ok", message: "Blog post published." });
       } catch (err) {
         console.error(
@@ -2488,7 +2489,7 @@ async function fixBannedPhrases(env, content, violations) {
 /**
  * Calls the Claude API, builds the HTML page, and persists everything to KV.
  */
-async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) {
+async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null, forceImage = null) {
   const parsedForceDate = forceDate ? new Date(forceDate + "T12:00:00Z") : null;
   const now = parsedForceDate && !isNaN(parsedForceDate) ? parsedForceDate : new Date();
   const activeModel = await resolveAiModel(env.BLOG_AI_KV);
@@ -2513,13 +2514,23 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
           ),
     );
 
-  // Pillar depth rotation: identify underrepresented topic pillars from recent posts
-  // so the AI favours depth over breadth. Only active when enough classified posts exist.
+  // Pillar weekly rotation: ensure each day uses a different pillar.
+  // - recentPillars: primary pillars of the last 7 published posts (explicit avoid list)
+  // - preferredPillars: least-covered pillars from last 30 posts (positive signal)
   let preferredPillars = [];
+  let recentPillars = [];
   if (!forcedEvent) {
-    const recentClassified = existingIndex
+    const sorted = existingIndex
       .slice()
-      .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
+      .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+
+    // Last 7 posts → pillars to avoid repeating this week
+    recentPillars = sorted
+      .slice(0, 7)
+      .filter((e) => Array.isArray(e.pillars) && e.pillars.length > 0)
+      .map((e) => e.pillars[0]); // primary pillar only
+
+    const recentClassified = sorted
       .slice(0, 30)
       .filter((e) => Array.isArray(e.pillars) && e.pillars.length > 0);
 
@@ -2538,7 +2549,7 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
         .slice(0, 3)
         .map(([p]) => p);
       console.log(
-        `Blog AI: depth rotation — preferred pillars: [${preferredPillars.join(", ")}]`,
+        `Blog AI: depth rotation — preferred pillars: [${preferredPillars.join(", ")}], avoid: [${recentPillars.join(", ")}]`,
       );
     }
   }
@@ -2565,6 +2576,7 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
             forcedEvent,
             preferredPillars,
             contextHook,
+            recentPillars,
           )
         : content;
 
@@ -2593,8 +2605,8 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
     // authority tracking and "You Might Also Like" relevance. Non-blocking.
     pillars = await classifyPillars(env, content);
 
-    // Validate the main image first.
-    const workingImage = await resolveWorkingImageForContent(content);
+    // Validate the main image first. If force-image was provided, use it directly.
+    const workingImage = forceImage || await resolveWorkingImageForContent(content);
     if (!workingImage) {
       if (attempt < MAX_CONTENT_ATTEMPTS) {
         const avoid = [...takenAllTime, content.title].filter(Boolean);
@@ -2609,6 +2621,7 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
           forcedEvent,
           preferredPillars,
           contextHook,
+          recentPillars,
         );
         continue;
       }
@@ -2644,6 +2657,7 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null) 
           forcedEvent,
           preferredPillars,
           contextHook,
+          recentPillars,
         );
         continue;
       }
@@ -3163,6 +3177,7 @@ async function callWorkersAI(
   forcedEvent = null,
   preferredPillars = [],
   contextHook = null,
+  recentPillars = [],
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -3172,9 +3187,17 @@ async function callWorkersAI(
       ? `\nThese topics have already been covered — do NOT write about any of them or anything closely related:\n${takenThisMonth.map((t) => `- ${t}`).join("\n")}\nSemantic avoidance rules: (1) If a listed title names a person, do not pick any event involving that person, their family, or their dynasty. (2) If a listed title names a battle or war, do not pick another engagement from the same conflict. (3) Do not pick a different year of the same recurring event type (e.g. if "Treaty of Paris 1856" is listed, avoid "Treaty of Paris 1783"). (4) If two events share the same country and the same event type within 50 years of each other, they are too similar — pick something from a different region or era entirely.\n`
       : "";
 
-  const pillarHint =
+  const avoidPillarLine =
+    recentPillars.length > 0
+      ? `AVOID these topic categories — they have been published in the last 7 days and must not repeat: ${recentPillars.map((p) => `"${p}"`).join(", ")}. Do not pick an event whose primary theme falls into any of these categories.`
+      : "";
+  const preferPillarLine =
     preferredPillars.length > 0
-      ? `\nTOPIC FOCUS: To build editorial depth, strongly prefer an event that falls into one of these underrepresented categories: ${preferredPillars.map((p) => `"${p}"`).join(", ")}. Only override this preference if no compelling event from those categories occurred on this date.\n`
+      ? `REQUIRED CATEGORY: You MUST choose an event that falls into one of these underrepresented categories: ${preferredPillars.map((p) => `"${p}"`).join(", ")}. Only ignore this if there is genuinely no significant event from those categories on this date.`
+      : "";
+  const pillarHint =
+    avoidPillarLine || preferPillarLine
+      ? `\n${avoidPillarLine}${avoidPillarLine && preferPillarLine ? "\n" : ""}${preferPillarLine}\n`
       : "";
 
   const contextHookSection = contextHook
@@ -3316,12 +3339,11 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "editorialNote": "Minimum 80 words. A frank, first-person-plural editorial reflection from the thisDay. team. Start with 'What strikes us about this is...' or 'We keep coming back to one thing:' or a similarly direct opening. Say something that the body of the article could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered and what actually happened. No hedging. No 'it is important to remember'. Say the thing.",
   "keyTerms": [
     { "term": "Exact phrase as it appears in the article text", "wikiUrl": "https://en.wikipedia.org/wiki/Exact_Article", "type": "person" },
-    { "term": "Another key person, place, or event named in the article", "wikiUrl": "https://en.wikipedia.org/wiki/Another_Article", "type": "event" }
+    { "term": "Another key person, place, or event named in the article", "wikiUrl": "https://en.wikipedia.org/wiki/Another_Article", "type": "event" },
+    "provide 5 to 8 entries total — key people, battles, organizations, treaties, or places that appear verbatim in the article body; type must be one of: person, place, event, organization"
   ],
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
   "youtubeSearchQuery": "specific event name year history documentary",
-  "bookSearchQuery": "event keyword book history",
-  "keyTerms": "5 to 8 important proper nouns that appear verbatim in the article body — key people, battles, organizations, treaties, or places. For each, provide: the exact phrase as written in the article, a valid Wikipedia URL, and a type from: person, place, event, organization. These will be used to create hyperlinks and inline images in the published text.",
   "bookSearchQuery": "3-5 word search query optimised for finding books about this specific event on eBay and Open Library. Example: 'italian invasion ethiopia 1935'.",
   "contentRationale": "Minimum 40 words. Answer this specific question: what does a reader find in this article that Wikipedia's entry on the same event does not already give them? Name the specific angle, the particular framing, the overlooked detail, or the editorial judgement that makes this article worth reading over the Wikipedia source. Do not be vague. Do not say 'deeper context' or 'engaging narrative'."
 }`;
@@ -4949,8 +4971,8 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
         eventStatus: "https://schema.org/EventCompleted",
         organizer: { "@type": "Organization", name: c.organizerName },
       },
-      ...((c.keyTerms || []).length > 0 && {
-        mentions: (c.keyTerms || []).map((kt) => ({
+      ...(Array.isArray(c.keyTerms) && c.keyTerms.length > 0 && {
+        mentions: c.keyTerms.map((kt) => ({
           "@type": kt.type === "person" ? "Person" : kt.type === "place" ? "Place" : kt.type === "organization" ? "Organization" : "Thing",
           name: kt.term,
           ...(kt.wikiUrl ? { sameAs: kt.wikiUrl } : {}),

@@ -1214,6 +1214,34 @@ function buildEventAnswerBlock({
   </section>`;
 }
 
+function buildDidYouKnowSlider(facts, extraClass = "") {
+  const cleanedFacts = (facts || [])
+    .map((fact) => String(fact || "").trim())
+    .filter(Boolean);
+  if (!cleanedFacts.length) return "";
+
+  const sliderFacts = cleanedFacts.map((fact, index) =>
+    `<article class="dyn-slide${extraClass ? ` ${extraClass}` : ""}" aria-label="Did you know fact ${index + 1}">
+      <p>Did you know</p>
+      <h3>${escapeHtml(fact)}</h3>
+    </article>`
+  ).join("");
+
+  return `<section class="dyn-slider-shell" aria-label="Did you know">
+    <button type="button" class="dyn-slider-btn dyn-slider-btn-prev" aria-label="Previous did you know card" onclick="this.parentElement.querySelector('.dyn-slider-wrap').scrollBy({ left: -280, behavior: 'smooth' })">
+      <i class="bi bi-chevron-left"></i>
+    </button>
+    <div class="dyn-slider-wrap">
+      <div class="dyn-slider-track">
+        ${sliderFacts}
+      </div>
+    </div>
+    <button type="button" class="dyn-slider-btn dyn-slider-btn-next" aria-label="Next did you know card" onclick="this.parentElement.querySelector('.dyn-slider-wrap').scrollBy({ left: 280, behavior: 'smooth' })">
+      <i class="bi bi-chevron-right"></i>
+    </button>
+  </section>`;
+}
+
 function buildQuizAnswerBlock({ mDisplay, day, quiz, featuredEvent }) {
   if (!quiz?.topic) return "";
 
@@ -1239,50 +1267,41 @@ function buildQuizAnswerBlock({ mDisplay, day, quiz, featuredEvent }) {
   </section>`;
 }
 
-function buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange }) {
+function buildPersonAnswerBlock({ mDisplay, day, featured, count, type, eraRange }) {
   if (!featured) return "";
-
-  const personNameRaw = featured.text.split(",")[0].trim();
-  const personDescRaw = featured.text.includes(",")
-    ? featured.text.split(",").slice(1).join(",").trim()
+  const p = featured.pages?.[0];
+  const personName = escapeHtml(featured.text.split(",")[0].trim());
+  const wikiDesc = p?.description ? escapeHtml(p.description) : "";
+  const wikiUrl = p?.content_urls?.desktop?.page || "";
+  const extract = p?.extract || "";
+  const knownFor = extract
+    ? escapeHtml(extract.split(/\.\s+/)[1]?.trim() || extract.split(/\.\s+/)[0]?.trim() || "")
     : "";
-  const personName = escapeHtml(personNameRaw);
-  const summaryLead = `On ${mDisplay} ${day}, ${personNameRaw}${personDescRaw ? ` — ${personDescRaw} —` : ""} was among the notable people born on this date. ${births.length} people with recorded birthdays on ${mDisplay} ${day} are listed on thisDay.info${eraRange ? `, spanning ${eraRange}` : ""}.`;
+  const yearLabel = type === "born" ? "Birth year" : "Death year";
+  const countLabel = type === "born" ? "Birthdays on this date" : "Deaths on this date";
+  const question = type === "born" ? `Who was born on ${mDisplay} ${day}?` : `Who died on ${mDisplay} ${day}?`;
+  const kicker = type === "born" ? "Famous birthdays" : "Notable deaths";
+  const titleId = type === "born" ? "born-answer-title" : "died-answer-title";
 
-  return `<section class="ai-answer-card" aria-labelledby="born-answer-title">
-    <div class="ai-answer-kicker">Short answer</div>
-    <h2 id="born-answer-title" class="h4 mb-2">Who was born on ${mDisplay} ${day}?</h2>
-    <p class="mb-0">${escapeHtml(summaryLead)}</p>
+  return `<section class="ai-answer-card" aria-labelledby="${titleId}">
+    <div class="ai-answer-kicker">${kicker}</div>
+    <h2 id="${titleId}" class="h4 mb-2">${escapeHtml(question)}</h2>
+    ${wikiDesc ? `<p class="mb-3">${personName} — ${wikiDesc}</p>` : ""}
     <div class="ai-answer-grid" aria-label="Key facts">
-      <div class="ai-answer-item"><strong>Date</strong><span>${mDisplay} ${day}</span></div>
-      <div class="ai-answer-item"><strong>Featured person</strong><span>${personName}</span></div>
-      <div class="ai-answer-item"><strong>Birthdays listed</strong><span>${escapeHtml(String(births.length))}</span></div>
-      ${eraRange ? `<div class="ai-answer-item"><strong>Era span</strong><span>${escapeHtml(eraRange)}</span></div>` : ""}
+      <div class="ai-answer-item"><strong>Featured</strong><span>${wikiUrl ? `<a href="${escapeHtml(wikiUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit">${personName}</a>` : personName}</span></div>
+      <div class="ai-answer-item"><strong>${yearLabel}</strong><span>${escapeHtml(String(featured.year))}</span></div>
+      ${knownFor ? `<div class="ai-answer-item" style="grid-column:1/-1"><strong>Known for</strong><span>${knownFor}</span></div>` : ""}
+      <div class="ai-answer-item"><strong>${countLabel}</strong><span>${escapeHtml(String(count))}${eraRange ? ` (${escapeHtml(eraRange)})` : ""}</span></div>
     </div>
   </section>`;
 }
 
+function buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange }) {
+  return buildPersonAnswerBlock({ mDisplay, day, featured, count: births.length, type: "born", eraRange });
+}
+
 function buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange }) {
-  if (!featured) return "";
-
-  const personNameRaw = featured.text.split(",")[0].trim();
-  const personDescRaw = featured.text.includes(",")
-    ? featured.text.split(",").slice(1).join(",").trim()
-    : "";
-  const personName = escapeHtml(personNameRaw);
-  const summaryLead = `On ${mDisplay} ${day}, ${personNameRaw}${personDescRaw ? ` — ${personDescRaw} —` : ""} was among the notable people who died on this date. ${deaths.length} recorded deaths on ${mDisplay} ${day} are listed on thisDay.info${eraRange ? `, spanning ${eraRange}` : ""}.`;
-
-  return `<section class="ai-answer-card" aria-labelledby="died-answer-title">
-    <div class="ai-answer-kicker">Short answer</div>
-    <h2 id="died-answer-title" class="h4 mb-2">Who died on ${mDisplay} ${day}?</h2>
-    <p class="mb-0">${escapeHtml(summaryLead)}</p>
-    <div class="ai-answer-grid" aria-label="Key facts">
-      <div class="ai-answer-item"><strong>Date</strong><span>${mDisplay} ${day}</span></div>
-      <div class="ai-answer-item"><strong>Featured person</strong><span>${personName}</span></div>
-      <div class="ai-answer-item"><strong>Deaths listed</strong><span>${escapeHtml(String(deaths.length))}</span></div>
-      ${eraRange ? `<div class="ai-answer-item"><strong>Era span</strong><span>${escapeHtml(eraRange)}</span></div>` : ""}
-    </div>
-  </section>`;
+  return buildPersonAnswerBlock({ mDisplay, day, featured, count: deaths.length, type: "died", eraRange });
 }
 
 function buildPersonMentions(items = [], dateKey) {
@@ -1320,6 +1339,18 @@ function redirectNoStore(url, status = 302) {
       "Cache-Control": "no-store",
     },
   });
+}
+
+// Scores a Wikipedia-enriched item by content richness. Higher = better featured candidate.
+function wikiRichScore(item) {
+  const p = item?.pages?.[0];
+  if (!p) return 0;
+  let s = 0;
+  if (p.thumbnail?.source) s += 3;
+  if (p.originalimage?.source) s += 2;
+  if (p.extract) s += Math.min(p.extract.length / 100, 5);
+  if (p.description) s += 1;
+  return s;
 }
 
 // Returns an array of 2-3 original editorial paragraphs for the featured event.
@@ -1760,6 +1791,7 @@ function getSharedPageStyles() {
 body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
 main{flex:1;padding:20px 0}
 h1,h2,h3,h4{color:var(--text)}
+p{font-size:15px;line-height:1.6}
 a{color:var(--lc)}a:hover{text-decoration:underline}
 .text-muted{color:var(--text-muted)!important}
 .breadcrumb-item a{color:var(--lc)}.breadcrumb-item.active{color:var(--text-muted)}
@@ -1780,11 +1812,23 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
 
-.did-you-know{background:rgba(34,113,54,.08);border-left:4px solid #166534;border-radius:0 8px 8px 0;padding:14px 16px;margin:18px 0}.did-you-know h3{font-size:1rem;font-weight:700;margin-bottom:10px;color:var(--tc)}.did-you-know ul{padding-left:1.3rem;margin-bottom:0}.did-you-know li{margin-bottom:7px;line-height:1.55;font-size:.95rem}
+.dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}
+.dyn-slider-btn{display:none;align-items:center;justify-content:center;width:42px;height:42px;border:1.5px solid var(--cbr);border-radius:999px;background:var(--cb);color:var(--tc);font-size:15px;font-weight:400;cursor:pointer;transition:background .15s,border-color .15s,color .15s;flex-shrink:0}
+.dyn-slider-btn:hover{background:var(--bg-alt);border-color:var(--btn-bg);color:var(--btn-bg)}
+.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0}
+.dyn-slider-wrap::-webkit-scrollbar{height:8px}
+.dyn-slider-wrap::-webkit-scrollbar-thumb{background:rgba(27,58,45,.25);border-radius:999px}
+.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}
+.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}
+.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.55}
+.dyn-slide h3{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.55}
+.dyn-slide-inline{margin:10px 0}
+@media(min-width:768px){.dyn-slider-btn{display:inline-flex}}
+@media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}
 
 .ai-answer-card{background:linear-gradient(180deg,rgba(157,196,58,.12),rgba(157,196,58,.05));border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px;margin:0 0 22px}
 .ai-answer-card p{margin-bottom:.7rem}
-.ai-answer-kicker{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:rgba(27,58,45,.08);color:var(--btn-bg);font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
+.ai-answer-kicker{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:rgba(27,58,45,.08);color:var(--btn-bg);font-size:13px;font-weight:400;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
 .ai-answer-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
 @media(min-width:640px){.ai-answer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px}
@@ -1797,9 +1841,9 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .p-thumb{width:44px;height:44px;border-radius:50%;object-fit:cover;flex-shrink:0}
 .p-thumb-blank{width:44px;height:44px;border-radius:50%;background:#e2e8f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2rem;color:#6c757d}
 
-.auto-tag{display:inline-block;background:rgba(0,0,0,.12);color:#1a1a1a;font-size:.7rem;font-weight:600;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
+.auto-tag{display:inline-block;background:rgba(0,0,0,.12);color:#1a1a1a;font-size:13px;font-weight:400;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
 
-.ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:.68rem;font-weight:600;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
+.ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:13px;font-weight:400;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
 .tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
 .tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
 .tdq-opt:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.tdq-opt-selected{border-color:var(--btn-bg)!important;background:rgba(157,196,58,.15)!important;font-weight:500}
@@ -1816,7 +1860,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
 .site-table th{background:rgba(0,0,0,.07);font-weight:600;white-space:nowrap;width:40%}
 
-.site-btn{display:inline-flex;align-items:center;gap:8px;padding:.5rem 1.1rem;background:transparent;color:var(--text);border:1.5px solid var(--border);border-radius:4px;font-size:.875rem;font-family:Lora,serif;font-weight:500;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s;user-select:none;white-space:nowrap}
+.site-btn{display:inline-flex;align-items:center;gap:8px;padding:.5rem 1.1rem;background:transparent;color:var(--text);border:1.5px solid var(--border);border-radius:4px;font-size:15px;font-family:Lora,serif;font-weight:400;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s;user-select:none;white-space:nowrap}
 .site-btn:hover{background:var(--bg-alt);color:var(--text);border-color:var(--border);text-decoration:none}
 .site-btn-primary{background:#1a3a2d!important;color:#fff!important;border-color:#1a3a2d!important}
 .site-btn-primary:hover{background:#2a4d3a!important;border-color:#2a4d3a!important;color:#fff!important}
@@ -1825,7 +1869,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 
 .explore-actions{display:flex;flex-direction:column;gap:.5rem}
 @media(min-width:576px){.explore-actions{flex-direction:row;flex-wrap:wrap;gap:.5rem}}
-.explore-action-btn{display:flex;align-items:center;width:100%;padding:.6rem 1rem;font-size:.875rem;font-weight:500;border:1.5px solid var(--cbr);border-radius:8px;text-decoration:none;color:var(--tc);background:transparent;transition:background .15s,border-color .15s}
+.explore-action-btn{display:flex;align-items:center;width:100%;padding:.6rem 1rem;font-size:15px;font-weight:400;border:1.5px solid var(--cbr);border-radius:8px;text-decoration:none;color:var(--tc);background:transparent;transition:background .15s,border-color .15s}
 @media(min-width:576px){.explore-action-btn{width:auto}}
 .explore-action-btn:hover{background:rgba(0,0,0,.06);border-color:rgba(0,0,0,.35);color:#1a1a1a;text-decoration:none}
 .explore-action-quiz{border-color:rgba(0,0,0,.3);color:#1a1a1a}
@@ -1834,7 +1878,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .date-cluster-card{padding:18px 20px}
 .date-cluster-links{display:grid;grid-template-columns:1fr;gap:.65rem}
 @media(min-width:576px){.date-cluster-links{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.date-cluster-link{display:flex;align-items:center;gap:.7rem;padding:.8rem 1rem;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;color:var(--tc);text-decoration:none;font-weight:600;transition:background .15s,border-color .15s,transform .15s}
+.date-cluster-link{display:flex;align-items:center;gap:.7rem;padding:.8rem 1rem;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;color:var(--tc);text-decoration:none;font-size:15px;font-weight:400;transition:background .15s,border-color .15s,transform .15s}
 .date-cluster-link:hover{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.35);color:#1a1a1a;text-decoration:none;transform:translateY(-1px)}
 .date-cluster-link i{font-size:1rem;flex-shrink:0}
 .date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
@@ -1852,17 +1896,17 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .tl-item-even .tl-node{order:2}
 .tl-item-even .tl-body{order:3;padding-left:44px}
 .tl-node{flex:0 0 72px;display:flex;justify-content:center;padding-top:10px;position:relative;z-index:1}
-.tl-node-badge{display:inline-block;background:var(--btn-bg);color:#fff;font-size:.68rem;font-weight:700;padding:4px 9px;border-radius:20px;white-space:nowrap;font-family:Georgia,serif;letter-spacing:.01em;box-shadow:0 0 0 3px var(--bg)}
+.tl-node-badge{display:inline-block;background:var(--btn-bg);color:#fff;font-size:13px;font-weight:400;padding:4px 9px;border-radius:20px;white-space:nowrap;font-family:Georgia,serif;letter-spacing:.01em;box-shadow:0 0 0 3px var(--bg)}
 .tl-card{border:1px solid var(--cbr);border-radius:10px;padding:13px 15px;background:var(--bg);transition:box-shadow .15s}
 .tl-card:hover{box-shadow:var(--shadow)}
-.tl-card-title{font-weight:600;font-size:.88rem;line-height:1.4;color:var(--text);margin-bottom:4px}
-.tl-card-desc{font-size:.79rem;color:#333;line-height:1.5;margin-bottom:6px}
-.tl-card-extract{font-size:.76rem;color:#333;line-height:1.45;margin-bottom:6px;opacity:.85;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.tl-card-title{font-weight:700;font-size:15px;line-height:1.4;color:var(--text);margin-bottom:4px}
+.tl-card-desc{font-size:15px;color:#333;line-height:1.6;margin-bottom:6px;font-style:italic}
+.tl-card-extract{font-size:15px;color:#333;line-height:1.6;margin-bottom:6px;opacity:.85;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .tl-card-inner{display:flex;gap:10px;align-items:flex-start}
 .tl-card-img{flex:0 0 78px;width:78px;height:auto;max-height:92px;object-fit:contain;border-radius:7px;background:rgba(0,0,0,.04);padding:2px;display:block;align-self:center}
 .tl-card-img-blank{flex:0 0 78px;width:78px;height:72px;border-radius:7px;background:rgba(0,0,0,.05);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.3rem;align-self:center}
 .tl-card-content{flex:1;min-width:0}
-.tl-btn{font-size:.72rem!important;padding:4px 10px!important;margin-top:5px;display:inline-flex!important}
+.tl-btn{font-size:15px!important;font-weight:400!important;padding:4px 10px!important;margin-top:5px;display:inline-flex!important}
 .tl-thumb{width:100%;height:auto;max-height:130px;object-fit:contain;border-radius:8px;display:block;background:rgba(0,0,0,.04);padding:4px}
 .tl-thumb-blank{width:100%;height:100px;border-radius:8px;background:rgba(0,0,0,.05);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.6rem}
 @media(max-width:767px){
@@ -1872,9 +1916,9 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 /* Featured first-event style */
 .tl-card-feat{border-color:var(--btn-bg);border-width:2px;padding:16px 18px}
 .tl-feat-img{width:100%;max-height:180px;object-fit:contain;border-radius:8px;margin-bottom:10px;background:rgba(0,0,0,.04);padding:4px;display:block}
-.tl-feat-title{font-weight:700;font-size:1rem;line-height:1.4;color:var(--text);margin-bottom:8px}
-.tl-feat-body{font-size:.84rem;line-height:1.55;margin-bottom:10px}
-.tl-node-badge-feat{font-size:.78rem;padding:5px 11px}
+.tl-feat-title{font-weight:400;font-size:15px;line-height:1.4;color:var(--text);margin-bottom:8px}
+.tl-feat-body{font-size:15px;line-height:1.6;margin-bottom:10px}
+.tl-node-badge-feat{font-size:13px;padding:5px 11px}
 /* Mobile — single column with line + badge on left */
 @media(max-width:767px){
   .tl-wrap::before{left:23px;transform:none}
@@ -1882,8 +1926,8 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
   .tl-item-odd .tl-node,.tl-item-even .tl-node{order:1!important;flex:0 0 46px;min-width:46px;display:flex;justify-content:center;padding-top:4px;position:static}
   .tl-item-odd .tl-body,.tl-item-even .tl-body{order:2!important;flex:1;min-width:0;padding:0 0 0 10px}
   .tl-item-odd .tl-media,.tl-item-even .tl-media{display:none}
-  .tl-node-badge{font-size:.6rem;padding:3px 6px;letter-spacing:0;box-shadow:0 0 0 2px var(--bg)}
-  .tl-node-badge-feat{font-size:.65rem;padding:4px 7px}
+  .tl-node-badge{font-size:13px;padding:3px 6px;letter-spacing:0;box-shadow:0 0 0 2px var(--bg)}
+  .tl-node-badge-feat{font-size:13px;padding:4px 7px}
 }
 
 .ai-question-block{padding:20px}
@@ -1891,10 +1935,10 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 @media(min-width:640px){.ai-question-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .ai-question-card{padding:16px;border:1px solid var(--cbr);border-radius:10px;background:rgba(255,255,255,.7)}
 .ai-question-card h3{font-size:1rem;margin-bottom:8px}
-.ai-question-card p{margin-bottom:12px;font-size:.94rem;line-height:1.55}
+.ai-question-card p{margin-bottom:12px;font-size:15px;line-height:1.6}
 .topic-hub-links{border-top:1px solid var(--cbr);padding-top:14px}
 .topic-hub-chip-row{display:flex;flex-wrap:wrap;gap:8px}
-.topic-hub-chip{display:inline-flex;align-items:center;padding:7px 12px;border:1px solid var(--cbr);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);text-decoration:none;font-size:.82rem;font-weight:600}
+.topic-hub-chip{display:inline-flex;align-items:center;padding:7px 12px;border:1px solid var(--cbr);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);text-decoration:none;font-size:13px;font-weight:400}
 .topic-hub-chip:hover{background:#e7f0e7;color:var(--btn-bg);text-decoration:none}
 
 #supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}
@@ -1985,12 +2029,13 @@ function generateEventsDateHTML(
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const canonical = `${siteUrl}/events/${monthName}/${day}/`;
-  const events = eventsData?.events || [];
+  const events = (eventsData?.events || []).slice().sort((a, b) => a.year - b.year);
   const births = eventsData?.births || [];
   const deaths = eventsData?.deaths || [];
 
-  const featured =
-    events.find((e) => e.pages?.[0]?.thumbnail?.source) || events[0] || null;
+  const featured = events.length
+    ? events.reduce((best, e) => wikiRichScore(e) >= wikiRichScore(best) ? e : best, events[0])
+    : null;
   const others = events.filter((e) => e !== featured);
   const topBirths = births.slice(0, 20);
   const topDeaths = deaths.slice(0, 20);
@@ -2018,6 +2063,9 @@ function generateEventsDateHTML(
   const featTitle = featured
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
+  const featRemainder = featured
+    ? featured.text.substring(featured.text.indexOf(".") + 1).trim()
+    : "";
 
   // Era range helpers (must be before eventsIntroLine which references evEraRange)
   const fmtY = (y) => (y < 0 ? `${Math.abs(y)} BC` : String(y));
@@ -2240,7 +2288,7 @@ function generateEventsDateHTML(
       ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=600&q=80" alt="${escapeHtml(featured.text.substring(0, 80))}" class="tl-feat-img d-md-none" loading="eager"/>`
       : "";
     const didYouKnowHtml = didYouKnowFacts.length > 0
-      ? `<div class="did-you-know" style="margin:10px 0"><h3><i class="bi bi-lightbulb-fill me-1" style="color:var(--accent,#9dc43a)"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>`
+      ? buildDidYouKnowSlider(didYouKnowFacts, "dyn-slide-inline")
       : `<div class="commentary" style="margin:10px 0"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`;
     const card = `<div class="tl-card tl-card-feat">
   ${mobileImg}
@@ -2275,6 +2323,8 @@ function generateEventsDateHTML(
     const dotIdx = fullText.indexOf(". ");
     const titleText = dotIdx > 0 ? escapeHtml(fullText.slice(0, dotIdx + 1)) : escapeHtml(fullText);
     const descText = dotIdx > 0 ? escapeHtml(fullText.slice(dotIdx + 2).trim()) : "";
+    const pageDesc = escapeHtml(e.pages?.[0]?.description || "");
+    const pageExtract = escapeHtml(e.pages?.[0]?.extract || "");
     const isEven = idx % 2 === 1;
     const imgHtml = th
       ? w
@@ -2286,7 +2336,8 @@ function generateEventsDateHTML(
     ${imgHtml}
     <div class="tl-card-content">
       <div class="tl-card-title">${titleText}</div>
-      ${descText ? `<div class="tl-card-desc">${descText}</div>` : ""}
+      ${descText ? `<div class="tl-card-desc">${descText}</div>` : pageDesc ? `<div class="tl-card-desc">${pageDesc}</div>` : ""}
+      ${pageExtract ? `<div class="tl-card-extract">${pageExtract}</div>` : ""}
       ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
     </div>
   </div>
@@ -2405,22 +2456,24 @@ ${siteNav()}
     ${events.length > 0 ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
     ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
   </div>
-  <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(eventsIntroLine)}</p>
+  <p class="text-muted mb-2" style="font-size:15px">${escapeHtml(eventsIntroLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   ${
     featured || others.length > 0
       ? `
-  ${featImg && featured ? `<div class="card-box" style="padding:0;overflow:hidden"><img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager" style="width:100%;display:block;border-radius:10px;max-height:380px;object-fit:cover"/></div>` : ""}
-  <div class="card-box" style="padding:20px 24px">
+  <div class="card-box" style="padding:0;overflow:hidden">
+    ${featImg && featured ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover"/>` : ""}
+    <div style="padding:20px 24px">
     ${featured ? `
     <h2 style="margin-top:0">${featTitle}</h2>
-    <p class="mb-3">${escapeHtml(featured.text)}</p>
-    ${didYouKnowFacts.length > 0 ? `<div class="did-you-know"><h3><i class="bi bi-lightbulb-fill me-1" style="color:var(--accent,#9dc43a)"></i>Did You Know?</h3><ul>${didYouKnowFacts.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>` : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
+    ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${others.length > 0 ? `
     <div class="tl-wrap">${othersVisibleHtml}</div>
     ${othersHiddenHtml ? `<div id="events-more" style="display:none"><div class="tl-wrap">${othersHiddenHtml}</div></div>
     <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>` : ""}` : ""}
+    </div>
   </div>`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
@@ -2488,8 +2541,8 @@ ${siteNav()}
     </div>
     <div class="text-center">
       <p class="text-muted mb-3">Explore history for any date on the interactive calendar.</p>
-      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+      <a href="/" class="site-btn site-btn-primary w-100 mt-3"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="site-btn w-100 mt-3"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
   </div>
 </main>
@@ -2560,7 +2613,7 @@ function buildDateClusterCard(monthName, day, mDisplay, currentType) {
 
   return `<div class="card-box date-cluster-card">
     <h2 class="h5 mb-3"><i class="bi bi-signpost-split me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h2>
-    <p class="text-muted mb-3" style="font-size:.9rem">Jump between the main pages for this date to compare events, people, and the daily quiz.</p>
+    <p class="text-muted mb-3" style="font-size:15px">Jump between the main pages for this date to compare events, people, and the daily quiz.</p>
     <div class="date-cluster-links">${buttons}</div>
   </div>`;
 }
@@ -2581,7 +2634,7 @@ function buildRelatedBlogCard(entry, heading = "Related Story") {
       ${thumb}
       <div style="min-width:0">
         <div class="fw-semibold" style="font-size:.96rem;line-height:1.35;color:var(--btn-bg,#1b3a2d)">${title}</div>
-        ${description ? `<p class="mb-2 mt-1 text-muted" style="font-size:.84rem;line-height:1.45">${description}</p>` : ""}
+        ${description ? `<p class="mb-2 mt-1 text-muted" style="font-size:15px;line-height:1.6">${description}</p>` : ""}
         <span class="small" style="font-weight:600">Read the full story <i class="bi bi-arrow-right ms-1"></i></span>
       </div>
     </a>
@@ -2651,11 +2704,31 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const DD = String(day).padStart(2, "0");
   const canonical = `${siteUrl}/born/${monthName}/${day}/`;
 
-  const births = eventsData?.births || [];
-  const featured =
-    births.find((b) => b.pages?.[0]?.thumbnail?.source) || births[0] || null;
+  const births = (eventsData?.births || []).slice().sort((a, b) => a.year - b.year);
+  const featured = births.length
+    ? births.reduce((best, b) => wikiRichScore(b) >= wikiRichScore(best) ? b : best, births[0])
+    : null;
+  const othersB = births.filter((b) => b !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
-  const featImg = featured?.pages?.[0]?.thumbnail?.source || null;
+  const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
+  const featRemainder = featured ? featured.text.substring(featured.text.indexOf(",") + 1).trim() : "";
+  const commentaryParas = featured ? workerCommentary(featured.year, featured.text) : [];
+  const didYouKnowFacts = (() => {
+    const scoreS = (s) =>
+      (/\d/.test(s) ? 2 : 0) +
+      (/\b(first|only|never|most|oldest|youngest|record|won|invented|discovered|became)\b/i.test(s) ? 3 : 0) +
+      (/[A-Z][a-z]/.test(s.slice(5)) ? 1 : 0);
+    return (featured?.pages?.[0]?.extract || "")
+      .split(/\.\s+/)
+      .map((s) => s.replace(/\s+/g, " ").trim())
+      .filter((s) => {
+        if (s.length < 50 || s.length > 220) return false;
+        if (/^(He|She|It|This|They|The [a-z])/.test(s) && !/\d/.test(s)) return false;
+        return true;
+      })
+      .sort((a, b) => scoreS(b) - scoreS(a))
+      .slice(0, 5);
+  })();
   const ogImg = featImg || `${siteUrl}/images/logo.png`;
   const pageTitle = featured
     ? `${featName} & Other Famous Birthdays on ${mDisplay} ${day} | thisDay.info`
@@ -2821,8 +2894,8 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 </div>`;
   };
 
-  const visibleBirths = births.slice(0, 20);
-  const hiddenBirths = births.slice(20);
+  const visibleBirths = othersB.slice(0, 20);
+  const hiddenBirths = othersB.slice(20);
 
   let visibleTlHtml = "";
   visibleBirths.forEach((b, i) => {
@@ -2893,13 +2966,22 @@ ${siteNav()}
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
-  <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(introLine)}</p>
+  <p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${births.length > 0 ? `
-  <div class="card-box" style="padding:20px 24px">
+  ${featured || othersB.length > 0 ? `
+  <div class="card-box" style="padding:0;overflow:hidden">
+    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover"/>` : ""}
+    <div style="padding:20px 24px">
+    ${featured ? `
+    <h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>
+    ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
+    ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
+    ${othersB.length > 0 ? `
     <div class="tl-wrap">${visibleTlHtml}</div>
     ${hiddenTlHtml ? `<div id="births-more" style="display:none"><div class="tl-wrap">${hiddenTlHtml}</div></div>
-    <button onclick="var m=document.getElementById('births-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${births.length} birthdays':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${births.length} birthdays</button>` : ""}
+    <button onclick="var m=document.getElementById('births-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${othersB.length} birthdays':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${othersB.length} birthdays</button>` : ""}` : ""}
+    </div>
   </div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
@@ -2910,14 +2992,6 @@ ${siteNav()}
   ${relatedBlogHtml}
   ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange })}
   ${buildDateClusterCard(monthName, day, mDisplay, "born")}
-  <div class="card-box">
-    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
-    <div class="explore-actions">
-      <a href="/events/${monthName}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-calendar-event me-2"></i>Historical Events</a>
-      <a href="/died/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
-      <a href="/quiz/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
-    </div>
-  </div>
   ${topEvents.length > 0 ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
@@ -2936,8 +3010,8 @@ ${siteNav()}
     </div>
     <div class="text-center">
       <p class="text-muted mb-3">Explore famous birthdays on the interactive calendar.</p>
-      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+      <a href="/" class="site-btn site-btn-primary w-100 mt-3"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="site-btn w-100 mt-3"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
   </div>
 </main>
@@ -2953,11 +3027,31 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const DD = String(day).padStart(2, "0");
   const canonical = `${siteUrl}/died/${monthName}/${day}/`;
 
-  const deaths = eventsData?.deaths || [];
-  const featured =
-    deaths.find((d) => d.pages?.[0]?.thumbnail?.source) || deaths[0] || null;
+  const deaths = (eventsData?.deaths || []).slice().sort((a, b) => a.year - b.year);
+  const featured = deaths.length
+    ? deaths.reduce((best, d) => wikiRichScore(d) >= wikiRichScore(best) ? d : best, deaths[0])
+    : null;
+  const othersD = deaths.filter((d) => d !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
-  const featImg = featured?.pages?.[0]?.thumbnail?.source || null;
+  const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
+  const featRemainder = featured ? featured.text.substring(featured.text.indexOf(",") + 1).trim() : "";
+  const commentaryParas = featured ? workerCommentary(featured.year, featured.text) : [];
+  const didYouKnowFacts = (() => {
+    const scoreS = (s) =>
+      (/\d/.test(s) ? 2 : 0) +
+      (/\b(first|only|never|most|oldest|youngest|record|won|invented|discovered|became)\b/i.test(s) ? 3 : 0) +
+      (/[A-Z][a-z]/.test(s.slice(5)) ? 1 : 0);
+    return (featured?.pages?.[0]?.extract || "")
+      .split(/\.\s+/)
+      .map((s) => s.replace(/\s+/g, " ").trim())
+      .filter((s) => {
+        if (s.length < 50 || s.length > 220) return false;
+        if (/^(He|She|It|This|They|The [a-z])/.test(s) && !/\d/.test(s)) return false;
+        return true;
+      })
+      .sort((a, b) => scoreS(b) - scoreS(a))
+      .slice(0, 5);
+  })();
   const ogImg = featImg || `${siteUrl}/images/logo.png`;
   const pageTitle = featured
     ? `${featName} & Others Who Died on ${mDisplay} ${day} | thisDay.info`
@@ -3123,8 +3217,8 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 </div>`;
   };
 
-  const visibleDeaths = deaths.slice(0, 20);
-  const hiddenDeaths = deaths.slice(20);
+  const visibleDeaths = othersD.slice(0, 20);
+  const hiddenDeaths = othersD.slice(20);
 
   let visibleDiedTlHtml = "";
   visibleDeaths.forEach((d, i) => {
@@ -3195,13 +3289,22 @@ ${siteNav()}
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>
-  <p class="text-muted mb-2" style="font-size:.9rem">${escapeHtml(introLine)}</p>
+  <p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
-  ${deaths.length > 0 ? `
-  <div class="card-box" style="padding:20px 24px">
+  ${featured || othersD.length > 0 ? `
+  <div class="card-box" style="padding:0;overflow:hidden">
+    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover"/>` : ""}
+    <div style="padding:20px 24px">
+    ${featured ? `
+    <h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>
+    ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
+    ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
+    ${othersD.length > 0 ? `
     <div class="tl-wrap">${visibleDiedTlHtml}</div>
     ${hiddenDiedTlHtml ? `<div id="deaths-more" style="display:none"><div class="tl-wrap">${hiddenDiedTlHtml}</div></div>
-    <button onclick="var m=document.getElementById('deaths-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${deaths.length} deaths':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${deaths.length} deaths</button>` : ""}
+    <button onclick="var m=document.getElementById('deaths-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${othersD.length} deaths':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${othersD.length} deaths</button>` : ""}` : ""}
+    </div>
   </div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
@@ -3212,14 +3315,6 @@ ${siteNav()}
   ${relatedBlogHtml}
   ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange })}
   ${buildDateClusterCard(monthName, day, mDisplay, "died")}
-  <div class="card-box">
-    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
-    <div class="explore-actions">
-      <a href="/events/${monthName}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-calendar-event me-2"></i>Historical Events</a>
-      <a href="/born/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
-      <a href="/quiz/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
-    </div>
-  </div>
   ${topEvents.length > 0 ? `
   <div class="card-box">
     <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
@@ -3238,8 +3333,8 @@ ${siteNav()}
     </div>
     <div class="text-center">
       <p class="text-muted mb-3">Explore notable deaths on the interactive calendar.</p>
-      <a href="/" class="site-btn site-btn-primary me-2"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+      <a href="/" class="site-btn site-btn-primary w-100 mt-3"><i class="bi bi-calendar3"></i>Open the Calendar</a>
+      <a href="/blog/" class="site-btn w-100 mt-3"><i class="bi bi-journal-text"></i>All Blog Posts</a>
     </div>
   </div>
 </main>
@@ -3341,7 +3436,7 @@ async function handleBlogIndex(env, url) {
                 ? `<div class="text-muted mb-2" style="font-size:.8rem">${dateStr}</div>`
                 : "") +
               (desc
-                ? `<p class="mb-2" style="font-size:.9rem">${desc}</p>`
+                ? `<p class="mb-2" style="font-size:15px">${desc}</p>`
                 : "") +
               `<a href="/blog/${slug}/" class="site-btn" style="padding:6px 12px;font-size:.8rem"><i class="bi bi-arrow-right me-1"></i>Read More</a>` +
               `</div></div></div>`
@@ -3394,7 +3489,7 @@ ${siteNav()}
   <h1 class="mb-4">Latest Posts</h1>
   ${
     latestPostLabel
-      ? `<p class="text-muted mb-4" style="font-size:.9rem">Latest article published on <time datetime="${escapeHtml(latestPostIso)}">${escapeHtml(latestPostLabel)}</time>.</p>`
+      ? `<p class="text-muted mb-4" style="font-size:15px">Latest article published on <time datetime="${escapeHtml(latestPostIso)}">${escapeHtml(latestPostLabel)}</time>.</p>`
       : ""
   }
   ${postsHtml}
@@ -3422,7 +3517,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v10-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v14-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -3512,7 +3607,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v10-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v14-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -3750,7 +3845,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v33-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v36-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -5600,7 +5695,7 @@ function buildQuizHTML(quiz, monthDisplay, day) {
   return (
     `<div class="card-box" id="tdq-widget">` +
     `<h2 class="h4 mb-3"><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>Test Your Knowledge — ${escapeHtml(monthDisplay)} ${day}</h2>` +
-    `<p class="text-muted mb-2" style="font-size:.9rem">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out.</p>` +
+    `<p class="text-muted mb-2" style="font-size:15px">How well do you know the history of ${escapeHtml(monthDisplay)} ${day}? Answer these 5 questions to find out.</p>` +
     `<a href="/quiz/${escapeHtml(monthDisplay.toLowerCase())}/${day}/" class="site-btn mb-3"><i class="bi bi-list-check"></i>Full quiz page</a>` +
     `<div id="tdq-questions">${questionsHtml}</div>` +
     `<div id="tdq-score" class="mt-3" hidden></div>` +
@@ -6232,12 +6327,12 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-dots-row{display:flex;justify-content:center;gap:10px;margin-bottom:8px}
 .qsc-dot{width:12px;height:12px;border-radius:50%;border:none;background:var(--cbr);cursor:pointer;padding:0;transition:all .2s;outline:none}
 .qsc-dot:hover{background:#94a3b8}.qsc-dot.qsc-dot-active{background:var(--btn-bg);transform:scale(1.3)}.qsc-dot.qsc-dot-done{background:#10b981}.qsc-dot.qsc-dot-wrong{background:#ef4444}
-.qsc-progress-label{font-size:.82rem;color:var(--mu);margin:0}
+.qsc-progress-label{font-size:13px;color:var(--mu);margin:0}
 /* Nav row */
 .qsc-nav-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
-.qsc-back-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;font-size:.85rem;font-weight:500;color:var(--tc);cursor:pointer;transition:all .15s}
+.qsc-back-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;font-size:15px;font-weight:400;color:var(--tc);cursor:pointer;transition:all .15s}
 .qsc-back-btn:hover:not(:disabled){border-color:#1a1a1a;color:#1a1a1a}.qsc-back-btn:disabled{opacity:.35;cursor:default}
-.qsc-hint{font-size:.82rem;color:var(--mu);font-style:italic}
+.qsc-hint{font-size:13px;color:var(--mu);font-style:italic}
 /* Carousel wrapper */
 #qsc-wrapper{border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.12);background:var(--cb);margin-bottom:24px}
 
@@ -6252,17 +6347,17 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-slide.qsc-active .qsc-event-img{transform:scale(1.02)}
 .qsc-img-placeholder{background:linear-gradient(135deg,#1e3a5f 0%,#2d1b69 100%)}
 .qsc-img-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.7) 0%,rgba(0,0,0,.1) 60%,transparent 100%)}
-.qsc-year-pill{position:absolute;bottom:14px;left:16px;background:var(--badge);color:#fff;padding:4px 12px;border-radius:20px;font-size:.8rem;font-weight:700;letter-spacing:.04em}
+.qsc-year-pill{position:absolute;bottom:14px;left:16px;background:var(--badge);color:#fff;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:400;letter-spacing:.04em}
 /* Slide body */
 .qsc-slide-body{padding:18px 20px 22px;scroll-margin-top:60px}
 @media(min-width:600px){.qsc-slide-body{padding:22px 28px 28px}}
-.qsc-read-more-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 14px;padding:6px 14px;border:1.5px solid rgba(0,0,0,.35);border-radius:20px;font-size:.8rem;font-weight:500;color:#1a1a1a;text-decoration:none;transition:all .2s;background:rgba(0,0,0,.06)}
+.qsc-read-more-btn{display:inline-flex;align-items:center;gap:6px;margin:10px 0 14px;padding:6px 14px;border:1.5px solid rgba(0,0,0,.35);border-radius:20px;font-size:15px;font-weight:400;color:#1a1a1a;text-decoration:none;transition:all .2s;background:rgba(0,0,0,.06)}
 .qsc-read-more-btn:hover{background:rgba(0,0,0,.14);border-color:#1a1a1a;color:#1a1a1a;text-decoration:none}
-.qsc-q-label{display:inline-flex;align-items:center;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--badge);margin-bottom:10px}
+.qsc-q-label{display:inline-flex;align-items:center;font-size:13px;font-weight:400;text-transform:uppercase;letter-spacing:.08em;color:var(--badge);margin-bottom:10px}
 .qsc-q-text{font-size:1.05rem;font-weight:700;color:var(--tc);margin-bottom:14px;line-height:1.45}
 .qsc-opts-wrap{display:flex;flex-direction:column;gap:9px}
 /* Next button */
-.qsc-next-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg);color:var(--btn-text);border:none;border-radius:10px;font-size:.95rem;font-weight:600;cursor:pointer;transition:background .15s,transform .1s;animation:qscIn .25s ease}
+.qsc-next-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:12px;background:var(--btn-bg);color:var(--btn-text);border:none;border-radius:10px;font-size:15px;font-weight:400;cursor:pointer;transition:background .15s,transform .1s;animation:qscIn .25s ease}
 .qsc-next-btn:hover{background:var(--btn-hover);transform:translateY(-1px)}
 .
 /* Final score slide */
@@ -6274,7 +6369,7 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-review-list{text-align:left;border:1px solid var(--cbr);border-radius:10px;overflow:hidden;margin-bottom:22px}
 .qsc-rev-item{display:flex;align-items:center;gap:10px;padding:10px 14px;font-size:.9rem;border-bottom:1px solid var(--cbr)}.qsc-rev-item:last-child{border-bottom:none}
 .qsc-cta-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
-.qsc-cta-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:8px;font-size:.9rem;font-weight:600;text-decoration:none;border:1.5px solid var(--cbr);color:var(--tc);background:var(--cb);transition:all .15s}
+.qsc-cta-btn{display:inline-flex;align-items:center;gap:7px;padding:10px 18px;border-radius:8px;font-size:15px;font-weight:400;text-decoration:none;border:1.5px solid var(--cbr);color:var(--tc);background:var(--cb);transition:all .15s}
 .qsc-cta-btn:hover{border-color:#1a1a1a;color:#1a1a1a;transform:translateY(-1px)}
 .qsc-cta-primary{background:var(--badge);color:#fff!important;border-color:var(--badge)}
 .qsc-cta-primary:hover{background:#a03508;border-color:#a03508;color:#fff!important}
@@ -6290,10 +6385,10 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-rec-img-wrap{height:82px;overflow:hidden;position:relative;background:linear-gradient(135deg,#1e3a5f 0%,#2d1b69 100%)}
 .qsc-rec-img{width:100%;height:100%;object-fit:cover;display:block}
 .qsc-rec-overlay{position:absolute;inset:0;background:rgba(0,0,0,.25)}
-.qsc-rec-badge{position:absolute;top:7px;right:8px;background:var(--badge);color:#fff;font-size:.65rem;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.04em;text-transform:uppercase}
+.qsc-rec-badge{position:absolute;top:7px;right:8px;background:var(--badge);color:#fff;font-size:13px;font-weight:400;padding:2px 7px;border-radius:10px;letter-spacing:.04em;text-transform:uppercase}
 .qsc-rec-body{padding:8px 10px}
-.qsc-rec-date{font-size:.85rem;font-weight:700;color:var(--tc);line-height:1.2}
-.qsc-rec-lbl{font-size:.72rem;color:var(--mu);margin-top:2px}
+.qsc-rec-date{font-size:13px;font-weight:400;color:var(--tc);line-height:1.2}
+.qsc-rec-lbl{font-size:13px;color:var(--mu);margin-top:2px}
 
 </style>
 </head>

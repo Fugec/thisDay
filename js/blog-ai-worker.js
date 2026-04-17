@@ -123,12 +123,6 @@ const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 
 function buildArticleAnswerBlock(content) {
-  // Use the AI description if it's a real one; avoid the "Discover the story of…" boilerplate.
-  const isBoilerplate = !content.description || /^Discover the story of /i.test(content.description);
-  const summaryLead = isBoilerplate
-    ? `${content.eventTitle} took place on ${content.historicalDate}${content.location ? ` in ${content.location}` : ""}.`
-    : content.description;
-
   // Build grid rows from quickFacts; fall back to the four core fields when empty.
   const facts = content.quickFacts?.length
     ? content.quickFacts
@@ -144,12 +138,53 @@ function buildArticleAnswerBlock(content) {
 
   return `<section class="ai-answer-card mb-4" aria-labelledby="article-short-answer-title">
     <div class="ai-answer-kicker">Short answer</div>
-    <h2 id="article-short-answer-title" class="h4 mb-2">What was ${esc(content.eventTitle)}?</h2>
-    <p>${esc(summaryLead)}</p>
+    <h2 id="article-short-answer-title" class="seo-only-title" style="display:none">What was ${esc(content.eventTitle)}?</h2>
     <div class="ai-answer-grid" aria-label="Key facts">
 ${gridItems}
     </div>
   </section>`;
+}
+
+function buildDidYouKnowSlider(facts) {
+  const cleanedFacts = (facts || [])
+    .map((fact) => String(fact || "").trim())
+    .filter(Boolean);
+  if (!cleanedFacts.length) return "";
+
+  const sliderFacts = Array.from({ length: 5 }, (_, index) => {
+    const fact = cleanedFacts[index] || cleanedFacts[index % cleanedFacts.length];
+    return `            <article class="blog-cta-col dyn-slide" aria-label="Did you know fact ${index + 1}">
+              <p>Did you know</p>
+              <h3>${esc(fact)}</h3>
+            </article>`;
+  }).join("\n");
+
+  return `<section class="dyn-slider-wrap mb-4" aria-label="Did you know">
+            <div class="dyn-slider-track">
+${sliderFacts}
+            </div>
+          </section>`;
+}
+
+function replaceLegacyDidYouKnowBlocks(html) {
+  return String(html || "").replace(
+    /<div class="did-you-know[^"]*"[^>]*>[\s\S]*?<ul[^>]*>([\s\S]*?)<\/ul>[\s\S]*?<\/div>/gi,
+    (_match, listHtml) => {
+      const facts = Array.from(
+        String(listHtml || "").matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi),
+      )
+        .map((item) =>
+          unesc(
+            String(item[1] || "")
+              .replace(/<[^>]+>/g, " ")
+              .replace(/\s+/g, " ")
+              .trim(),
+          ),
+        )
+        .filter(Boolean);
+      return buildDidYouKnowSlider(facts);
+    },
+  );
 }
 
 const AI_REFERRER_SOURCES = [
@@ -1160,7 +1195,7 @@ export default {
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace(
           "</head>",
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:.82rem;font-weight:700;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}</style></head>`,
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide h3{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}</style></head>`,
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml
@@ -1217,6 +1252,8 @@ export default {
           /<figcaption class="article-meta mt-2">\s*<small>(?!Image courtesy of)[\s\S]*?<\/small>\s*<\/figcaption>/,
           '<figcaption class="article-meta mt-2"><small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small></figcaption>',
         );
+        // Patch legacy Did You Know bullet boxes into the card slider used by newer posts.
+        patchedHtml = replaceLegacyDidYouKnowBlocks(patchedHtml);
         // Patch old byline link /about/ → /about/editorial/ (E-E-A-T signal)
         if (patchedHtml.includes('href="/about/" rel="author"')) {
           patchedHtml = patchedHtml.replaceAll(
@@ -3208,14 +3245,16 @@ async function callWorkersAI(
     ? `You MUST write about this specific event: "${forcedEvent}". Do not choose a different event.`
     : `Write a detailed, engaging blog post about a significant historical event that occurred on ${monthName} ${day} (any year).
 ${pillarHint}
-When choosing the event, rank candidates by click and share potential on YouTube Shorts and social media. Prioritise in this order:
+GLOBAL RECOGNITION RULE (highest priority): First, ask yourself — does this date have an event that billions of people worldwide have heard of, that dominates Google search results for this date, and that anyone would instantly recognise from a headline? Examples of this tier: a presidential assassination, the sinking of a famous ship, a world war turning point, a major terrorist attack, a civil rights milestone. If yes, that event MUST be chosen. Do not pick a lesser-known event when a globally famous one exists on the same date — even if the famous event seems "obvious" or already widely covered online. Obvious famous events are chosen because they have the highest search traffic and audience interest.
+
+When no single globally dominant event exists, rank candidates by click and share potential on YouTube Shorts and social media. Prioritise in this order:
 1. Events involving globally recognised figures (presidents, kings, scientists, cultural icons) in dramatic or unexpected situations
 2. Events with a shocking twist, a near-miss, a dramatic reversal, or a surprising outcome that most people do not know
 3. Discoveries, inventions, or "firsts" that changed everyday life in ways still felt today
 4. Political turning points or military events whose consequences are still visible in the modern world
-5. Avoid obscure regional events, minor treaties, and incremental legislative steps unless they have a genuinely surprising story attached
+5. Avoid obscure regional events, minor treaties, incremental legislative steps, and niche court cases unless they have a genuinely viral story attached
 
-Prefer events that are likely to be image-rich on Wikipedia, meaning a real article page plus multiple usable related images. Good fits are named people, major battles, disasters, inventions, launches, assassinations, landmark trials, coups, and widely documented public incidents. Avoid generic labels like "strike", "meeting", or "conference" unless the event is tied to a very specific named subject and is clearly documented with multiple images.
+Prefer events that are likely to be image-rich on Wikipedia, meaning a real article page plus multiple usable related images. Good fits are named people, major battles, disasters, inventions, launches, assassinations, coups, and widely documented public incidents. Avoid generic labels like "strike", "meeting", or "conference" unless the event is tied to a very specific named subject and is clearly documented with multiple images.
 
 Choose the single event from this date that a curious 25-year-old would most likely stop scrolling to watch a 45-second video about, and that is most likely to pass a 3-image Wikipedia coverage check.`;
 
@@ -4871,9 +4910,7 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
   const canonicalUrl = `https://thisday.info/blog/${slug}/`;
   const publishedStr = `${monthName} ${day}, ${publishYear}`;
 
-  const didYouKnowItems = (c.didYouKnowFacts || [])
-    .map((f) => `              <li>${esc(f)}</li>`)
-    .join("\n");
+  const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || []);
 
   const overviewParas = (c.overviewParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
@@ -5213,17 +5250,24 @@ ${JSON.stringify({
       :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
       body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
       main{flex:1;margin-top:20px}
+      p{font-size:15px;line-height:1.6}
       a{color:var(--btn-bg)}a:hover{color:var(--accent);text-decoration:underline}
       h1,h2,h3{color:var(--text)}
-      .article-meta{color:var(--text-muted);font-size:.875rem}
+      .article-meta{color:var(--text-muted);font-size:13px}
       .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px}
-      .pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:.82rem;font-weight:700;letter-spacing:.01em;text-decoration:none;transition:background .15s ease,border-color .15s ease,color .15s ease}
+      .pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none;transition:background .15s ease,border-color .15s ease,color .15s ease}
       .pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg);color:var(--btn-bg);text-decoration:none}
       .pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
       .pillar-pill-featured:hover{background:var(--btn-hover);border-color:var(--btn-hover);color:#fff}
       .breadcrumb{background:transparent;padding:0;margin-bottom:1rem}
       .breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
-      .did-you-know{background:rgba(0,0,0,.04);border-left:4px solid var(--btn-bg);border-radius:0 .5rem .5rem 0}
+      .seo-only-title{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+      .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+      .dyn-slider-wrap::-webkit-scrollbar{display:none}
+      .dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}
+      .dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}
+      .dyn-slide h3{font-size:15px;color:#fff;margin:0;line-height:1.6}
+      .dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}
       .analysis-good{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
       .analysis-bad{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
       .related-card{border:1px solid var(--border);background:var(--bg);transition:transform .15s ease,box-shadow .15s ease}
@@ -5232,15 +5276,15 @@ ${JSON.stringify({
       @media(min-width:640px){.related-question-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
       .related-question-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72)}
       .related-question-card h3{font-size:1rem;margin-bottom:8px}
-      .related-question-card p{margin-bottom:0;font-size:.94rem;line-height:1.55}
+      .related-question-card p{margin-bottom:0;font-size:15px;line-height:1.6}
       .topic-hub-links{border-top:1px solid var(--border);padding-top:14px}
       .topic-hub-chip-row{display:flex;flex-wrap:wrap;gap:8px}
-      .topic-hub-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 12px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:.82rem;font-weight:700;text-decoration:none}
+      .topic-hub-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 12px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;font-weight:400;text-decoration:none}
       .topic-hub-chip:hover{background:#e7f0e7;border-color:var(--btn-bg);color:var(--btn-bg);text-decoration:none}
       .authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}
-      .authority-links-label{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}
+      .authority-links-label{font-size:13px;font-weight:400;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}
       .authority-links-row{display:flex;flex-wrap:wrap;gap:8px}
-      .authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:.84rem;font-weight:600;color:var(--btn-bg);background:#fff;text-decoration:none}
+      .authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;font-weight:400;color:var(--btn-bg);background:#fff;text-decoration:none}
       .authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
       blockquote.historical-quote{border-left:3px solid var(--btn-bg);padding-left:1rem;margin-left:.5rem;font-style:italic}
       .border{border:1px solid var(--border)!important;box-shadow:none}
@@ -5249,7 +5293,7 @@ ${JSON.stringify({
       .btn-outline-primary:hover{border-color:var(--btn-bg);color:var(--text);background:var(--bg-alt)}
       #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg);z-index:9999;transition:width .1s linear;pointer-events:none}
       button#chatbotToggle,#chatbotWindow{display:none!important}
-      .site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
+      .site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:15px;font-weight:400;text-decoration:none;color:var(--text);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
       .site-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}
       .site-btn-primary{border-color:var(--btn-bg);color:var(--text)}
       .site-btn-primary:hover{background:var(--bg-alt);border-color:var(--btn-hover);color:var(--text)}
@@ -5257,9 +5301,9 @@ ${JSON.stringify({
       .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--border);text-align:left;color:var(--text)}
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
       .site-table th{background:var(--bg-alt);font-weight:600;white-space:nowrap;width:40%}
-      .ai-answer-card{background:linear-gradient(180deg,rgba(157,196,58,.12),rgba(157,196,58,.05));border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px}
+      .ai-answer-card{background:#f5f5f5;border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px}
       .ai-answer-card p{margin-bottom:.75rem}
-      .ai-answer-kicker{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:rgba(27,58,45,.08);color:var(--btn-bg);font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
+      .ai-answer-kicker{display:none!important}
       .ai-answer-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
       @media(min-width:640px){.ai-answer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
       .ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px}
@@ -5320,16 +5364,7 @@ ${JSON.stringify({
           </figure>` : ""}
 
           <!-- Did You Know -->
-          ${
-            didYouKnowItems
-              ? `<div class="did-you-know p-3 rounded mb-4">
-            <strong>Did You Know?</strong>
-            <ul class="mb-0 mt-2">
-${didYouKnowItems}
-            </ul>
-          </div>`
-              : ""
-          }
+          ${didYouKnowSlider}
 
           <!-- Overview -->
           ${
@@ -5404,8 +5439,6 @@ ${conclusionParas}
               : ""
           }
 
-          ${buildArticleRelatedQuestionsBlock(c, currentPillars)}
-
           <!-- Personal Analysis -->
           ${
             analysisGoodItems || analysisBadItems
@@ -5442,29 +5475,6 @@ ${analysisBadItems}
               Historical data sourced under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.
             </small>
           </div>
-
-          ${(() => {
-            // Cross-link to the canonical /events/ page for the event's month/day
-            // Always derive the month/day from the publication slug (e.g. "8-april-2026")
-            // so the Explore card stays correct even if the AI returns a wrong ISO date.
-            const sp = parseSlugDate(slug);
-            if (!sp) return "";
-            const hDay = sp.day;
-            const hMonthSlug = sp.monthSlug;
-            const hMonthDisplay = sp.monthDisplay;
-            const exploreThumb =
-              c.eventsImageUrl || c.imageUrl
-                ? `<img src="/image-proxy?src=${encodeURIComponent(c.eventsImageUrl || c.imageUrl)}&w=80&q=75" alt="${esc(c.eventTitle)} historical image" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
-                : "";
-            return buildDateExploreCard(
-              {
-                monthDisplay: hMonthDisplay,
-                monthSlug: hMonthSlug,
-                day: hDay,
-              },
-              exploreThumb,
-            );
-          })()}
 
           ${(() => {
             const others = allPosts.filter((p) => p.slug !== slug);
@@ -5532,6 +5542,8 @@ ${analysisBadItems}
             </div>
           </section>`;
           })()}
+
+          ${buildArticleRelatedQuestionsBlock(c, currentPillars)}
 
           <!-- AI & Editorial Disclosure -->
           <div class="mt-5 p-3 rounded" style="background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);font-size:.82rem;line-height:1.6">

@@ -3908,10 +3908,11 @@ async function handleEventsDatePage(_request, env, ctx, url) {
   }
 
   // Identify featured event and generate AI "Did You Know" facts
-  const featuredEvent =
-    eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) ||
-    eventsData?.events?.[0] ||
-    null;
+  // Must use the same wikiRichScore selection as generateEventsDateHTML so DYK facts match the featured card.
+  const _evForFeatured = (eventsData?.events || []).slice().sort((a, b) => a.year - b.year);
+  const featuredEvent = _evForFeatured.length
+    ? _evForFeatured.reduce((best, e) => wikiRichScore(e) >= wikiRichScore(best) ? e : best, _evForFeatured[0])
+    : null;
   let didYouKnowFacts = [];
   const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
   const wikiSummary = featuredEvent

@@ -1812,6 +1812,14 @@ export default {
             "box-shadow:none",
           );
         }
+        // Inject updated ai-answer-card styles into older stored posts (removes green gradient,
+        // hides kicker and h2 title to match the current clean card design).
+        if (!patchedHtml.includes('ai-card-patch-v1')) {
+          patchedHtml = patchedHtml.replace(
+            '</head>',
+            '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>',
+          );
+        }
         // Patch stored <ins class="adsbygoogle"> elements missing style="display:block".
         // The pushIns function bails on offsetWidth===0, so inline <ins> elements are never
         // pushed to adsbygoogle. This fixes articles stored before the style was added.

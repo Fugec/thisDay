@@ -1826,9 +1826,10 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 @media(min-width:768px){.dyn-slider-btn{display:inline-flex}}
 @media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}
 
-.ai-answer-card{background:linear-gradient(180deg,rgba(157,196,58,.12),rgba(157,196,58,.05));border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px;margin:0 0 22px}
+.ai-answer-card{background:#f5f5f5;border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px;margin:0 0 22px}
 .ai-answer-card p{margin-bottom:.7rem}
-.ai-answer-kicker{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:rgba(27,58,45,.08);color:var(--btn-bg);font-size:13px;font-weight:400;letter-spacing:.04em;text-transform:uppercase;margin-bottom:10px}
+.ai-answer-kicker{display:none!important}
+.ai-answer-card h2{display:none!important}
 .ai-answer-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
 @media(min-width:640px){.ai-answer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px}
@@ -3553,14 +3554,16 @@ async function handleBornPage(request, env, ctx, url) {
   try {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
-      if (cached)
-        return new Response(cached, {
+      if (cached) {
+        const patched = cached.includes('ai-card-patch-v1') ? cached : cached.replace('</head>', '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        return new Response(patched, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
             "X-Cache": "HIT",
           },
         });
+      }
     }
   } catch (e) {
     console.error("KV read born:", e);
@@ -3643,14 +3646,16 @@ async function handleDiedPage(request, env, ctx, url) {
   try {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
-      if (cached)
-        return new Response(cached, {
+      if (cached) {
+        const patched = cached.includes('ai-card-patch-v1') ? cached : cached.replace('</head>', '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        return new Response(patched, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
             "X-Cache": "HIT",
           },
         });
+      }
     }
   } catch (e) {
     console.error("KV read died:", e);
@@ -3882,7 +3887,8 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        return new Response(cached, {
+        const patched = cached.includes('ai-card-patch-v1') ? cached : cached.replace('</head>', '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        return new Response(patched, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",

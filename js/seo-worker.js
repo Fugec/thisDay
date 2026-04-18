@@ -676,6 +676,7 @@ async function handleYearsIndex(env, url) {
 <link rel="stylesheet" href="/css/style.css"/>
 <link rel="stylesheet" href="/css/custom.css"/>
 <style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
 <body>
 ${siteNav()}
@@ -697,6 +698,17 @@ ${siteNav()}
     makeMeta: (item) => `${item.posts.length} matched article${item.posts.length === 1 ? "" : "s"}`,
     emptyText: "No year archives available yet.",
   })}
+  <div class="ad-unit my-4">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
+  </div>
 </main>
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "years-index", pageSlug: "years" })}
@@ -752,6 +764,7 @@ async function handleYearArchivePage(env, url, year) {
 <link rel="stylesheet" href="/css/style.css"/>
 <link rel="stylesheet" href="/css/custom.css"/>
 <style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
 <body>
 ${siteNav()}
@@ -769,6 +782,17 @@ ${siteNav()}
     <p class="mb-0">${yearEntry.posts.length} article${yearEntry.posts.length === 1 ? "" : "s"} currently connect to this historical year.</p>
   </section>
   ${renderTopicHubPostCards(yearEntry.posts)}
+  <div class="ad-unit my-4">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
+  </div>
 </main>
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "year-archive", pageSlug: String(year) })}
@@ -825,6 +849,7 @@ async function handleKeywordsIndex(env, url) {
 <link rel="stylesheet" href="/css/style.css"/>
 <link rel="stylesheet" href="/css/custom.css"/>
 <style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
 <body>
 ${siteNav()}
@@ -846,6 +871,17 @@ ${siteNav()}
     makeMeta: (item) => `${item.posts.length} matched article${item.posts.length === 1 ? "" : "s"}`,
     emptyText: "No keyword archives available yet.",
   })}
+  <div class="ad-unit my-4">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
+  </div>
 </main>
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "keywords-index", pageSlug: "keywords" })}
@@ -901,6 +937,7 @@ async function handleKeywordArchivePage(env, url, slug) {
 <link rel="stylesheet" href="/css/style.css"/>
 <link rel="stylesheet" href="/css/custom.css"/>
 <style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
 <body>
 ${siteNav()}
@@ -918,6 +955,17 @@ ${siteNav()}
     <p class="mb-0">${keywordEntry.posts.length} article${keywordEntry.posts.length === 1 ? "" : "s"} currently connect to this keyword cluster.</p>
   </section>
   ${renderTopicHubPostCards(keywordEntry.posts)}
+  <div class="ad-unit my-4">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
+  </div>
 </main>
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "keyword-archive", pageSlug: slug })}
@@ -1051,6 +1099,7 @@ async function handleTopicsIndex(env, url) {
 <link rel="stylesheet" href="/css/style.css"/>
 <link rel="stylesheet" href="/css/custom.css"/>
 <style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
 <body>
 ${siteNav()}
@@ -1067,6 +1116,17 @@ ${siteNav()}
     <p class="mb-0">These hubs connect thisDay.info articles into broader themes so readers and AI systems can move from one event page to a wider historical subject.</p>
   </section>
   ${cards}
+  <div class="ad-unit my-4">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
+  </div>
 </main>
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "topics-index", pageSlug: "topics" })}
@@ -1139,6 +1199,7 @@ async function handleTopicHubPage(env, url, slug) {
 <link rel="stylesheet" href="/css/style.css"/>
 <link rel="stylesheet" href="/css/custom.css"/>
 <style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
 <body>
 ${siteNav()}
@@ -1164,6 +1225,17 @@ ${siteNav()}
   </section>
   ${pillarLinks ? `<div class="topic-hub-chip-row mb-4">${pillarLinks}</div>` : ""}
   ${renderTopicHubPostCards(matchedPosts)}
+  <div class="ad-unit my-4">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
+  </div>
 </main>
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "topic-hub", pageSlug: slug })}
@@ -3506,6 +3578,7 @@ async function handleBlogIndex(env, url) {
 <link rel="stylesheet" href="/css/style.css"/>
 <link rel="stylesheet" href="/css/custom.css"/>
 <style>${getSharedPageStyles()}</style>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 </head>
 <body>
 ${siteNav()}
@@ -3523,6 +3596,17 @@ ${siteNav()}
       : ""
   }
   ${postsHtml}
+  <div class="ad-unit my-4">
+    <div class="ad-unit-label">Advertisement</div>
+    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
+         data-ad-format="auto" data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
+         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
+  </div>
 </main>
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "blog-index", pageSlug: "blog" })}

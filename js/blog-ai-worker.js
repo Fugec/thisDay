@@ -6060,6 +6060,7 @@ ${JSON.stringify(
         <div class="ad-unit-container">
           <span class="ad-unit-label">Advertisement</span>
           <ins class="adsbygoogle"
+               style="display:block"
                data-ad-client="ca-pub-8565025017387209"
                data-ad-slot="9477779891"
                data-ad-format="auto"
@@ -6068,6 +6069,15 @@ ${JSON.stringify(
         <div class="month-section">
           <h2 class="month-header"><i class="bi bi-book me-2"></i>All Articles (${index.length})</h2>
           ${postItems}
+        </div>
+
+        <div class="ad-unit-container mt-4 mb-4">
+          <span class="ad-unit-label">Advertisement</span>
+          <ins class="adsbygoogle"
+               style="display:block"
+               data-ad-client="ca-pub-8565025017387209"
+               data-ad-slot="9183511632"
+               data-ad-format="autorelaxed"></ins>
         </div>
       </div>
     </div>
@@ -6341,9 +6351,8 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
           <ins class="adsbygoogle"
                style="display:block;border-radius:8px;overflow:hidden"
                data-ad-client="ca-pub-8565025017387209"
-               data-ad-slot="9477779891"
-               data-ad-format="auto"
-               data-full-width-responsive="true"></ins>
+               data-ad-slot="9183511632"
+               data-ad-format="autorelaxed"></ins>
         </div>
 
         <div class="mb-5">

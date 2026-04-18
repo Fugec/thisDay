@@ -1812,6 +1812,14 @@ export default {
             "box-shadow:none",
           );
         }
+        // Patch stored <ins class="adsbygoogle"> elements missing style="display:block".
+        // The pushIns function bails on offsetWidth===0, so inline <ins> elements are never
+        // pushed to adsbygoogle. This fixes articles stored before the style was added.
+        patchedHtml = patchedHtml.replace(
+          /<ins([^>]*class="adsbygoogle"[^>]*)>/g,
+          (match, attrs) =>
+            attrs.includes("display:block") ? match : `<ins${attrs} style="display:block">`,
+        );
         // Inject AdSense ad unit into stored posts that don't have one yet
         // Only inject for posts from March 2026 onwards — leave older posts alone
         const _adParts = slug.match(/^(\d+)-([a-z]+)-(\d{4})$/i);
@@ -1826,7 +1834,7 @@ export default {
           !patchedHtml.includes('<ins class="adsbygoogle"') &&
           patchedHtml.includes("</article>")
         ) {
-          const adUnit = `<div class="ad-unit-container"><span class="ad-unit-label">Advertisement</span><ins id="ad-post-end" class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div><div class="ad-unit-container mt-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins></div>`;
+          const adUnit = `<div class="ad-unit-container"><span class="ad-unit-label">Advertisement</span><ins id="ad-post-end" class="adsbygoogle" style="display:block" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div><div class="ad-unit-container mt-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins></div>`;
           const adInitJs = `<script>(function(){if(location.hostname!=='thisday.info'&&location.hostname!=='www.thisday.info')return;function pushIns(el){if(!el.getAttribute('data-adsbygoogle-status')&&!el.getAttribute('data-ad-pushed')){el.setAttribute('data-ad-pushed','1');try{(adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}}}var units=document.querySelectorAll('ins.adsbygoogle');if('IntersectionObserver' in window){var io=new IntersectionObserver(function(e,o){e.forEach(function(en){if(en.isIntersecting){pushIns(en.target);o.unobserve(en.target);}});},{threshold:0.1});units.forEach(function(el){io.observe(el);});}else{units.forEach(pushIns);}})();<\/script>`;
           const bodyClose2 = patchedHtml.includes("</body>")
             ? "</body>"
@@ -5396,7 +5404,7 @@ ${overviewParas}
           <!-- Eyewitness / Chronicle Accounts -->
           ${
             eyewitnessParas
-              ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
+              ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
           <section class="mt-5">
             <h2 class="h3">Eyewitness Accounts</h2>
 ${eyewitnessParas}
@@ -5571,6 +5579,7 @@ ${analysisBadItems}
         <div class="ad-unit-container">
           <span class="ad-unit-label">Advertisement</span>
           <ins class="adsbygoogle"
+               style="display:block"
                data-ad-client="ca-pub-8565025017387209"
                data-ad-slot="9477779891"
                data-ad-format="auto"

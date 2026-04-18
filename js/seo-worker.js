@@ -2716,9 +2716,12 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       return true;
     }).length;
   };
+  const hasImage = (p) => !!(p?.pages?.[0]?.thumbnail?.source || p?.pages?.[0]?.originalimage?.source);
   const bornScore = (b) => countDyk(b) * 10 + wikiRichScore(b);
-  const featured = births.length
-    ? births.reduce((best, b) => bornScore(b) >= bornScore(best) ? b : best, births[0])
+  const birthsWithImg = births.filter(hasImage);
+  const featuredPool = birthsWithImg.length ? birthsWithImg : births;
+  const featured = featuredPool.length
+    ? featuredPool.reduce((best, b) => bornScore(b) >= bornScore(best) ? b : best, featuredPool[0])
     : null;
   const othersB = births.filter((b) => b !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
@@ -3050,9 +3053,12 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       return true;
     }).length;
   };
+  const hasImgD = (p) => !!(p?.pages?.[0]?.thumbnail?.source || p?.pages?.[0]?.originalimage?.source);
   const diedScore = (d) => countDykD(d) * 10 + wikiRichScore(d);
-  const featured = deaths.length
-    ? deaths.reduce((best, d) => diedScore(d) >= diedScore(best) ? d : best, deaths[0])
+  const deathsWithImg = deaths.filter(hasImgD);
+  const featuredPoolD = deathsWithImg.length ? deathsWithImg : deaths;
+  const featured = featuredPoolD.length
+    ? featuredPoolD.reduce((best, d) => diedScore(d) >= diedScore(best) ? d : best, featuredPoolD[0])
     : null;
   const othersD = deaths.filter((d) => d !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
@@ -3540,7 +3546,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v17-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v18-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -3630,7 +3636,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v16-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v17-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";

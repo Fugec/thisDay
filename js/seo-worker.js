@@ -2705,8 +2705,20 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const canonical = `${siteUrl}/born/${monthName}/${day}/`;
 
   const births = (eventsData?.births || []).slice().sort((a, b) => a.year - b.year);
+  // Count qualifying DYK sentences for a person — prefer someone who produces DYK cards,
+  // using wikiRichScore as a tiebreaker so we still get images when DYK counts are equal.
+  const countDyk = (b) => {
+    const extract = b?.pages?.[0]?.extract || "";
+    return extract.split(/\.\s+/).filter((s) => {
+      s = s.replace(/\s+/g, " ").trim();
+      if (s.length < 50 || s.length > 220) return false;
+      if (/^(He|She|It|This|They|The [a-z])/.test(s) && !/\d/.test(s)) return false;
+      return true;
+    }).length;
+  };
+  const bornScore = (b) => countDyk(b) * 10 + wikiRichScore(b);
   const featured = births.length
-    ? births.reduce((best, b) => wikiRichScore(b) >= wikiRichScore(best) ? b : best, births[0])
+    ? births.reduce((best, b) => bornScore(b) >= bornScore(best) ? b : best, births[0])
     : null;
   const othersB = births.filter((b) => b !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
@@ -3028,8 +3040,19 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const canonical = `${siteUrl}/died/${monthName}/${day}/`;
 
   const deaths = (eventsData?.deaths || []).slice().sort((a, b) => a.year - b.year);
+  // Prefer a featured person whose extract produces DYK cards; use wikiRichScore as tiebreaker.
+  const countDykD = (d) => {
+    const extract = d?.pages?.[0]?.extract || "";
+    return extract.split(/\.\s+/).filter((s) => {
+      s = s.replace(/\s+/g, " ").trim();
+      if (s.length < 50 || s.length > 220) return false;
+      if (/^(He|She|It|This|They|The [a-z])/.test(s) && !/\d/.test(s)) return false;
+      return true;
+    }).length;
+  };
+  const diedScore = (d) => countDykD(d) * 10 + wikiRichScore(d);
   const featured = deaths.length
-    ? deaths.reduce((best, d) => wikiRichScore(d) >= wikiRichScore(best) ? d : best, deaths[0])
+    ? deaths.reduce((best, d) => diedScore(d) >= diedScore(best) ? d : best, deaths[0])
     : null;
   const othersD = deaths.filter((d) => d !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
@@ -3517,7 +3540,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v16-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v17-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -3607,7 +3630,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v15-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v16-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";

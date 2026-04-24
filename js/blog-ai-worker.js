@@ -412,6 +412,9 @@ function extractPlainSentence(text, maxLength = 220) {
 
   const sentence = cleaned.split(/(?<=[.!?])\s+/)[0].replace(/\x01/g, ".");
 
+  // Reject AI-truncated text — ends with ellipsis, sentence is incomplete
+  if (sentence.endsWith("…") || sentence.endsWith("...")) return "";
+
   return sentence;
 }
 
@@ -1432,18 +1435,39 @@ export default {
             stepOverride + "\n" + bodyClose,
           );
         }
+        // Fix related-question-card paragraphs that end with … (AI-truncated in stored HTML)
+        if (patchedHtml.includes('related-question-card') && patchedHtml.includes('…</p>')) {
+          patchedHtml = patchedHtml.replace(
+            /(<article class="related-question-card">[\s\S]*?<p>)([^<]*…)(<\/p>)/g,
+            (_, open, text, close) => {
+              const lastEnd = text.search(/[.!?][^.!?]*$/);
+              if (lastEnd !== -1) return open + text.slice(0, lastEnd + 1) + close;
+              return open + text.replace(/\s+\S*…$/, '.') + close;
+            },
+          );
+        }
+        // Upgrade old amber-style Quiz CTA to authority-links style
+        if (!patchedHtml.includes('quiz-cta-patch-v1') && patchedHtml.includes('rgba(245,158,11,.08)')) {
+          patchedHtml = patchedHtml.replace(
+            /<div[^>]*rgba\(245,158,11[^>]*>[\s\S]*?<\/div>\s*<\/div>/,
+            `<div class="authority-links mt-4"><!-- quiz-cta-patch-v1 -->
+            <span class="authority-links-label">Test Your Knowledge</span>
+            <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
+            <div class="authority-links-row">
+              <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+            </div>
+          </div>`,
+          );
+        }
         // Inject quiz CTA + popup for old posts that don't have it
         if (!patchedHtml.includes("tdq-cta-btn")) {
           const quizCta = `
           <!-- Quiz CTA -->
-          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
-            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:var(--accent,#9dc43a);flex-shrink:0"></i>
-            <div>
-              <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
-              <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
-                Take the Quiz <i class="bi bi-arrow-right ms-1"></i>
-              </button>
+          <div class="authority-links mt-4">
+            <span class="authority-links-label">Test Your Knowledge</span>
+            <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
+            <div class="authority-links-row">
+              <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>`;
           const quizBlock = `
@@ -1585,10 +1609,10 @@ export default {
             /<div class="mt-4 p-3 rounded d-flex align-items-center gap-3"[^>]*>\s*<i class="bi bi-calendar3[\s\S]*?<\/div>\s*<\/div>/,
             "",
           );
-          // Fix intermediate explore cards that have data-explore-injected but Bootstrap flex classes (no nowrap)
+          // Upgrade old explore cards (inline styles / Bootstrap flex) to authority-links class
           patchedHtml = patchedHtml.replace(
-            /(<div data-explore-injected="1" class="mt-4 p-3 rounded) d-flex[^"]*"([^>]*)>/g,
-            '$1" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">',
+            /<div data-explore-injected="1" class="mt-4[^"]*"[^>]*>/g,
+            '<div data-explore-injected="1" class="authority-links mt-4">',
           );
           // Build "Explore in History" section
           const _sp = slugParsedForThumb;
@@ -1823,6 +1847,13 @@ export default {
             '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>',
           );
         }
+        // Font-size consistency patch: 15px on .mb-2 and .ai-answer-item value text.
+        if (!patchedHtml.includes('font-patch-v1')) {
+          patchedHtml = patchedHtml.replace(
+            '</head>',
+            '<style>/*font-patch-v1*/li.mb-2{font-size:15px}.ai-answer-item{font-size:15px}</style></head>',
+          );
+        }
         // Patch stored <ins class="adsbygoogle"> elements missing style="display:block".
         // The pushIns function bails on offsetWidth===0, so inline <ins> elements are never
         // pushed to adsbygoogle. This fixes articles stored before the style was added.
@@ -2044,15 +2075,38 @@ export default {
         /<script>\s*\(function\(\)\{var bar=document.getElementById\('marqueeBar'\),track=document.getElementById\('marqueeTrack'\)[\s\S]*?<\/script>/g,
         "",
       );
+      // Fix related-question-card paragraphs that end with … (AI-truncated in stored HTML)
+      if (html.includes('related-question-card') && html.includes('…</p>')) {
+        html = html.replace(
+          /(<article class="related-question-card">[\s\S]*?<p>)([^<]*…)(<\/p>)/g,
+          (_, open, text, close) => {
+            const lastEnd = text.search(/[.!?][^.!?]*$/);
+            if (lastEnd !== -1) return open + text.slice(0, lastEnd + 1) + close;
+            return open + text.replace(/\s+\S*…$/, '.') + close;
+          },
+        );
+      }
+      // Upgrade old amber-style Quiz CTA to authority-links style
+      if (!html.includes('quiz-cta-patch-v1') && html.includes('rgba(245,158,11,.08)')) {
+        html = html.replace(
+          /<div[^>]*rgba\(245,158,11[^>]*>[\s\S]*?<\/div>\s*<\/div>/,
+          `<div class="authority-links mt-4"><!-- quiz-cta-patch-v1 -->
+          <span class="authority-links-label">Test Your Knowledge</span>
+          <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
+          <div class="authority-links-row">
+            <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+          </div>
+        </div>`,
+        );
+      }
       // Inject quiz CTA + popup if no quiz present
       if (!html.includes("tdq-cta-btn")) {
         const quizCta = `
-          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(157,196,58,.08);border:1px solid rgba(157,196,58,.25)">
-            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:var(--accent,#9dc43a);flex-shrink:0"></i>
-            <div>
-              <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
-              <small class="tdq-cta-sub" style="color:var(--text-muted,#5c7a65)">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn mt-1" id="tdq-cta-btn" onclick="if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></button>
+          <div class="authority-links mt-4">
+            <span class="authority-links-label">Test Your Knowledge</span>
+            <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
+            <div class="authority-links-row">
+              <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>`;
         const quizBlock = `
@@ -5319,6 +5373,7 @@ ${JSON.stringify({
       .dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}
       .analysis-good{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
       .analysis-bad{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
+      li.mb-2{font-size:15px}
       .related-card{border:1px solid var(--border);background:var(--bg);transition:transform .15s ease,box-shadow .15s ease}
       .related-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1);text-decoration:none}
       .related-question-grid{display:grid;grid-template-columns:1fr;gap:14px}
@@ -5350,12 +5405,12 @@ ${JSON.stringify({
       .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--border);text-align:left;color:var(--text)}
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
       .site-table th{background:var(--bg-alt);font-weight:600;white-space:nowrap;width:40%}
-      .ai-answer-card{background:#f5f5f5;border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px}
-      .ai-answer-card p{margin-bottom:.75rem}
+      .ai-answer-card{background:#f5f5f5;border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px;font-size:15px}
+      .ai-answer-card p{margin-bottom:.75rem;font-size:15px}
       .ai-answer-kicker{display:none!important}
       .ai-answer-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
       @media(min-width:640px){.ai-answer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-      .ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px}
+      .ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px;font-size:15px}
       .ai-answer-item strong{font-size:.74rem;letter-spacing:.03em;text-transform:uppercase;color:var(--text-muted)}
       .tdq-cta-sub{color:var(--text-muted)}
       ${BLOG_NAV_WIDTH_FIX_CSS}
@@ -5575,14 +5630,11 @@ ${analysisBadItems}
               })
               .join("");
             return `<!-- Quiz CTA -->
-          <div class="mt-4 p-3 rounded d-flex align-items-center gap-3" style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25)">
-            <i class="bi bi-patch-question-fill" style="font-size:1.5rem;color:var(--accent,#9dc43a);flex-shrink:0"></i>
-            <div>
-              <strong style="color:var(--text,#1a2e20)">Test Your Knowledge</strong><br/>
-              <small class="tdq-cta-sub">Can you answer 5 questions about this event?</small><br/>
-              <button class="btn" id="tdq-cta-btn" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">
-                Take the Quiz <i class="bi bi-arrow-right ms-1"></i>
-              </button>
+          <div class="authority-links mt-4">
+            <span class="authority-links-label">Test Your Knowledge</span>
+            <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
+            <div class="authority-links-row">
+              <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>
           <section class="mt-5">
@@ -6576,17 +6628,18 @@ function buildDateExploreCard(sp, thumbHtml = "") {
   const monthDisplay = esc(sp.monthDisplay);
   const monthSlug = esc(sp.monthSlug);
   const day = esc(sp.day);
-  return `<div data-explore-injected="1" class="mt-4 p-3 rounded" style="display:flex;flex-direction:row;flex-wrap:nowrap;align-items:flex-start;gap:12px;background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08)">
-    ${thumbHtml}<div style="flex:1;min-width:0">
-      <strong>Explore ${monthDisplay} ${day} in History</strong><br/>
-      <small class="article-meta">Jump between the main events, famous births, notable deaths, and quiz for this date.</small>
-      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px">
-        <a href="/events/${monthSlug}/${day}/" class="btn">Events</a>
-        <a href="/born/${monthSlug}/${day}/" class="btn">Born</a>
-        <a href="/died/${monthSlug}/${day}/" class="btn">Died</a>
-        <a href="/quiz/${monthSlug}/${day}/" class="btn">Quiz</a>
-      </div>
-    </div>
+  const links = `<div class="authority-links-row">
+      <a href="/events/${monthSlug}/${day}/" class="authority-link">Events</a>
+      <a href="/born/${monthSlug}/${day}/" class="authority-link">Born</a>
+      <a href="/died/${monthSlug}/${day}/" class="authority-link">Died</a>
+      <a href="/quiz/${monthSlug}/${day}/" class="authority-link">Quiz</a>
+    </div>`;
+  const inner = thumbHtml
+    ? `<div style="display:flex;align-items:flex-start;gap:12px">${thumbHtml}<div style="flex:1;min-width:0"><p style="font-size:15px;margin:0 0 10px">Jump between the main events, famous births, notable deaths, and quiz for this date.</p>${links}</div></div>`
+    : `<p style="font-size:15px;margin:0 0 10px">Jump between the main events, famous births, notable deaths, and quiz for this date.</p>${links}`;
+  return `<div data-explore-injected="1" class="authority-links mt-4">
+    <span class="authority-links-label">Explore ${monthDisplay} ${day} in History</span>
+    ${inner}
   </div>`;
 }
 

@@ -71,7 +71,24 @@ function trimRedundantDateLead(text, post) {
   return out.trim();
 }
 
-function buildNarrationFactBlock(post, contentItems) {
+const ABBREV_RE = /\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc)\./gi;
+const METADATA_RE = /published:|editorial team|min read|event date|&nbsp;/i;
+const METADATA_PREFIX_RE = /^.*(?:min read|editorial team|event date)\s+/i;
+
+function extractFirstSentence(text) {
+  if (!text) return "";
+  const clean = String(text).replace(/&[a-z]+;/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const protected_ = clean.replace(ABBREV_RE, (m) => m.slice(0, -1) + "\x01");
+  const sentences = protected_.split(/(?<=[.!?])\s+/).map(s => s.replace(/\x01/g, ".").trim());
+  for (const s of sentences) {
+    // Strip leading metadata prefix (e.g. "Editorial Team | 12 min read ") if present
+    const candidate = METADATA_RE.test(s) ? s.replace(METADATA_PREFIX_RE, "") : s;
+    if (candidate.length > 80 && !METADATA_RE.test(candidate)) return candidate;
+  }
+  return "";
+}
+
+function buildNarrationFactBlock(post, contentItems, articleText) {
   if (contentItems && contentItems.length > 0) {
     const factA = trimRedundantDateLead(contentItems[0], post);
     const factB = contentItems[1]
@@ -82,13 +99,20 @@ function buildNarrationFactBlock(post, contentItems) {
     return facts.map((item) => (item.endsWith(".") ? item : item + ".")).join(" ");
   }
 
+  // Prefer the first full sentence from article text — avoids truncated KV descriptions
+  if (articleText) {
+    const sentence = trimRedundantDateLead(extractFirstSentence(articleText), post);
+    if (sentence && sentence.length > 60)
+      return sentence.endsWith(".") ? sentence : sentence + ".";
+  }
+
   const description = trimRedundantDateLead(post.description, post);
   return description ? (description.endsWith(".") ? description : description + ".") : "";
 }
 
-export function buildNarrationScript(post, contentItems) {
+export function buildNarrationScript(post, contentItems, articleText) {
   const parts = ["On this day in history.", buildNarrationIntro(post)];
-  const factBlock = buildNarrationFactBlock(post, contentItems);
+  const factBlock = buildNarrationFactBlock(post, contentItems, articleText);
   if (factBlock) parts.push(factBlock);
 
   parts.push("Discover more at thisday.info");
@@ -101,11 +125,12 @@ export function buildNarrationScript(post, contentItems) {
  *
  * @param {{ title: string, description: string }} post
  * @param {string[]|null} contentItems
+ * @param {string|null} articleText
  * @returns {string[]}
  */
-export function buildNarrationParts(post, contentItems) {
+export function buildNarrationParts(post, contentItems, articleText) {
   const parts = ["On this day in history.", buildNarrationIntro(post)];
-  const factBlock = buildNarrationFactBlock(post, contentItems);
+  const factBlock = buildNarrationFactBlock(post, contentItems, articleText);
   if (factBlock) parts.push(factBlock);
   parts.push("Discover more at thisday.info");
   return parts;

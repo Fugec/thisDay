@@ -669,76 +669,28 @@ async function prepareWikipediaSceneBuffer(buffer, year = null, qualityHint = nu
  * Background slowly zooms out (Ken Burns); the framed card stays fixed on top.
  */
 async function prepareWikipediaSceneLayers(buffer, year = null, qualityHint = null) {
+  // Full-bleed layout: sharp image fills W × (H - HEADER_H) below the header panel.
+  // bgBuf is oversized by IMAGE_HEADROOM so zoompan can animate without black edges.
+  // cardLayerBuf is a transparent canvas — no card, just branding composited by caller.
+  const HEADER_H = 480;
+  const IMG_H = H - HEADER_H - 1; // 1px gap below header
   const TARGET_W = Math.round(W * IMAGE_HEADROOM);
-  const TARGET_H = Math.round(H * IMAGE_HEADROOM);
-  const cardW = Math.round(W * 0.82);
-  const cardH = Math.round(H * 0.68);
-  const cardX = Math.round((W - cardW) / 2);
-  const cardY = Math.round((H - cardH) / 2 - H * 0.035);
-  const cardRadius = Math.round(Math.min(cardW, cardH) * 0.045);
+  const TARGET_H = Math.round(IMG_H * IMAGE_HEADROOM);
   const tuning = getQualityTuning(qualityHint);
 
-  // Background: blurred, darkened — oversized for zoompan headroom
-  let background = sharp(buffer)
+  let img = sharp(buffer)
     .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre" })
-    .blur(tuning.bgBlur)
-    .modulate({
-      brightness: tuning.bgBrightness,
-      saturation: tuning.bgSaturation,
-    });
-  background = applyEraGrading(background, year);
-
-  // Card image: sharp, enhanced, at card dimensions
-  let card = sharp(buffer)
-    .resize(cardW, cardH, { fit: "cover", position: "centre" })
     .sharpen({ sigma: tuning.cardSharpenSigma })
-    .modulate({
-      brightness: tuning.cardBrightness,
-      saturation: tuning.cardSaturation,
-    })
+    .modulate({ brightness: tuning.cardBrightness, saturation: tuning.cardSaturation })
     .linear(tuning.cardLinearA, tuning.cardLinearB);
-  card = applyEraGrading(card, year);
+  img = applyEraGrading(img, year);
 
-  const [bgBuf, cardImgBuf, vignetteBuf, depthBuf, shadowBuf, maskBuf] =
-    await Promise.all([
-      background.png().toBuffer(),
-      card.png().toBuffer(),
-      sharp(Buffer.from(buildVignetteSVG(W, H))).png().toBuffer(),
-      sharp(Buffer.from(buildDepthOverlaySVG(W, H))).png().toBuffer(),
-      sharp(Buffer.from(buildCardShadowSVG(cardW, cardH, cardRadius))).png().toBuffer(),
-      sharp(Buffer.from(buildRoundedRectMaskSVG(cardW, cardH, cardRadius))).png().toBuffer(),
-    ]);
+  const bgBuf = await img.png().toBuffer();
 
-  const maskedCardBuf = await sharp(cardImgBuf)
-    .composite([{ input: maskBuf, blend: "dest-in" }])
-    .png()
-    .toBuffer();
-
-  const borderBuf = await sharp({
-    create: { width: cardW, height: cardH, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
-  })
-    .composite([{
-      input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${cardW}" height="${cardH}">
-          <rect x="4" y="4"
-            width="${cardW - 8}" height="${cardH - 8}"
-            rx="${Math.max(0, cardRadius - 4)}"
-            fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="6"/>
-        </svg>`),
-    }])
-    .png()
-    .toBuffer();
-
-  // Card layer: W×H transparent canvas — shadow, masked card, border, vignette, depth
+  // Transparent static overlay — branding composited on top by the caller
   const cardLayerBuf = await sharp({
     create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
   })
-    .composite([
-      { input: shadowBuf,     left: cardX, top: cardY, blend: "over" },
-      { input: maskedCardBuf, left: cardX, top: cardY, blend: "over" },
-      { input: borderBuf,     left: cardX, top: cardY, blend: "over" },
-      { input: vignetteBuf,   blend: "over" },
-      { input: depthBuf,      blend: "over" },
-    ])
     .png()
     .toBuffer();
 
@@ -1690,6 +1642,9 @@ async function generateMultiSceneVideo(
 
       // Per-scene filter: pulsing zoom — image breathes in then out over full scene.
       // Z_MIN=1.0 → Z_MAX=1.18 → Z_MIN creates a gentle heartbeat feel.
+      // Image occupies W × IMG_H below the header; pad adds HEADER_H+1 px black at top.
+      const HEADER_H = 480;
+      const IMG_H = H - HEADER_H - 1;
       const Z_MIN = 1.0;
       const Z_MAX = 1.18;
       const Z_RANGE_STR = (Z_MAX - Z_MIN).toFixed(4);
@@ -1705,9 +1660,11 @@ async function generateMultiSceneVideo(
         const y = `ih/2-(ih/zoom/2)`;
         // Cinematic grade: slight warmth (lift reds, drop blues) + desaturation + film grain
         const grade = `eq=saturation=0.82:contrast=1.06:gamma_r=1.04:gamma_b=0.94,noise=alls=9:allf=t`;
+        // Zoompan outputs W×IMG_H; pad pushes it down below the header panel
         const zp =
           `[${i}:v]zoompan=z='${zoom}':x='${x}':y='${y}'` +
-          `:d=${d}:s=${W}x${H}:fps=${FPS},setpts=PTS-STARTPTS,fps=fps=${FPS},${grade}[kb${i}]`;
+          `:d=${d}:s=${W}x${IMG_H}:fps=${FPS},setpts=PTS-STARTPTS,fps=fps=${FPS},${grade}` +
+          `,pad=${W}:${H}:0:${HEADER_H + 1}:color=black[kb${i}]`;
         const brandPart   = `[kb${i}][${bgFiles.length + i}:v]overlay=x=0:y=0:format=auto[vbrand${i}]`;
         const bgPanelPart = `[vbrand${i}][${bgPanelIdx}:v]overlay=x=0:y=0:format=auto[vbgp${i}]`;
         const titlePart   = `[vbgp${i}][${titleCardIdx}:v]overlay=x=0:y=0:format=auto[v${i}]`;

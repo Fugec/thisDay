@@ -321,9 +321,7 @@ async function main() {
 
         // ── Narration expert: polish DYK/Quick Facts for engaging TTS ─────────
         // Uses full article text as context. Falls back to originals on any error.
-        const articleText = contentItems
-          ? await getArticleText(post.slug).catch(() => null)
-          : null;
+        const articleText = await getArticleText(post.slug).catch(() => null);
         const wikiArticleUrl = await getPostWikipediaUrl(post.slug).catch(
           () => null,
         );
@@ -338,6 +336,7 @@ async function main() {
         const script = buildNarrationScript(
           post,
           narrationItems ?? contentItems,
+          articleText,
         );
         const { path: narrPath, words: narrWords } = await generateNarration(
           post.slug,
@@ -387,6 +386,7 @@ async function main() {
             narrationParts: buildNarrationParts(
               post,
               narrationItems ?? contentItems,
+              articleText,
             ),
             qualityHint,
           });

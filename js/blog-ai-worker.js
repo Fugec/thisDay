@@ -402,14 +402,17 @@ function getQuestionHeadings(eventTitle, pillars = []) {
 }
 
 function extractPlainSentence(text, maxLength = 220) {
-  const sentence = String(text || "")
+  // Temporarily replace periods in common abbreviations so they don't trigger sentence splits
+  const ABBREV = /\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc|e\.g|i\.e)\./gi;
+  const cleaned = String(text || "")
     .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .split(/(?<=[.!?])\s+/)[0];
+    .replace(ABBREV, (m) => m.slice(0, -1) + "\x01");
 
-  if (!sentence) return "";
-  return sentence.length > maxLength ? `${sentence.slice(0, maxLength - 1).trim()}…` : sentence;
+  const sentence = cleaned.split(/(?<=[.!?])\s+/)[0].replace(/\x01/g, ".");
+
+  return sentence;
 }
 
 function ensureFactDenseOpening(paragraphs, leadSentence, requiredTerms = []) {
@@ -2306,16 +2309,45 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
           !/icon|logo|flag|map|seal|coa/i.test(t),
       );
 
-    if (!imageFiles.length) return null;
+    if (imageFiles.length > 0) {
+      const infoRes = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(imageFiles[0])}&prop=imageinfo&iiprop=url&format=json`,
+        { headers: ua },
+      );
+      if (infoRes.ok) {
+        const infoData = await infoRes.json();
+        const infoPage = Object.values(infoData?.query?.pages ?? {})[0];
+        const infoUrl = infoPage?.imageinfo?.[0]?.url ?? null;
+        if (infoUrl) return infoUrl;
+      }
+    }
 
-    const infoRes = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(imageFiles[0])}&prop=imageinfo&iiprop=url&format=json`,
+    // 3. Wikimedia Commons search — fallback for articles that use only fair-use
+    //    images not hosted on Commons, which are invisible to the REST summary API.
+    const commonsRes = await fetch(
+      `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(title)}&srnamespace=6&srlimit=5&format=json`,
       { headers: ua },
     );
-    if (!infoRes.ok) return null;
-    const infoData = await infoRes.json();
-    const infoPage = Object.values(infoData?.query?.pages ?? {})[0];
-    return infoPage?.imageinfo?.[0]?.url ?? null;
+    if (commonsRes.ok) {
+      const commonsData = await commonsRes.json();
+      const hits = (commonsData?.query?.search ?? [])
+        .map((h) => h.title)
+        .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !/icon|logo|flag|map|seal|coa/i.test(t));
+      if (hits.length > 0) {
+        const commonsInfoRes = await fetch(
+          `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(hits[0])}&prop=imageinfo&iiprop=url&format=json`,
+          { headers: ua },
+        );
+        if (commonsInfoRes.ok) {
+          const commonsInfoData = await commonsInfoRes.json();
+          const commonsPage = Object.values(commonsInfoData?.query?.pages ?? {})[0];
+          const commonsUrl = commonsPage?.imageinfo?.[0]?.url ?? null;
+          if (commonsUrl) return commonsUrl;
+        }
+      }
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -2617,7 +2649,7 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null, 
   let pillars = [];
   let personImages = [];
   let eventImages = [];
-  const MAX_CONTENT_ATTEMPTS = 2;
+  const MAX_CONTENT_ATTEMPTS = 3;
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
     content =
       attempt === 1
@@ -2734,8 +2766,9 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null, 
   // Avoid the "Discover the story of…" boilerplate which AI engines treat as low-signal.
   if (!content.description || content.description.length < 120 || /^Discover the story of /i.test(content.description)) {
     const overviewLead = String(content.overviewParagraphs?.[0] || "")
-      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    const firstSentence = overviewLead.split(/(?<=[.!?])\s+/)[0] || "";
+      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+      .replace(/\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc)\./gi, (m) => m.slice(0, -1) + "\x01");
+    const firstSentence = (overviewLead.split(/(?<=[.!?])\s+/)[0] || "").replace(/\x01/g, ".");
     if (firstSentence.length >= 60) {
       content.description = firstSentence.length > 155
         ? firstSentence.substring(0, 152).trimEnd() + "..."

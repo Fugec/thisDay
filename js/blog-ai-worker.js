@@ -2908,6 +2908,101 @@ function scanBannedPhrases(content) {
   return violations;
 }
 
+function plainText(value) {
+  return String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wordCount(value) {
+  const words = plainText(value).match(/\b[\w'’]+\b/g);
+  return words ? words.length : 0;
+}
+
+function hasHardFact(value) {
+  const text = plainText(value);
+  return (
+    /\b\d{3,4}\b/.test(text) ||
+    /\b\d{1,3}(?:,\d{3})+\b/.test(text) ||
+    /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,}\b/.test(text)
+  );
+}
+
+function hasSourceAnchor(value) {
+  return /\b(letter|diary|memoir|newspaper|trial|testimony|record|report|dispatch|chronicle|historian|archive|decree|proclamation|treaty|census|journal|interview|speech|minutes|source)\b/i.test(
+    plainText(value),
+  );
+}
+
+function scanArticleQuality(content) {
+  const issues = [];
+  const paraMinimums = {
+    overviewParagraphs: 95,
+    eyewitnessOrChronicle: 90,
+    aftermathParagraphs: 95,
+    conclusionParagraphs: 75,
+  };
+
+  for (const [field, minWords] of Object.entries(paraMinimums)) {
+    const paras = Array.isArray(content[field]) ? content[field] : [];
+    paras.forEach((paragraph, index) => {
+      const words = wordCount(paragraph);
+      if (words < minWords) {
+        issues.push(`${field}[${index}] is thin (${words} words, needs ${minWords}+).`);
+      }
+      if (!hasHardFact(paragraph)) {
+        issues.push(`${field}[${index}] lacks a hard fact such as a name, year, number, or place.`);
+      }
+    });
+    if (paras.length > 0 && !paras.some(hasSourceAnchor)) {
+      issues.push(`${field} needs at least one source anchor or named record.`);
+    }
+  }
+
+  const analysisItems = [
+    ...(Array.isArray(content.analysisGood) ? content.analysisGood.map((item, i) => ["analysisGood", item, i]) : []),
+    ...(Array.isArray(content.analysisBad) ? content.analysisBad.map((item, i) => ["analysisBad", item, i]) : []),
+  ];
+  for (const [field, item, index] of analysisItems) {
+    const detail = item?.detail || "";
+    if (wordCount(detail) < 55) {
+      issues.push(`${field}[${index}].detail is too short for real analysis.`);
+    }
+    if (!hasHardFact(detail)) {
+      issues.push(`${field}[${index}].detail lacks a concrete name, date, number, or institution.`);
+    }
+  }
+
+  if (Array.isArray(content.didYouKnowFacts)) {
+    content.didYouKnowFacts.forEach((fact, index) => {
+      if (wordCount(fact) < 35) {
+        issues.push(`didYouKnowFacts[${index}] is too short.`);
+      }
+      if (!hasHardFact(fact)) {
+        issues.push(`didYouKnowFacts[${index}] lacks a concrete detail.`);
+      }
+    });
+  }
+
+  if (wordCount(content.editorialNote) < 70) {
+    issues.push("editorialNote is too short.");
+  }
+  if (!plainText(content.contentRationale).match(/\bWikipedia\b/i) || wordCount(content.contentRationale) < 35) {
+    issues.push("contentRationale must explain the article's specific value beyond Wikipedia.");
+  }
+
+  if (issues.length > 0) {
+    console.warn(
+      `scanArticleQuality: ${issues.length} issue(s):\n` +
+        issues.map((issue) => `  - ${issue}`).join("\n"),
+    );
+  } else {
+    console.log("scanArticleQuality: clean");
+  }
+  return issues;
+}
+
 /**
  * Quality fix pass: rewrites paragraphs that contain banned phrases AND
  * removes cross-section repetition (same facts restated in a later section).
@@ -2985,6 +3080,112 @@ async function fixBannedPhrases(env, content, violations) {
 
   const remaining = scanBannedPhrases(updated);
   console.log(`fixBannedPhrases: done — ${remaining.length} phrase(s) still present after fix`);
+  return updated;
+}
+
+async function improveArticleQuality(env, content, issues) {
+  if (!issues.length) return content;
+
+  const repairPayload = {
+    title: content.title,
+    eventTitle: content.eventTitle,
+    historicalDate: content.historicalDate,
+    location: content.location,
+    overviewParagraphs: content.overviewParagraphs || [],
+    eyewitnessOrChronicle: content.eyewitnessOrChronicle || [],
+    aftermathParagraphs: content.aftermathParagraphs || [],
+    conclusionParagraphs: content.conclusionParagraphs || [],
+    didYouKnowFacts: content.didYouKnowFacts || [],
+    analysisGood: content.analysisGood || [],
+    analysisBad: content.analysisBad || [],
+    editorialNote: content.editorialNote || "",
+    contentRationale: content.contentRationale || "",
+  };
+
+  const systemPrompt =
+    "You are a senior history editor doing a final quality repair before publication. " +
+    "Fix only the fields named by the audit issues. Keep facts accurate and do not invent quotations. " +
+    "Strengthen weak writing with concrete names, dates, institutions, source anchors, and consequences. " +
+    "Preserve array lengths exactly. Preserve the same JSON shape for analysisGood and analysisBad items. " +
+    "Never use hyphens or em dashes in article body fields. Avoid generic phrases such as 'changed history', " +
+    "'turning point', 'lasting impact', 'important moment', 'remarkable event', and 'still resonates today'. " +
+    "Return ONLY a JSON object containing changed fields.";
+
+  const userMessage =
+    `Audit issues:\n${issues.map((issue) => `- ${issue}`).join("\n")}\n\n` +
+    `Article fields to repair:\n${JSON.stringify(repairPayload, null, 2)}\n\n` +
+    "Return only changed fields. If repairing analysisGood or analysisBad, return the full corrected array for that field.";
+
+  let raw;
+  try {
+    raw = await callAI(
+      env,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      { maxTokens: 4000, timeoutMs: 50_000 },
+    );
+  } catch (err) {
+    console.warn(`improveArticleQuality: AI call failed (${err.message}) — keeping original`);
+    return content;
+  }
+
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) {
+    console.warn("improveArticleQuality: no JSON in response — keeping original");
+    return content;
+  }
+
+  let fixes;
+  try {
+    fixes = JSON.parse(match[0]);
+  } catch {
+    console.warn("improveArticleQuality: JSON parse error — keeping original");
+    return content;
+  }
+
+  const updated = { ...content };
+  const paragraphFields = [
+    "overviewParagraphs",
+    "eyewitnessOrChronicle",
+    "aftermathParagraphs",
+    "conclusionParagraphs",
+    "didYouKnowFacts",
+  ];
+  for (const field of paragraphFields) {
+    if (!Array.isArray(fixes[field])) continue;
+    if (fixes[field].length !== (content[field] || []).length) continue;
+    if (!fixes[field].every((item) => typeof item === "string" && item.trim().length > 20)) continue;
+    updated[field] = fixes[field];
+  }
+
+  for (const field of ["analysisGood", "analysisBad"]) {
+    if (!Array.isArray(fixes[field])) continue;
+    if (fixes[field].length !== (content[field] || []).length) continue;
+    if (
+      !fixes[field].every(
+        (item) =>
+          item &&
+          typeof item.title === "string" &&
+          typeof item.detail === "string" &&
+          item.detail.trim().length > 80,
+      )
+    ) {
+      continue;
+    }
+    updated[field] = fixes[field];
+  }
+
+  for (const field of ["editorialNote", "contentRationale"]) {
+    if (typeof fixes[field] === "string" && fixes[field].trim().length > 80) {
+      updated[field] = fixes[field].trim();
+    }
+  }
+
+  const remaining = scanArticleQuality(updated);
+  console.log(`improveArticleQuality: done — ${remaining.length} issue(s) still present after repair`);
   return updated;
 }
 
@@ -3142,8 +3343,21 @@ async function generateAndStore(
       if (violations.length > 0) {
         content = await fixBannedPhrases(env, content, violations);
       }
+      const qualityIssues = scanArticleQuality(content);
+      if (qualityIssues.length > 0) {
+        content = await improveArticleQuality(env, content, qualityIssues);
+      }
 
       content = await reviewContentWithSEOExpert(content, env);
+      const postReviewViolations = scanBannedPhrases(content);
+      if (postReviewViolations.length > 0) {
+        content = await fixBannedPhrases(env, content, postReviewViolations);
+      }
+      const postReviewQualityIssues = scanArticleQuality(content);
+      if (postReviewQualityIssues.length > 0) {
+        content = await improveArticleQuality(env, content, postReviewQualityIssues);
+      }
+
       await factCheckContent(env, content);
       await validateEyewitnessQuote(env, content);
       pillars = await classifyPillars(env, content);
@@ -3470,7 +3684,20 @@ async function enrichPublishedPost(env, slug) {
   const fixed = violations.length > 0
     ? await fixBannedPhrases(env, content, violations)
     : content;
-  let enriched = await reviewContentWithSEOExpert(fixed, env);
+  const qualityIssues = scanArticleQuality(fixed);
+  const qualityRepaired = qualityIssues.length > 0
+    ? await improveArticleQuality(env, fixed, qualityIssues)
+    : fixed;
+  let enriched = await reviewContentWithSEOExpert(qualityRepaired, env);
+  const postReviewViolations = scanBannedPhrases(enriched);
+  if (postReviewViolations.length > 0) {
+    enriched = await fixBannedPhrases(env, enriched, postReviewViolations);
+  }
+  const postReviewQualityIssues = scanArticleQuality(enriched);
+  if (postReviewQualityIssues.length > 0) {
+    enriched = await improveArticleQuality(env, enriched, postReviewQualityIssues);
+  }
+
   await factCheckContent(env, enriched);
   await validateEyewitnessQuote(env, enriched);
   const pillars = await classifyPillars(env, enriched);

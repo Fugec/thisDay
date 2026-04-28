@@ -137,6 +137,20 @@ function getTodaySlug() {
   return `${day}-${month}-${year}`;
 }
 
+async function waitForPublishedPost(slug, {
+  timeoutMs = 5 * 60_000,
+  intervalMs = 15_000,
+} = {}) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const posts = await getPostIndex();
+    const post = posts.find((p) => p.slug === slug);
+    if (post) return { posts, post };
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return { posts: await getPostIndex(), post: null };
+}
+
 /**
  * Ensures today's post exists in KV. If not found, calls POST /blog/publish
  * to generate it, waits 60 s for propagation, then returns the refreshed index.
@@ -174,16 +188,15 @@ async function ensureTodaysPost(posts) {
     return posts;
   }
 
-  console.log("  ✓ Blog worker triggered. Waiting 60 s for KV propagation...");
-  await new Promise((r) => setTimeout(r, 60_000));
-
-  // Re-fetch the index fresh — never use the stale in-memory copy
-  const fresh = await getPostIndex();
-  if (fresh.find((p) => p.slug === todaySlug)) {
+  console.log(
+    "  ✓ Blog worker triggered. Waiting for the final published article to appear in the public KV index...",
+  );
+  const { posts: fresh, post } = await waitForPublishedPost(todaySlug);
+  if (post) {
     console.log(`  ✓ Today's post "${todaySlug}" is now in KV.`);
   } else {
     console.warn(
-      `  ⚠ Today's post still not found after regeneration — will upload next available.`,
+      `  ⚠ Today's final post still not found after waiting — will upload next available.`,
     );
   }
   return fresh;

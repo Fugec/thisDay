@@ -31,9 +31,10 @@ import {
   checkAndUpdateAiModel,
   CF_AI_MODEL,
 } from "./shared/ai-model.js";
-import { callAI } from "./shared/ai-call.js";
+import { callAI, hasAnyTextAIProvider } from "./shared/ai-call.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
+const DEBUG_BUILD = "2026-04-28-ai-debug-1";
 
 function utcDateString(value = new Date()) {
   return value.toISOString().slice(0, 10);
@@ -116,6 +117,7 @@ async function recordPipelineFailure(
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
+const KV_DRAFT_PREFIX = "draft:";
 const KV_PERSON_IMAGE_PREFIX = "person-image:";
 const KV_PERSON_IMAGE_TTL = 60 * 60 * 24 * 30; // 30 days
 const EVERY_OTHER_DAYS = 1; // Generate every N days
@@ -602,6 +604,319 @@ const MONTH_SLUGS = [
   "december",
 ];
 
+function extractMonthDayCandidate(value) {
+  const str = String(value || "").trim();
+  if (!str) return null;
+
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return {
+      source: "iso",
+      month: Number.parseInt(isoMatch[2], 10),
+      day: Number.parseInt(isoMatch[3], 10),
+      raw: str,
+    };
+  }
+
+  const monthMatch = str.match(
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\b/i,
+  );
+  if (monthMatch) {
+    const monthIndex = MONTH_NAMES.findIndex(
+      (month) => month.toLowerCase() === monthMatch[1].toLowerCase(),
+    );
+    if (monthIndex >= 0) {
+      return {
+        source: "text",
+        month: monthIndex + 1,
+        day: Number.parseInt(monthMatch[2], 10),
+        raw: str,
+      };
+    }
+  }
+
+  return null;
+}
+
+function validateContentDateForPublish(content, targetDate) {
+  const expectedMonth = targetDate.getUTCMonth() + 1;
+  const expectedDay = targetDate.getUTCDate();
+  const candidates = [
+    { label: "historicalDateISO", candidate: extractMonthDayCandidate(content?.historicalDateISO) },
+    { label: "historicalDate", candidate: extractMonthDayCandidate(content?.historicalDate) },
+    { label: "title", candidate: extractMonthDayCandidate(content?.title) },
+  ].filter((entry) => entry.candidate);
+
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      reason: "No parseable publish date in generated content.",
+    };
+  }
+
+  const mismatches = candidates.filter(
+    ({ candidate }) =>
+      candidate.month !== expectedMonth || candidate.day !== expectedDay,
+  );
+  if (mismatches.length === 0) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    reason:
+      `Generated content date mismatch. Expected ${MONTH_NAMES[expectedMonth - 1]} ${expectedDay}, got ` +
+      mismatches.map(({ label, candidate }) => `${label}=${candidate.raw}`).join(" | "),
+  };
+}
+
+function deriveHistoricalYear(content) {
+  const explicitYear = Number.parseInt(content?.historicalYear, 10);
+  if (Number.isInteger(explicitYear) && explicitYear > 0) return explicitYear;
+
+  const isoYear = String(content?.historicalDateISO || "").match(/^(\d{4})-\d{2}-\d{2}$/);
+  if (isoYear) return Number.parseInt(isoYear[1], 10);
+
+  const textYear = String(content?.historicalDate || "").match(/\b(\d{4})\b/);
+  if (textYear) return Number.parseInt(textYear[1], 10);
+
+  const titleYear = String(content?.title || "").match(/\b(\d{4})\b/);
+  if (titleYear) return Number.parseInt(titleYear[1], 10);
+
+  return null;
+}
+
+function formatHistoricalDate(month, day, year) {
+  if (!Number.isInteger(month) || !Number.isInteger(day) || !Number.isInteger(year)) {
+    return "";
+  }
+  return `${MONTH_NAMES[month - 1]} ${day}, ${year}`;
+}
+
+function buildCanonicalTitle(eventTitle, historicalDate) {
+  const baseTitle =
+    String(eventTitle || "")
+      .replace(/\s+[-—]\s+.*$/, "")
+      .trim() || "Historical Event";
+  return historicalDate ? `${baseTitle} — ${historicalDate}` : baseTitle;
+}
+
+function alignContentDateFields(content, canonical = {}) {
+  const safeContent = content || {};
+  const targetMonthDay =
+    extractMonthDayCandidate(canonical?.historicalDateISO) ||
+    extractMonthDayCandidate(canonical?.historicalDate) ||
+    extractMonthDayCandidate(safeContent?.historicalDateISO) ||
+    extractMonthDayCandidate(safeContent?.historicalDate) ||
+    extractMonthDayCandidate(safeContent?.title);
+
+  const year =
+    Number.parseInt(canonical?.historicalYear, 10) ||
+    deriveHistoricalYear(canonical) ||
+    deriveHistoricalYear(safeContent);
+
+  if (targetMonthDay && Number.isInteger(year) && year > 0) {
+    safeContent.historicalDateISO = `${String(year).padStart(4, "0")}-${String(targetMonthDay.month).padStart(2, "0")}-${String(targetMonthDay.day).padStart(2, "0")}`;
+    safeContent.historicalDate = formatHistoricalDate(
+      targetMonthDay.month,
+      targetMonthDay.day,
+      year,
+    );
+    safeContent.historicalYear = year;
+  }
+
+  const canonicalEventTitle =
+    String(canonical?.eventTitle || safeContent?.eventTitle || "")
+      .replace(/\s+[-—]\s+.*$/, "")
+      .trim();
+  if (canonicalEventTitle) {
+    safeContent.eventTitle = canonicalEventTitle;
+  }
+  if (safeContent.eventTitle && safeContent.historicalDate) {
+    safeContent.title = buildCanonicalTitle(
+      safeContent.eventTitle,
+      safeContent.historicalDate,
+    );
+  }
+
+  if (Array.isArray(safeContent.quickFacts)) {
+    safeContent.quickFacts = safeContent.quickFacts.map((fact) => {
+      if (!fact || typeof fact !== "object") return fact;
+      if (/^Event$/i.test(fact.label || "")) {
+        return { ...fact, value: safeContent.eventTitle || fact.value };
+      }
+      if (/^Date$/i.test(fact.label || "")) {
+        return { ...fact, value: safeContent.historicalDate || fact.value };
+      }
+      return fact;
+    });
+  }
+
+  if (safeContent.jsonLdName && safeContent.eventTitle) {
+    safeContent.jsonLdName = safeContent.eventTitle;
+  }
+
+  return safeContent;
+}
+
+async function chooseEventForDate(
+  env,
+  date,
+  takenAllTime = [],
+  preferredPillars = [],
+  recentPillars = [],
+) {
+  const monthName = MONTH_NAMES[date.getUTCMonth()];
+  const day = date.getUTCDate();
+  const mPad = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dPad = String(day).padStart(2, "0");
+
+  const avoidTitles =
+    takenAllTime.length > 0
+      ? `Avoid these already-covered topics or anything too closely related:\n${takenAllTime.map((t) => `- ${t}`).join("\n")}\n`
+      : "";
+  const avoidPillars =
+    recentPillars.length > 0
+      ? `Avoid these pillar categories from the last 7 posts: ${recentPillars.join(", ")}.\n`
+      : "";
+  const preferPillars =
+    preferredPillars.length > 0
+      ? `Prefer one of these underrepresented categories if a strong event exists: ${preferredPillars.join(", ")}.\n`
+      : "";
+
+  let candidateEvents = [];
+  try {
+    let eventsData =
+      (env.EVENTS_KV &&
+        (await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, {
+          type: "json",
+        }))) ||
+      null;
+
+    if (!eventsData?.events?.length) {
+      const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
+      const response = await fetch(apiUrl, {
+        headers: { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" },
+      });
+      if (response.ok) {
+        eventsData = await response.json();
+        if (env.EVENTS_KV && eventsData?.events?.length) {
+          env.EVENTS_KV.put(
+            `events-data:${mPad}-${dPad}`,
+            JSON.stringify(eventsData),
+            { expirationTtl: 7 * 24 * 60 * 60 },
+          ).catch(() => {});
+        }
+      }
+    }
+
+    candidateEvents = (eventsData?.events || [])
+      .map((event) => {
+        const firstPage = event?.pages?.[0] || {};
+        const pageTitle =
+          firstPage?.titles?.normalized ||
+          firstPage?.normalizedtitle ||
+          firstPage?.title ||
+          "";
+        const pageUrl =
+          firstPage?.content_urls?.desktop?.page ||
+          firstPage?.content_urls?.mobile?.page ||
+          "";
+        return {
+          year: event?.year,
+          text: String(event?.text || "").replace(/\s+/g, " ").trim(),
+          pageTitle: String(pageTitle).trim(),
+          pageUrl: String(pageUrl).trim(),
+        };
+      })
+      .filter((event) => event.year && event.text && event.pageTitle)
+      .filter((event) => {
+        const haystack = `${event.pageTitle} ${event.text}`.toLowerCase();
+        return !takenAllTime.some((taken) =>
+          haystack.includes(String(taken || "").toLowerCase()),
+        );
+      })
+      .slice(0, 20);
+  } catch (err) {
+    console.warn(`Event selector candidate load failed: ${err.message}`);
+  }
+
+  const candidateSection =
+    candidateEvents.length > 0
+      ? `Choose ONLY from this vetted list of real events for ${monthName} ${day}:\n` +
+        candidateEvents
+          .map(
+            (event, index) =>
+              `${index + 1}. ${event.year}: ${event.pageTitle} — ${event.text}${event.pageUrl ? ` [${event.pageUrl}]` : ""}`,
+          )
+          .join("\n") +
+        `\nDo not invent a different event, year, or title.`
+      : `No vetted event list is available, so be extremely conservative and choose only an event you are certain happened on ${monthName} ${day}.`;
+
+  const prompt =
+    `Select a single real historical event that happened on ${monthName} ${day} in any year.\n` +
+    `${avoidTitles}${avoidPillars}${preferPillars}${candidateSection}\n` +
+    `Requirements:\n` +
+    `- The event must actually have happened on ${monthName} ${day}\n` +
+    `- Prefer globally recognizable or vividly visual events with strong Wikipedia coverage\n` +
+    `- Do not choose an event from any other calendar day\n` +
+    `- If a vetted event list is provided above, your answer must match one entry from that list\n` +
+    `- Respond with JSON only\n` +
+    `{"eventTitle":"Specific event name","historicalDate":"Month Day, Year","historicalDateISO":"YYYY-MM-DD","wikiUrl":"https://en.wikipedia.org/wiki/Article","why":"short reason under 25 words"}`;
+
+  const raw = await callAI(
+    env,
+    [
+      {
+        role: "system",
+        content:
+          "You are a strict historical date selector. Return one candidate event as valid JSON only.",
+      },
+      { role: "user", content: prompt },
+    ],
+    { maxTokens: 220, timeoutMs: 15_000, temperature: 0.2 },
+  );
+
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) {
+    throw new Error(`Event selector returned no JSON: ${raw.slice(0, 160)}`);
+  }
+  const parsed = JSON.parse(match[0]);
+  if (!parsed?.eventTitle) {
+    throw new Error("Event selector returned no eventTitle");
+  }
+
+  if (candidateEvents.length > 0) {
+    const matchedCandidate = candidateEvents.find((event) => {
+      const normalizedTitle = String(parsed.eventTitle || "").toLowerCase();
+      return (
+        normalizedTitle === event.pageTitle.toLowerCase() ||
+        event.pageTitle.toLowerCase().includes(normalizedTitle) ||
+        normalizedTitle.includes(event.pageTitle.toLowerCase())
+      );
+    });
+    if (!matchedCandidate) {
+      throw new Error(`Event selector chose an event outside the vetted list: ${parsed.eventTitle}`);
+    }
+    parsed.eventTitle = matchedCandidate.pageTitle;
+    parsed.historicalYear = Number.parseInt(matchedCandidate.year, 10);
+    parsed.historicalDate = `${monthName} ${day}, ${matchedCandidate.year}`;
+    parsed.historicalDateISO = `${String(matchedCandidate.year).padStart(4, "0")}-${mPad}-${dPad}`;
+    if (matchedCandidate.pageUrl) parsed.wikiUrl = matchedCandidate.pageUrl;
+  }
+
+  const validation = validateContentDateForPublish(parsed, date);
+  if (!validation.ok) {
+    throw new Error(`Event selector date mismatch. ${validation.reason}`);
+  }
+
+  return parsed;
+}
+
 // ---------------------------------------------------------------------------
 // Shared support popup (Buy Me a Coffee) — injected before </body> on all pages
 // ---------------------------------------------------------------------------
@@ -650,6 +965,29 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, "") || "/";
 
+    if (path === "/blog/debug-ai" && request.method === "GET") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      return jsonResponse({
+        status: "ok",
+        build: DEBUG_BUILD,
+        hasAI: Boolean(env.AI),
+        hasGroq: Boolean(env.GROQ_API_KEY),
+        hasGroq2: Boolean(env.GROQ_API_KEY_2),
+        hasGroq3: Boolean(env.GROQ_API_KEY_3),
+        hasGroq4: Boolean(env.GROQ_API_KEY_4),
+        hasGroq5: Boolean(env.GROQ_API_KEY_5),
+        hasOpenRouter: Boolean(env.OPENROUTER_API_KEY || env.OPENRUITER_API_KEY || env.OPENNRUITER_API_KEY),
+        hasOpenRouter2: Boolean(env.OPENROUTER_API_KEY_2 || env.OPENRUITER_API_KEY_2 || env.OPENNRUITER_API_KEY_2),
+        hasOpenRouter3: Boolean(env.OPENROUTER_API_KEY_3 || env.OPENRUITER_API_KEY_3 || env.OPENNRUITER_API_KEY_3),
+        hasCerebras: Boolean(env.CEREBRAS_API_KEY || env.CEREBAS_API_KEY),
+        hasCerebras2: Boolean(env.CEREBRAS_API_KEY_2 || env.CEREBAS_API_KEY_2),
+        hasCerebras3: Boolean(env.CEREBRAS_API_KEY_3 || env.CEREBAS_API_KEY_3),
+      });
+    }
+
     // Manual trigger (POST /blog/publish)
     // Requires:  Authorization: Bearer <PUBLISH_SECRET>  (blog failsafe)
     //        or  Authorization: Bearer <YOUTUBE_REGEN_SECRET>  (YouTube regen)
@@ -668,7 +1006,9 @@ export default {
         const forcedEvent = publishUrl.searchParams.get("force-event") || null;
         const forceDate = publishUrl.searchParams.get("force-date") || null;
         const forceImage = publishUrl.searchParams.get("force-image") || null;
-        await generateAndStore(env, ctx, forcedEvent, forceDate, forceImage);
+        await generateAndStore(env, ctx, forcedEvent, forceDate, forceImage, {
+          lightweightPublish: true,
+        });
         return jsonResponse({ status: "ok", message: "Blog post published." });
       } catch (err) {
         console.error(
@@ -687,6 +1027,25 @@ export default {
           { expirationTtl: 7 * 86_400 },
         );
         return jsonResponse({ status: "error", message: err.message }, 500);
+      }
+    }
+
+    if (path === "/blog/enrich" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const enrichUrl = new URL(request.url);
+      const slug = enrichUrl.searchParams.get("slug") || "";
+      if (!slug) {
+        return jsonResponse({ status: "error", message: "Provide ?slug=X" }, 400);
+      }
+      try {
+        await enrichPublishedPost(env, slug);
+        return jsonResponse({ status: "ok", slug, message: "Post enriched." });
+      } catch (err) {
+        console.error(`Blog AI: /blog/enrich failed for ${slug} — ${err.message}`);
+        return jsonResponse({ status: "error", slug, message: err.message }, 500);
       }
     }
 
@@ -1044,7 +1403,7 @@ export default {
           title: slug.replace(/[-/]/g, " "),
           description: "",
         };
-        if (env.AI || env.GROQ_API_KEY) {
+        if (hasAnyTextAIProvider(env)) {
           const content = await buildRichContent(entryOrFallback, slug);
           const quiz = await generateBlogQuiz(env, content, slug);
           if (quiz) {
@@ -1971,7 +2330,7 @@ export default {
             const cached =
               inlineQuizRaw ||
               (await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`));
-            if (!cached && (env.AI || env.GROQ_API_KEY)) {
+            if (!cached && hasAnyTextAIProvider(env)) {
               try {
                 const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
                 const index = indexRaw ? JSON.parse(indexRaw) : [];
@@ -2290,7 +2649,9 @@ async function maybeGenerateBlogPost(env, ctx) {
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await generateAndStore(env, ctx);
+      await generateAndStore(env, ctx, null, null, null, {
+        lightweightPublish: true,
+      });
       console.log(
         `Blog AI: post generated successfully (attempt ${attempt}/3).`,
       );
@@ -2494,7 +2855,9 @@ const BANNED_PHRASE_LIST = [
   "far-reaching consequences", "world was forever changed", "world would never be the same",
   "made history", "turning point", "watershed moment", "stands as a", "serves as a",
   "testament to", "in the annals of history", "throughout history",
-  "stood the test of time", "chapter in history",
+  "stood the test of time", "chapter in history", "significant turning point",
+  "dramatic and unexpected turn of events", "dramatic and unexpected",
+  "remarkable event", "marked the end of a dark period", "brighter future",
   // Mood labels without evidence
   "it was a dark time", "it was a bleak time", "it was a difficult period",
   "it was chaos", "it was a complex time", "dark chapter", "in the face of adversity",
@@ -2628,7 +2991,14 @@ async function fixBannedPhrases(env, content, violations) {
 /**
  * Calls the Claude API, builds the HTML page, and persists everything to KV.
  */
-async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null, forceImage = null) {
+async function generateAndStore(
+  env,
+  ctx,
+  forcedEvent = null,
+  forceDate = null,
+  forceImage = null,
+  { lightweightPublish = false } = {},
+) {
   const parsedForceDate = forceDate ? new Date(forceDate + "T12:00:00Z") : null;
   const now = parsedForceDate && !isNaN(parsedForceDate) ? parsedForceDate : new Date();
   const activeModel = await resolveAiModel(env.BLOG_AI_KV);
@@ -2693,11 +3063,29 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null, 
     }
   }
 
+  let selectedForcedEvent = forcedEvent;
+  let selectedEvent = null;
+  if (!selectedForcedEvent) {
+    selectedEvent = await chooseEventForDate(
+      env,
+      now,
+      takenAllTime,
+      preferredPillars,
+      recentPillars,
+    );
+    selectedForcedEvent = selectedEvent.eventTitle;
+    console.log(
+      `Blog AI: selected event "${selectedForcedEvent}" for ${selectedEvent.historicalDate || now.toISOString().slice(0, 10)}`,
+    );
+  }
+
   // P4a — "why now" context hook: one short AI call that grounds the article
   // in the publish date's current world. The hook is injected into the main
   // generation prompt so at least one sentence exists that could not have been
   // written six months ago. Non-blocking — falls back to null on any error.
-  const contextHook = await fetchContextHook(env, now, forcedEvent);
+  const contextHook = lightweightPublish
+    ? null
+    : await fetchContextHook(env, now, selectedForcedEvent);
 
   let content = null;
   let pillars = [];
@@ -2712,204 +3100,168 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null, 
             now,
             takenAllTime,
             activeModel,
-            forcedEvent,
+            selectedForcedEvent,
             preferredPillars,
             contextHook,
             recentPillars,
           )
         : content;
 
+    if (selectedEvent) {
+      alignContentDateFields(content, selectedEvent);
+    }
+
+    const dateValidation = validateContentDateForPublish(content, now);
+    if (!dateValidation.ok) {
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        console.warn(
+          `Blog AI: date validation failed for "${content?.title || "untitled"}" — ${dateValidation.reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await callWorkersAI(
+          env,
+          now,
+          avoid,
+          activeModel,
+          selectedForcedEvent,
+          preferredPillars,
+          contextHook,
+          recentPillars,
+        );
+        continue;
+      }
+
+      throw new Error(dateValidation.reason);
+    }
+
     // Post-generation banned phrase scan + targeted fix pass.
     // If violations are found, one focused AI call patches only the offending paragraphs.
     // Falls back to original paragraphs if the fix call fails or produces worse output.
-    const violations = scanBannedPhrases(content);
-    if (violations.length > 0) {
-      content = await fixBannedPhrases(env, content, violations);
-    }
-
-    // SEO expert review: improve meta fields, descriptions, keywords, and paragraph
-    // sentence length before building HTML. Falls back to original on any error.
-    content = await reviewContentWithSEOExpert(content, env);
-
-    // Fact-check pass: verify date, year, location against the event name.
-    // Applies corrections in-place; never blocks generation on failure.
-    await factCheckContent(env, content);
-
-    // Eyewitness quote validation: confirm the quote is from a verifiable source.
-    // Clears eyewitnessQuote if the AI cannot confirm documented provenance,
-    // preventing fabricated quotes from being published under real names.
-    await validateEyewitnessQuote(env, content);
-
-    // Pillar classification: assign article to 1–3 content pillars for topical
-    // authority tracking and "You Might Also Like" relevance. Non-blocking.
-    pillars = await classifyPillars(env, content);
-
-    // Validate the main image first. If force-image was provided, use it directly.
-    const workingImage = forceImage || await resolveWorkingImageForContent(content);
-    if (!workingImage) {
-      if (attempt < MAX_CONTENT_ATTEMPTS) {
-        const avoid = [...takenAllTime, content.title].filter(Boolean);
-        console.warn(
-          `Blog AI: no valid image for "${content.title}". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
-        );
-        content = await callWorkersAI(
-          env,
-          now,
-          avoid,
-          activeModel,
-          forcedEvent,
-          preferredPillars,
-          contextHook,
-          recentPillars,
-        );
-        continue;
+    if (!lightweightPublish) {
+      const violations = scanBannedPhrases(content);
+      if (violations.length > 0) {
+        content = await fixBannedPhrases(env, content, violations);
       }
 
-      // No working image found after all attempts — throw so the caller retries
-      // with a different topic rather than publishing with a logo background.
-      throw new Error(
-        `No working image for "${content.title}" after ${MAX_CONTENT_ATTEMPTS} attempts.`,
-      );
-    }
-    content.imageUrl = workingImage;
+      content = await reviewContentWithSEOExpert(content, env);
+      await factCheckContent(env, content);
+      await validateEyewitnessQuote(env, content);
+      pillars = await classifyPillars(env, content);
 
-    // Precheck wiki image coverage before publishing. The video pipeline needs
-    // at least 3 usable Wikipedia images, so weak topics are regenerated here.
-    [personImages, eventImages] = await Promise.all([
-      fetchKeyPersonImages(env, content.keyTerms).catch(() => []),
-      content.wikiUrl
-        ? fetchEventImages(content.wikiUrl, content.imageUrl, 3).catch(() => [])
-        : Promise.resolve([]),
-    ]);
-    const wikiImageTotal = personImages.length + eventImages.length;
-    if (wikiImageTotal < 3) {
-      if (attempt < MAX_CONTENT_ATTEMPTS) {
-        const avoid = [...takenAllTime, content.title].filter(Boolean);
-        console.warn(
-          `Blog AI: wiki image precheck failed for "${content.title}" (${wikiImageTotal}/3). Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+      const workingImage = forceImage || await resolveWorkingImageForContent(content);
+      if (!workingImage) {
+        if (attempt < MAX_CONTENT_ATTEMPTS) {
+          const avoid = [...takenAllTime, content.title].filter(Boolean);
+          console.warn(
+            `Blog AI: no valid image for "${content.title}". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+          );
+          content = await callWorkersAI(
+            env,
+            now,
+            avoid,
+            activeModel,
+            selectedForcedEvent,
+            preferredPillars,
+            contextHook,
+            recentPillars,
+          );
+          continue;
+        }
+
+        throw new Error(
+          `No working image for "${content.title}" after ${MAX_CONTENT_ATTEMPTS} attempts.`,
         );
-        content = await callWorkersAI(
-          env,
-          now,
-          avoid,
-          activeModel,
-          forcedEvent,
-          preferredPillars,
-          contextHook,
-          recentPillars,
+      }
+      content.imageUrl = workingImage;
+
+      [personImages, eventImages] = await Promise.all([
+        fetchKeyPersonImages(env, content.keyTerms).catch(() => []),
+        content.wikiUrl
+          ? fetchEventImages(content.wikiUrl, content.imageUrl, 3).catch(() => [])
+          : Promise.resolve([]),
+      ]);
+      const wikiImageTotal = personImages.length + eventImages.length;
+      if (wikiImageTotal < 3) {
+        if (attempt < MAX_CONTENT_ATTEMPTS) {
+          const avoid = [...takenAllTime, content.title].filter(Boolean);
+          console.warn(
+            `Blog AI: wiki image precheck failed for "${content.title}" (${wikiImageTotal}/3). Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+          );
+          content = await callWorkersAI(
+            env,
+            now,
+            avoid,
+            activeModel,
+            selectedForcedEvent,
+            preferredPillars,
+            contextHook,
+            recentPillars,
+          );
+          continue;
+        }
+
+        throw new Error(
+          `IMAGE_UNAVAILABLE: wiki-only topic gate requires 3 usable Wikipedia images, got ${wikiImageTotal} for "${content.title}"`,
         );
-        continue;
       }
 
-      throw new Error(
-        `IMAGE_UNAVAILABLE: wiki-only topic gate requires 3 usable Wikipedia images, got ${wikiImageTotal} for "${content.title}"`,
-      );
+      await generateEditorialNote(env, content, now);
     }
-
-    // P4b — separate editorial note: a second isolated AI call that reads the
-    // finished article and writes a perspective section that must reference the
-    // current year. This creates structural differentiation between the research
-    // layer (article body) and the perspective layer (editorial note).
-    // Non-blocking — keeps existing editorialNote on any error.
-    await generateEditorialNote(env, content, now);
+    if (selectedEvent) {
+      alignContentDateFields(content, selectedEvent);
+    }
     break;
   }
 
-  // Ensure meta description meets minimum SEO length (120 chars).
-  // Prefer the first sentence of the overview paragraph — specific and fact-dense.
-  // Avoid the "Discover the story of…" boilerplate which AI engines treat as low-signal.
-  if (!content.description || content.description.length < 120 || /^Discover the story of /i.test(content.description)) {
-    const overviewLead = String(content.overviewParagraphs?.[0] || "")
-      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
-      .replace(/\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc)\./gi, (m) => m.slice(0, -1) + "\x01");
-    const firstSentence = (overviewLead.split(/(?<=[.!?])\s+/)[0] || "").replace(/\x01/g, ".");
-    if (firstSentence.length >= 60) {
-      content.description = firstSentence.length > 155
-        ? firstSentence.substring(0, 152).trimEnd() + "..."
-        : firstSentence;
-    } else {
-      // Factual fallback: "EventTitle (Date, Location): Significance."
-      const sig = (content.quickFacts || []).find((f) => /significance|legacy|impact/i.test(f.label))?.value || "";
-      const loc = content.location ? `, ${content.location}` : "";
-      content.description = `${content.eventTitle} (${content.historicalDate}${loc})${sig ? `: ${sig}.` : "."}`.substring(0, 155);
-    }
+  if (selectedEvent) {
+    alignContentDateFields(content, selectedEvent);
   }
-  // Clamp meta description to 155 chars maximum (Google truncates beyond this)
-  if (content.description.length > 155) {
-    content.description =
-      content.description.substring(0, 152).trimEnd() + "...";
+
+  const finalDateValidation = validateContentDateForPublish(content, now);
+  if (!finalDateValidation.ok) {
+    throw new Error(finalDateValidation.reason);
   }
-  if (!content.ogDescription || content.ogDescription.length < 80) {
-    content.ogDescription = content.description.substring(0, 130);
-  }
-  if (content.ogDescription.length > 130) {
-    content.ogDescription =
-      content.ogDescription.substring(0, 127).trimEnd() + "...";
-  }
-  if (!content.twitterDescription || content.twitterDescription.length < 60) {
-    content.twitterDescription = content.description.substring(0, 120);
-  }
-  if (content.twitterDescription.length > 120) {
-    content.twitterDescription =
-      content.twitterDescription.substring(0, 117).trimEnd() + "...";
-  }
+
+  normalizeContentMetadata(content);
 
   const slug = buildSlug(now);
+  if (lightweightPublish) {
+    await env.BLOG_AI_KV.put(
+      `${KV_DRAFT_PREFIX}${slug}`,
+      JSON.stringify({
+        content,
+        publishedAt: now.toISOString(),
+      }),
+      { expirationTtl: 3 * 86_400 },
+    );
+  } else {
+    const bookCoverUrl = await fetchBookCover(content.bookSearchQuery).catch(() => null);
 
-  // Fetch book cover in parallel with the final HTML assembly.
-  const bookCoverUrl = await fetchBookCover(content.bookSearchQuery).catch(() => null);
-
-  const rawHtml = buildPostHTML(content, now, slug, existingIndex, pillars, bookCoverUrl);
-  let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
-  html = injectPersonImages(html, personImages);
-  if (eventImages.length > 0) html = injectEventImages(html, eventImages);
-
-  // Persist the rendered page (no expiry — permanent archive)
-  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
-
-  // Update the index (reuse the already-loaded existingIndex)
-  const index = [...existingIndex];
-
-  // Add or update the index entry for this slug — remove ALL existing entries
-  // for this slug first to prevent duplicates accumulating from retries/restores
-  const deduped = index.filter((e) => e.slug !== slug);
-  const entry = {
-    slug,
-    title: content.title,
-    description: content.description,
-    imageUrl: content.imageUrl,
-    publishedAt: now.toISOString(),
-    ...(content.keywords ? { keywords: content.keywords } : {}),
-    ...(content.eventTitle ? { eventTitle: content.eventTitle } : {}),
-    ...(Number.isInteger(content.historicalYear)
-      ? { historicalYear: content.historicalYear }
-      : {}),
-    ...(Array.isArray(content.keyTerms) && content.keyTerms.length > 0
-      ? { keyTerms: content.keyTerms }
-      : {}),
-    ...(pillars && pillars.length > 0 ? { pillars } : {}),
-    ...(content.contentRationale
-      ? { contentRationale: content.contentRationale }
-      : {}),
-  };
-  deduped.unshift(entry);
-  const finalIndex = deduped;
-  // Cap the index at 200 entries
-  if (finalIndex.length > 200) finalIndex.splice(200);
-  await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(finalIndex));
+    await savePublishedPost(env, {
+      slug,
+      date: now,
+      content,
+      existingIndex,
+      pillars,
+      bookCoverUrl,
+      personImages,
+      eventImages,
+    });
+  }
 
   // Core write is done — fire all post-publish extras in the background so
   // the response (or cron return) is not blocked by quiz generation, cache
   // purges, pings, or Discord. ctx may be undefined in unit tests — guard it.
   if (ctx?.waitUntil) {
-    ctx.waitUntil(runPostPublishExtras(env, slug, content));
+    ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish }));
   } else {
-    // Fallback for environments without ctx (e.g. tests): run synchronously
-    await runPostPublishExtras(env, slug, content);
+    await runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish });
   }
 
   console.log(
-    `Blog: published post "${content.title}" → /blog/${slug}/`,
+    lightweightPublish
+      ? `Blog: drafted post "${content.title}" → ${KV_DRAFT_PREFIX}${slug}`
+      : `Blog: published post "${content.title}" → /blog/${slug}/`,
   );
 }
 
@@ -2918,7 +3270,17 @@ async function generateAndStore(env, ctx, forcedEvent = null, forceDate = null, 
  * quiz page cache bust, WebSub ping, Discord notify.
  * Runs via ctx.waitUntil() so it never blocks the HTTP response / cron return.
  */
-async function runPostPublishExtras(env, slug, content) {
+async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = false } = {}) {
+  if (scheduleEnrichment && env.PUBLISH_SECRET) {
+    fetch(`https://thisday.info/blog/enrich?slug=${encodeURIComponent(slug)}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.PUBLISH_SECRET}` },
+    }).catch((e) =>
+      console.error(`Blog: enrich kickoff failed for ${slug}:`, e.message),
+    );
+    return;
+  }
+
   // Purge the cached sitemap and RSS feed so they reflect the new post immediately
   // (both workers cache for 1 h — without this, the new post would be invisible
   //  to crawlers until the next cache expiry).
@@ -2936,8 +3298,12 @@ async function runPostPublishExtras(env, slug, content) {
     }),
   ]);
 
-  // Generate and store a quiz using the already-available content (no self-fetch round-trip that
-  // can fail due to KV replication delay right after publishing)
+  // Generate and store a quiz using the already-available content.
+  // Skip this in lightweight publish mode — the enrichment pass will get a fresh request budget.
+  if (scheduleEnrichment) {
+    return;
+  }
+
   try {
     const allParas = [
       ...(content.overviewParagraphs || []),
@@ -3015,6 +3381,132 @@ async function runPostPublishExtras(env, slug, content) {
   }
 }
 
+function normalizeContentMetadata(content) {
+  if (!content.description || content.description.length < 120 || /^Discover the story of /i.test(content.description)) {
+    const overviewLead = String(content.overviewParagraphs?.[0] || "")
+      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+      .replace(/\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc)\./gi, (m) => m.slice(0, -1) + "\x01");
+    const firstSentence = (overviewLead.split(/(?<=[.!?])\s+/)[0] || "").replace(/\x01/g, ".");
+    if (firstSentence.length >= 60) {
+      content.description = firstSentence.length > 155
+        ? firstSentence.substring(0, 152).trimEnd() + "..."
+        : firstSentence;
+    } else {
+      const sig = (content.quickFacts || []).find((f) => /significance|legacy|impact/i.test(f.label))?.value || "";
+      const loc = content.location ? `, ${content.location}` : "";
+      content.description = `${content.eventTitle} (${content.historicalDate}${loc})${sig ? `: ${sig}.` : "."}`.substring(0, 155);
+    }
+  }
+  if (content.description.length > 155) {
+    content.description = content.description.substring(0, 152).trimEnd() + "...";
+  }
+  if (!content.ogDescription || content.ogDescription.length < 80) {
+    content.ogDescription = content.description.substring(0, 130);
+  }
+  if (content.ogDescription.length > 130) {
+    content.ogDescription = content.ogDescription.substring(0, 127).trimEnd() + "...";
+  }
+  if (!content.twitterDescription || content.twitterDescription.length < 60) {
+    content.twitterDescription = content.description.substring(0, 120);
+  }
+  if (content.twitterDescription.length > 120) {
+    content.twitterDescription = content.twitterDescription.substring(0, 117).trimEnd() + "...";
+  }
+}
+
+async function savePublishedPost(
+  env,
+  { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [], eventImages = [] },
+) {
+  const safePillars = Array.isArray(pillars) ? pillars : [];
+  const safePersonImages = Array.isArray(personImages) ? personImages : [];
+  const safeEventImages = Array.isArray(eventImages) ? eventImages : [];
+
+  alignContentDateFields(content);
+  const dateValidation = validateContentDateForPublish(content, date);
+  if (!dateValidation.ok) {
+    throw new Error(`Refusing to publish ${slug}: ${dateValidation.reason}`);
+  }
+
+  const rawHtml = buildPostHTML(content, date, slug, existingIndex, safePillars, bookCoverUrl);
+  let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
+  if (safePersonImages.length > 0) html = injectPersonImages(html, safePersonImages);
+  if (safeEventImages.length > 0) html = injectEventImages(html, safeEventImages);
+  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
+
+  const deduped = [...existingIndex].filter((e) => e.slug !== slug);
+  const entry = {
+    slug,
+    title: content.title,
+    description: content.description,
+    imageUrl: content.imageUrl,
+    publishedAt: date.toISOString(),
+    ...(content.keywords ? { keywords: content.keywords } : {}),
+    ...(content.eventTitle ? { eventTitle: content.eventTitle } : {}),
+    ...(Number.isInteger(content.historicalYear) ? { historicalYear: content.historicalYear } : {}),
+    ...(Array.isArray(content.keyTerms) && content.keyTerms.length > 0 ? { keyTerms: content.keyTerms } : {}),
+    ...(safePillars.length > 0 ? { pillars: safePillars } : {}),
+    ...(content.contentRationale ? { contentRationale: content.contentRationale } : {}),
+  };
+  deduped.unshift(entry);
+  if (deduped.length > 200) deduped.splice(200);
+  await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(deduped));
+}
+
+async function enrichPublishedPost(env, slug) {
+  const draftRaw = await env.BLOG_AI_KV.get(`${KV_DRAFT_PREFIX}${slug}`);
+  if (!draftRaw) throw new Error(`No draft found for ${slug}`);
+
+  const draft = JSON.parse(draftRaw);
+  const content = draft?.content;
+  const publishedAt = draft?.publishedAt;
+  if (!content || !publishedAt) throw new Error(`Draft payload invalid for ${slug}`);
+
+  const date = new Date(publishedAt);
+  const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+  const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
+
+  const violations = scanBannedPhrases(content);
+  const fixed = violations.length > 0
+    ? await fixBannedPhrases(env, content, violations)
+    : content;
+  let enriched = await reviewContentWithSEOExpert(fixed, env);
+  await factCheckContent(env, enriched);
+  await validateEyewitnessQuote(env, enriched);
+  const pillars = await classifyPillars(env, enriched);
+
+  const workingImage = await resolveWorkingImageForContent(enriched);
+  if (workingImage) enriched.imageUrl = workingImage;
+
+  const [personImages, eventImages, bookCoverUrl] = await Promise.all([
+    fetchKeyPersonImages(env, enriched.keyTerms).catch(() => []),
+    enriched.wikiUrl
+      ? fetchEventImages(enriched.wikiUrl, enriched.imageUrl, 3).catch(() => [])
+      : Promise.resolve([]),
+    fetchBookCover(enriched.bookSearchQuery).catch(() => null),
+  ]);
+
+  await generateEditorialNote(env, enriched, date);
+  alignContentDateFields(enriched);
+  const dateValidation = validateContentDateForPublish(enriched, date);
+  if (!dateValidation.ok) {
+    throw new Error(`Refusing to enrich ${slug}: ${dateValidation.reason}`);
+  }
+  normalizeContentMetadata(enriched);
+  await savePublishedPost(env, {
+    slug,
+    date,
+    content: enriched,
+    existingIndex,
+    pillars,
+    bookCoverUrl,
+    personImages,
+    eventImages,
+  });
+  await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`).catch(() => {});
+  await runPostPublishExtras(env, slug, enriched, { scheduleEnrichment: false });
+}
+
 // ---------------------------------------------------------------------------
 // Blog quiz generation
 // ---------------------------------------------------------------------------
@@ -3039,7 +3531,7 @@ async function runPostPublishExtras(env, slug, content) {
  * @returns {Promise<Array>}  Improved questions, or originals on any failure
  */
 async function reviewQuizWithExpert(questions, content, env) {
-  if (!env.AI && !env.GROQ_API_KEY) return questions;
+  if (!hasAnyTextAIProvider(env)) return questions;
 
   const contextLines = [
     `Title: ${content.title}`,
@@ -3224,7 +3716,7 @@ async function buildRichContent(entry, slug) {
 }
 
 async function generateBlogQuiz(env, content, _slug) {
-  if (!env.AI && !env.GROQ_API_KEY) return null;
+  if (!hasAnyTextAIProvider(env)) return null;
 
   const contextLines = [
     `Title: ${content.title}`,
@@ -3376,6 +3868,7 @@ Write as a passionate, opinionated history narrator — serious and authoritativ
 Specific voice qualities:
 - PLAY YOUR ACE CARD FIRST: The single most surprising, counterintuitive, or little-known fact in the entire article belongs in the first two sentences. Do not save the best for the end. Most readers will not reach it.
 - FOCUS ON ONE THREAD: Do not try to cover everything about the event. Find the sharpest angle — one person, one decision, one consequence — and pull that thread through the whole article. Breadth kills impact.
+- FACTS BEFORE FEELINGS: The first paragraph must contain at least three hard facts, drawn from different categories such as one named person, one exact place, one number, one document, or one precise date. Do not open with mood words like "dramatic", "remarkable", "significant", or "unexpected" unless the very same sentence also supplies the concrete fact that earns that description.
 - MULTI-SENSORY writing: Do not describe only what something looked like. What did it sound like? What did it smell like? What did it feel like physically? Include at least one non-visual sensory detail in the Overview and one in the Eyewitness section.
 - NEVER make a summary mood judgment. Do not write "it was a dark time", "it was a difficult period", "it was chaotic", "it was a bleak time", or any sentence that labels a mood without evidence. Describe the specific thing that is dark, difficult, or chaotic — what someone would see, hear, smell, or feel on the ground — and let the reader draw the conclusion themselves. The writer plants the evidence; the reader forms the judgment.
 - FRESH COMPARISONS ONLY: Do not use stock idioms or pre-made comparisons. "As hot as hell" is dead from overuse. Write a fresh, specific comparison that could only come from this event: "as chaotic as a harbor pilot trying to dock in a force-9 gale" is better than "utterly chaotic."
@@ -3389,7 +3882,9 @@ Sentence and paragraph rules:
 - VARY SENTENCE FORMS, not just lengths. If one sentence is conditional ("If X, then Y"), the next should be a short declarative. Follow that with a cause-and-effect. Never write three consecutive sentences with the same grammatical structure — structural repetition kills energy even when length varies.
 - Target an average of 18-22 words per sentence across each paragraph. This creates readable depth without choppiness.
 - Every paragraph must contain at least one specific, verifiable fact: a real name, an exact year or number, a specific place, or a direct quote. No paragraph may consist entirely of vague generalizations.
+- SOURCE ANCHOR RULE: In every major section, at least one paragraph must name the source of its claim, whether that is a memoir, a trial record, a newspaper, a historian, a government decree, or a specific witness.
 - FACT FIRST IN EVERY SECTION: The first sentence of Overview, Eyewitness Accounts, Aftermath, and Legacy must state the key fact before any scene-setting. Answer the implied reader question immediately, then expand.
+- AFTERMATH MUST CASH OUT: The aftermath paragraphs must name specific actions taken in the days, weeks, or years after the event, including who acted, where, and what changed. Do not hide behind phrases like "it reshaped politics" unless you name the office, law, institution, or military result that changed.
 - NO REPETITION ACROSS SECTIONS: Each paragraph must introduce new information. Never restate a point, conclusion, or fact already made in a previous section. Do not name the same person, institution, or concept more than three times in the full article — use pronouns or contextual references after the first mention.
 - Include at least one clear "what would need to be true for this to be wrong" check somewhere in the article when you make a strong claim.
 - Start with the takeaway, then walk backward to the evidence. Avoid "Picture..." and "This was not some minor accident." Write like a human: a little uneven, a little opinionated, and not overly polished.
@@ -3402,6 +3897,7 @@ Sentence and paragraph rules:
 
 BANNED PHRASES — never write any of these:
 "significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of", "it was a dark time", "it was a bleak time", "it was a difficult period", "it was chaos", "it was a complex time", "dark chapter". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
+"dramatic and unexpected", "dramatic and unexpected turn of events", "significant turning point", "brighter future", and "marked the end of a dark period" are also banned unless rewritten into concrete, evidenced statements.
 
 HARD RULE — NO RHETORICAL QUESTIONS: Do not write a single sentence in the form of a question directed at the reader. Not one. This includes: "But why was it significant?", "What were they thinking?", "What happened next?", "So, what happened?", "What does this tell us?", "What if King Faisal had lived?", "What were the consequences?", "Did it work?", or any variation. Every question you are tempted to write must be rewritten as a declarative statement that answers itself. Example: instead of "What were the consequences?" write "The consequences were immediate and lasting." Before submitting your response, scan every sentence — if any sentence ends with a question mark and is addressed to the reader, rewrite it.
 
@@ -4347,16 +4843,17 @@ async function patchBodyParagraphs(html, env) {
  * No paragraph rewriting. Falls back to original on any error.
  */
 async function reviewSEOMetaOnly(content, env) {
-  if (!env.AI && !env.GROQ_API_KEY) return content;
+  if (!hasAnyTextAIProvider(env)) return content;
 
   const systemPrompt =
     "You are a senior SEO editor. Improve only these 5 fields for a historical blog post:\n" +
-    "- description: 120–155 chars, start with year + event name, include location, specific hook\n" +
+    "- description: 120–155 chars, start with year + event name, include location, specific hook, and at least one hard fact such as a number, named figure, or institutional consequence\n" +
     "- ogDescription: 100–130 chars, curiosity-driven, makes people click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
     "- keywords: 5–8 comma-separated, specific — year, location, person names, historical context\n" +
     "- imageAlt: vivid 8–15 word phrase describing what is visible in the image\n\n" +
     "Rules: output ONLY valid JSON with the fields that need improvement. Omit unchanged fields. " +
+    "Never use generic filler such as 'dramatic and unexpected', 'remarkable event', 'turning point', 'important moment', or 'history of [country]'. " +
     "Do not change title, content, or any other field.";
 
   const userMessage =
@@ -4438,7 +4935,7 @@ async function reviewSEOMetaOnly(content, env) {
  * Returns the improved content object. Falls back to original on any error.
  */
 async function reviewContentWithSEOExpert(content, env) {
-  if (!env.AI && !env.GROQ_API_KEY) return content;
+  if (!hasAnyTextAIProvider(env)) return content;
 
   // --- PASS 1: Paragraph quality + humanization (no meta fields) ---
   const allParagraphs = {
@@ -4518,13 +5015,14 @@ async function reviewContentWithSEOExpert(content, env) {
   // --- PASS 2: SEO meta fields only (no paragraphs) ---
   const seoSystemPrompt =
     "You are a senior SEO editor for a historical blog. Improve only these meta fields:\n" +
-    "- description: 120–155 chars, open with year and event, include location and a specific hook\n" +
+    "- description: 120–155 chars, open with year and event, include location and a specific hook, and mention one concrete fact such as a death toll, office, ship name, law, military result, or named figure\n" +
     "- ogDescription: 100–130 chars, curiosity-driven, give readers a reason to click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
     "- keywords: 5–8 specific terms including year, location, key people, historical context\n" +
     "- imageAlt: vivid 8–15 word description of what is visible in the image\n" +
     "- title: keep format 'Event Name — Month Day, Year'. Only change event name if vague or generic.\n\n" +
-    "Return ONLY a JSON object with fields that need improvement. Omit fields that are already good.";
+    "Return ONLY a JSON object with fields that need improvement. Omit fields that are already good.\n" +
+    "Ban vague copy such as 'dramatic and unexpected', 'significant turning point', 'remarkable', 'important moment', 'in the history of', or 'changed everything' unless a concrete fact immediately follows.";
 
   const seoUserMessage =
     `Title: ${content.title}\n` +

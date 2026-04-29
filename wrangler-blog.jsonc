@@ -1,5 +1,5 @@
 {
-  // Blog Post Worker — publishes a new blog post every other day
+  // Blog Post Worker — publishes a new blog post every day
   // using Cloudflare Workers AI (free, no external API key needed).
   //
   // Deploy:  npx wrangler deploy --config wrangler-blog.jsonc
@@ -30,7 +30,8 @@
   // Cron trigger — runs every day at 00:05 UTC.
   // 5 minutes after warmup-worker (00:01) has populated the events KV cache.
   // Blog post is the source of truth for the video narration + metadata.
-  // Failsafe check follows at 00:35, YouTube upload at 01:00/02:00.
+  // Failsafe check follows at 00:35.
+  // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 01:00 UTC.
   "triggers": {
     "crons": ["5 0 * * *"],
   },

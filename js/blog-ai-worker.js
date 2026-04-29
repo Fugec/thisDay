@@ -2,7 +2,7 @@
  * Cloudflare Worker — Blog Post Generator
  *
  * Runs on a cron trigger (daily at 00:05 UTC) and publishes a new blog post
- * every other day using Cloudflare Workers AI (free, no external API key).
+ * every day using Cloudflare Workers AI (free, no external API key).
  * Posts are stored in Cloudflare KV and served at:
  *   /blog/                → listing of all published posts
  *   /blog/[slug]/         → individual post page
@@ -123,6 +123,13 @@ const KV_PERSON_IMAGE_TTL = 60 * 60 * 24 * 30; // 30 days
 const EVERY_OTHER_DAYS = 1; // Generate every N days
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
+const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
+
+function buildSocialPreviewImageUrl(imageUrl) {
+  return imageUrl
+    ? `https://thisday.info/image-proxy?src=${encodeURIComponent(imageUrl)}&${SOCIAL_PREVIEW_IMAGE_PARAMS}`
+    : "https://thisday.info/images/logo.png";
+}
 
 function buildArticleAnswerBlock(content) {
   // Build grid rows from quickFacts; fall back to the four core fields when empty.
@@ -138,9 +145,8 @@ function buildArticleAnswerBlock(content) {
     .map((f) => `      <div class="ai-answer-item"><strong>${esc(f.label)}</strong><span>${esc(f.value)}</span></div>`)
     .join("\n");
 
-  return `<section class="ai-answer-card mb-4" aria-labelledby="article-short-answer-title">
+  return `<section class="ai-answer-card mb-4" aria-label="Short answer">
     <div class="ai-answer-kicker">Short answer</div>
-    <h2 id="article-short-answer-title" class="seo-only-title" style="display:none">What was ${esc(content.eventTitle)}?</h2>
     <div class="ai-answer-grid" aria-label="Key facts">
 ${gridItems}
     </div>
@@ -157,7 +163,7 @@ function buildDidYouKnowSlider(facts) {
     const fact = cleanedFacts[index] || cleanedFacts[index % cleanedFacts.length];
     return `            <article class="blog-cta-col dyn-slide" aria-label="Did you know fact ${index + 1}">
               <p>Did you know</p>
-              <h3>${esc(fact)}</h3>
+              <p class="dyn-fact">${esc(fact)}</p>
             </article>`;
   }).join("\n");
 
@@ -484,26 +490,26 @@ function buildArticleRelatedQuestionsBlock(content, pillars = []) {
     <h2 class="h3 mb-3">Questions readers ask about ${esc(content.eventTitle)}</h2>
     <div class="related-question-grid">
       <article class="related-question-card">
-        <h3>${esc(q1)}</h3>
+        <p class="related-question-title">${esc(q1)}</p>
         <p>${esc(overviewAnswer)}</p>
       </article>
       <article class="related-question-card">
-        <h3>${esc(q2)}</h3>
+        <p class="related-question-title">${esc(q2)}</p>
         <p>${esc(eyewitnessAnswer)}</p>
       </article>
       <article class="related-question-card">
-        <h3>${esc(q3)}</h3>
+        <p class="related-question-title">${esc(q3)}</p>
         <p>${esc(aftermathAnswer)}</p>
       </article>
       <article class="related-question-card">
-        <h3>${esc(q4)}</h3>
+        <p class="related-question-title">${esc(q4)}</p>
         <p>${esc(legacyAnswer)}</p>
       </article>
     </div>
     ${
       topicLinks.length > 0
         ? `<div class="topic-hub-links mt-3">
-      <h3 class="h6 mb-2">Explore connected topic hubs</h3>
+      <strong class="topic-hub-label">Explore connected topic hubs</strong>
       <div class="topic-hub-chip-row">
         ${topicLinks
           .map(
@@ -947,7 +953,7 @@ function staticNavMountMarkup({
 
 export default {
   /**
-   * Cron trigger — runs daily, generates every other day.
+   * Cron trigger — runs daily and publishes the current UTC day's post.
    */
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(
@@ -1126,6 +1132,69 @@ export default {
       const { updatedHtml, changed } = await patchBodyParagraphs(html, env);
       await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${targetSlug}`, updatedHtml);
       return jsonResponse({ status: "ok", slug: targetSlug, changed });
+    }
+
+    // Admin: rewrite stored HTML with response-time page quality normalizations.
+    // POST /blog/backfill-page-quality?all=true
+    // POST /blog/backfill-page-quality?slug=22-march-2026
+    if (path === "/blog/backfill-page-quality" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const params = new URL(request.url).searchParams;
+      const targetSlug = params.get("slug");
+      const backfillAll = params.get("all") === "true";
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const slugs = targetSlug
+        ? [targetSlug]
+        : backfillAll
+          ? index.map((entry) => entry.slug).filter(Boolean)
+          : [];
+      if (slugs.length === 0) {
+        return jsonResponse(
+          { status: "error", message: "Provide ?slug=X or ?all=true" },
+          400,
+        );
+      }
+
+      const results = [];
+      for (const slug of slugs) {
+        try {
+          const key = `${KV_POST_PREFIX}${slug}`;
+          const html = await env.BLOG_AI_KV.get(key);
+          if (!html) {
+            results.push({ slug, status: "not_found" });
+            continue;
+          }
+          const updatedHtml = prepareHtmlResponse(html);
+          if (updatedHtml === html) {
+            results.push({ slug, status: "unchanged" });
+            continue;
+          }
+          await env.BLOG_AI_KV.put(key, updatedHtml);
+          results.push({
+            slug,
+            status: "updated",
+            bytesBefore: html.length,
+            bytesAfter: updatedHtml.length,
+          });
+        } catch (err) {
+          results.push({ slug, status: "error", error: err.message });
+        }
+      }
+      const updated = results.filter((item) => item.status === "updated").length;
+      const unchanged = results.filter((item) => item.status === "unchanged").length;
+      const errors = results.filter((item) => item.status === "error").length;
+      return jsonResponse({
+        status: "ok",
+        total: results.length,
+        updated,
+        unchanged,
+        errors,
+        results,
+      });
     }
 
     // Admin: purge Cloudflare edge cache for all blog post pages
@@ -1496,22 +1565,34 @@ export default {
             `<a href="/events/${slugParsedForThumb.monthSlug}/${slugParsedForThumb.day}/" class="btn mt-2">View ${md} <i `,
           );
         }
-        // Patch raw og:image / twitter:image URLs → image-proxy at 1200px for proper social card sizing.
-        // Old posts store the raw Wikimedia URL directly; new posts use image-proxy in buildPostHTML.
-        if (!patchedHtml.includes('og:image" content="/image-proxy')) {
+        // Patch raw/relative og:image / twitter:image URLs → absolute 1200x630 image-proxy.
+        // Search and social preview parsers are more reliable with absolute image URLs.
+        if (!patchedHtml.includes('og:image" content="https://thisday.info/image-proxy')) {
           patchedHtml = patchedHtml.replace(
             /(<meta property="og:image" content=")(https?:\/\/[^"]+)(")/,
             (_, pre, url, post) =>
-              `${pre}/image-proxy?src=${encodeURIComponent(url)}&w=1200&q=85${post}`,
+              `${pre}${buildSocialPreviewImageUrl(url)}${post}`,
+          );
+          patchedHtml = patchedHtml.replace(
+            /(<meta property="og:image" content=")\/image-proxy\?src=([^"]+)(")/,
+            "$1https://thisday.info/image-proxy?src=$2$3",
           );
         }
-        if (!patchedHtml.includes('twitter:image" content="/image-proxy')) {
+        if (!patchedHtml.includes('twitter:image" content="https://thisday.info/image-proxy')) {
           patchedHtml = patchedHtml.replace(
             /(<meta name="twitter:image" content=")(https?:\/\/[^"]+)(")/,
             (_, pre, url, post) =>
-              `${pre}/image-proxy?src=${encodeURIComponent(url)}&w=1200&q=85${post}`,
+              `${pre}${buildSocialPreviewImageUrl(url)}${post}`,
+          );
+          patchedHtml = patchedHtml.replace(
+            /(<meta name="twitter:image" content=")\/image-proxy\?src=([^"]+)(")/,
+            "$1https://thisday.info/image-proxy?src=$2$3",
           );
         }
+        patchedHtml = patchedHtml.replace(
+          /<meta name="robots" content="index, follow"\s*\/?>/i,
+          '<meta name="robots" content="index, follow, max-image-preview:large" />',
+        );
         // Patch broken JS apostrophe — \'s inside template literal got unescaped to 's,
         // breaking the JS string literal in showResults()
         patchedHtml = patchedHtml.replace(
@@ -1560,7 +1641,7 @@ export default {
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace(
           "</head>",
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide h3{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}</style></head>`,
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}</style></head>`,
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml
@@ -1813,7 +1894,7 @@ export default {
             <span class="authority-links-label">Test Your Knowledge</span>
             <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
             <div class="authority-links-row">
-              <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+              <a class="authority-link" id="tdq-cta-btn" href="/quiz/" onclick="event.preventDefault();document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>`,
           );
@@ -1826,7 +1907,7 @@ export default {
             <span class="authority-links-label">Test Your Knowledge</span>
             <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
             <div class="authority-links-row">
-              <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+              <a class="authority-link" id="tdq-cta-btn" href="/quiz/" onclick="event.preventDefault();document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>`;
           const quizBlock = `
@@ -1978,7 +2059,7 @@ export default {
           let exploreHtml = "";
           if (_sp) {
             const _thumb = eventsThumb
-              ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
+              ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="Explore ${esc(_sp.monthDisplay)} ${esc(_sp.day)} in history" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
               : "";
             exploreHtml = "\n          " + buildDateExploreCard(_sp, _thumb);
           }
@@ -2059,7 +2140,7 @@ export default {
         ) {
           const sp = slugParsedForThumb;
           const thumb = eventsThumb
-            ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
+            ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="Explore ${esc(sp.monthDisplay)} ${esc(sp.day)} in history" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
             : "";
           const exploreCard = buildDateExploreCard(sp, thumb);
           const anchor = patchedHtml.includes("<!-- Quiz CTA -->")
@@ -2453,7 +2534,7 @@ export default {
           <span class="authority-links-label">Test Your Knowledge</span>
           <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
           <div class="authority-links-row">
-            <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+            <a class="authority-link" id="tdq-cta-btn" href="/quiz/" onclick="event.preventDefault();if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
           </div>
         </div>`,
         );
@@ -2465,7 +2546,7 @@ export default {
             <span class="authority-links-label">Test Your Knowledge</span>
             <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
             <div class="authority-links-row">
-              <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+              <a class="authority-link" id="tdq-cta-btn" href="/quiz/" onclick="event.preventDefault();if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>`;
         const quizBlock = `
@@ -2609,36 +2690,41 @@ export default {
  */
 async function maybeGenerateBlogPost(env, ctx) {
   const today = todayDateString(); // "YYYY-MM-DD"
+  const todaySlug = buildSlug(new Date());
   const lastGen = await env.BLOG_AI_KV.get(KV_LAST_GEN_KEY);
+
+  const todayPost = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${todaySlug}`);
+  let todayInIndex = false;
+  if (todayPost) {
+    const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+    const index = indexRaw ? JSON.parse(indexRaw) : [];
+    todayInIndex = index.some((entry) => entry?.slug === todaySlug);
+  }
+  if (!todayPost) {
+    const todayDraft = await env.BLOG_AI_KV.get(`${KV_DRAFT_PREFIX}${todaySlug}`);
+    if (todayDraft) {
+      try {
+        await enrichPublishedPost(env, todaySlug);
+        console.log(`Blog AI: recovered draft and published /blog/${todaySlug}/.`);
+        return;
+      } catch (err) {
+        console.error(
+          `Blog AI: draft recovery failed for ${todaySlug} — ${err.message}`,
+        );
+      }
+    }
+  }
 
   if (lastGen) {
     const diffDays = Math.round(
       (new Date(today) - new Date(lastGen)) / 86_400_000,
     );
-    if (diffDays < EVERY_OTHER_DAYS) {
+    if (diffDays < EVERY_OTHER_DAYS && todayPost && todayInIndex) {
       console.log(
         `Blog AI: last post was ${diffDays} day(s) ago — skipping (need ${EVERY_OTHER_DAYS}).`,
       );
       return;
     }
-  }
-
-  // Day-of-week aware publish variance (P2c — anti-spam-signal pattern break).
-  //
-  // YouTube upload runs Mon/Tue/Thu/Fri at 01:00 UTC and depends on today's
-  // post being ready. Those days always generate.
-  //
-  // Wed/Sat/Sun have no scheduled YouTube run, so we skip ~35% of them
-  // randomly. This makes the publish schedule non-deterministic without
-  // breaking the YouTube pipeline or touching wrangler-blog.jsonc.
-  const SKIP_PROBABILITY = 0.35;
-  const YOUTUBE_DAYS = new Set([1, 2, 4, 5]); // Mon=1, Tue=2, Thu=4, Fri=5
-  const todayDow = new Date(today + "T00:00:00Z").getUTCDay(); // 0=Sun…6=Sat
-  if (!YOUTUBE_DAYS.has(todayDow) && Math.random() < SKIP_PROBABILITY) {
-    console.log(
-      `Blog AI: random publish skip applied (${Math.round(SKIP_PROBABILITY * 100)}% chance on non-YouTube days) — no post today.`,
-    );
-    return;
   }
 
   // Mark today as attempted before generating so tomorrow's cron always starts
@@ -2669,7 +2755,7 @@ async function maybeGenerateBlogPost(env, ctx) {
     step: "blog",
     slug: today,
     message: errMsg,
-    date: now,
+    date: new Date(),
   });
   await env.BLOG_AI_KV.put(
     `error:${today}`,
@@ -2879,6 +2965,20 @@ const PARA_FIELDS = [
   "aftermathParagraphs", "conclusionParagraphs",
 ];
 
+// Adapted from Anbeeld/WRITING.md compact guidance for rewrite passes.
+// Kept short because enrichment runs multiple AI calls under Worker limits.
+const WRITING_REWRITE_RULES =
+  "WRITING.md rewrite discipline:\n" +
+  "- Fit the medium: this is long-form historical web writing for curious general readers, not a chatbot answer or textbook entry.\n" +
+  "- Put the answer, consequence, or strongest concrete fact early. Do not warm up with generic setup.\n" +
+  "- Every substantial paragraph needs a concrete anchor: a proper noun, number, place, named document, quoted source, decision, or checkable consequence.\n" +
+  "- Prefer plain verbs and specific nouns over polished abstraction. Replace vague authority with named source anchors or cut the claim.\n" +
+  "- Develop one through-line. Do not make sections feel like interchangeable buckets or a chronological list with prettier prose.\n" +
+  "- Watch regularity: repeated paragraph arcs, hidden three-part lists, identical openers, tidy concession rhythms, and ceremonial closing sentences.\n" +
+  "- Vary structure because the thought requires it, not through random sentence-length wobble or fake messiness.\n" +
+  "- Cut generic clauses, restatements, announcement sentences, and any phrase that could be pasted into an article about a different event.\n" +
+  "- Do not invent quotes, numbers, motives, causal links, or suspiciously exact claims. If a claim is not supported, attribute it, soften it, or remove it.\n";
+
 /**
  * Scans generated content for banned phrases.
  * Returns a list of violation strings. Empty array = clean.
@@ -2935,6 +3035,60 @@ function hasSourceAnchor(value) {
   );
 }
 
+const EDITORIAL_OVERHEATED_RE =
+  /\b(chaotic scenes|harsh realities|fa[cç]ade|illusion|escapism|spectacle|manipulation|fantasy and nostalgia|masterfully crafted|calculated nature of power|polarization of global politics|major world powers|world grapples|enduring impact|lasting legacy|testaments? to|pomp and circumstance)\b/i;
+
+function scanEditorialNoteQuality(content) {
+  const issues = [];
+  const editorial = plainText(content.editorialNote);
+  if (wordCount(editorial) < 70) {
+    issues.push("editorialNote is too short.");
+  }
+  if (!hasHardFact(editorial)) {
+    issues.push("editorialNote lacks a concrete article-specific detail.");
+  }
+  if (EDITORIAL_OVERHEATED_RE.test(editorial)) {
+    issues.push("editorialNote uses overheated abstraction or cynical editorial language.");
+  }
+  if (
+    /\b(Ukraine|major world powers|global politics|geopolitical|war|conflict)\b/i.test(editorial) &&
+    /\b(wedding|royal|monarchy|ceremony|celebrity|culture|book|music|film|art)\b/i.test(
+      `${content.title || ""} ${content.eventTitle || ""} ${content.keywords || ""}`,
+    )
+  ) {
+    issues.push("editorialNote makes a forced current-war or geopolitics comparison for a non-war event.");
+  }
+  return issues;
+}
+
+function buildFallbackEditorialNote(content) {
+  const event = content.eventTitle || content.title || "this event";
+  const date = content.historicalDate || "its day";
+  const location = content.location ? ` at ${content.location}` : "";
+  const fact = (content.quickFacts || [])
+    .map((item) => item?.value)
+    .find((value) => typeof value === "string" && value.trim().length > 20);
+  const factSentence = fact
+    ? `The detail that stays with us is this: ${fact.replace(/\s+/g, " ").trim()}`
+    : `The detail that stays with us is how much public meaning gathered around one recorded event.`;
+
+  return (
+    `We keep coming back to one thing: ${event} on ${date}${location} was not just a date on a timeline. ` +
+    `${factSentence} ` +
+    `That is where the story becomes useful. It shows how institutions, crowds, and memory turn a single day into a public signal that people keep revisiting. ` +
+    `The image matters, but the choices behind it matter more.`
+  );
+}
+
+function enforceEditorialNoteQuality(content) {
+  const issues = scanEditorialNoteQuality(content);
+  if (issues.length === 0) return content;
+  console.warn(
+    `enforceEditorialNoteQuality: using fallback note (${issues.join("; ")})`,
+  );
+  return { ...content, editorialNote: buildFallbackEditorialNote(content) };
+}
+
 function scanArticleQuality(content) {
   const issues = [];
   const paraMinimums = {
@@ -2985,9 +3139,7 @@ function scanArticleQuality(content) {
     });
   }
 
-  if (wordCount(content.editorialNote) < 70) {
-    issues.push("editorialNote is too short.");
-  }
+  issues.push(...scanEditorialNoteQuality(content));
   if (!plainText(content.contentRationale).match(/\bWikipedia\b/i) || wordCount(content.contentRationale) < 35) {
     issues.push("contentRationale must explain the article's specific value beyond Wikipedia.");
   }
@@ -3032,6 +3184,7 @@ async function fixBannedPhrases(env, content, violations) {
     "restates facts already stated in overviewParagraphs or eyewitnessOrChronicle. " +
     "If a later paragraph says the same thing as an earlier one, rewrite it to add new information not yet covered, " +
     "or advance the story to a later point in time. Each section must earn its place with information the reader has not seen yet.\n\n" +
+    WRITING_REWRITE_RULES + "\n" +
     "Rules: Preserve paragraph count exactly in every array. Never use dashes (-) or em dashes. " +
     "Keep all facts accurate. Return ONLY a JSON object with the arrays that changed. Omit unchanged arrays.";
 
@@ -3109,6 +3262,11 @@ async function improveArticleQuality(env, content, issues) {
     "Preserve array lengths exactly. Preserve the same JSON shape for analysisGood and analysisBad items. " +
     "Never use hyphens or em dashes in article body fields. Avoid generic phrases such as 'changed history', " +
     "'turning point', 'lasting impact', 'important moment', 'remarkable event', and 'still resonates today'. " +
+    "For editorialNote, keep the voice measured, specific, and grounded in the article. Do not make forced comparisons " +
+    "to Ukraine, war, major world powers, global polarization, or modern crises unless the historical event is directly " +
+    "about war or diplomacy. Do not use cynical abstraction such as 'manipulation', 'facade', 'illusion', 'escapism', " +
+    "'spectacle', 'fantasy', 'testament to', 'lasting legacy', 'enduring impact', or 'calculated nature of power'. " +
+    WRITING_REWRITE_RULES +
     "Return ONLY a JSON object containing changed fields.";
 
   const userMessage =
@@ -3420,6 +3578,11 @@ async function generateAndStore(
       }
 
       await generateEditorialNote(env, content, now);
+      const editorialQualityIssues = scanArticleQuality(content);
+      if (editorialQualityIssues.length > 0) {
+        content = await improveArticleQuality(env, content, editorialQualityIssues);
+      }
+      content = enforceEditorialNoteQuality(content);
     }
     if (selectedEvent) {
       alignContentDateFields(content, selectedEvent);
@@ -3463,9 +3626,9 @@ async function generateAndStore(
     });
   }
 
-  // Core write is done — fire all post-publish extras in the background so
-  // the response (or cron return) is not blocked by quiz generation, cache
-  // purges, pings, or Discord. ctx may be undefined in unit tests — guard it.
+  // Core write is done. Lightweight publishes still need the enrichment pass
+  // to promote draft:* into post:* + index, so runPostPublishExtras handles
+  // that critical path before returning.
   if (ctx?.waitUntil) {
     ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish }));
   } else {
@@ -3480,18 +3643,25 @@ async function generateAndStore(
 }
 
 /**
- * All non-critical post-publish work: cache purges, quiz generation,
- * quiz page cache bust, WebSub ping, Discord notify.
- * Runs via ctx.waitUntil() so it never blocks the HTTP response / cron return.
+ * Completes post-publish work. For lightweight publishes this promotes the
+ * draft into the public post/index. For full publishes it handles cache purges,
+ * quiz generation, quiz page cache bust, WebSub ping, and Discord notify.
  */
 async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = false } = {}) {
-  if (scheduleEnrichment && env.PUBLISH_SECRET) {
-    fetch(`https://thisday.info/blog/enrich?slug=${encodeURIComponent(slug)}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${env.PUBLISH_SECRET}` },
-    }).catch((e) =>
-      console.error(`Blog: enrich kickoff failed for ${slug}:`, e.message),
-    );
+  if (scheduleEnrichment) {
+    try {
+      await enrichPublishedPost(env, slug);
+    } catch (err) {
+      const message = `Draft enrichment failed: ${err.message}`;
+      console.error(`Blog: enrich failed for ${slug}: ${message}`);
+      await recordPipelineFailure(env, {
+        step: "blog",
+        slug,
+        message,
+        date: new Date(),
+      });
+      return;
+    }
     return;
   }
 
@@ -3714,6 +3884,11 @@ async function enrichPublishedPost(env, slug) {
   ]);
 
   await generateEditorialNote(env, enriched, date);
+  const editorialQualityIssues = scanArticleQuality(enriched);
+  if (editorialQualityIssues.length > 0) {
+    enriched = await improveArticleQuality(env, enriched, editorialQualityIssues);
+  }
+  enriched = enforceEditorialNoteQuality(enriched);
   alignContentDateFields(enriched);
   const dateValidation = validateContentDateForPublish(enriched, date);
   if (!dateValidation.ok) {
@@ -4380,11 +4555,14 @@ async function generateEditorialNote(env, content, date) {
       `YOUR TASK:\n` +
       `Write a first-person-plural editorial note (100–150 words) that:\n` +
       `1. Opens with "What strikes us about this is..." or "We keep coming back to one thing:" or a similarly direct opener\n` +
-      `2. Makes a specific connection to something happening in ${year} — name it (a conflict, a political situation, a technological shift, a cultural moment). Be concrete, not vague.\n` +
-      `3. Says something the article body could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered vs what actually happened\n` +
-      `4. Ends with one precise, memorable sentence\n\n` +
+      `2. Uses at least two concrete details from the article, such as names, dates, places, institutions, numbers, or decisions\n` +
+      `3. If you connect it to ${year}, make the connection direct and modest. Do not force a current crisis into an event that does not directly involve war, diplomacy, public safety, science, or politics\n` +
+      `4. Says something the article body could not quite say — an honest opinion about what this event reveals about power, human nature, memory, media, institutions, or public ceremony\n` +
+      `5. Ends with one precise, memorable sentence\n\n` +
       `ABSOLUTE RULES:\n` +
       `- No hedging. No "it is important to remember". No "this serves as a reminder".\n` +
+      `- No Ukraine, war, major world powers, global polarization, or modern-conflict comparisons unless the article itself is directly about war or diplomacy\n` +
+      `- No cynical abstractions or generic legacy phrases: "manipulation", "facade", "façade", "illusion", "escapism", "spectacle", "fantasy", "testament to", "lasting legacy", "enduring impact", "calculated nature of power", or "harsh realities"\n` +
       `- Do not summarize the article — respond to it\n` +
       `- Do not mention Wikipedia or sources\n` +
       `- Respond with the note text only. No preamble, no label, no quotes around it.`;
@@ -5195,6 +5373,7 @@ async function reviewContentWithSEOExpert(content, env) {
     "- Vary paragraph openers: some start with subject, some with time/place, some with consequence\n" +
     "PROHIBITIONS: No rhetorical questions to the reader. No 'Picture this', 'So,', 'You have to understand'. " +
     "No sentence fragments as a style device. No casual speech: 'That's the thing', 'It's a shame, really', 'He saw it all'.\n\n" +
+    WRITING_REWRITE_RULES + "\n" +
     "PUNCTUATION: Never use hyphens (-) or em dashes (—). Use a comma or split into two sentences.\n\n" +
     "Return ONLY a JSON object with the paragraph arrays that needed improvement. " +
     "Omit arrays that are already good. Preserve array lengths exactly.\n" +
@@ -5796,6 +5975,7 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
     : "";
 
   const publishedDateISO = date.toISOString().split("T")[0];
+  const previewImageUrl = buildSocialPreviewImageUrl(c.imageUrl);
   const jsonLd = JSON.stringify(
     {
       "@context": "https://schema.org",
@@ -5820,7 +6000,7 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
         },
       },
       description: c.jsonLdDescription || c.description,
-      image: c.imageUrl,
+      image: previewImageUrl,
       url: canonicalUrl,
       about: {
         "@type": "Event",
@@ -5915,7 +6095,7 @@ ${currentPillars
     <meta http-equiv="X-UA-Compatible" content="ie=edge" />
     <title>${esc(c.title)} | thisDay.</title>
     <link rel="canonical" href="${canonicalUrl}" />
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="author" content="thisDay. Editorial" />
     <meta name="description" content="${esc(c.description)}" />
     <meta name="keywords" content="${esc(c.keywords)}" />
@@ -5925,7 +6105,7 @@ ${currentPillars
     <meta property="og:description" content="${esc(c.ogDescription || c.description)}" />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="${canonicalUrl}" />
-    <meta property="og:image" content="${esc(c.imageUrl ? `/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=1200&q=85` : `https://thisday.info/images/logo.png`)}" />
+    <meta property="og:image" content="${esc(previewImageUrl)}" />
     <meta property="og:image:alt" content="${esc(c.imageAlt || c.title)}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -5947,7 +6127,7 @@ ${currentPillars
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${esc(c.title)}" />
     <meta name="twitter:description" content="${esc(c.twitterDescription || c.description)}" />
-    <meta name="twitter:image" content="${esc(c.imageUrl ? `/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=1200&q=85` : `https://thisday.info/images/logo.png`)}" />
+    <meta name="twitter:image" content="${esc(previewImageUrl)}" />
     <meta name="twitter:image:alt" content="${esc(c.imageAlt || c.title)}" />
 
     <!-- JSON-LD Schema -->
@@ -6071,8 +6251,6 @@ ${JSON.stringify({
       }
     </script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
-    <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
-    <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
 
     <style>
       :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
@@ -6094,7 +6272,7 @@ ${JSON.stringify({
       .dyn-slider-wrap::-webkit-scrollbar{display:none}
       .dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}
       .dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}
-      .dyn-slide h3{font-size:15px;color:#fff;margin:0;line-height:1.6}
+      .dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}
       .dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}
       .analysis-good{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
       .analysis-bad{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
@@ -6104,9 +6282,10 @@ ${JSON.stringify({
       .related-question-grid{display:grid;grid-template-columns:1fr;gap:14px}
       @media(min-width:640px){.related-question-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
       .related-question-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72)}
-      .related-question-card h3{font-size:1rem;margin-bottom:8px}
+      .related-question-title{font-size:1rem;margin-bottom:8px;font-weight:600;color:var(--text)}
       .related-question-card p{margin-bottom:0;font-size:15px;line-height:1.6}
       .topic-hub-links{border-top:1px solid var(--border);padding-top:14px}
+      .topic-hub-label{display:block;font-size:.9rem;margin-bottom:8px;color:var(--text)}
       .topic-hub-chip-row{display:flex;flex-wrap:wrap;gap:8px}
       .topic-hub-chip{display:inline-flex;align-items:center;justify-content:center;padding:7px 12px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;font-weight:400;text-decoration:none}
       .topic-hub-chip:hover{background:#e7f0e7;border-color:var(--btn-bg);color:var(--btn-bg);text-decoration:none}
@@ -6359,7 +6538,7 @@ ${analysisBadItems}
             <span class="authority-links-label">Test Your Knowledge</span>
             <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
             <div class="authority-links-row">
-              <a class="authority-link" id="tdq-cta-btn" href="javascript:void(0)" onclick="document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
+              <a class="authority-link" id="tdq-cta-btn" href="/quiz/" onclick="event.preventDefault();document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>
           <section class="mt-5">
@@ -6831,8 +7010,6 @@ ${JSON.stringify(
       gtag("js", new Date()); gtag("config", "G-WXEZ3868VN");
     </script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
-    <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
-    <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
     <style>
       :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
       body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
@@ -7100,8 +7277,6 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
-    <script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
-    <script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
     <style>
       :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}
       body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}
@@ -7379,8 +7554,101 @@ function esc(str) {
     .replace(/'/g, "&#39;");
 }
 
+function stripGoogleFundingChoices(html) {
+  return String(html || "")
+    .replace(
+      /\s*<script\b[^>]*\bsrc=["']https:\/\/fundingchoicesmessages\.google\.com\/i\/pub-8565025017387209\?ers=1["'][^>]*>\s*<\/script>/gi,
+      "",
+    )
+    .replace(
+      /\s*<script>\(function\(\)\{function signalGooglefcPresent\(\)\{[\s\S]*?signalGooglefcPresent\(\);\}\)\(\);<\/script>/gi,
+      "",
+    );
+}
+
+function normalizeHeadingAuditHtml(html) {
+  return String(html || "")
+    .replace(
+      /\s*<h2\b(?=[^>]*\bid=["']article-short-answer-title["'])(?=[^>]*\bstyle=["'][^"']*display\s*:\s*none[^"']*["'])[^>]*>[\s\S]*?<\/h2>/gi,
+      "",
+    )
+    .replace(
+      /<h3>([^<]+)<\/h3>(\s*<\/article>)/gi,
+      '<p class="dyn-fact">$1</p>$2',
+    )
+    .replace(
+      /<article class="related-question-card">\s*<h3>([\s\S]*?)<\/h3>/gi,
+      '<article class="related-question-card">\n        <p class="related-question-title">$1</p>',
+    )
+    .replace(
+      /<h3 class="h6 mb-2">Explore connected topic hubs<\/h3>/gi,
+      '<strong class="topic-hub-label">Explore connected topic hubs</strong>',
+    );
+}
+
+function normalizeSearchPreviewHtml(html) {
+  const normalizePreviewContent = (value) => {
+    const decoded = String(value || "").replace(/&amp;/g, "&");
+    try {
+      const parsed = new URL(decoded, "https://thisday.info");
+      if (parsed.hostname === "thisday.info" && parsed.pathname === "/image-proxy") {
+        const proxiedSrc = parsed.searchParams.get("src");
+        if (proxiedSrc) return buildSocialPreviewImageUrl(proxiedSrc);
+      }
+      if (parsed.hostname.endsWith("wikimedia.org")) {
+        return buildSocialPreviewImageUrl(decoded);
+      }
+    } catch (_) {
+      /* leave malformed URLs unchanged */
+    }
+    return decoded;
+  };
+  const escapeAttrUrl = (value) => String(value || "").replace(/&/g, "&amp;");
+
+  return String(html || "")
+    .replace(
+      /<meta name="robots" content="index, follow"\s*\/?>/i,
+      '<meta name="robots" content="index, follow, max-image-preview:large" />',
+    )
+    .replace(
+      /(<meta property="og:image" content=")([^"]+)(")/i,
+      (_, pre, imageUrl, post) =>
+        `${pre}${escapeAttrUrl(normalizePreviewContent(imageUrl))}${post}`,
+    )
+    .replace(
+      /(<meta name="twitter:image" content=")([^"]+)(")/i,
+      (_, pre, imageUrl, post) =>
+        `${pre}${escapeAttrUrl(normalizePreviewContent(imageUrl))}${post}`,
+    );
+}
+
+function normalizeCrawlableLinksHtml(html) {
+  return String(html || "").replace(
+    /(<a\b[^>]*\bid=["']tdq-cta-btn["'][^>]*\bhref=["'])javascript:void\(0\)(["'][^>]*\bonclick=["'])/gi,
+    "$1/quiz/$2event.preventDefault();",
+  );
+}
+
+function normalizeImageAltHtml(html) {
+  return String(html || "").replace(
+    /(<div data-explore-injected="1"[\s\S]*?<span class="authority-links-label">Explore\s+([^<]+?)\s+in History<\/span>[\s\S]*?<img\b[^>]*\salt=(["']))\3([^>]*>)/gi,
+    (_match, pre, dateLabel, quote, post) =>
+      `${pre}Explore ${esc(unesc(dateLabel))} in history${quote}${post}`,
+  );
+}
+
+function prepareHtmlResponse(body) {
+  return normalizeImageAltHtml(
+    normalizeCrawlableLinksHtml(
+      normalizeSearchPreviewHtml(
+        normalizeHeadingAuditHtml(stripGoogleFundingChoices(body)),
+      ),
+    ),
+  );
+}
+
 function htmlResponse(body, status = 200) {
-  return new Response(body, {
+  return new Response(prepareHtmlResponse(body), {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",

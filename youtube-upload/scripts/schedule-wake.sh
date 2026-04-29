@@ -6,6 +6,7 @@
 # Wake times (UTC): 02:35 and 03:35, Mon/Tue/Thu/Fri (days 1,2,4,5)
 # Mac wakes 2 min early, cron fires at :35, Mac returns to sleep on idle.
 WAKE_TIMES=("02:35:00" "03:35:00")
+WAKE_DAYS=(1 2 4 5)
 
 NOW=$(date -u +%s)
 

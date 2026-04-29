@@ -53,11 +53,66 @@ function buildChapters(cuts) {
     .join("\n");
 }
 
+function getEventName(post) {
+  return String(post.eventTitle || post.title || "")
+    .replace(/\s*[—–-]\s+[A-Z][a-z]+ \d{1,2},\s*\d{4}\s*$/, "")
+    .replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}\s*$/, "")
+    .trim();
+}
+
+function toHashtag(value) {
+  const compact = String(value || "")
+    .split(/\s+/)
+    .map((word) => word.replace(/[^a-zA-Z0-9]/g, ""))
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join("");
+  return compact ? `#${compact.slice(0, 40)}` : null;
+}
+
+function buildEventHashtags(post) {
+  const eventName = getEventName(post);
+  const hashtags = [];
+  const add = (value) => {
+    const tag = toHashtag(value);
+    if (tag && !hashtags.includes(tag)) hashtags.push(tag);
+  };
+
+  const people = Array.isArray(post.keyTerms)
+    ? post.keyTerms
+        .filter((term) => term?.type === "person")
+        .map((term) => term.term)
+        .filter((term) => {
+          const normalizedEvent = eventName.toLowerCase();
+          const parts = String(term || "")
+            .toLowerCase()
+            .split(/\s+/)
+            .map((part) => part.replace(/[^a-z0-9]/g, ""))
+            .filter((part) => part.length > 2);
+          return parts.length > 0 && parts.some((part) => normalizedEvent.includes(part));
+        })
+    : [];
+
+  for (const person of people.slice(0, 2)) add(person);
+
+  if (/\broyal wedding\b/i.test(`${eventName} ${post.keywords || ""}`)) {
+    add("Royal Wedding");
+  } else {
+    add(
+      eventName
+        .replace(/\b(wedding of|sinking of|battle of|disaster|sinking)\b/gi, "")
+        .trim() || eventName,
+    );
+  }
+
+  return hashtags.slice(0, 3);
+}
+
 /**
  * Uploads a video file to YouTube and returns the video ID.
  *
  * @param {string} videoPath  - Path to the MP4 file
- * @param {{ slug: string, title: string, description: string, publishedAt: string }} post
+ * @param {{ slug: string, title: string, eventTitle?: string, description: string, publishedAt: string }} post
  * @param {number[]} [cuts]   - Scene boundary timestamps for chapter markers
  * @returns {Promise<string>} YouTube video ID
  */
@@ -68,6 +123,15 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
   // YouTube title limit: 100 chars. Strip em-dash separators for cleaner titles.
   const rawTitle = post.title.replace(/ [—–] /g, ": ");
   const title = rawTitle.length > 97 ? rawTitle.slice(0, 94) + "..." : rawTitle;
+  const eventName = getEventName(post);
+  const eventHashtags = buildEventHashtags(post);
+  const hashtagLine = [
+    ...eventHashtags,
+    "#OnThisDay",
+    "#History",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const description = [
     post.description,
@@ -75,7 +139,7 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
     buildChapters(cuts),
     `Read the full article → https://thisday.info/blog/${post.slug}/`,
     "",
-    "#OnThisDay #History #Shorts #ThisDay #HistoricalEvents #TodayInHistory",
+    hashtagLine,
   ]
     .filter((line) => line !== null && line !== undefined)
     .join("\n");
@@ -94,6 +158,7 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
           "historical events",
           "today in history",
           "education",
+          eventName,
         ],
         categoryId: "27", // Education
         defaultLanguage: "en",

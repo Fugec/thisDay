@@ -95,6 +95,19 @@ async function handleImageProxy(_request, url, ctx) {
     parseInt(url.searchParams.get("w") || "1200", 10),
     2000,
   );
+  const heightParam = parseInt(url.searchParams.get("h") || "0", 10);
+  const height =
+    Number.isFinite(heightParam) && heightParam > 0
+      ? Math.min(heightParam, 2000)
+      : null;
+  const fitParam = String(url.searchParams.get("fit") || "").toLowerCase();
+  const fit = ["cover", "contain", "scale-down", "crop", "pad"].includes(
+    fitParam,
+  )
+    ? fitParam
+    : height
+      ? "cover"
+      : undefined;
   const quality = Math.min(
     parseInt(url.searchParams.get("q") || "82", 10),
     100,
@@ -123,12 +136,15 @@ async function handleImageProxy(_request, url, ctx) {
   // Check worker-level cache first (keyed on final URL + dimensions)
   const workerCache = caches.default;
   const cacheKey = new Request(
-    `https://img-cache.thisday.info/${encodeURIComponent(imageUrl)}?w=${width}&q=${quality}`,
+    `https://img-cache.thisday.info/${encodeURIComponent(imageUrl)}?w=${width}&h=${height || ""}&fit=${fit || ""}&q=${quality}`,
   );
   const cached = await workerCache.match(cacheKey);
   if (cached) return cached;
 
   try {
+    const imageOptions = { width, quality, format: "auto" };
+    if (height) imageOptions.height = height;
+    if (fit) imageOptions.fit = fit;
     const imageResponse = await fetch(imageUrl, {
       headers: {
         "User-Agent": WIKIPEDIA_USER_AGENT,
@@ -138,7 +154,7 @@ async function handleImageProxy(_request, url, ctx) {
         cacheTtl: 60 * 60 * 24 * 30, // 30-day Cloudflare edge cache
         cacheEverything: true,
         // Cloudflare Image Resizing (Pro plan+): converts to WebP/AVIF automatically
-        image: { width, quality, format: "auto" },
+        image: imageOptions,
       },
     });
 
@@ -1295,7 +1311,7 @@ function buildDidYouKnowSlider(facts, extraClass = "") {
   const sliderFacts = cleanedFacts.map((fact, index) =>
     `<article class="dyn-slide${extraClass ? ` ${extraClass}` : ""}" aria-label="Did you know fact ${index + 1}">
       <p>Did you know</p>
-      <h3>${escapeHtml(fact)}</h3>
+      <p class="dyn-fact">${escapeHtml(fact)}</p>
     </article>`
   ).join("");
 
@@ -1893,7 +1909,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}
 .dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}
 .dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.55}
-.dyn-slide h3{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.55}
+.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.55}
 .dyn-slide-inline{margin:10px 0}
 @media(min-width:768px){.dyn-slider-btn{display:inline-flex}}
 @media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}
@@ -2081,8 +2097,6 @@ const initAds=()=>{if(location.hostname!=='thisday.info'&&location.hostname!=='w
 if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',initAds,{once:true});}else{initAds();}
 setTimeout(initAds,1200);
 </script>
-<script async src="https://fundingchoicesmessages.google.com/i/pub-8565025017387209?ers=1"></script>
-<script>(function(){function signalGooglefcPresent(){if(!window.frames['googlefcPresent']){if(document.body){const iframe=document.createElement('iframe');iframe.style='width:0;height:0;border:none;z-index:-1000;left:-1000px;top:-1000px;display:none;';iframe.name='googlefcPresent';document.body.appendChild(iframe);}else{setTimeout(signalGooglefcPresent,0);}}}signalGooglefcPresent();})();</script>
 <script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
 <div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:var(--btn-bg);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
 <script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{var _t=localStorage.getItem('supportPopupClosed');if(_t&&Date.now()-Number(_t)<86400000)return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed',String(Date.now()));}catch(e){}});})();</script>
@@ -2398,11 +2412,14 @@ function generateEventsDateHTML(
     const descText = dotIdx > 0 ? escapeHtml(fullText.slice(dotIdx + 2).trim()) : "";
     const pageDesc = escapeHtml(e.pages?.[0]?.description || "");
     const pageExtract = escapeHtml(e.pages?.[0]?.extract || "");
+    const imgAlt = escapeHtml(
+      e.pages?.[0]?.title || e.pages?.[0]?.normalizedtitle || fullText,
+    );
     const isEven = idx % 2 === 1;
     const imgHtml = th
       ? w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
-        : `<img src="${escapeHtml(th)}" alt="" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-image-alt"></i></div>`;
     const card = `<div class="tl-card">
   <div class="tl-card-inner">
@@ -5386,12 +5403,12 @@ async function handleFetchRequest(request, env, ctx) {
     `https://www.google-analytics.com https://www.google.com https://www.google.ba https://www.gstatic.com ` +
     `https://www.googleadservices.com https://pagead2.googlesyndication.com ` +
     `https://*.adtrafficquality.google https://*.doubleclick.net ` +
-    `https://fundingchoicesmessages.google.com https://www.googletagmanager.com; ` +
-    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://static.cloudflareinsights.com https://*.adtrafficquality.google https://fundingchoicesmessages.google.com 'unsafe-inline'; ` +
+    `https://www.googletagmanager.com; ` +
+    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://static.cloudflareinsights.com https://*.adtrafficquality.google 'unsafe-inline'; ` +
     `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
-    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com https://img.youtube.com https://*.adtrafficquality.google https://*.doubleclick.net https://fundingchoicesmessages.google.com; ` +
+    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com https://img.youtube.com https://*.adtrafficquality.google https://*.doubleclick.net; ` +
     `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
-    `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com https://googleads.g.doubleclick.net https://*.adtrafficquality.google https://fundingchoicesmessages.google.com; ` +
+    `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com https://googleads.g.doubleclick.net https://*.adtrafficquality.google; ` +
     `manifest-src 'self'; ` +
     `base-uri 'self'; ` +
     `frame-ancestors 'none'; ` +

@@ -22,6 +22,7 @@
 const DOMAIN = "https://thisday.info";
 const CACHE_MAX_AGE = 3600; // 1 hour (purged immediately after each new publish)
 const KV_INDEX_KEY = "index";
+const KV_ENTITY_INDEX_KEY = "entity-index-v1";
 const SITE_STRUCTURE_LASTMOD = "2026-04-09";
 
 // ---------------------------------------------------------------------------
@@ -153,10 +154,8 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (
-      url.pathname !== "/sitemap.xml" &&
-      url.pathname !== "/sitemap-main.xml"
-    ) {
+    const knownPaths = ["/sitemap.xml", "/sitemap-main.xml", "/sitemap-entities.xml"];
+    if (!knownPaths.includes(url.pathname)) {
       return fetch(request);
     }
 
@@ -177,6 +176,27 @@ export default {
     const cacheKey = new Request(`${DOMAIN}${url.pathname}`);
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
+
+    // Serve entity sitemap separately — only needs the entity index
+    if (url.pathname === "/sitemap-entities.xml") {
+      let entityIndex = [];
+      try {
+        const raw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
+        entityIndex = raw ? JSON.parse(raw) : [];
+      } catch (err) {
+        console.error("Sitemap: failed to read entity index:", err);
+      }
+      const entityXml = buildEntitiesSitemap(entityIndex);
+      const entityResponse = new Response(entityXml, {
+        headers: {
+          "Content-Type": "application/xml; charset=utf-8",
+          "Cache-Control": `public, max-age=${CACHE_MAX_AGE}, s-maxage=${CACHE_MAX_AGE}`,
+          "X-Robots-Tag": "noindex",
+        },
+      });
+      await cache.put(cacheKey, entityResponse.clone());
+      return entityResponse;
+    }
 
     // Read AI blog post index from KV
     let aiPosts = [];
@@ -222,6 +242,7 @@ function buildSitemapIndex(latestPostLastmod) {
     sitemapEntry(`${DOMAIN}/sitemap-main.xml`, mainSitemapLastmod),
     sitemapEntry(`${DOMAIN}/sitemap-generated.xml`, today),
     sitemapEntry(`${DOMAIN}/sitemap-people.xml`, today),
+    sitemapEntry(`${DOMAIN}/sitemap-entities.xml`, today),
     sitemapEntry(`${DOMAIN}/news-sitemap.xml`, latestPostLastmod),
   ];
 
@@ -308,6 +329,28 @@ function urlEntry(loc, lastmod, changefreq, priority) {
     `    <changefreq>${changefreq}</changefreq>\n` +
     `    <priority>${priority}</priority>\n` +
     `  </url>`
+  );
+}
+
+function buildEntitiesSitemap(entityIndex) {
+  const entries = (Array.isArray(entityIndex) ? entityIndex : [])
+    .filter((e) => {
+      if (!e.url || !e.slug) return false;
+      // Newer entries carry an explicit indexable flag; for legacy entries fall
+      // back to a summary-word proxy (short summary → likely thin page).
+      if (typeof e.indexable === "boolean") return e.indexable;
+      return String(e.summary || "").split(/\s+/).filter(Boolean).length >= 25;
+    })
+    .map((e) => {
+      const lastmod = e.updatedAt ? e.updatedAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
+      const priority = e.type === "person" ? "0.6" : "0.5";
+      return urlEntry(`${DOMAIN}${e.url}`, lastmod, "monthly", priority);
+    });
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+    entries.join("\n") +
+    `\n</urlset>`
   );
 }
 

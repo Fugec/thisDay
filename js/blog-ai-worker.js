@@ -114,10 +114,13 @@ async function recordPipelineFailure(
   }
 }
 
+const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
 const KV_LAST_GEN_KEY = "last_gen_date";
 const KV_DRAFT_PREFIX = "draft:";
+const KV_ENTITY_PREFIX = "entity-v1:";
+const KV_ENTITY_INDEX_KEY = "entity-index-v1";
 const KV_PERSON_IMAGE_PREFIX = "person-image:";
 const KV_PERSON_IMAGE_TTL = 60 * 60 * 24 * 30; // 30 days
 const EVERY_OTHER_DAYS = 1; // Generate every N days
@@ -1055,6 +1058,139 @@ export default {
       }
     }
 
+    if (path === "/blog/backfill-entities" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const params = new URL(request.url).searchParams;
+      const targetSlug = params.get("slug");
+      const bfLimit = Math.min(parseInt(params.get("limit") || "5", 10), 20);
+      const bfOffset = parseInt(params.get("offset") || "0", 10);
+      const since = params.get("since") || null; // e.g. "2026-03-01"
+      const skipExisting = params.get("skip_existing") !== "false";
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const sorted = [...index].sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+      let pool = targetSlug
+        ? sorted.filter((e) => e.slug === targetSlug)
+        : since
+          ? sorted.filter((e) => e.publishedAt && e.publishedAt.slice(0, 10) >= since)
+          : sorted.slice(0, 1);
+      if (!pool.length) {
+        return jsonResponse({ status: "error", message: "No matching posts found." }, 404);
+      }
+      if (skipExisting && !targetSlug) {
+        const checks = await Promise.all(
+          pool.map((e) =>
+            env.BLOG_AI_KV.get(`post-entities:${e.slug}`, { type: "text" })
+              .then((v) => ({ slug: e.slug, exists: v !== null }))
+              .catch(() => ({ slug: e.slug, exists: false })),
+          ),
+        );
+        const enriched = new Set(checks.filter((c) => c.exists).map((c) => c.slug));
+        pool = pool.filter((e) => !enriched.has(e.slug));
+      }
+      const total = pool.length;
+      const targets = pool.slice(bfOffset, bfOffset + bfLimit);
+      if (!targets.length) {
+        return jsonResponse({ status: "ok", message: "All posts in range already enriched.", total: 0, results: [], nextOffset: null });
+      }
+      const results = [];
+      for (const entry of targets) {
+        try {
+          const date = new Date(entry.publishedAt || Date.now());
+          const content = { ...entry, historicalDate: inferHistoricalDateFromEntry(entry) };
+          const entities = await upsertEntitiesForContent(env, content, entry.slug, date, entry.pillars || []);
+          results.push({ slug: entry.slug, status: "ok", entities: entities.length });
+        } catch (err) {
+          results.push({ slug: entry.slug, status: "error", error: err.message });
+        }
+      }
+      return jsonResponse({
+        status: "ok",
+        results,
+        total,
+        offset: bfOffset,
+        limit: bfLimit,
+        nextOffset: bfOffset + bfLimit < total ? bfOffset + bfLimit : null,
+      });
+    }
+
+    // Admin: re-generate body sections for existing entity records using the improved prompt.
+    // Does NOT re-fetch Wikipedia — uses already-stored intro/summary data.
+    // POST /blog/reenrich-entity-sections?type=person&limit=10&offset=0
+    if (path === "/blog/reenrich-entity-sections" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const reenrichParams = new URL(request.url).searchParams;
+      const typeFilter = reenrichParams.get("type") || "person";
+      const reenrichLimit = Math.min(parseInt(reenrichParams.get("limit") || "10", 10), 30);
+      const reenrichOffset = parseInt(reenrichParams.get("offset") || "0", 10);
+
+      const entityIndexRaw = await env.BLOG_AI_KV?.get(KV_ENTITY_INDEX_KEY).catch(() => null);
+      if (!entityIndexRaw) return jsonResponse({ status: "error", message: "Entity index not found" }, 404);
+      const entityIndex = JSON.parse(entityIndexRaw);
+      const reenrichFiltered = typeFilter === "all" ? entityIndex : entityIndex.filter((e) => e.type === typeFilter);
+      const reenrichBatch = reenrichFiltered.slice(reenrichOffset, reenrichOffset + reenrichLimit);
+
+      const reenrichResults = [];
+      for (const entry of reenrichBatch) {
+        try {
+          const entityKey = `${KV_ENTITY_PREFIX}${entry.type}:${entry.slug}`;
+          const entityRaw = await env.BLOG_AI_KV.get(entityKey);
+          if (!entityRaw) { reenrichResults.push({ slug: entry.slug, status: "not_found" }); continue; }
+          const entity = JSON.parse(entityRaw);
+          const contentProxy = {
+            title: entity.sourcePostTitle || entity.name,
+            eventTitle: entity.sourcePostTitle || entity.name,
+            historicalDate: null,
+            location: null,
+            description: entity.description || entity.summary || "",
+            contentRationale: null,
+            keyTerms: [],
+          };
+          const fallback = buildFallbackEntityBodySections(entity, contentProxy);
+          entity.bodySections = await generateEntityBodySections(env, entity, contentProxy, fallback);
+          entity.updatedAt = new Date().toISOString();
+          const wordCount = (entity.bodySections || [])
+            .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
+            .join(" ").split(/\s+/).filter(Boolean).length;
+          await env.BLOG_AI_KV.put(entityKey, JSON.stringify(entity));
+          reenrichResults.push({ slug: entry.slug, type: entry.type, status: "ok", sections: entity.bodySections.length, wordCount });
+        } catch (err) {
+          reenrichResults.push({ slug: entry.slug, type: entry.type, status: "error", error: err.message });
+        }
+      }
+      // Bulk-update indexable flags in the entity index for the processed batch
+      const updatedIndexable = new Map(
+        reenrichResults
+          .filter((r) => r.status === "ok")
+          .map((r) => [`${r.type}:${r.slug}`, r.wordCount >= 150]),
+      );
+      if (updatedIndexable.size > 0) {
+        const idxRaw = await env.BLOG_AI_KV?.get(KV_ENTITY_INDEX_KEY).catch(() => null);
+        if (idxRaw) {
+          const idx = JSON.parse(idxRaw);
+          for (const entry of idx) {
+            const key = `${entry.type}:${entry.slug}`;
+            if (updatedIndexable.has(key)) entry.indexable = updatedIndexable.get(key);
+          }
+          await env.BLOG_AI_KV.put(KV_ENTITY_INDEX_KEY, JSON.stringify(idx));
+        }
+      }
+      return jsonResponse({
+        status: "ok",
+        results: reenrichResults,
+        total: reenrichFiltered.length,
+        offset: reenrichOffset,
+        limit: reenrichLimit,
+        nextOffset: reenrichOffset + reenrichLimit < reenrichFiltered.length ? reenrichOffset + reenrichLimit : null,
+      });
+    }
+
     // Admin: patch SEO meta tags on existing posts without full regeneration
     // POST /blog/regen-seo?slug=22-march-2026   — single post
     // POST /blog/regen-seo?all=true             — all posts in index (sequential)
@@ -1521,10 +1657,11 @@ export default {
               )
               .catch(() => "")
           : Promise.resolve("");
-      const [html, ytRaw, eventsThumb] = await Promise.all([
+      const [html, ytRaw, eventsThumb, articleEntitiesRaw] = await Promise.all([
         env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`),
         env.BLOG_AI_KV.get("youtube:uploaded"),
         eventsThumbPromise,
+        env.BLOG_AI_KV.get(`post-entities:${slug}`).catch(() => null),
       ]);
       if (html) {
         const extractWikiUrl = (doc) => {
@@ -1641,7 +1778,7 @@ export default {
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace(
           "</head>",
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}</style></head>`,
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}</style></head>`,
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml
@@ -2206,29 +2343,6 @@ export default {
             "#tdq-float-btn:hover{background:#1a3a2d;",
           );
 
-        // Backfill inline figures for already-stored posts that shipped without them.
-        // Lazily inject and persist back to KV so the latest article gets figures immediately.
-        if (!/<figure style="float:(?:right|left);/i.test(patchedHtml)) {
-          const wikiUrl = extractWikiUrl(patchedHtml);
-          const coverUrl = extractCoverSrc(patchedHtml);
-          if (wikiUrl) {
-            try {
-              const imgs = await fetchEventImages(wikiUrl, coverUrl, 2);
-              if (imgs.length > 0) {
-                patchedHtml = injectEventImages(patchedHtml, imgs);
-                if (ctx?.waitUntil) {
-                  ctx.waitUntil(
-                    env.BLOG_AI_KV
-                      .put(`${KV_POST_PREFIX}${slug}`, patchedHtml)
-                      .catch(() => {}),
-                  );
-                }
-              }
-            } catch (_) {
-              /* non-fatal */
-            }
-          }
-        }
 
         // Patch old amber/orange quiz colors → green palette
         if (
@@ -2280,11 +2394,14 @@ export default {
           );
         }
         // Inject updated ai-answer-card styles into older stored posts (removes green gradient,
-        // hides kicker and h2 title to match the current clean card design).
-        if (!patchedHtml.includes('ai-card-patch-v1')) {
+        // hides kicker, h2 title, and injected figure/p to match the current clean card design).
+        if (!patchedHtml.includes('ai-card-patch-v2')) {
           patchedHtml = patchedHtml.replace(
+            /<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/,
+            '',
+          ).replace(
             '</head>',
-            '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>',
+            '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>',
           );
         }
         // Font-size consistency patch: 15px on .mb-2 and .ai-answer-item value text.
@@ -2331,6 +2448,24 @@ export default {
             bodyClose2,
             adInitJs + "\n" + bodyClose2,
           );
+        }
+        if (articleEntitiesRaw && !patchedHtml.includes("data-entity-strip")) {
+          try {
+            const entityMeta = JSON.parse(articleEntitiesRaw);
+            const strip = buildArticleEntityStrip(entityMeta);
+            if (strip) {
+              const heroAnchor = '<figure class="text-center mb-4">';
+              const heroIdx = patchedHtml.indexOf(heroAnchor);
+              if (heroIdx !== -1) {
+                patchedHtml =
+                  patchedHtml.slice(0, heroIdx) +
+                  strip + "\n" +
+                  patchedHtml.slice(heroIdx);
+              }
+            }
+          } catch {
+            // malformed entity meta — skip strip
+          }
         }
         const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
         if (ytEntry?.youtubeId && ytEntry.privacy !== "private") {
@@ -3800,11 +3935,10 @@ function normalizeContentMetadata(content) {
 
 async function savePublishedPost(
   env,
-  { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [], eventImages = [] },
+  { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [] },
 ) {
   const safePillars = Array.isArray(pillars) ? pillars : [];
   const safePersonImages = Array.isArray(personImages) ? personImages : [];
-  const safeEventImages = Array.isArray(eventImages) ? eventImages : [];
 
   alignContentDateFields(content);
   const dateValidation = validateContentDateForPublish(content, date);
@@ -3815,7 +3949,6 @@ async function savePublishedPost(
   const rawHtml = buildPostHTML(content, date, slug, existingIndex, safePillars, bookCoverUrl);
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
   if (safePersonImages.length > 0) html = injectPersonImages(html, safePersonImages);
-  if (safeEventImages.length > 0) html = injectEventImages(html, safeEventImages);
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
 
   const deduped = [...existingIndex].filter((e) => e.slug !== slug);
@@ -3895,6 +4028,9 @@ async function enrichPublishedPost(env, slug) {
     throw new Error(`Refusing to enrich ${slug}: ${dateValidation.reason}`);
   }
   normalizeContentMetadata(enriched);
+  await upsertEntitiesForContent(env, enriched, slug, date, pillars).catch((err) => {
+    console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
+  });
   await savePublishedPost(env, {
     slug,
     date,
@@ -3907,6 +4043,778 @@ async function enrichPublishedPost(env, slug) {
   });
   await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`).catch(() => {});
   await runPostPublishExtras(env, slug, enriched, { scheduleEnrichment: false });
+}
+
+function entitySlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function normalizeEntityType(type) {
+  const value = String(type || "").toLowerCase();
+  if (value === "person") return "person";
+  if (value === "event") return "event";
+  return null;
+}
+
+function wikiTitleFromUrl(wikiUrl) {
+  try {
+    const parsed = new URL(wikiUrl);
+    const title = parsed.pathname.split("/wiki/")[1];
+    return title ? decodeURIComponent(title.split("#")[0]).replace(/_/g, " ") : "";
+  } catch {
+    return "";
+  }
+}
+
+function formatWikiDate(claim) {
+  const raw = claim?.mainsnak?.datavalue?.value?.time;
+  if (!raw) return "";
+  const match = raw.match(/^[+-](\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+async function fetchWikidataLifeDates(pageTitle) {
+  if (!pageTitle) return {};
+  const url =
+    "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=pageprops&ppprop=wikibase_item&format=json&origin=*&titles=" +
+    encodeURIComponent(pageTitle);
+  const res = await fetch(url, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } });
+  if (!res.ok) return {};
+  const data = await res.json();
+  const page = Object.values(data?.query?.pages || {})[0];
+  const qid = page?.pageprops?.wikibase_item;
+  if (!qid) return {};
+
+  const entityUrl =
+    "https://www.wikidata.org/wiki/Special:EntityData/" +
+    encodeURIComponent(qid) +
+    ".json";
+  const entityRes = await fetch(entityUrl, {
+    headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+  });
+  if (!entityRes.ok) return {};
+  const entityData = await entityRes.json();
+  const claims = entityData?.entities?.[qid]?.claims || {};
+  return {
+    birthDate: formatWikiDate(claims.P569?.[0]),
+    deathDate: formatWikiDate(claims.P570?.[0]),
+  };
+}
+
+async function fetchWikipediaEntityData(term) {
+  const pageTitle = wikiTitleFromUrl(term.wikiUrl) || term.term;
+  if (!pageTitle) return {};
+  const summaryUrl =
+    "https://en.wikipedia.org/api/rest_v1/page/summary/" +
+    encodeURIComponent(pageTitle);
+  const introUrl =
+    "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&exintro=1&explaintext=1&format=json&origin=*&titles=" +
+    encodeURIComponent(pageTitle);
+  const [summaryRes, introRes, lifeDates] = await Promise.all([
+    fetch(summaryUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } }).catch(() => null),
+    fetch(introUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } }).catch(() => null),
+    normalizeEntityType(term.type) === "person"
+      ? fetchWikidataLifeDates(pageTitle).catch(() => ({}))
+      : Promise.resolve({}),
+  ]);
+  let summary = {};
+  if (summaryRes?.ok) summary = await summaryRes.json();
+  let intro = "";
+  if (introRes?.ok) {
+    const introData = await introRes.json();
+    const introPage = Object.values(introData?.query?.pages || {})[0];
+    intro = introPage?.extract || "";
+  }
+  return {
+    summary: summary.extract || "",
+    intro: intro || summary.extract || "",
+    description: summary.description || "",
+    imageUrl: summary.thumbnail?.source || summary.originalimage?.source || "",
+    pageTitle,
+    ...lifeDates,
+  };
+}
+
+function compactEntityText(value, maxLength = 180) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  const sentence = text.split(/(?<=[.!?])\s+/)[0];
+  if (sentence && sentence.length <= maxLength) return sentence;
+  return text.slice(0, maxLength - 3).trimEnd() + "...";
+}
+
+function entityFactSentences(...values) {
+  const seen = new Set();
+  return values
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 30)
+    .filter((sentence) => {
+      const key = normalizeTopicMatchText(sentence);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function findEntityFact(sentences, patterns, fallback = "") {
+  const found = sentences.find((sentence) =>
+    patterns.some((pattern) => pattern.test(sentence)),
+  );
+  return compactEntityText(found || fallback, 220);
+}
+
+function findDistinctEntityFact(sentences, patterns, usedValues, fallback = "") {
+  const found = sentences.find((sentence) => {
+    const normalized = normalizeTopicMatchText(sentence);
+    return !usedValues.has(normalized) && patterns.some((pattern) => pattern.test(sentence));
+  });
+  const value = compactEntityText(found || fallback, 220);
+  if (value) usedValues.add(normalizeTopicMatchText(value));
+  return value;
+}
+
+function inferHistoricalDateFromEntry(entry) {
+  if (entry?.historicalDate) return entry.historicalDate;
+  const title = String(entry?.title || "");
+  const dashDate = title.match(/[—-]\s*([A-Z][a-z]+ \d{1,2}, \d{3,4})\s*$/);
+  if (dashDate) return dashDate[1];
+  const inlineDate = title.match(/\b([A-Z][a-z]+ \d{1,2}, \d{3,4})\b/);
+  if (inlineDate) return inlineDate[1];
+  if (Number.isInteger(entry?.historicalYear)) return String(entry.historicalYear);
+  return "";
+}
+
+function buildPersonOverviewCards(entity) {
+  const lifeDates = entity.birthDate && entity.deathDate
+    ? `${entity.birthDate} – ${entity.deathDate}`
+    : entity.birthDate
+      ? `b. ${entity.birthDate}`
+      : "";
+  const factSentences = entityFactSentences(entity.intro, entity.summary);
+  const summary = compactEntityText(entity.summary || entity.intro, 185);
+  const description = compactEntityText(entity.description, 150);
+  const usedFacts = new Set();
+  const knownFor = findDistinctEntityFact(
+    factSentences,
+    [/primary author/i, /principal author/i, /founded/i, /invented/i, /discovered/i, /pioneered/i, /led\b/i, /proponent/i, /champion/i, /known for/i, /best known/i],
+    usedFacts,
+    description || summary,
+  );
+  const majorWork = findDistinctEntityFact(
+    factSentences,
+    [/served as/i, /wrote\b/i, /authored/i, /composed/i, /established/i, /military/i, /campaign/i, /founded/i, /created/i],
+    usedFacts,
+    summary || description,
+  );
+  const significance = findDistinctEntityFact(
+    factSentences,
+    [/proponent/i, /democracy/i, /rights/i, /philosophy/i, /legacy/i, /impact/i, /formative/i],
+    usedFacts,
+    summary || description,
+  );
+  const cards = [
+    { label: "Known for", value: knownFor },
+    { label: "Major work", value: majorWork },
+    { label: "Significance", value: significance },
+  ].filter((c) => c.value);
+  if (description) cards.unshift({ label: "Role", value: description });
+  if (lifeDates) cards.unshift({ label: "Born / Died", value: lifeDates });
+  return cards;
+}
+
+function normalizeEntityCards(cards, fallbackCards, type) {
+  const wantedLabels = type === "person"
+    ? ["Born / Died", "Role", "Known for", "Major work", "Significance"]
+    : ["What happened", "Date", "Location", "Key people", "Outcome", "Why it matters"];
+  const source = Array.isArray(cards) ? cards : [];
+  const normalized = [];
+  const seenValues = new Set();
+
+  for (const label of wantedLabels) {
+    const candidate = source.find((card) => String(card?.label || "").trim().toLowerCase() === label.toLowerCase());
+    const fallback = fallbackCards.find((card) => card.label === label);
+    const rawValue = candidate?.value || fallback?.value || "";
+    const value = compactEntityText(rawValue, 240);
+    const duplicateKey = normalizeTopicMatchText(value);
+    if (!value || seenValues.has(duplicateKey)) {
+      normalized.push(fallback);
+      if (fallback?.value) seenValues.add(normalizeTopicMatchText(fallback.value));
+      continue;
+    }
+    normalized.push({ label, value });
+    seenValues.add(duplicateKey);
+  }
+
+  return normalized.filter((card) => card?.label && card?.value);
+}
+
+function entityCardsAreFilled(cards, type) {
+  if (!Array.isArray(cards) || cards.length < 6) return false;
+  const compactLabels = type === "event"
+    ? new Set(["Date", "Location", "Key people"])
+    : new Set(["Life and death"]);
+  return cards.every((card) => {
+    const value = String(card?.value || "").trim();
+    if (!value) return false;
+    if (compactLabels.has(card.label)) return value.split(/\s+/).length >= 6;
+    return value.split(/\s+/).length >= 18;
+  });
+}
+
+function expandedEntityCardValue(label, currentValue, entity, content, fallbackValue) {
+  const current = String(currentValue || "").trim();
+  const fallback = String(fallbackValue || "").trim();
+  const summary = compactEntityText(entity.summary, 220);
+  const description = String(entity.description || "").replace(/\s+/g, " ").trim();
+  const facts = entityFactSentences(entity.intro, entity.summary);
+  const people = (content.keyTerms || [])
+    .filter((term) => term.type === "person")
+    .map((term) => term.term)
+    .slice(0, 4)
+    .join(", ");
+
+  if (entity.type === "person") {
+    if (label === "Born / Died") {
+      const dates = entity.birthDate && entity.deathDate
+        ? `${entity.birthDate} – ${entity.deathDate}`
+        : entity.birthDate ? `b. ${entity.birthDate}` : "";
+      return dates || fallback || current;
+    }
+    if (label === "Role") {
+      return description || fallback || current || summary;
+    }
+    if (label === "Known for") {
+      return findEntityFact(facts, [/primary author/i, /founded/i, /invented/i, /discovered/i, /pioneered/i, /proponent/i, /known for/i, /best known/i], description || summary || current || fallback);
+    }
+    if (label === "Major work") {
+      return findEntityFact(facts, [/served as/i, /wrote\b/i, /authored/i, /composed/i, /established/i, /military/i, /founded/i, /created/i], current || fallback || summary);
+    }
+    if (label === "Significance") {
+      return findEntityFact(facts, [/proponent/i, /democracy/i, /rights/i, /philosophy/i, /legacy/i, /formative/i], fallback || current || summary);
+    }
+  }
+
+  if (label === "What happened") {
+    return summary || content.description || `${entity.name} is treated as the central event for this entity page, with the related article providing the narrative and source-backed context.`;
+  }
+  if (label === "Date") {
+    return content.historicalDate || fallback || current || "Date details are sourced from the related thisDay article.";
+  }
+  if (label === "Location") {
+    return content.location || fallback || current || "Location details are sourced from the related thisDay article when available.";
+  }
+  if (label === "Key people") {
+    return people || fallback || current || "Key people are drawn from the related article and linked entity records when available.";
+  }
+  if (label === "Outcome") {
+    return `${content.description || summary || `${entity.name} changed the public story around the people and institutions involved.`} The outcome card keeps the immediate result separate from the broader legacy.`;
+  }
+  if (label === "Why it matters") {
+    return content.contentRationale || `This event matters because it links a specific date to people, institutions, media attention, and later memory. The entity page gives readers a place to move beyond one article.`;
+  }
+  return current || fallback;
+}
+
+function ensureFilledEntityCards(cards, fallbackCards, entity, content) {
+  const used = new Set();
+  return cards.map((card) => {
+    const fallback = fallbackCards.find((item) => item.label === card.label);
+    const minWords = entity.type === "event" && ["Date", "Location", "Key people"].includes(card.label)
+      ? 4
+      : entity.type === "person" && card.label === "Life and death"
+        ? 7
+        : 18;
+    const words = String(card.value || "").trim().split(/\s+/).filter(Boolean).length;
+    const currentKey = normalizeTopicMatchText(card.value || "");
+    if (currentKey && used.has(currentKey)) {
+      const value = expandedEntityCardValue(card.label, "", entity, content, fallback?.value);
+      used.add(normalizeTopicMatchText(value));
+      return { label: card.label, value };
+    }
+    if (entity.type === "person" && card.label === "Life and death" && !/\b(death|died)\b/i.test(card.value || "")) {
+      const value = expandedEntityCardValue(card.label, card.value, entity, content, fallback?.value);
+      used.add(normalizeTopicMatchText(value));
+      return {
+        label: card.label,
+        value,
+      };
+    }
+    if (words >= minWords) {
+      used.add(currentKey);
+      return card;
+    }
+    const value = expandedEntityCardValue(card.label, card.value, entity, content, fallback?.value);
+    used.add(normalizeTopicMatchText(value));
+    return {
+      label: card.label,
+      value,
+    };
+  });
+}
+
+async function generateEntityOverviewCards(env, entity, content, fallbackCards) {
+  if (!hasAnyTextAIProvider(env)) return fallbackCards;
+  const typeGuide = entity.type === "person"
+    ? `Write exactly 6 cards with these labels in this order: Life and death, Known for, Main role, Major work, Significance, Context.
+Life and death must be factual and first. If the person is alive, say "No death date is listed." Do not make one up.`
+    : `Write exactly 6 cards with these labels in this order: What happened, Date, Location, Key people, Outcome, Why it matters.`;
+  const prompt =
+    `Create compact, information-rich overview slider cards for a thisDay entity page.\n\n` +
+    `${typeGuide}\n\n` +
+    `Rules:\n` +
+    `- Each non-date value must be 25 to 45 words.\n` +
+    `- Full cards are better than tiny labels. Avoid sentence fragments.\n` +
+    `- Do not repeat the same phrase or idea across cards.\n` +
+    `- Do not repeat the exact Wikipedia short description.\n` +
+    `- Use plain factual language, no hype.\n` +
+    `- Prefer concrete facts over generic website text.\n` +
+    `- Do not invent facts beyond the supplied data.\n` +
+    `- Return JSON only: {"cards":[{"label":"...","value":"..."}]}\n\n` +
+    `Entity data:\n${JSON.stringify(
+      {
+        type: entity.type,
+        name: entity.name,
+        description: entity.description,
+        summary: entity.summary,
+        intro: entity.intro,
+        birthDate: entity.birthDate,
+        deathDate: entity.deathDate,
+        wikiUrl: entity.wikiUrl,
+        sourcePostTitle: entity.sourcePostTitle,
+        sourcePublishedAt: entity.sourcePublishedAt,
+      },
+      null,
+      2,
+    )}\n\n` +
+    `Related article data:\n${JSON.stringify(
+      {
+        title: content.title,
+        eventTitle: content.eventTitle,
+        historicalDate: content.historicalDate,
+        location: content.location,
+        description: content.description,
+        contentRationale: content.contentRationale,
+        keyPeople: (content.keyTerms || []).filter((term) => term.type === "person").map((term) => term.term).slice(0, 6),
+      },
+      null,
+      2,
+    )}`;
+
+  try {
+    const raw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content: "You write concise historical knowledge cards. Return valid JSON only.",
+        },
+        { role: "user", content: prompt },
+      ],
+      { maxTokens: 1300, timeoutMs: 25_000, temperature: 0.35 },
+    );
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return fallbackCards;
+    const parsed = JSON.parse(match[0]);
+    let normalized = normalizeEntityCards(parsed.cards, fallbackCards, entity.type);
+    if (entityCardsAreFilled(normalized, entity.type)) return normalized;
+
+    const rewritePrompt =
+      `The cards below are too thin. Rewrite them as full slider cards.\n` +
+      `Keep the same labels and order. Each non-date card must be 25 to 45 words, specific, and non-repetitive.\n` +
+      `Return JSON only: {"cards":[{"label":"...","value":"..."}]}\n\n` +
+      JSON.stringify({ entity: entity.name, type: entity.type, cards: normalized }, null, 2);
+    const expandedRaw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content: "You expand short historical entity cards into complete, non-repetitive JSON cards.",
+        },
+        { role: "user", content: rewritePrompt },
+      ],
+      { maxTokens: 1500, timeoutMs: 25_000, temperature: 0.45 },
+    );
+    const expandedCleaned = expandedRaw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim();
+    const expandedMatch = expandedCleaned.match(/\{[\s\S]*\}/);
+    if (expandedMatch) {
+      const expanded = JSON.parse(expandedMatch[0]);
+      normalized = normalizeEntityCards(expanded.cards, fallbackCards, entity.type);
+    }
+    return ensureFilledEntityCards(normalized, fallbackCards, entity, content);
+  } catch (err) {
+    console.warn(`Entity overview AI failed for ${entity.name}: ${err.message}`);
+    return ensureFilledEntityCards(fallbackCards, fallbackCards, entity, content);
+  }
+}
+
+function splitIntroParagraphs(text, targetWords = 100) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  const sentences = clean.match(/[^.!?]+[.!?]+(?:\s|$)/g) || [clean];
+  const paras = [];
+  let current = [];
+  let wordCount = 0;
+  for (const sentence of sentences) {
+    const words = sentence.trim().split(/\s+/).length;
+    if (wordCount + words > targetWords && current.length > 0) {
+      paras.push(current.join(" ").trim());
+      current = [sentence.trim()];
+      wordCount = words;
+    } else {
+      current.push(sentence.trim());
+      wordCount += words;
+    }
+  }
+  if (current.length > 0) paras.push(current.join(" ").trim());
+  return paras.filter((p) => p.length > 40);
+}
+
+function buildFallbackEntityBodySections(entity, content) {
+  const sourceTitle = entity.sourcePostTitle || content.title || "the related thisDay article";
+  const factSentences = entityFactSentences(entity.intro, entity.summary);
+  const summary = String(entity.summary || entity.intro || "").replace(/\s+/g, " ").trim();
+  const description = String(entity.description || "").replace(/\s+/g, " ").trim();
+  const articleDescription = /\.\.\.$|…$/.test(String(content.description || "").trim())
+    ? ""
+    : String(content.description || "").trim();
+  const people = (content.keyTerms || [])
+    .filter((term) => term.type === "person")
+    .map((term) => term.term)
+    .slice(0, 5)
+    .join(", ");
+
+  if (entity.type === "person") {
+    const introParagraphs = splitIntroParagraphs(entity.intro || entity.summary, 110);
+    const sections = [];
+
+    if (introParagraphs.length >= 2) {
+      sections.push({
+        heading: `Who is ${entity.name}?`,
+        paragraphs: introParagraphs.slice(0, 2),
+      });
+    } else {
+      const lifeLine = entity.deathDate
+        ? `${entity.name} was born on ${entity.birthDate || "an unlisted date"} and died on ${entity.deathDate}.`
+        : entity.birthDate
+          ? `${entity.name} was born on ${entity.birthDate}.`
+          : "";
+      const educationFact = findEntityFact(factSentences, [/educated/i, /university/i, /college/i, /academy/i], "");
+      const serviceFact = findEntityFact(factSentences, [/served/i, /military/i, /air force/i, /air ambulance/i, /army/i], "");
+      sections.push({
+        heading: `Who is ${entity.name}?`,
+        paragraphs: [
+          `${lifeLine} ${summary || `${entity.name} is connected to a dated historical event in thisDay coverage.`}`.trim(),
+          [educationFact, serviceFact].filter(Boolean).join(" ") || (description ? `${entity.name} is described as ${description}.` : summary),
+        ].filter(Boolean),
+      });
+    }
+
+    if (introParagraphs.length >= 4) {
+      sections.push({
+        heading: `Career and legacy`,
+        paragraphs: introParagraphs.slice(2, 4),
+      });
+    } else if (introParagraphs.length === 3) {
+      sections[0].paragraphs.push(introParagraphs[2]);
+    }
+
+    if (introParagraphs.length >= 5) {
+      sections.push({
+        heading: `Historical significance`,
+        paragraphs: introParagraphs.slice(4, 6),
+      });
+    }
+
+    sections.push({
+      heading: `${entity.name} on thisDay`,
+      paragraphs: [
+        `${sourceTitle} connects ${entity.name} to a specific historical moment.${articleDescription ? ` ${articleDescription}` : ""}`,
+      ].filter(Boolean),
+    });
+
+    return sections.filter((s) => s.paragraphs.filter(Boolean).length > 0);
+  }
+
+  return [
+    {
+      heading: `What was ${entity.name}?`,
+      paragraphs: [
+        `${summary || content.description || `${entity.name} is the event connected to this thisDay article.`}`,
+        `${content.historicalDate ? `${entity.name} is tied to ${content.historicalDate}.` : `The related article supplies the date context for ${entity.name}.`} ${people ? `Key people connected to the event include ${people}.` : `Key people are drawn from the related article when available.`}`,
+      ],
+    },
+    {
+      heading: `Why ${entity.name} still matters`,
+      paragraphs: [
+        `${content.contentRationale || `${entity.name} matters because it connects a specific date to people, institutions, public memory, and later interpretation.`}`,
+        `${sourceTitle} connects ${entity.name} to a specific historical date. ${articleDescription || "The related article explains the event, the people involved, and why the moment is still remembered."}`,
+      ],
+    },
+  ];
+}
+
+function normalizeEntityBodySections(sections, fallbackSections) {
+  const source = Array.isArray(sections) ? sections : [];
+  const normalized = source
+    .map((section) => ({
+      heading: String(section?.heading || "").trim(),
+      paragraphs: Array.isArray(section?.paragraphs)
+        ? section.paragraphs.map((p) => String(p || "").replace(/\s+/g, " ").trim()).filter(Boolean)
+        : [],
+    }))
+    .filter((section) => section.heading && section.paragraphs.length > 0)
+    .slice(0, 5);
+  const enough = normalized.length >= 2 && normalized.every((section) =>
+    section.paragraphs.join(" ").split(/\s+/).filter(Boolean).length >= 40,
+  );
+  return enough ? normalized : fallbackSections;
+}
+
+async function generateEntityBodySections(env, entity, content, fallbackSections) {
+  if (!hasAnyTextAIProvider(env)) return fallbackSections;
+  const isperson = entity.type === "person";
+  const prompt =
+    `Write the main body text for a thisDay ${isperson ? "person" : "event"} page. It appears directly under an overview slider.\n\n` +
+    `Requirements:\n` +
+    `- Return JSON only: {"sections":[{"heading":"...","paragraphs":["...","...","..."]}]}\n` +
+    `- Create 3 to 4 sections.\n` +
+    `- Each section should have 2 to 3 paragraphs.\n` +
+    `- Each paragraph should be 100 to 140 words — write full, informative prose, not short summaries.\n` +
+    `- Use clear, searchable headings that describe the section topic (e.g. "Early life and career", "Role in the Vietnam War", "Nobel Prize refusal", "Legacy").\n` +
+    `- Cover: early life/background, main career/achievement, historical significance, legacy or later life.\n` +
+    `- Include all available facts from the supplied intro text — do not omit names, dates, offices, or events.\n` +
+    `- Use only supplied facts. Do not invent dates, places, offices, or achievements.\n` +
+    `- Avoid filler phrases like "rich tapestry", "delve", "captivating", "important to remember", "testament to".\n` +
+    `- Do not explain what the page is for. Write about the ${isperson ? "person" : "event"} itself.\n` +
+    `- Avoid repeating the same sentence or title wording from the overview cards.\n\n` +
+    `Entity:\n${JSON.stringify(
+      {
+        type: entity.type,
+        name: entity.name,
+        description: entity.description,
+        summary: entity.summary,
+        intro: entity.intro,
+        birthDate: entity.birthDate,
+        deathDate: entity.deathDate,
+        wikiUrl: entity.wikiUrl,
+        sourcePostTitle: entity.sourcePostTitle,
+      },
+      null,
+      2,
+    )}\n\n` +
+    `Related thisDay article:\n${JSON.stringify(
+      {
+        title: content.title,
+        eventTitle: content.eventTitle,
+        historicalDate: content.historicalDate,
+        location: content.location,
+        description: content.description,
+        contentRationale: content.contentRationale,
+        pillars: entity.relatedTopics,
+        keyPeople: (content.keyTerms || []).filter((term) => term.type === "person").map((term) => term.term).slice(0, 6),
+      },
+      null,
+      2,
+    )}`;
+
+  try {
+    const raw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content:
+            "You write detailed, factual, long-form historical entity page copy for thisDay.info. Return valid JSON only.\n\n" +
+            WRITING_REWRITE_RULES,
+        },
+        { role: "user", content: prompt },
+      ],
+      { maxTokens: 3200, timeoutMs: 40_000, temperature: 0.35 },
+    );
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return fallbackSections;
+    const parsed = JSON.parse(match[0]);
+    return normalizeEntityBodySections(parsed.sections, fallbackSections);
+  } catch (err) {
+    console.warn(`Entity body AI failed for ${entity.name}: ${err.message}`);
+    return fallbackSections;
+  }
+}
+
+function buildEventOverviewCards(entity, content) {
+  const summary = compactEntityText(entity.summary, 185);
+  const description = compactEntityText(content.description, 185);
+  const rationale = compactEntityText(content.contentRationale, 185);
+  return [
+    { label: "What happened", value: summary || description || `${entity.name} is the event covered by this thisDay article.` },
+    { label: "Date", value: content.historicalDate || "Date details are sourced from the related article." },
+    { label: "Location", value: content.location || "Location details are sourced from the related article." },
+    { label: "Key people", value: (content.keyTerms || []).filter((t) => t.type === "person").map((t) => t.term).slice(0, 4).join(", ") || "Key people are listed in the related article." },
+    { label: "Outcome", value: description || summary || "The related article explains the outcome and immediate consequences." },
+    { label: "Why it matters", value: rationale || summary || "This page collects thisDay coverage and source links for the event." },
+  ];
+}
+
+async function upsertEntityRecord(env, draftEntity) {
+  const key = `${KV_ENTITY_PREFIX}${draftEntity.type}:${draftEntity.slug}`;
+  const existingRaw = await env.BLOG_AI_KV.get(key);
+  const existing = existingRaw ? JSON.parse(existingRaw) : null;
+  const relatedPosts = [
+    ...new Set([
+      ...(Array.isArray(existing?.relatedPosts) ? existing.relatedPosts : []),
+      ...(Array.isArray(draftEntity.relatedPosts) ? draftEntity.relatedPosts : []),
+    ]),
+  ];
+  const entity = {
+    ...(existing || {}),
+    ...draftEntity,
+    relatedPosts,
+    firstSeenAt: existing?.firstSeenAt || draftEntity.firstSeenAt,
+    updatedAt: new Date().toISOString(),
+  };
+  await env.BLOG_AI_KV.put(key, JSON.stringify(entity));
+  return entity;
+}
+
+async function upsertEntityIndex(env, entities) {
+  if (!entities.length) return;
+  const raw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
+  const index = raw ? JSON.parse(raw) : [];
+  const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
+  for (const entity of entities) {
+    byId.set(`${entity.type}:${entity.slug}`, {
+      type: entity.type,
+      slug: entity.slug,
+      name: entity.name,
+      url: entity.url,
+      imageUrl: entity.imageUrl || "",
+      summary: entity.summary || entity.description || "",
+      relatedPosts: entity.relatedPosts || [],
+      updatedAt: entity.updatedAt,
+      indexable: (Array.isArray(entity.bodySections) ? entity.bodySections : [])
+        .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
+        .join(" ").split(/\s+/).filter(Boolean).length >= 150,
+    });
+  }
+  await env.BLOG_AI_KV.put(
+    KV_ENTITY_INDEX_KEY,
+    JSON.stringify([...byId.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)))),
+  );
+}
+
+async function upsertEntitiesForContent(env, content, slug, date, pillars) {
+  const rawTerms = Array.isArray(content.keyTerms) ? content.keyTerms : [];
+  const mainEvent = {
+    term: content.eventTitle || content.title,
+    wikiUrl: content.wikiUrl || content.jsonLdUrl || "",
+    type: "event",
+  };
+  const termsById = new Map();
+  for (const term of [mainEvent, ...rawTerms]) {
+    const type = normalizeEntityType(term?.type);
+    const slugPart = entitySlug(term?.term);
+    if (!term?.term || !type || !slugPart) continue;
+    const id = `${type}:${slugPart}`;
+    const existing = termsById.get(id);
+    if (!existing || (!existing.wikiUrl && term.wikiUrl)) {
+      termsById.set(id, { ...existing, ...term, type });
+    }
+  }
+  const terms = [...termsById.values()];
+
+  const saved = [];
+  for (const term of terms) {
+    const type = normalizeEntityType(term.type);
+    const slugPart = entitySlug(term.term);
+    if (!type || !slugPart) continue;
+    const wikiData = term.wikiUrl ? await fetchWikipediaEntityData(term).catch(() => ({})) : {};
+    const url = type === "person" ? `/people/${slugPart}/` : `/history/${slugPart}/`;
+    const entity = {
+      type,
+      slug: slugPart,
+      name: term.term,
+      url,
+      wikiUrl: term.wikiUrl || "",
+      sourcePostSlug: slug,
+      sourcePostTitle: content.title || "",
+      sourcePostUrl: `/blog/${slug}/`,
+      sourcePublishedAt: date.toISOString(),
+      imageUrl: wikiData.imageUrl || (type === "event" ? content.imageUrl : ""),
+      summary: wikiData.summary || "",
+      intro: wikiData.intro || wikiData.summary || "",
+      description: wikiData.description || "",
+      birthDate: wikiData.birthDate || "",
+      deathDate: wikiData.deathDate || "",
+      relatedTopics: Array.isArray(pillars) ? pillars : [],
+      relatedPosts: [slug],
+      firstSeenAt: new Date().toISOString(),
+    };
+    const fallbackCards = type === "person"
+      ? buildPersonOverviewCards(entity)
+      : buildEventOverviewCards(entity, content);
+    entity.overviewCards = await generateEntityOverviewCards(env, entity, content, fallbackCards);
+    const fallbackSections = buildFallbackEntityBodySections(entity, content);
+    entity.bodySections = await generateEntityBodySections(env, entity, content, fallbackSections);
+    saved.push(await upsertEntityRecord(env, entity));
+  }
+  await upsertEntityIndex(env, saved);
+  if (saved.length > 0) {
+    const lightweight = saved.map((e) => ({
+      type: e.type,
+      slug: e.slug,
+      name: e.name,
+      imageUrl: e.imageUrl || "",
+      url: e.url,
+    }));
+    await env.BLOG_AI_KV.put(
+      `post-entities:${slug}`,
+      JSON.stringify(lightweight),
+    ).catch(() => {});
+  }
+  return saved;
+}
+
+function buildArticleEntityStrip(entityMeta) {
+  if (!Array.isArray(entityMeta) || entityMeta.length === 0) return "";
+  const people = entityMeta.filter((e) => e.type === "person" && e.slug && e.name);
+  if (people.length === 0) return "";
+
+  const chips = people.map((e) =>
+    `<a href="${esc(e.url)}" class="person-pill">` +
+    `<span class="person-circle">${e.imageUrl ? `<img src="/image-proxy?src=${encodeURIComponent(e.imageUrl)}&w=120&h=120&fit=cover&q=80" alt="${esc(e.name)}" loading="lazy">` : `<span class="person-circle-fallback" aria-hidden="true">${esc(String(e.name).slice(0, 1).toUpperCase())}</span>`}</span>` +
+    `<span class="person-pill-name">${esc(e.name)}</span>` +
+    `</a>`,
+  ).join("");
+
+  const css = `<style>.entity-strip{margin:0 0 1.25rem}.entity-strip-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted,#5c7a65);margin-bottom:.65rem}.entity-person-chips{display:flex;flex-wrap:wrap;gap:1rem}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
+
+  return `${css}<div class="entity-strip" data-entity-strip="1"><div class="entity-strip-label">People in this story</div><div class="entity-person-chips">${chips}</div></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -6272,6 +7180,7 @@ ${JSON.stringify({
       .dyn-slider-wrap::-webkit-scrollbar{display:none}
       .dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}
       .dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}
+      .dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}
       .dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}
       .dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}
       .analysis-good{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
@@ -7637,11 +8546,25 @@ function normalizeImageAltHtml(html) {
   );
 }
 
+function stripDynSliderFiguresHtml(html) {
+  let next = String(html || "");
+  let previous = "";
+  const dynFigurePattern =
+    /(<article\b[^>]*\bdyn-slide\b[^>]*>[\s\S]*?)<figure\b[^>]*>[\s\S]*?<\/figure>/gi;
+  while (next !== previous) {
+    previous = next;
+    next = next.replace(dynFigurePattern, "$1");
+  }
+  return next;
+}
+
 function prepareHtmlResponse(body) {
   return normalizeImageAltHtml(
     normalizeCrawlableLinksHtml(
       normalizeSearchPreviewHtml(
-        normalizeHeadingAuditHtml(stripGoogleFundingChoices(body)),
+        normalizeHeadingAuditHtml(
+          stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+        ),
       ),
     ),
   );

@@ -10,6 +10,7 @@
 import {
   siteNav,
   siteFooter,
+  footerYearScript,
   SITE_DESCRIPTION,
   NAV_CSS,
   FOOTER_CSS,
@@ -521,6 +522,410 @@ function slugifyArchiveLabel(value) {
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+}
+
+function entityKey(type, slug) {
+  return `entity-v1:${type}:${slug}`;
+}
+
+const ENTITY_PLACEHOLDER_FRAGMENTS = [
+  "public role summarized from the linked source",
+  "life date details are sourced from",
+  "life and death details are taken from",
+  "is the current thisday link for",
+  "as more articles mention the same person",
+  "entity page, with the related article",
+  "the outcome card keeps the immediate result",
+  "this event matters because it links",
+  "date details are sourced from the related",
+  "location details are sourced from the related",
+  "key people are drawn from the related article",
+];
+
+function isEntityPlaceholder(value) {
+  const v = String(value || "").toLowerCase();
+  return ENTITY_PLACEHOLDER_FRAGMENTS.some((f) => v.includes(f));
+}
+
+const PERSON_CARD_SKIP = [
+  /was born (into|in|at)\b/i,
+  /born into the\b/i,
+  /\bis the current thisday\b/i,
+  /\bwas born (and raised|to a)\b/i,
+  /\bthe (son|daughter|child) of\b/i,
+  /grew up in\b/i,
+];
+
+const PERSON_CARD_PREFER = [
+  /\bprimary author\b/i, /\bprincipal author\b/i,
+  /\bfounded\b/i, /\binvented\b/i, /\bdiscovered\b/i,
+  /\bserved as\b/i, /\bwrote\b/i, /\bcomposed\b/i,
+  /\bpioneered\b/i, /\bwon\b/i, /\bawarded\b/i,
+  /\bproponent\b/i, /\barchitect of\b/i, /\bauthor of\b/i,
+  /\bled\b/i, /\bchampioned\b/i, /\bestablished\b/i,
+];
+
+function personIntroSentences(text) {
+  if (!text) return [];
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 45 && s.length <= 350)
+    .filter((s) => !PERSON_CARD_SKIP.some((p) => p.test(s)))
+    .sort((a, b) => {
+      return PERSON_CARD_PREFER.filter((p) => p.test(b)).length - PERSON_CARD_PREFER.filter((p) => p.test(a)).length;
+    })
+    .slice(0, 4);
+}
+
+function sentenceLabel(sentence) {
+  if (/primary author|principal author|wrote|composed|authored/i.test(sentence)) return "Written work";
+  if (/founded|established|created|built/i.test(sentence)) return "Founded";
+  if (/invented|discovered|pioneered/i.test(sentence)) return "Discovery";
+  if (/proponent|democracy|rights|philosophy/i.test(sentence)) return "Philosophy";
+  if (/served as|president|governor|minister|senator|general/i.test(sentence)) return "Career";
+  if (/awarded|won|prize|medal/i.test(sentence)) return "Achievement";
+  return "Legacy";
+}
+
+function buildEntityOverviewSlider(entity) {
+  const cards = [];
+
+  if (entity.type === "person") {
+    // Dates from direct entity fields
+    if (entity.birthDate || entity.deathDate) {
+      const dates = entity.birthDate && entity.deathDate
+        ? `${entity.birthDate} – ${entity.deathDate}`
+        : entity.birthDate
+          ? `b. ${entity.birthDate}`
+          : `d. ${entity.deathDate}`;
+      cards.push({ label: "Born / Died", value: dates });
+    }
+
+    // Role from Wikipedia description (most reliable one-liner)
+    if (entity.description && !isEntityPlaceholder(entity.description)) {
+      cards.push({ label: "Role", value: entity.description });
+    }
+
+    // Concrete sentences from Wikipedia intro
+    const sentences = personIntroSentences(entity.intro || entity.summary || "");
+    const usedTexts = new Set(cards.map((c) => c.value.toLowerCase()));
+    for (const sentence of sentences) {
+      if (cards.length >= 5) break;
+      if (!usedTexts.has(sentence.toLowerCase())) {
+        cards.push({ label: sentenceLabel(sentence), value: sentence });
+        usedTexts.add(sentence.toLowerCase());
+      }
+    }
+
+    // Fill remaining from stored AI cards that look concrete
+    const storedGood = (entity.overviewCards || [])
+      .filter((c) => c?.label && c?.value)
+      .filter((c) => !["Context", "Life and death", "Main role", "Known for"].includes(c.label))
+      .filter((c) => !isEntityPlaceholder(c.value))
+      .filter((c) => !PERSON_CARD_SKIP.some((p) => p.test(c.value)));
+    for (const c of storedGood) {
+      if (cards.length >= 6) break;
+      if (!usedTexts.has(c.value.toLowerCase())) {
+        cards.push(c);
+        usedTexts.add(c.value.toLowerCase());
+      }
+    }
+  } else {
+    const storedCards = (entity.overviewCards || [])
+      .filter((c) => c?.label && c?.value)
+      .filter((c) => c.label !== "Context")
+      .filter((c) => !isEntityPlaceholder(c.value));
+    cards.push(...storedCards);
+    if (!cards.length) {
+      cards.push({ label: "What happened", value: entity.summary || entity.description || entity.name });
+    }
+  }
+
+  if (!cards.length) return "";
+
+  return `<section class="mt-4" style="overflow:hidden">
+    <h2 class="h3">Overview</h2>
+    <div class="dyn-slider-wrap">
+      <div class="dyn-slider-track">
+        ${cards
+          .map(
+            (card) =>
+              `<article class="dyn-slide"><p>${escapeHtml(card.label)}</p><p class="dyn-fact">${escapeHtml(card.value)}</p></article>`,
+          )
+          .join("")}
+      </div>
+    </div>
+  </section>`;
+}
+
+const ENTITY_INLINE_AD = `<div class="ad-unit-container my-4">
+  <span class="ad-unit-label">Advertisement</span>
+  <ins class="adsbygoogle" style="display:block"
+       data-ad-client="ca-pub-8565025017387209"
+       data-ad-slot="9477779891"
+       data-ad-format="auto"
+       data-full-width-responsive="true"></ins>
+</div>`;
+
+function buildEntityBodySections(entity) {
+  const sections = Array.isArray(entity.bodySections) ? entity.bodySections : [];
+  const validSections = sections
+    .map((section) => ({
+      heading: String(section?.heading || "").trim(),
+      paragraphs: Array.isArray(section?.paragraphs)
+        ? section.paragraphs.map((p) => String(p || "").trim()).filter(Boolean)
+        : [],
+    }))
+    .filter((section) => section.heading && section.paragraphs.length > 0)
+    .slice(0, 5);
+
+  if (!validSections.length) {
+    const fallback = entity.intro || entity.summary || entity.description || "";
+    if (!fallback) return "";
+    return `<section class="entity-body mt-4">
+      <h2 class="h3">About ${escapeHtml(entity.name)}</h2>
+      <p>${escapeHtml(fallback)}</p>
+    </section>`;
+  }
+
+  return `<section class="entity-body mt-4">
+    ${validSections
+      .map(
+        (section, i) =>
+          `${i === 1 || i === 2 ? ENTITY_INLINE_AD : ""}<div class="entity-body-section">
+            <h2 class="h3">${escapeHtml(section.heading)}</h2>
+            ${section.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
+          </div>`,
+      )
+      .join("")}
+  </section>`;
+}
+
+function buildEntityRelatedPosts(entity, posts) {
+  const relatedSlugs = Array.isArray(entity.relatedPosts) ? entity.relatedPosts : [];
+  const related = relatedSlugs
+    .map((slug) => posts.find((post) => post.slug === slug))
+    .filter(Boolean)
+    .slice(0, 6);
+  if (!related.length) return "";
+  return `<section class="mt-5">
+    <h2 class="h3">Related on thisDay</h2>
+    <div class="entity-grid">
+      ${related
+        .map(
+          (post) =>
+            `<a class="entity-card" href="/blog/${escapeHtml(post.slug)}/"><strong>${escapeHtml(post.title)}</strong><p class="mb-0 article-meta">${escapeHtml(post.description || "Read the related thisDay article.")}</p></a>`,
+        )
+        .join("")}
+    </div>
+  </section>`;
+}
+
+function buildEntityAdUnits() {
+  return `<div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block"
+         data-ad-client="ca-pub-8565025017387209"
+         data-ad-slot="9477779891"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+  </div>
+  <div class="ad-unit-container my-4">
+    <span class="ad-unit-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:block"
+         data-ad-client="ca-pub-8565025017387209"
+         data-ad-slot="9477779891"
+         data-ad-format="autorelaxed"></ins>
+  </div>`;
+}
+
+async function handleEntityPage(request, env, url, type, slug) {
+  const raw = await env.BLOG_AI_KV?.get(entityKey(type, slug)).catch(() => null);
+  if (!raw) {
+    return fetch(request);
+  }
+  const entity = JSON.parse(raw);
+  const posts = await getBlogIndexEntries(env);
+  const title = `${entity.name} | thisDay.`;
+  const canonical = `${url.origin}${entity.url || url.pathname}`;
+  const descriptionBase = type === "person"
+    ? `Explore ${entity.name} through thisDay articles, biographical context, source links, and related historical coverage.`
+    : (entity.summary || entity.description || `Explore ${entity.name} through thisDay articles, sources, and related history.`);
+  const description = descriptionBase
+    .replace(/\s+/g, " ")
+    .slice(0, 155);
+  const imageUrl = entity.imageUrl
+    ? `${url.origin}/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=1200&h=630&fit=cover&q=85`
+    : `${url.origin}/images/logo.png`;
+  const bodySectionWords = (Array.isArray(entity.bodySections) ? entity.bodySections : [])
+    .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
+    .join(" ").split(/\s+/).filter(Boolean).length;
+  const robotsMeta = bodySectionWords >= 150
+    ? "index, follow, max-image-preview:large"
+    : "noindex, follow";
+  const schemaType = type === "person" ? "Person" : "Event";
+  const jsonLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": schemaType,
+    name: entity.name,
+    url: canonical,
+    sameAs: entity.wikiUrl || undefined,
+    description,
+    image: imageUrl,
+    ...(type === "person" && entity.birthDate ? { birthDate: entity.birthDate } : {}),
+    ...(type === "person" && entity.deathDate ? { deathDate: entity.deathDate } : {}),
+  });
+  const breadcrumbLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Home", item: `${url.origin}/` },
+      { "@type": "ListItem", position: 2, name: type === "person" ? "People" : "History", item: `${url.origin}${type === "person" ? "/people/" : "/history/"}` },
+      { "@type": "ListItem", position: 3, name: entity.name, item: canonical },
+    ],
+  });
+  const imageFigure = entity.imageUrl
+    ? `<figure class="entity-hero-image text-center mb-4">
+        <img src="/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=900&h=520&fit=cover&q=85" class="img-fluid rounded" alt="${escapeHtml(entity.name)}" loading="eager" />
+        <figcaption class="article-meta mt-2"><small>Image via Wikimedia Commons or Wikipedia.</small></figcaption>
+      </figure>`
+    : "";
+  const topicPills = Array.isArray(entity.relatedTopics) && entity.relatedTopics.length > 0
+    ? `<div class="pillar-pill-row mt-3">${entity.relatedTopics
+        .map(
+          (topic, index) =>
+            `<span class="pillar-pill${index === 0 ? " pillar-pill-featured" : ""}">${escapeHtml(topic)}</span>`,
+        )
+        .join("")}</div>`
+    : "";
+  const sourceLinks = `<div class="authority-links mt-4">
+    <span class="authority-links-label">Sources and Links</span>
+    <div class="authority-links-row">
+      ${entity.sourcePostUrl ? `<a class="authority-link" href="${escapeHtml(entity.sourcePostUrl)}">Read the article</a>` : ""}
+      ${entity.wikiUrl ? `<a class="authority-link" href="${escapeHtml(entity.wikiUrl)}" target="_blank" rel="noopener">Wikipedia source</a>` : ""}
+    </div>
+  </div>`;
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(title)}</title>
+  <link rel="canonical" href="${escapeHtml(canonical)}" />
+  <meta name="robots" content="${robotsMeta}" />
+  <meta name="description" content="${escapeHtml(description)}" />
+  <meta property="og:title" content="${escapeHtml(title)}" />
+  <meta property="og:description" content="${escapeHtml(description)}" />
+  <meta property="og:type" content="${type === "person" ? "profile" : "article"}" />
+  <meta property="og:url" content="${escapeHtml(canonical)}" />
+  <meta property="og:image" content="${escapeHtml(imageUrl)}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <script type="application/ld+json">${jsonLd}</script>
+  <script type="application/ld+json">${breadcrumbLd}</script>
+  <link rel="icon" href="/images/favicon.ico" />
+  <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/custom.css" />
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+  <style>
+    :root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a}
+    body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}main{flex:1;margin-top:20px}p{font-size:15px;line-height:1.6}a{color:var(--btn-bg)}a:hover{color:var(--accent)}h1,h2,h3{color:var(--text)}.article-meta{color:var(--text-muted);font-size:13px}.breadcrumb{background:transparent;padding:0;margin-bottom:1rem}.breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
+    .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;text-decoration:none}.pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
+    .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}.dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}.slider-controls{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}.slider-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:50%;background:#fff;color:var(--btn-bg);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.slider-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.slider-btn:disabled{opacity:.35;cursor:default}
+    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:16px;line-height:1.75;margin-bottom:1rem}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+    .entity-grid{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:720px){.entity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}.entity-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72);text-decoration:none;color:inherit}.entity-card:hover{background:var(--bg-alt);text-decoration:none;color:inherit}.border{border:1px solid var(--border)!important;box-shadow:none}.nav-inner{max-width:1920px!important;margin:0 auto!important}
+    .entity-description{font-size:1rem;color:var(--text-muted);font-style:italic;line-height:1.4}.entity-dates{font-size:13px;color:var(--text-muted)}
+    ${NAV_CSS}
+    ${FOOTER_CSS}
+  </style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-10 col-xl-8">
+      <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/">Home</a></li><li class="breadcrumb-item"><a href="${type === "person" ? "/people/" : "/history/"}">${type === "person" ? "People" : "History"}</a></li><li class="breadcrumb-item active" aria-current="page">${escapeHtml(entity.name)}</li></ol></nav>
+      <article class="p-4 rounded border" style="background-color:var(--bg);color:var(--text)">
+        <header class="mb-4 text-center">
+          <h1 class="mb-2 fw-bold">${escapeHtml(entity.name)}</h1>
+          ${entity.description ? `<p class="entity-description mb-1">${escapeHtml(entity.description)}</p>` : ""}
+          ${type === "person" && (entity.birthDate || entity.deathDate) ? `<p class="entity-dates article-meta mb-2">${[entity.birthDate ? `Born: ${escapeHtml(entity.birthDate)}` : "", entity.deathDate ? `Died: ${escapeHtml(entity.deathDate)}` : ""].filter(Boolean).join(" &nbsp;·&nbsp; ")}</p>` : ""}
+          ${topicPills}
+        </header>
+        ${imageFigure}
+        ${buildEntityOverviewSlider(entity)}
+        ${buildEntityBodySections(entity)}
+        ${buildEntityAdUnits()}
+        ${buildEntityRelatedPosts(entity, posts)}
+        ${sourceLinks}
+      </article>
+    </div>
+  </div>
+</main>
+${siteFooter("yr")}
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+${navToggleScript()}
+${footerYearScript("yr")}
+document.querySelectorAll(".dyn-slider-wrap").forEach(function(slider){
+  if (slider.dataset.controlsReady) return;
+  slider.dataset.controlsReady = "1";
+  slider.setAttribute("tabindex", "0");
+  var controls = document.createElement("div");
+  controls.className = "slider-controls";
+  var prev = document.createElement("button");
+  var next = document.createElement("button");
+  prev.className = next.className = "slider-btn";
+  prev.type = next.type = "button";
+  prev.setAttribute("aria-label", "Previous overview cards");
+  next.setAttribute("aria-label", "Next overview cards");
+  prev.innerHTML = "&larr;";
+  next.innerHTML = "&rarr;";
+  controls.append(prev, next);
+  slider.parentNode.insertBefore(controls, slider);
+  function update(){
+    prev.disabled = slider.scrollLeft <= 2;
+    next.disabled = slider.scrollLeft + slider.clientWidth >= slider.scrollWidth - 2;
+  }
+  function move(direction){
+    slider.scrollBy({ left: direction * Math.max(260, Math.floor(slider.clientWidth * 0.85)), behavior: "smooth" });
+  }
+  prev.addEventListener("click", function(){ move(-1); });
+  next.addEventListener("click", function(){ move(1); });
+  slider.addEventListener("scroll", update, { passive: true });
+  window.addEventListener("resize", update);
+  update();
+});
+(function(){
+  if(location.hostname !== "thisday.info" && location.hostname !== "www.thisday.info") return;
+  function pushAds(){
+    document.querySelectorAll("ins.adsbygoogle").forEach(function(ins){
+      if(ins.getAttribute("data-adsbygoogle-status") || ins.getAttribute("data-ad-pushed")) return;
+      if((ins.offsetWidth || 0) === 0) return;
+      ins.setAttribute("data-ad-pushed", "1");
+      try{ (adsbygoogle = window.adsbygoogle || []).push({}); }catch(e){}
+    });
+  }
+  if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", pushAds, { once: true });
+  else pushAds();
+  setTimeout(pushAds, 1200);
+})();
+</script>
+${marqueeScript()}
+</body>
+</html>`;
+
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=3600, s-maxage=86400",
+    },
+  });
 }
 
 function getHistoricalYearFromPost(post) {
@@ -1908,6 +2313,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .dyn-slider-wrap::-webkit-scrollbar-thumb{background:rgba(27,58,45,.25);border-radius:999px}
 .dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}
 .dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}
+.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}
 .dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.55}
 .dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.55}
 .dyn-slide-inline{margin:10px 0}
@@ -4283,6 +4689,10 @@ async function handleFetchRequest(request, env, ctx) {
       "/died/",
       "/quiz",
       "/quiz/",
+      "/people",
+      "/people/",
+      "/history",
+      "/history/",
       "/about",
       "/about/",
       "/contact",
@@ -4314,6 +4724,7 @@ async function handleFetchRequest(request, env, ctx) {
         `Sitemap: ${url.origin}/sitemap.xml`,
         `Sitemap: ${url.origin}/sitemap-generated.xml`,
         `Sitemap: ${url.origin}/sitemap-people.xml`,
+        `Sitemap: ${url.origin}/sitemap-entities.xml`,
         `Sitemap: ${url.origin}/news-sitemap.xml`,
       ].join("\n"),
       {
@@ -4567,6 +4978,16 @@ async function handleFetchRequest(request, env, ctx) {
   }
   if (url.pathname === "/deaths" || url.pathname === "/deaths/") {
     return Response.redirect(`${url.origin}/died/today/`, 301);
+  }
+
+  const personEntityMatch = url.pathname.match(/^\/people\/([a-z0-9-]+)\/?$/);
+  if (personEntityMatch) {
+    return handleEntityPage(request, env, url, "person", personEntityMatch[1]);
+  }
+
+  const historyEntityMatch = url.pathname.match(/^\/history\/([a-z0-9-]+)\/?$/);
+  if (historyEntityMatch) {
+    return handleEntityPage(request, env, url, "event", historyEntityMatch[1]);
   }
 
   // Born pages: /born/{month}/{day}/

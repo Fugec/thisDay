@@ -10,14 +10,44 @@
 import { google } from "googleapis";
 import { createReadStream } from "fs";
 
+const OAUTH_REDIRECT_URI = "http://localhost:3838";
+const YOUTUBE_UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+const EDUCATION_CATEGORY_ID = "27";
+const CHAPTER_LABELS = [
+  "On This Day",
+  "Did You Know?",
+  "Historical Facts",
+  "The Aftermath",
+  "Legacy & Impact",
+];
+const DEFAULT_TAGS = [
+  "on this day",
+  "history",
+  "shorts",
+  "thisday",
+  "historical events",
+  "today in history",
+  "education",
+];
+
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`Missing required environment variable: ${name}`);
+  return value;
+}
+
 function getOAuth2Client() {
   const client = new google.auth.OAuth2(
-    process.env.YOUTUBE_CLIENT_ID,
-    process.env.YOUTUBE_CLIENT_SECRET,
-    "http://localhost:3838",
+    requireEnv("YOUTUBE_CLIENT_ID"),
+    requireEnv("YOUTUBE_CLIENT_SECRET"),
+    OAUTH_REDIRECT_URI,
   );
-  client.setCredentials({ refresh_token: process.env.YOUTUBE_REFRESH_TOKEN });
+  client.setCredentials({ refresh_token: requireEnv("YOUTUBE_REFRESH_TOKEN") });
   return client;
+}
+
+function getYoutubeClient() {
+  return google.youtube({ version: "v3", auth: getOAuth2Client() });
 }
 
 /**
@@ -33,23 +63,16 @@ function fmtTime(secs) {
 
 /**
  * Builds the YouTube chapters string from scene cut timestamps.
- * Returns an empty string when fewer than 2 cuts are provided.
+ * Returns null when no scene cuts are provided.
  *
  * @param {number[]} cuts  Scene boundary timestamps in seconds
  * @returns {string}
  */
 function buildChapters(cuts) {
   if (!cuts?.length) return null;
-  const LABELS = [
-    "On This Day",
-    "Did You Know?",
-    "Historical Facts",
-    "The Aftermath",
-    "Legacy & Impact",
-  ];
   const times = [0, ...cuts];
   return times
-    .map((t, i) => `${fmtTime(t)} ${LABELS[i] ?? `Scene ${i + 1}`}`)
+    .map((t, i) => `${fmtTime(t)} ${CHAPTER_LABELS[i] ?? `Scene ${i + 1}`}`)
     .join("\n");
 }
 
@@ -108,32 +131,21 @@ function buildEventHashtags(post) {
   return hashtags.slice(0, 3);
 }
 
-/**
- * Uploads a video file to YouTube and returns the video ID.
- *
- * @param {string} videoPath  - Path to the MP4 file
- * @param {{ slug: string, title: string, eventTitle?: string, description: string, publishedAt: string }} post
- * @param {number[]} [cuts]   - Scene boundary timestamps for chapter markers
- * @returns {Promise<string>} YouTube video ID
- */
-export async function uploadToYoutube(videoPath, post, cuts = []) {
-  const auth = getOAuth2Client();
-  const youtube = google.youtube({ version: "v3", auth });
+function buildVideoTitle(post) {
+  const rawTitle = String(post.title || "").replace(/ [—–] /g, ": ");
+  return rawTitle.length > 97 ? rawTitle.slice(0, 94) + "..." : rawTitle;
+}
 
-  // YouTube title limit: 100 chars. Strip em-dash separators for cleaner titles.
-  const rawTitle = post.title.replace(/ [—–] /g, ": ");
-  const title = rawTitle.length > 97 ? rawTitle.slice(0, 94) + "..." : rawTitle;
-  const eventName = getEventName(post);
-  const eventHashtags = buildEventHashtags(post);
+function buildVideoDescription(post, cuts) {
   const hashtagLine = [
-    ...eventHashtags,
+    ...buildEventHashtags(post),
     "#OnThisDay",
     "#History",
   ]
     .filter(Boolean)
     .join(" ");
 
-  const description = [
+  return [
     post.description,
     "",
     buildChapters(cuts),
@@ -143,24 +155,41 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
   ]
     .filter((line) => line !== null && line !== undefined)
     .join("\n");
+}
+
+function buildVideoTags(post) {
+  return [...DEFAULT_TAGS, getEventName(post)].filter(Boolean);
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeoutId));
+}
+
+/**
+ * Uploads a video file to YouTube and returns the video ID.
+ *
+ * @param {string} videoPath  - Path to the MP4 file
+ * @param {{ slug: string, title: string, eventTitle?: string, description: string, publishedAt: string }} post
+ * @param {number[]} [cuts]   - Scene boundary timestamps for chapter markers
+ * @returns {Promise<string>} YouTube video ID
+ */
+export async function uploadToYoutube(videoPath, post, cuts = []) {
+  const youtube = getYoutubeClient();
 
   const uploadPromise = youtube.videos.insert({
     part: ["snippet", "status"],
     requestBody: {
       snippet: {
-        title,
-        description,
-        tags: [
-          "on this day",
-          "history",
-          "shorts",
-          "thisday",
-          "historical events",
-          "today in history",
-          "education",
-          eventName,
-        ],
-        categoryId: "27", // Education
+        title: buildVideoTitle(post),
+        description: buildVideoDescription(post, cuts),
+        tags: buildVideoTags(post),
+        categoryId: EDUCATION_CATEGORY_ID,
         defaultLanguage: "en",
         defaultAudioLanguage: "en",
       },
@@ -175,37 +204,13 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
     },
   });
 
-  const res = await Promise.race([
+  const res = await withTimeout(
     uploadPromise,
-    new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error("YouTube upload timed out after 5 minutes")),
-        5 * 60 * 1000,
-      ),
-    ),
-  ]);
+    YOUTUBE_UPLOAD_TIMEOUT_MS,
+    "YouTube upload timed out after 5 minutes",
+  );
 
   return res.data.id;
-}
-
-/**
- * Uploads a custom thumbnail for a YouTube video.
- * Requires the video to already be uploaded and the OAuth token to have
- * the youtube.upload scope.
- *
- * @param {string} videoId
- * @param {string} thumbnailPath  Path to a JPEG image (1080×1920 for Shorts)
- */
-export async function setYoutubeThumbnail(videoId, thumbnailPath) {
-  const auth = getOAuth2Client();
-  const youtube = google.youtube({ version: "v3", auth });
-  await youtube.thumbnails.set({
-    videoId,
-    media: {
-      mimeType: "image/jpeg",
-      body: createReadStream(thumbnailPath),
-    },
-  });
 }
 
 export async function verifyYoutubeAuth() {

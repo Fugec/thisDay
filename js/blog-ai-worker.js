@@ -974,6 +974,34 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/$/, "") || "/";
 
+    if (path === "/blog/debug-backfill" && request.method === "GET") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const testSlug = new URL(request.url).searchParams.get("slug") || "1-may-2026";
+      const html = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${testSlug}`);
+      if (!html) return jsonResponse({ error: "slug not found" }, 404);
+      const extractWikiUrl = (doc) => {
+        const s = String(doc || "");
+        const m = s.match(/href="(https:\/\/en\.wikipedia\.org\/wiki\/[^"]+)"[^>]*>Wikipedia<\/a>/i)
+          || s.match(/"url"\s*:\s*"(https:\\\/\\\/en\.wikipedia\.org\\\/wiki\\\/[^"]+)"/i);
+        return m ? String(m[1]).replace(/\\\//g, "/") : "";
+      };
+      const wikiUrl = extractWikiUrl(html);
+      const hasFloats = /<figure style="float:(?:right|left);/i.test(html);
+      let fetchResult = { tried: false, imgCount: 0, error: null };
+      if (wikiUrl && !hasFloats) {
+        try {
+          const imgs = await fetchEventImages(wikiUrl, "", 2);
+          fetchResult = { tried: true, imgCount: imgs.length, error: null, firstUrl: imgs[0]?.imageUrl?.slice(0, 60) };
+        } catch (e) {
+          fetchResult = { tried: true, imgCount: 0, error: e.message };
+        }
+      }
+      return jsonResponse({ slug: testSlug, wikiUrl, hasFloats, fetchResult });
+    }
+
     if (path === "/blog/debug-ai" && request.method === "GET") {
       const auth = request.headers.get("Authorization") ?? "";
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
@@ -2448,6 +2476,30 @@ export default {
             bodyClose2,
             adInitJs + "\n" + bodyClose2,
           );
+        }
+        // Backfill inline figures for already-stored posts that shipped without them.
+        // Lazily inject and persist back to KV so the article gets figures immediately.
+        // DYN slides hide images via CSS; this only affects main article body figures.
+        if (!/<figure style="float:(?:right|left);/i.test(patchedHtml)) {
+          const wikiUrl = extractWikiUrl(patchedHtml);
+          const coverUrl = extractCoverSrc(patchedHtml);
+          if (wikiUrl) {
+            try {
+              const imgs = await fetchEventImages(wikiUrl, coverUrl, 2);
+              if (imgs.length > 0) {
+                patchedHtml = injectEventImages(patchedHtml, imgs);
+                if (ctx?.waitUntil) {
+                  ctx.waitUntil(
+                    env.BLOG_AI_KV
+                      .put(`${KV_POST_PREFIX}${slug}`, patchedHtml)
+                      .catch(() => {}),
+                  );
+                }
+              }
+            } catch {
+              // backfill is best-effort
+            }
+          }
         }
         if (articleEntitiesRaw && !patchedHtml.includes("data-entity-strip")) {
           try {
@@ -3935,10 +3987,11 @@ function normalizeContentMetadata(content) {
 
 async function savePublishedPost(
   env,
-  { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [] },
+  { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [], eventImages = [] },
 ) {
   const safePillars = Array.isArray(pillars) ? pillars : [];
   const safePersonImages = Array.isArray(personImages) ? personImages : [];
+  const safeEventImages = Array.isArray(eventImages) ? eventImages : [];
 
   alignContentDateFields(content);
   const dateValidation = validateContentDateForPublish(content, date);
@@ -3949,6 +4002,7 @@ async function savePublishedPost(
   const rawHtml = buildPostHTML(content, date, slug, existingIndex, safePillars, bookCoverUrl);
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
   if (safePersonImages.length > 0) html = injectPersonImages(html, safePersonImages);
+  if (safeEventImages.length > 0) html = injectEventImages(html, safeEventImages);
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
 
   const deduped = [...existingIndex].filter((e) => e.slug !== slug);
@@ -5217,7 +5271,8 @@ DO NOT open consecutive paragraphs with the same word or conjunction. Each parag
 
 Title rules:
 - The "title" field MUST follow exactly this format: "[Specific Action or Event] — ${monthName} ${day}, Year"
-- The first part must be the specific historical event name (e.g. "Assassination of Julius Caesar", "Apollo 11 Moon Landing", "Fall of Constantinople").
+- The first part MUST describe WHAT HAPPENED — it must contain an action verb or clearly describe the event. Examples: "Amtrak Founded", "Geocaching Invented", "Apollo 11 Lands on Moon", "Assassination of Julius Caesar", "Fall of Constantinople", "Berlin Wall Falls". NEVER use a bare noun or organization name alone (e.g. "Amtrak", "Geocaching", "NASA", "IBM" are WRONG — they describe a subject, not an event).
+- The "eventTitle" field must follow the same rule: it must describe the action/event, not just name the subject. Good: "Amtrak Founded". Bad: "Amtrak".
 - Do NOT use colloquial date names or phrases like "Ides of March", "D-Day", or "Black Tuesday" as the title — use the actual event name instead.
 - The separator between event name and date MUST be " — " (space, em dash, space).
 
@@ -8547,15 +8602,14 @@ function normalizeImageAltHtml(html) {
 }
 
 function stripDynSliderFiguresHtml(html) {
-  let next = String(html || "");
-  let previous = "";
-  const dynFigurePattern =
-    /(<article\b[^>]*\bdyn-slide\b[^>]*>[\s\S]*?)<figure\b[^>]*>[\s\S]*?<\/figure>/gi;
-  while (next !== previous) {
-    previous = next;
-    next = next.replace(dynFigurePattern, "$1");
-  }
-  return next;
+  // Replace figures only within dyn-slide article elements, not outside them.
+  // The old approach used a greedy cross-element regex that accidentally removed
+  // floating figures placed after DYN slides in the main article body.
+  return String(html || "").replace(
+    /(<article\b[^>]*\bdyn-slide\b[^>]*>)([\s\S]*?)(<\/article>)/gi,
+    (_, open, content, close) =>
+      open + content.replace(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi, "") + close,
+  );
 }
 
 function prepareHtmlResponse(body) {

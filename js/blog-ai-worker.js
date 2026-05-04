@@ -170,10 +170,14 @@ function buildDidYouKnowSlider(facts) {
             </article>`;
   }).join("\n");
 
-  return `<section class="dyn-slider-wrap mb-4" aria-label="Did you know">
-            <div class="dyn-slider-track">
+  return `<section class="dyn-slider-shell mb-4" aria-label="Did you know">
+            <button type="button" class="dyn-slider-btn dyn-slider-btn-prev" aria-label="Previous" onclick="this.parentElement.querySelector('.dyn-slider-wrap').scrollBy({left:-280,behavior:'smooth'})">&#8249;</button>
+            <div class="dyn-slider-wrap">
+              <div class="dyn-slider-track">
 ${sliderFacts}
+              </div>
             </div>
+            <button type="button" class="dyn-slider-btn dyn-slider-btn-next" aria-label="Next" onclick="this.parentElement.querySelector('.dyn-slider-wrap').scrollBy({left:280,behavior:'smooth'})">&#8250;</button>
           </section>`;
 }
 
@@ -870,8 +874,9 @@ async function chooseEventForDate(
     `- Prefer globally recognizable or vividly visual events with strong Wikipedia coverage\n` +
     `- Do not choose an event from any other calendar day\n` +
     `- If a vetted event list is provided above, your answer must match one entry from that list\n` +
+    `- If a vetted list is provided, include "candidateIndex": N where N is the number (1, 2, 3...) from the list\n` +
     `- Respond with JSON only\n` +
-    `{"eventTitle":"Specific event name","historicalDate":"Month Day, Year","historicalDateISO":"YYYY-MM-DD","wikiUrl":"https://en.wikipedia.org/wiki/Article","why":"short reason under 25 words"}`;
+    `{"candidateIndex":1,"eventTitle":"Exact title from list","historicalDate":"Month Day, Year","historicalDateISO":"YYYY-MM-DD","wikiUrl":"https://en.wikipedia.org/wiki/Article","why":"short reason under 25 words"}`;
 
   const raw = await callAI(
     env,
@@ -883,7 +888,7 @@ async function chooseEventForDate(
       },
       { role: "user", content: prompt },
     ],
-    { maxTokens: 220, timeoutMs: 15_000, temperature: 0.2 },
+    { maxTokens: 260, timeoutMs: 15_000, temperature: 0.2 },
   );
 
   const cleaned = raw
@@ -900,14 +905,40 @@ async function chooseEventForDate(
   }
 
   if (candidateEvents.length > 0) {
-    const matchedCandidate = candidateEvents.find((event) => {
+    // Primary: index-based lookup — AI returns the number from the numbered list
+    let matchedCandidate = null;
+    const idx = Number.parseInt(parsed.candidateIndex, 10);
+    if (!Number.isNaN(idx) && idx >= 1 && idx <= candidateEvents.length) {
+      matchedCandidate = candidateEvents[idx - 1];
+    }
+
+    // Fallback: exact / substring string matching
+    if (!matchedCandidate) {
       const normalizedTitle = String(parsed.eventTitle || "").toLowerCase();
-      return (
-        normalizedTitle === event.pageTitle.toLowerCase() ||
-        event.pageTitle.toLowerCase().includes(normalizedTitle) ||
-        normalizedTitle.includes(event.pageTitle.toLowerCase())
-      );
-    });
+      matchedCandidate = candidateEvents.find((event) => {
+        return (
+          normalizedTitle === event.pageTitle.toLowerCase() ||
+          event.pageTitle.toLowerCase().includes(normalizedTitle) ||
+          normalizedTitle.includes(event.pageTitle.toLowerCase())
+        );
+      });
+    }
+
+    // Final fallback: word-overlap (handles synonym variants like "shootings" vs "massacre")
+    if (!matchedCandidate) {
+      const normalizedTitle = String(parsed.eventTitle || "").toLowerCase();
+      const stopWords = new Set(["the", "a", "an", "of", "in", "at", "on", "and", "or", "to", "is", "was"]);
+      const titleWords = new Set(normalizedTitle.split(/\W+/).filter((w) => w.length > 2 && !stopWords.has(w)));
+      if (titleWords.size > 0) {
+        matchedCandidate = candidateEvents.find((event) => {
+          const candidateWords = new Set(event.pageTitle.toLowerCase().split(/\W+/).filter((w) => w.length > 2 && !stopWords.has(w)));
+          let overlap = 0;
+          for (const w of titleWords) if (candidateWords.has(w)) overlap++;
+          return candidateWords.size > 0 && overlap / Math.min(titleWords.size, candidateWords.size) >= 0.6;
+        });
+      }
+    }
+
     if (!matchedCandidate) {
       throw new Error(`Event selector chose an event outside the vetted list: ${parsed.eventTitle}`);
     }
@@ -1806,7 +1837,7 @@ export default {
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace(
           "</head>",
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}</style></head>`,
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}.dyn-slider-btn{display:none;align-items:center;justify-content:center;width:42px;height:42px;border:1.5px solid var(--border);border-radius:999px;background:var(--bg);color:var(--text);font-size:20px;font-weight:400;cursor:pointer;transition:background .15s,border-color .15s,color .15s;flex-shrink:0;line-height:1}.dyn-slider-btn:hover{background:var(--bg-alt);border-color:var(--btn-bg);color:var(--btn-bg)}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}@media(min-width:768px){.dyn-slider-btn{display:inline-flex}}@media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}</style></head>`,
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml
@@ -2900,6 +2931,48 @@ async function maybeGenerateBlogPost(env, ctx) {
         );
       }
     }
+  }
+
+  // Refresh entities whose Wikipedia data was empty at creation time (needsWikiRefresh flag).
+  // Runs up to 5 entities per cron tick so it doesn't delay new post generation.
+  try {
+    const entityIdxRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
+    const entityIdx = entityIdxRaw ? JSON.parse(entityIdxRaw) : [];
+    const stale = entityIdx.filter((e) => e.needsWikiRefresh && e.wikiUrl);
+    const toRefresh = stale.slice(0, 5);
+    for (const entry of toRefresh) {
+      try {
+        const kvKey = `entity-v1:${entry.type}:${entry.slug}`;
+        const entityRaw = await env.BLOG_AI_KV.get(kvKey);
+        if (!entityRaw) continue;
+        const entity = JSON.parse(entityRaw);
+        const freshWiki = await fetchWikipediaEntityData({ wikiUrl: entity.wikiUrl, term: entity.name, type: entity.type }).catch(() => ({}));
+        if (!freshWiki.intro && !freshWiki.summary) continue; // still failing, keep flag
+        entity.summary = freshWiki.summary || "";
+        entity.intro = freshWiki.intro || freshWiki.summary || "";
+        entity.description = freshWiki.description || entity.description || "";
+        entity.imageUrl = freshWiki.imageUrl || entity.imageUrl || "";
+        if (freshWiki.birthDate) entity.birthDate = freshWiki.birthDate;
+        if (freshWiki.deathDate) entity.deathDate = freshWiki.deathDate;
+        delete entity.needsWikiRefresh;
+        entity.updatedAt = new Date().toISOString();
+        // Regenerate cards and body sections now that we have real data
+        const sourceIdx = (JSON.parse(entityIdxRaw) || []).find((e) => e.slug === entity.sourcePostSlug) || {};
+        const sourceContent = { ...sourceIdx, historicalDate: inferHistoricalDateFromEntry(sourceIdx) };
+        const fallbackCards = entity.type === "person" ? buildPersonOverviewCards(entity) : buildEventOverviewCards(entity, sourceContent);
+        entity.overviewCards = await generateEntityOverviewCards(env, entity, sourceContent, fallbackCards);
+        const fallbackSections = buildFallbackEntityBodySections(entity, sourceContent);
+        entity.bodySections = await generateEntityBodySections(env, entity, sourceContent, fallbackSections);
+        await env.BLOG_AI_KV.put(kvKey, JSON.stringify(entity));
+        // Clear flag in index
+        await upsertEntityIndex(env, [entity]);
+        console.log(`Blog AI: refreshed wiki data for entity ${kvKey}`);
+      } catch (refreshErr) {
+        console.warn(`Blog AI: wiki refresh failed for ${entry.slug} — ${refreshErr.message}`);
+      }
+    }
+  } catch (idxErr) {
+    console.warn(`Blog AI: entity refresh scan failed — ${idxErr.message}`);
   }
 
   if (lastGen) {
@@ -4167,7 +4240,7 @@ async function fetchWikidataLifeDates(pageTitle) {
   };
 }
 
-async function fetchWikipediaEntityData(term) {
+async function fetchWikipediaEntityData(term, { retryOnEmpty = true } = {}) {
   const pageTitle = wikiTitleFromUrl(term.wikiUrl) || term.term;
   if (!pageTitle) return {};
   const summaryUrl =
@@ -4191,7 +4264,7 @@ async function fetchWikipediaEntityData(term) {
     const introPage = Object.values(introData?.query?.pages || {})[0];
     intro = introPage?.extract || "";
   }
-  return {
+  const result = {
     summary: summary.extract || "",
     intro: intro || summary.extract || "",
     description: summary.description || "",
@@ -4199,6 +4272,12 @@ async function fetchWikipediaEntityData(term) {
     pageTitle,
     ...lifeDates,
   };
+  // Retry once when both summary and intro came back empty — transient Wikipedia timeout
+  if (retryOnEmpty && !result.intro && !result.summary) {
+    await new Promise((r) => setTimeout(r, 1500));
+    return fetchWikipediaEntityData(term, { retryOnEmpty: false });
+  }
+  return result;
 }
 
 function compactEntityText(value, maxLength = 180) {
@@ -4745,13 +4824,36 @@ async function upsertEntityRecord(env, draftEntity) {
       ...(Array.isArray(draftEntity.relatedPosts) ? draftEntity.relatedPosts : []),
     ]),
   ];
+
+  // Prefer non-empty values: never overwrite good existing data with empty new data.
+  // Wikipedia fetch failures during re-enrichment must not erase previously stored content.
+  const hasSections = (sections) =>
+    Array.isArray(sections) && sections.length > 0 &&
+    sections.some((s) => (s.paragraphs || []).join(" ").split(/\s+/).length > 20);
+
+  const mergedIntro = draftEntity.intro || existing?.intro || "";
+  const mergedSummary = draftEntity.summary || existing?.summary || "";
   const entity = {
     ...(existing || {}),
     ...draftEntity,
+    intro: mergedIntro,
+    summary: mergedSummary,
+    description: draftEntity.description || existing?.description || "",
+    imageUrl: draftEntity.imageUrl || existing?.imageUrl || "",
+    birthDate: draftEntity.birthDate || existing?.birthDate || "",
+    deathDate: draftEntity.deathDate || existing?.deathDate || "",
+    overviewCards: (draftEntity.overviewCards?.length > 0) ? draftEntity.overviewCards : (existing?.overviewCards || []),
+    bodySections: hasSections(draftEntity.bodySections) ? draftEntity.bodySections : (existing?.bodySections || []),
     relatedPosts,
     firstSeenAt: existing?.firstSeenAt || draftEntity.firstSeenAt,
     updatedAt: new Date().toISOString(),
   };
+  // Clear stale refresh flag whenever we now have real data; set it only when still empty
+  if (mergedIntro || mergedSummary) {
+    delete entity.needsWikiRefresh;
+  } else if (draftEntity.needsWikiRefresh) {
+    entity.needsWikiRefresh = true;
+  }
   await env.BLOG_AI_KV.put(key, JSON.stringify(entity));
   return entity;
 }
@@ -4762,11 +4864,13 @@ async function upsertEntityIndex(env, entities) {
   const index = raw ? JSON.parse(raw) : [];
   const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
   for (const entity of entities) {
+    const prev = byId.get(`${entity.type}:${entity.slug}`) || {};
     byId.set(`${entity.type}:${entity.slug}`, {
       type: entity.type,
       slug: entity.slug,
       name: entity.name,
       url: entity.url,
+      wikiUrl: entity.wikiUrl || prev.wikiUrl || "",
       imageUrl: entity.imageUrl || "",
       summary: entity.summary || entity.description || "",
       relatedPosts: entity.relatedPosts || [],
@@ -4774,6 +4878,7 @@ async function upsertEntityIndex(env, entities) {
       indexable: (Array.isArray(entity.bodySections) ? entity.bodySections : [])
         .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
         .join(" ").split(/\s+/).filter(Boolean).length >= 150,
+      ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
     });
   }
   await env.BLOG_AI_KV.put(
@@ -4808,6 +4913,7 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars) {
     const slugPart = entitySlug(term.term);
     if (!type || !slugPart) continue;
     const wikiData = term.wikiUrl ? await fetchWikipediaEntityData(term).catch(() => ({})) : {};
+    const wikiEmpty = !wikiData.intro && !wikiData.summary;
     const url = type === "person" ? `/people/${slugPart}/` : `/history/${slugPart}/`;
     const entity = {
       type,
@@ -4828,6 +4934,7 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars) {
       relatedTopics: Array.isArray(pillars) ? pillars : [],
       relatedPosts: [slug],
       firstSeenAt: new Date().toISOString(),
+      ...(wikiEmpty && term.wikiUrl ? { needsWikiRefresh: true } : {}),
     };
     const fallbackCards = type === "person"
       ? buildPersonOverviewCards(entity)
@@ -5260,10 +5367,13 @@ Sentence and paragraph rules:
 - When nuance or complication enters a paragraph, represent it at its strongest — give the best version of the opposing case, not the weakest. Do not signal you are doing this with phrases like "critics argue" or "some would say." Just write it directly as part of the narrative flow: "Nehru rejected the resolution not because he dismissed Muslim concerns, but because he believed division would harden them into interstate conflict." Strong nuance woven naturally is far more persuasive than a weak position you announce and dismiss.
 
 BANNED PHRASES — never write any of these:
+"I was", "I witnessed", "I saw", "I recall", "I remember", "I stood", "I heard", "I watched" (first-person singular narration is forbidden everywhere),
 "significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of", "it was a dark time", "it was a bleak time", "it was a difficult period", "it was chaos", "it was a complex time", "dark chapter". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
 "dramatic and unexpected", "dramatic and unexpected turn of events", "significant turning point", "brighter future", and "marked the end of a dark period" are also banned unless rewritten into concrete, evidenced statements.
 
 HARD RULE — NO RHETORICAL QUESTIONS: Do not write a single sentence in the form of a question directed at the reader. Not one. This includes: "But why was it significant?", "What were they thinking?", "What happened next?", "So, what happened?", "What does this tell us?", "What if King Faisal had lived?", "What were the consequences?", "Did it work?", or any variation. Every question you are tempted to write must be rewritten as a declarative statement that answers itself. Example: instead of "What were the consequences?" write "The consequences were immediate and lasting." Before submitting your response, scan every sentence — if any sentence ends with a question mark and is addressed to the reader, rewrite it.
+
+HARD RULE — NO FIRST-PERSON SINGULAR: The narrator is ALWAYS third person. Never write "I", "I was", "I witnessed", "I saw", "I recall", "I remember", or any sentence where the narrator uses "I" as a subject. This applies everywhere in the article — overview, eyewitness, aftermath, conclusion, everywhere. The Eyewitness section reports WHAT witnesses said and experienced; it does not pretend the narrator was present. Write "Student Alan Canfora later recalled that..." not "I was on the campus and I witnessed...". If a real quote is included, attribute it with a signal phrase in third person ("as Canfora wrote", "Smith testified that", "the correspondent reported"). Zero first-person singular in the entire response.
 
 HARD RULE — NO FAKE SUSPENSE OPENERS: Do not start any sentence with: "So,", "Picture this", "Picture the scene", "And then,", "But what", "But why", "You have to understand", "Nobody expected", "Frankly", "Which, frankly". These are conversational filler. State the fact directly.
 
@@ -5315,8 +5425,8 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "Paragraph 2 (nuance + synthesis; ~100 words): Introduce the strongest complication or contrary reality as part of the narrative — not as a rhetorical question or a 'But why?' setup. State the complication directly as a fact or claim, then synthesize. Do NOT begin with 'But the [topic] wasn't without...' or 'But why was it...'. End with a precise assessment that links back to the opening claim."
   ],
   "eyewitnessOrChronicle": [
-    "Paragraph 1 (vivid account + source criticism; ~100+ words): Present the most vivid contemporary account with full attribution (name, role, source). Then interrogate the source: why was this person present, what stake did they have in how the event was remembered, what biases or blind spots might they carry (insider, foreign observer, someone currying favor or evading blame), and what does the account leave out that you would expect it to address?",
-    "Paragraph 2 (contrast + what the record reveals; ~100+ words): Offer a contrasting account or later scholarly appraisal. Explain what the gap between the two perspectives reveals about who controlled the narrative, whose version survived, and why. A modern historian reads these sources differently than their intended audience did. End with what historians now agree on or still dispute, and why the disagreement matters."
+    "Paragraph 1 (vivid account + source criticism; ~100+ words): In THIRD PERSON, describe what a named contemporary witness or chronicler reported about the event — never write 'I was there' or use first-person narration. Attribute in third person: 'Student Alan Canfora later recalled that...', 'The correspondent for the New York Times reported...', 'As Sergeant X wrote in his diary...'. Then interrogate the source in third person: why was this person present, what stake did they have in how the event was remembered, what biases or blind spots might they carry (insider, foreign observer, someone currying favor or evading blame), and what does the account leave out that you would expect it to address?",
+    "Paragraph 2 (contrast + what the record reveals; ~100+ words): In THIRD PERSON, offer a contrasting account or later scholarly appraisal. Explain what the gap between the two perspectives reveals about who controlled the narrative, whose version survived, and why. A modern historian reads these sources differently than their intended audience did. End with what historians now agree on or still dispute, and why the disagreement matters."
   ],
   "eyewitnessQuote": "A direct or closely paraphrased quote from a named contemporary source, under 200 characters. Must be attributed to a real person or document.",
   "eyewitnessQuoteSource": "Full attribution: name, role, source document, and year, plus one phrase noting the circumstances under which it was written (e.g. 'written under censorship', 'published posthumously', 'testimony given under oath'). Example: 'Ivan Turgenev, letter to a friend, March 1861, written in exile'",
@@ -7231,6 +7341,9 @@ ${JSON.stringify({
       .breadcrumb{background:transparent;padding:0;margin-bottom:1rem}
       .breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
       .seo-only-title{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+      .dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}
+      .dyn-slider-btn{display:none;align-items:center;justify-content:center;width:42px;height:42px;border:1.5px solid var(--border);border-radius:999px;background:var(--bg);color:var(--text);font-size:20px;font-weight:400;cursor:pointer;transition:background .15s,border-color .15s,color .15s;flex-shrink:0;line-height:1}
+      .dyn-slider-btn:hover{background:var(--bg-alt);border-color:var(--btn-bg);color:var(--btn-bg)}
       .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
       .dyn-slider-wrap::-webkit-scrollbar{display:none}
       .dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}
@@ -7238,6 +7351,8 @@ ${JSON.stringify({
       .dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}
       .dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}
       .dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}
+      @media(min-width:768px){.dyn-slider-btn{display:inline-flex}}
+      @media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}
       .analysis-good{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
       .analysis-bad{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
       li.mb-2{font-size:15px}

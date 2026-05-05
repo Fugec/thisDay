@@ -124,6 +124,7 @@ const KV_ENTITY_INDEX_KEY = "entity-index-v1";
 const KV_PERSON_IMAGE_PREFIX = "person-image:";
 const KV_PERSON_IMAGE_TTL = 60 * 60 * 24 * 30; // 30 days
 const EVERY_OTHER_DAYS = 1; // Generate every N days
+const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
@@ -2508,6 +2509,36 @@ export default {
             adInitJs + "\n" + bodyClose2,
           );
         }
+        // Repair stored posts whose featured image is a logo, seal, flag, or similar
+        // low-value asset. The replacement is persisted so the fix happens once.
+        {
+          const wikiUrl = extractWikiUrl(patchedHtml);
+          const coverUrl = extractCoverSrc(patchedHtml);
+          if (wikiUrl && coverUrl && isLowValueFeaturedImage(coverUrl)) {
+            try {
+              const replacement = await fetchWikipediaImage("", wikiUrl);
+              if (replacement && replacement !== coverUrl) {
+                patchedHtml = patchedHtml
+                  .replaceAll(encodeURIComponent(coverUrl), encodeURIComponent(replacement))
+                  .replaceAll(coverUrl, replacement);
+                if (ctx?.waitUntil) {
+                  ctx.waitUntil((async () => {
+                    await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, patchedHtml);
+                    const indexRaw2 = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+                    const index2 = indexRaw2 ? JSON.parse(indexRaw2) : [];
+                    const found = index2.find((entry) => entry?.slug === slug);
+                    if (found) {
+                      found.imageUrl = replacement;
+                      await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index2));
+                    }
+                  })().catch(() => {}));
+                }
+              }
+            } catch {
+              // best-effort repair
+            }
+          }
+        }
         // Backfill inline figures for already-stored posts that shipped without them.
         // Lazily inject and persist back to KV so the article gets figures immediately.
         // DYN slides hide images via CSS; this only affects main article body figures.
@@ -2938,8 +2969,13 @@ async function maybeGenerateBlogPost(env, ctx) {
   try {
     const entityIdxRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
     const entityIdx = entityIdxRaw ? JSON.parse(entityIdxRaw) : [];
-    const stale = entityIdx.filter((e) => e.needsWikiRefresh && e.wikiUrl);
+    const stale = entityIdx.filter((e) =>
+      e.wikiUrl &&
+      (e.needsWikiRefresh || !e.indexable || !e.summary || !e.imageUrl)
+    );
     const toRefresh = stale.slice(0, 5);
+    const postIndexRaw = toRefresh.length ? await env.BLOG_AI_KV.get(KV_INDEX_KEY) : null;
+    const postIndex = postIndexRaw ? JSON.parse(postIndexRaw) : [];
     for (const entry of toRefresh) {
       try {
         const kvKey = `entity-v1:${entry.type}:${entry.slug}`;
@@ -2957,7 +2993,7 @@ async function maybeGenerateBlogPost(env, ctx) {
         delete entity.needsWikiRefresh;
         entity.updatedAt = new Date().toISOString();
         // Regenerate cards and body sections now that we have real data
-        const sourceIdx = (JSON.parse(entityIdxRaw) || []).find((e) => e.slug === entity.sourcePostSlug) || {};
+        const sourceIdx = postIndex.find((e) => e.slug === entity.sourcePostSlug) || {};
         const sourceContent = { ...sourceIdx, historicalDate: inferHistoricalDateFromEntry(sourceIdx) };
         const fallbackCards = entity.type === "person" ? buildPersonOverviewCards(entity) : buildEventOverviewCards(entity, sourceContent);
         entity.overviewCards = await generateEntityOverviewCards(env, entity, sourceContent, fallbackCards);
@@ -3050,7 +3086,7 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
     if (summaryRes.ok) {
       const d = await summaryRes.json();
       const img = d.thumbnail?.source ?? d.originalimage?.source ?? null;
-      if (img) return img;
+      if (img && !isLowValueFeaturedImage(img)) return img;
     }
 
     // 2. MediaWiki images list + imageinfo — catches infobox images not exposed
@@ -3067,7 +3103,7 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
       .filter(
         (t) =>
           /\.(jpe?g|png|webp|gif)$/i.test(t) &&
-          !/icon|logo|flag|map|seal|coa/i.test(t),
+          !/icon|logo|wordmark|symbol|emblem|flag|map|seal|coa/i.test(t),
       );
 
     if (imageFiles.length > 0) {
@@ -3079,7 +3115,7 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
         const infoData = await infoRes.json();
         const infoPage = Object.values(infoData?.query?.pages ?? {})[0];
         const infoUrl = infoPage?.imageinfo?.[0]?.url ?? null;
-        if (infoUrl) return infoUrl;
+        if (infoUrl && !isLowValueFeaturedImage(infoUrl)) return infoUrl;
       }
     }
 
@@ -3093,7 +3129,7 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
       const commonsData = await commonsRes.json();
       const hits = (commonsData?.query?.search ?? [])
         .map((h) => h.title)
-        .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !/icon|logo|flag|map|seal|coa/i.test(t));
+        .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !/icon|logo|wordmark|symbol|emblem|flag|map|seal|coa/i.test(t));
       if (hits.length > 0) {
         const commonsInfoRes = await fetch(
           `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(hits[0])}&prop=imageinfo&iiprop=url&format=json`,
@@ -3103,7 +3139,7 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
           const commonsInfoData = await commonsInfoRes.json();
           const commonsPage = Object.values(commonsInfoData?.query?.pages ?? {})[0];
           const commonsUrl = commonsPage?.imageinfo?.[0]?.url ?? null;
-          if (commonsUrl) return commonsUrl;
+          if (commonsUrl && !isLowValueFeaturedImage(commonsUrl)) return commonsUrl;
         }
       }
     }
@@ -3112,6 +3148,12 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
   } catch {
     return null;
   }
+}
+
+function isLowValueFeaturedImage(url) {
+  const value = String(url || "").toLowerCase();
+  if (!value) return true;
+  return /(?:^|[\/_.%-])(logo|wordmark|icon|symbol|emblem|seal|flag|map|coa)(?:[\/_.%-]|$)/i.test(value);
 }
 
 async function isWorkingImageUrl(url) {
@@ -3152,7 +3194,9 @@ async function isWorkingImageUrl(url) {
 async function resolveWorkingImageForContent(content) {
   const candidates = [];
 
-  if (content?.imageUrl) candidates.push(content.imageUrl);
+  if (content?.imageUrl && !isLowValueFeaturedImage(content.imageUrl)) {
+    candidates.push(content.imageUrl);
+  }
 
   const wikiImage = await fetchWikipediaImage(
     content?.eventTitle,
@@ -4026,6 +4070,9 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
 }
 
 function normalizeContentMetadata(content) {
+  normalizeEventTitleAction(content);
+  alignJsonLdMetadata(content);
+
   if (!content.description || content.description.length < 120 || /^Discover the story of /i.test(content.description)) {
     const overviewLead = String(content.overviewParagraphs?.[0] || "")
       .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
@@ -4055,6 +4102,52 @@ function normalizeContentMetadata(content) {
   }
   if (content.twitterDescription.length > 120) {
     content.twitterDescription = content.twitterDescription.substring(0, 117).trimEnd() + "...";
+  }
+}
+
+function alignJsonLdMetadata(content) {
+  if (!content) return;
+  if (content.eventTitle) content.jsonLdName = content.eventTitle;
+  if (!content.jsonLdUrl && content.wikiUrl) content.jsonLdUrl = content.wikiUrl;
+  if (!content.jsonLdDescription && content.description) content.jsonLdDescription = content.description;
+}
+
+function normalizeEventTitleAction(content) {
+  if (!content) return;
+  const currentEvent = String(content.eventTitle || "").trim();
+  const currentTitle = String(content.title || "").trim();
+  if (!currentEvent) return;
+
+  const hasAction = /\b(founding|founded|formed|created|established|launched|opened|signed|adopted|ratified|declared|began|ended|fell|rose|assassinated|elected|discovered|invented|published|landed|launched|battle|siege|revolt|revolution|war|attack|bombing|crash|trial|coronation|independence)\b/i.test(currentEvent);
+  if (hasAction) return;
+
+  const evidence = [
+    content.description,
+    content.jsonLdDescription,
+    ...(content.overviewParagraphs || []),
+    ...(content.quickFacts || []).map((fact) => `${fact?.label || ""}: ${fact?.value || ""}`),
+  ].join(" ");
+
+  let suffix = "";
+  if (/\bfounded|founding|constitution came into effect|established\b/i.test(evidence)) suffix = "Founding";
+  else if (/\blaunched|began|started\b/i.test(evidence)) suffix = "Launch";
+  else if (/\bcreated|formed\b/i.test(evidence)) suffix = "Creation";
+  else if (/\bsigned|ratified|adopted\b/i.test(evidence)) suffix = "Signing";
+  else if (/\bopened|inaugurated\b/i.test(evidence)) suffix = "Opening";
+
+  if (!suffix) return;
+  const improvedEvent = `${currentEvent} ${suffix}`;
+  content.eventTitle = improvedEvent;
+  content.jsonLdName = improvedEvent;
+  if (currentTitle.startsWith(currentEvent)) {
+    content.title = improvedEvent + currentTitle.slice(currentEvent.length);
+  }
+  if (Array.isArray(content.quickFacts)) {
+    content.quickFacts = content.quickFacts.map((fact) =>
+      String(fact?.label || "").toLowerCase() === "event" && fact.value === currentEvent
+        ? { ...fact, value: improvedEvent }
+        : fact,
+    );
   }
 }
 
@@ -5453,11 +5546,18 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "keyTerms": [
     { "term": "Exact phrase as it appears in the article text", "wikiUrl": "https://en.wikipedia.org/wiki/Exact_Article", "type": "person" },
     { "term": "Another key person, place, or event named in the article", "wikiUrl": "https://en.wikipedia.org/wiki/Another_Article", "type": "event" },
-    "provide 5 to 8 entries total — key people, battles, organizations, treaties, or places that appear verbatim in the article body; type must be one of: person, place, event, organization"
+    "provide 5 to 8 entries total — key people, battles, organizations, treaties, or places that appear verbatim in the article body; type must be one of: person, place, event, organization",
+    "include every named person who appears at least twice in the article body, plus any person in quickFacts Key Figure or organizerName; do not omit living officials, historians, witnesses, founders, directors, or authors if their full name appears in the prose"
   ],
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
   "youtubeSearchQuery": "specific event name year history documentary",
-  "bookSearchQuery": "3-5 word search query optimised for finding books about this specific event on eBay and Open Library. Example: 'italian invasion ethiopia 1935'.",
+  "bookSearchQuery": "3-5 word search query optimised for finding books about this specific event on Amazon, eBay, and Open Library. Pick the most useful book topic for a reader: the exact event, the main person, the war/movement, the artist, or the scientific discovery. Example: 'italian invasion ethiopia 1935'.",
+  "amazonBookTopic": "Short human-readable topic for Amazon book recommendations, 3-7 words. Example: 'Books on the Italo-Ethiopian War'.",
+  "amazonProductIdeas": [
+    { "label": "Short card title, 3-6 words", "searchQuery": "Amazon search query for a book or item directly connected to this article", "type": "book" },
+    { "label": "Second card title", "searchQuery": "Amazon search query for a biography, art print, map, documentary, educational kit, or topic-related item", "type": "book|biography|art|map|documentary|education" },
+    { "label": "Third card title", "searchQuery": "Amazon search query for another relevant product angle, never generic", "type": "book|biography|art|map|documentary|education" }
+  ],
   "contentRationale": "Minimum 40 words. Answer this specific question: what does a reader find in this article that Wikipedia's entry on the same event does not already give them? Name the specific angle, the particular framing, the overlooked detail, or the editorial judgement that makes this article worth reading over the Wikipedia source. Do not be vague. Do not say 'deeper context' or 'engaging narrative'."
 }`;
 
@@ -6665,6 +6765,118 @@ async function fetchBookCover(bookSearchQuery) {
   }
 }
 
+function amazonSearchUrl(query) {
+  const cleaned = String(query || "")
+    .replace(/[^\p{L}\p{N}\s'".,:]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const safeQuery = cleaned || "history books";
+  return `https://www.amazon.com/s?k=${encodeURIComponent(safeQuery)}&tag=${encodeURIComponent(AMAZON_ASSOCIATE_TAG)}`;
+}
+
+function buildAmazonRelatedBlock(c, currentPillars = []) {
+  const topic = String(c.amazonBookTopic || c.bookSearchQuery || c.eventTitle || c.title || "")
+    .replace(/^books?\s+(about|on)\s+/i, "")
+    .replace(/\s+[-—]\s+.*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!topic) return "";
+
+  const eventText = `${c.eventTitle || ""} ${c.keywords || ""} ${(currentPillars || []).join(" ")}`.toLowerCase();
+  const secondary =
+    /art|artist|painting|culture|literature|music|theatre|film/.test(eventText)
+      ? { label: "Art, prints, and visual references", query: `${topic} art prints books` }
+      : /science|technology|space|medicine|discovery|invention/.test(eventText)
+        ? { label: "Science and discovery books", query: `${topic} science history books` }
+        : /person|born|died|king|queen|president|leader|scientist|writer|artist/.test(eventText)
+          ? { label: "Biographies and memoirs", query: `${topic} biography book` }
+          : { label: "Maps, posters, and reference material", query: `${topic} historical map poster` };
+
+  const links = [
+    { label: `Books about ${topic}`, query: `${topic} history book` },
+    secondary,
+    { label: "Documentaries and companion reading", query: `${topic} documentary book` },
+  ];
+  const aiIdeas = Array.isArray(c.amazonProductIdeas)
+    ? c.amazonProductIdeas
+        .map((item) => ({
+          label: String(item?.label || "").trim(),
+          query: String(item?.searchQuery || "").trim(),
+          type: String(item?.type || "book").trim().toLowerCase(),
+        }))
+        .filter((item) => item.label && item.query)
+        .slice(0, 6)
+    : [];
+  const sliderItems = (aiIdeas.length ? aiIdeas : links).map((item) => ({
+    label: item.label,
+    query: item.query,
+    type: item.type || "book",
+  }));
+  const openLibraryQuery = String(c.bookSearchQuery || sliderItems[0]?.query || `${topic} history book`)
+    .replace(/\s+/g, " ")
+    .trim();
+  const bookKeywords = [
+    topic,
+    c.eventTitle,
+    c.keywords,
+    ...(Array.isArray(c.keyTerms) ? c.keyTerms.map((term) => term?.term || "") : []),
+  ]
+    .join(" ")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4 && !["history", "world", "first", "second", "battle", "revolution", "founded", "founding"].includes(word))
+    .slice(0, 14)
+    .join(" ");
+
+  return `<section class="amazon-related mt-4 p-3 rounded" aria-label="Related book recommendations" style="display:none">
+            <div class="amazon-related-head">
+              <span class="amazon-kicker">Related books</span>
+            </div>
+            <div class="amazon-slider-shell" data-open-library-books data-query="${esc(openLibraryQuery)}" data-keywords="${esc(bookKeywords)}" data-amazon-tag="${esc(AMAZON_ASSOCIATE_TAG)}">
+              <button type="button" class="amazon-slider-btn" aria-label="Previous Amazon recommendations" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
+              <div class="amazon-slider-wrap">
+                <div class="amazon-slider-track" aria-live="polite"></div>
+              </div>
+              <button type="button" class="amazon-slider-btn" aria-label="Next Amazon recommendations" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
+            </div>
+            <small class="article-meta d-block mt-2">Book covers from Open Library. As an Amazon Associate I earn from qualifying purchases.</small>
+            <script>
+(function(){
+  var shell=document.currentScript&&document.currentScript.previousElementSibling&&document.currentScript.previousElementSibling.previousElementSibling;
+  if(!shell||!shell.matches('[data-open-library-books]')||shell.dataset.loaded==='true')return;
+  shell.dataset.loaded='true';
+  var track=shell.querySelector('.amazon-slider-track');
+  var query=shell.dataset.query||'history books';
+  var keywords=(shell.dataset.keywords||'').split(/\\s+/).filter(Boolean);
+  var tag=shell.dataset.amazonTag||'${AMAZON_ASSOCIATE_TAG}';
+  function escText(value){return String(value||'').replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
+  function amazonUrl(title,author){return 'https://www.amazon.com/s?k='+encodeURIComponent([title,author].filter(Boolean).join(' '))+'&tag='+encodeURIComponent(tag);}
+  fetch('https://openlibrary.org/search.json?q='+encodeURIComponent(query)+'&mode=books&limit=8&fields=title,author_name,cover_i,first_publish_year')
+    .then(function(res){return res.ok?res.json():null;})
+    .then(function(data){
+      var docs=((data&&data.docs)||[]).filter(function(doc){
+        if(!doc||!doc.title||!doc.cover_i)return false;
+        var hay=[doc.title,(doc.author_name&&doc.author_name[0])||'',((doc.subject||[]).slice(0,8).join(' '))].join(' ').toLowerCase();
+        return !keywords.length || keywords.some(function(word){return hay.indexOf(word)!==-1;});
+      }).slice(0,5);
+      if(docs.length<3)return;
+      track.innerHTML=docs.map(function(doc){
+        var author=(doc.author_name&&doc.author_name[0])||'';
+        var title=doc.title||'Related book';
+        var cover='https://covers.openlibrary.org/b/id/'+doc.cover_i+'-M.jpg';
+        return '<a class="amazon-product-card" href="'+amazonUrl(title,author)+'" target="_blank" rel="sponsored noopener noreferrer">'+
+          '<span class="amazon-card-cover"><img src="'+cover+'" alt="'+escText(title)+' cover" loading="lazy"></span>'+
+          '<strong>'+escText(title)+'</strong>'+
+          (author?'<small>'+escText(author)+'</small>':'<small>View on Amazon</small>')+
+        '</a>';
+      }).join('');
+      shell.closest('.amazon-related').style.display='';
+    }).catch(function(){});
+})();
+            </script>
+          </section>`;
+}
+
 /**
  * Fetches up to `limit` images from the article's own Wikipedia page.
  * Used as a fallback when no person portraits are available (event/battle articles).
@@ -7077,7 +7289,7 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
       url: canonicalUrl,
       about: {
         "@type": "Event",
-        name: c.jsonLdName || c.eventTitle,
+        name: c.eventTitle || c.jsonLdName,
         startDate: c.historicalDateISO || String(c.historicalYear),
         description: c.jsonLdDescription || c.description,
         location: {
@@ -7373,6 +7585,24 @@ ${JSON.stringify({
       .authority-links-row{display:flex;flex-wrap:wrap;gap:8px}
       .authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;font-weight:400;color:var(--btn-bg);background:#fff;text-decoration:none}
       .authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+      .amazon-related{background:var(--bg-alt);border:1px solid var(--border)}
+      .amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+      .amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
+      .amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}
+      .amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}
+      .amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}
+      .amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+      .amazon-slider-wrap::-webkit-scrollbar{display:none}
+      .amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}
+      .amazon-product-card{flex:0 0 170px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}
+      .amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}
+      .amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+      .amazon-product-card small{color:var(--text-muted)}
+      .amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--btn-bg);font-size:28px}
+      .amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}
+      .amazon-card-cover-fallback{background:linear-gradient(135deg,#f9fbf7,#e7f0e7)}
+      @media(min-width:768px){.amazon-slider-btn{display:inline-flex}}
+      @media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
       blockquote.historical-quote{border-left:3px solid var(--btn-bg);padding-left:1rem;margin-left:.5rem;font-style:italic}
       .border{border:1px solid var(--border)!important;box-shadow:none}
       .shadow-sm{box-shadow:none!important}
@@ -7463,22 +7693,22 @@ ${overviewParas}
               : ""
           }
 
-          ${bookCoverUrl && c.bookSearchQuery ? `<!-- Further Reading -->
+          ${bookCoverUrl && c.bookSearchQuery ? `<!-- Free Library Reading -->
           <div class="mt-3 p-3 rounded" style="background-color: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08); display:flex; align-items:flex-start; gap:14px;">
             <a href="https://openlibrary.org/search?q=${encodeURIComponent(c.bookSearchQuery)}&mode=books" target="_blank" rel="noopener noreferrer" style="flex-shrink:0;">
               <img src="${esc(bookCoverUrl)}" alt="Book cover" loading="lazy" style="width:60px;height:auto;border-radius:4px;display:block;">
             </a>
             <div>
-              <strong style="font-size:0.9rem;">Want to read more?</strong><br>
-              <small class="article-meta">If you want to explore this topic further, we recommend searching for books on
-                <a href="https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(c.bookSearchQuery + " book")}&_sacat=267" target="_blank" rel="noopener noreferrer">eBay</a>
-                or browsing free digital editions at
+              <strong style="font-size:0.9rem;">Free library reading</strong><br>
+              <small class="article-meta">You can also browse free digital editions and catalog records at
                 <a href="https://openlibrary.org/search?q=${encodeURIComponent(c.bookSearchQuery)}&mode=books" target="_blank" rel="noopener noreferrer">Open Library</a>.
               </small>
             </div>
           </div>` : ""}
 
           ${buildAuthorityLinksBlock(c, currentPillars)}
+
+          ${buildAmazonRelatedBlock(c, currentPillars)}
 
           <!-- Eyewitness / Chronicle Accounts -->
           ${

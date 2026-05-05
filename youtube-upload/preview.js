@@ -6,7 +6,7 @@
  */
 
 import "dotenv/config";
-import { getPostIndex, getDidYouKnow, getQuickFacts, getPostWikipediaUrl } from "./lib/kv.js";
+import { getPostIndex, getDidYouKnow, getQuickFacts, getArticleText, getPostWikipediaUrl } from "./lib/kv.js";
 import { generateVideo } from "./lib/video.js";
 import { generateNarration, buildNarrationScript, buildNarrationParts } from "./lib/elevenlabs.js";
 import { polishNarrationItems } from "./lib/narration-expert.js";
@@ -33,18 +33,19 @@ async function main() {
   console.log(`Post: ${post.title}`);
 
   // Narration content
-  const [dyk, qf, wikiUrl] = await Promise.all([
+  const [dyk, qf, articleText, wikiUrl] = await Promise.all([
     getDidYouKnow(slug),
     getQuickFacts(slug),
+    getArticleText(slug).catch(() => null),
     getPostWikipediaUrl(slug),
   ]);
   const rawItems = dyk ?? qf ?? null;
   const contentItems = rawItems
-    ? await polishNarrationItems(rawItems, post).catch(() => rawItems)
+    ? await polishNarrationItems(post.title, rawItems, articleText).catch(() => rawItems)
     : null;
   const narrationItems = contentItems;
 
-  const script = buildNarrationScript(post, narrationItems ?? contentItems);
+  const script = buildNarrationScript(post, narrationItems ?? contentItems, articleText);
   console.log(`Narration script: "${script}"`);
 
   const { path: narrationPath, words } = await generateNarration(slug, script);
@@ -58,7 +59,7 @@ async function main() {
     useAiImage,
     contentItems,
     wikiArticleUrl: wikiUrl,
-    narrationParts: buildNarrationParts(post, narrationItems ?? contentItems),
+    narrationParts: buildNarrationParts(post, narrationItems ?? contentItems, articleText),
   });
 
   console.log(`\n✓ Preview video ready: ${videoResult.path}`);

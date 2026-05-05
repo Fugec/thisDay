@@ -189,6 +189,8 @@ Style guide:
 - Use active voice and present-tense verbs where they add urgency ("Soviet forces surround…")
 - Keep each item as ONE sentence or two short connected sentences — no lists
 - Avoid starting consecutive items with the same word
+- Do not begin items with the calendar date or repeat the title date; the video card already shows it
+- If a fact starts with "On [Month] [day]" or "[Month] [day], [year]", remove that lead-in and start with the actor, number, or action
 - Do NOT invent facts not present in the original items or the article text
 - Use contractions naturally ("didn't", "wasn't", "he'd") — stiff formal language kills TTS pacing
 - Grammar must be perfect — check plurals and verb agreement before returning

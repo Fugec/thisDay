@@ -740,12 +740,154 @@ function buildEntityAdUnits() {
   </div>`;
 }
 
-async function handleEntityPage(request, env, url, type, slug) {
+function wikiTitleFromEntityUrl(wikiUrl) {
+  try {
+    const parsed = new URL(wikiUrl);
+    const title = parsed.pathname.split("/wiki/")[1];
+    return title ? decodeURIComponent(title.split("#")[0]).replace(/_/g, " ") : "";
+  } catch {
+    return "";
+  }
+}
+
+function formatWikidataDate(claim) {
+  const raw = claim?.mainsnak?.datavalue?.value?.time;
+  const match = raw ? raw.match(/^[+-](\d{4})-(\d{2})-(\d{2})/) : null;
+  if (!match) return "";
+  const [, year, month, day] = match;
+  return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+    .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+async function fetchEntityLifeDates(type, pageTitle) {
+  if (type !== "person" || !pageTitle) return {};
+  const pageRes = await fetch(
+    `https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=pageprops&ppprop=wikibase_item&format=json&origin=*&titles=${encodeURIComponent(pageTitle)}`,
+    { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+  ).catch(() => null);
+  if (!pageRes?.ok) return {};
+  const pageData = await pageRes.json();
+  const page = Object.values(pageData?.query?.pages || {})[0];
+  const qid = page?.pageprops?.wikibase_item;
+  if (!qid) return {};
+  const entityRes = await fetch(
+    `https://www.wikidata.org/wiki/Special:EntityData/${encodeURIComponent(qid)}.json`,
+    { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+  ).catch(() => null);
+  if (!entityRes?.ok) return {};
+  const entityData = await entityRes.json();
+  const claims = entityData?.entities?.[qid]?.claims || {};
+  return {
+    birthDate: formatWikidataDate(claims.P569?.[0]),
+    deathDate: formatWikidataDate(claims.P570?.[0]),
+  };
+}
+
+async function fetchEntityWikiHydration(entity, type) {
+  const pageTitle = wikiTitleFromEntityUrl(entity.wikiUrl) || entity.name;
+  if (!pageTitle) return {};
+  const [summaryRes, extractRes, lifeDates] = await Promise.all([
+    fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`,
+      { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+    ).catch(() => null),
+    fetch(
+      `https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exchars=3200&format=json&origin=*&titles=${encodeURIComponent(pageTitle)}`,
+      { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+    ).catch(() => null),
+    fetchEntityLifeDates(type, pageTitle),
+  ]);
+
+  const summary = summaryRes?.ok ? await summaryRes.json() : {};
+  const extractData = extractRes?.ok ? await extractRes.json() : {};
+  const page = Object.values(extractData?.query?.pages || {})[0];
+  const intro = cleanWikiExtract(page?.extract || summary.extract || "");
+  return {
+    summary: summary.extract || "",
+    intro,
+    description: summary.description || "",
+    imageUrl: summary.thumbnail?.source || summary.originalimage?.source || "",
+    ...lifeDates,
+  };
+}
+
+function cleanWikiExtract(value) {
+  return String(value || "")
+    .replace(/^=+[^=\n]+?=+\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitEntityHydratedSections(entity) {
+  const text = String(entity.intro || entity.summary || "").replace(/\s+/g, " ").trim();
+  if (!text) return [];
+  const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)/g) || [text];
+  const sections = [];
+  let current = [];
+  let words = 0;
+  for (const sentence of sentences) {
+    const count = sentence.trim().split(/\s+/).filter(Boolean).length;
+    if (words + count > 130 && current.length) {
+      sections.push(current.join(" ").trim());
+      current = [sentence.trim()];
+      words = count;
+    } else {
+      current.push(sentence.trim());
+      words += count;
+    }
+  }
+  if (current.length) sections.push(current.join(" ").trim());
+
+  const name = entity.name || "This subject";
+  const headings = entity.type === "person"
+    ? [`Who was ${name}?`, "Career and public life", "Historical significance"]
+    : [`What was ${name}?`, "Background and consequences", "Why it matters"];
+  return sections.slice(0, 3).map((paragraph, index) => ({
+    heading: headings[index] || headings[headings.length - 1],
+    paragraphs: [paragraph],
+  }));
+}
+
+async function hydrateSparseEntity(env, entity, type, ctx) {
+  const bodyWords = (Array.isArray(entity.bodySections) ? entity.bodySections : [])
+    .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
+    .join(" ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+  const hasWikiMarkup = /={2,}[^=]+={2,}/.test(`${entity.intro || ""} ${entity.summary || ""}`);
+  const sparse = !entity.intro || !entity.summary || !entity.imageUrl || bodyWords < 150 || hasWikiMarkup;
+  if (!sparse || !entity.wikiUrl) return entity;
+
+  const wiki = await fetchEntityWikiHydration(entity, type).catch(() => ({}));
+  const hydrated = {
+    ...entity,
+    type,
+    summary: cleanWikiExtract(entity.summary || wiki.summary || ""),
+    intro: cleanWikiExtract(hasWikiMarkup ? (wiki.intro || wiki.summary || entity.intro) : (entity.intro || wiki.intro || wiki.summary || "")),
+    description: entity.description || wiki.description || "",
+    imageUrl: entity.imageUrl || wiki.imageUrl || "",
+    birthDate: entity.birthDate || wiki.birthDate || "",
+    deathDate: entity.deathDate || wiki.deathDate || "",
+    updatedAt: new Date().toISOString(),
+  };
+  if (bodyWords < 150 || hasWikiMarkup) {
+    hydrated.bodySections = splitEntityHydratedSections(hydrated);
+  }
+  if (hydrated.intro || hydrated.summary) delete hydrated.needsWikiRefresh;
+
+  const write = env.BLOG_AI_KV?.put(entityKey(type, hydrated.slug), JSON.stringify(hydrated)).catch(() => {});
+  if (ctx?.waitUntil && write) ctx.waitUntil(write);
+  else if (write) await write;
+  return hydrated;
+}
+
+async function handleEntityPage(request, env, url, type, slug, ctx) {
   const raw = await env.BLOG_AI_KV?.get(entityKey(type, slug)).catch(() => null);
   if (!raw) {
     return fetch(request);
   }
-  const entity = JSON.parse(raw);
+  let entity = JSON.parse(raw);
+  entity = await hydrateSparseEntity(env, entity, type, ctx);
   const posts = await getBlogIndexEntries(env);
   const title = `${entity.name} | thisDay.`;
   const canonical = `${url.origin}${entity.url || url.pathname}`;
@@ -4982,12 +5124,12 @@ async function handleFetchRequest(request, env, ctx) {
 
   const personEntityMatch = url.pathname.match(/^\/people\/([a-z0-9-]+)\/?$/);
   if (personEntityMatch) {
-    return handleEntityPage(request, env, url, "person", personEntityMatch[1]);
+    return handleEntityPage(request, env, url, "person", personEntityMatch[1], ctx);
   }
 
   const historyEntityMatch = url.pathname.match(/^\/history\/([a-z0-9-]+)\/?$/);
   if (historyEntityMatch) {
-    return handleEntityPage(request, env, url, "event", historyEntityMatch[1]);
+    return handleEntityPage(request, env, url, "event", historyEntityMatch[1], ctx);
   }
 
   // Born pages: /born/{month}/{day}/

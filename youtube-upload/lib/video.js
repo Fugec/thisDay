@@ -844,6 +844,28 @@ function wrapLines(text, maxChars) {
   return lines;
 }
 
+function fitTitleLines(title) {
+  const cleanTitle = String(title || "").replace(/\s+/g, " ").trim();
+  const attempts = [
+    { fontSize: 60, maxChars: 24, maxLines: 2, lineH: 66 },
+    { fontSize: 52, maxChars: 28, maxLines: 3, lineH: 58 },
+    { fontSize: 46, maxChars: 32, maxLines: 3, lineH: 52 },
+    { fontSize: 40, maxChars: 36, maxLines: 4, lineH: 46 },
+    { fontSize: 36, maxChars: 40, maxLines: 4, lineH: 42 },
+  ];
+
+  for (const attempt of attempts) {
+    const lines = wrapLines(cleanTitle, attempt.maxChars);
+    if (lines.length <= attempt.maxLines) return { ...attempt, lines };
+  }
+
+  const fallback = attempts[attempts.length - 1];
+  return {
+    ...fallback,
+    lines: wrapLines(cleanTitle, fallback.maxChars).slice(0, fallback.maxLines),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Overlay builders
 // ---------------------------------------------------------------------------
@@ -870,13 +892,13 @@ async function buildBgPanelBuffer() {
  */
 function buildTitleTextSVG(title) {
   const PW = 1080, PH = 480;
-  const lines       = wrapLines(title, 24).slice(0, 2);
-  const lineH       = 66;
-  const titleStartY = lines.length === 1 ? 300 : 270;
+  const { lines, fontSize, lineH } = fitTitleLines(title);
+  const blockH = (lines.length - 1) * lineH;
+  const titleStartY = Math.max(242, 320 - blockH / 2);
 
   const titleSVG = lines.map((line, i) => `
     <text x="${PW / 2}" y="${titleStartY + i * lineH}"
-      font-family="${FONT}" font-size="60" font-weight="700"
+      font-family="${FONT}" font-size="${fontSize}" font-weight="700"
       fill="white" text-anchor="middle" dominant-baseline="middle"
       stroke="rgba(0,0,0,0.45)" stroke-width="3" paint-order="stroke fill"
     >${escapeXml(line)}</text>`).join("");
@@ -1085,6 +1107,31 @@ async function fetchArticleImageBuffers(slug, limit = 3) {
     }
   }
   return buffers;
+}
+
+async function fetchPreferredVideoImageBuffers(post, articleSource, limit, context = {}) {
+  const buffers = [];
+  const featuredUrl = post?.imageUrl || null;
+
+  if (featuredUrl) {
+    try {
+      const featuredBuffer = await downloadImageBuffer(featuredUrl);
+      buffers.push(featuredBuffer);
+      console.log("  ✓ Using blog featured image as primary video image");
+    } catch (err) {
+      console.warn(`  ⚠ Featured image unavailable for video (${err.message}) — falling back to Wikipedia article images`);
+    }
+  }
+
+  if (buffers.length >= limit) return buffers.slice(0, limit);
+
+  const fallbackBuffers = await fetchWikipediaImageBuffers(
+    articleSource,
+    limit - buffers.length,
+    context,
+  );
+  buffers.push(...fallbackBuffers);
+  return buffers.slice(0, limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -1490,17 +1537,18 @@ async function generateMultiSceneVideo(
       : `  Video duration: ${videoDuration} s (default — no word timestamps)`,
   );
 
-  // 1. Fetch real images only from the exact Wikipedia article tied to this post.
+  // 1. Use the article's featured image first. This keeps the video aligned with
+  // the published blog post; Wikipedia article images are only fallback material.
   const fallbackTitle = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
   const articleSource = wikiArticleUrl || fallbackTitle;
-  console.log(`  Fetching exact Wikipedia article images for "${slug}"...`);
-  const imageBuffers = await fetchWikipediaImageBuffers(articleSource, N_SCENES, {
+  console.log(`  Fetching featured/article image for "${slug}"...`);
+  const imageBuffers = await fetchPreferredVideoImageBuffers(post, articleSource, N_SCENES, {
     contentItems,
   });
 
   if (imageBuffers.length === 0) {
     throw new Error(
-      "IMAGE_UNAVAILABLE: no usable images found on the exact Wikipedia article",
+      "IMAGE_UNAVAILABLE: no usable featured image or exact Wikipedia article image",
     );
   }
 
@@ -1518,7 +1566,7 @@ async function generateMultiSceneVideo(
 
   const sceneCount = Math.min(N_SCENES, imageBuffers.length);
   console.log(
-    `  ✓ Using ${sceneCount} real images from the exact Wikipedia article (min=${minWikiImages})`,
+    `  ✓ Using ${sceneCount} real image(s) for video (featured first, min=${minWikiImages})`,
   );
 
   const sceneLayers = await Promise.all(

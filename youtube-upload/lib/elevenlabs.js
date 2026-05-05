@@ -43,8 +43,7 @@ function buildNarrationIntro(post) {
   const rawTitle = String(post?.title || "").trim();
   const parts = rawTitle.split(/ [—–] /);
   const lead = parts[0]?.trim() || rawTitle;
-  const datePart = parts[1]?.trim() || "";
-  return datePart ? `${lead}, ${datePart}.` : `${lead}.`;
+  return `${lead}.`;
 }
 
 function trimRedundantDateLead(text, post) {
@@ -67,8 +66,17 @@ function trimRedundantDateLead(text, post) {
     out = out.replace(new RegExp(`^by\\s+${year},?\\s*`, "i"), "");
     out = out.replace(new RegExp(`^${year},?\\s*`, "i"), "");
   }
+  out = out.replace(
+    /^\s*(?:on\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{3,4},?\s*/i,
+    "",
+  );
+  out = out.replace(
+    /^\s*(?:on\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s*/i,
+    "",
+  );
 
-  return out.trim();
+  out = out.trim();
+  return out ? out.charAt(0).toUpperCase() + out.slice(1) : out;
 }
 
 const ABBREV_RE = /\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc)\./gi;

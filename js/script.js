@@ -2091,7 +2091,7 @@ async function fetchAndApplyCommentary(month, day) {
     // Inject commentary paragraphs into event cards that have a match
     const modal = document.getElementById("modalBodyContent");
     if (!modal) return;
-    modal.querySelectorAll("li[data-ckey]").forEach((li) => {
+    modal.querySelectorAll("[data-ckey]").forEach((li) => {
       const text = commentaryMap[li.dataset.ckey];
       if (!text) return;
       // Don't double-inject
@@ -2116,14 +2116,21 @@ function renderFilteredItems(itemsToRender) {
       "<p class='text-muted text-center'>No items found for this category.</p>";
     return;
   }
+  const escHtml = (value) =>
+    String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   const currentYear = new Date().getFullYear();
-  let htmlContent = `<ul class="list-unstyled">`;
+  let htmlContent = `<div class="modal-timeline" role="list">`;
   itemsToRender.forEach((event) => {
-    let specialEmphasis = "";
+    let typeLabel = "Event";
     if (event.type === "birth") {
-      specialEmphasis = "<strong>Birth:</strong> ";
+      typeLabel = "Birth";
     } else if (event.type === "death") {
-      specialEmphasis = "<strong>Death:</strong> ";
+      typeLabel = "Death";
     }
     // Years ago badge — shown for all historical events
     const eventYear = parseInt(event.year, 10);
@@ -2138,30 +2145,47 @@ function renderFilteredItems(itemsToRender) {
       `${event.year} — ${event.description}\n${event.sourceUrl || "https://thisday.info"}`,
     );
     const waUrl = `https://wa.me/?text=${shareText}`;
+    const title = event.title || event.description || "Historical event";
+    const mediaHtml = event.thumbnailUrl
+      ? `
+                        <div class="modal-tl-media">
+                            <img src="${escHtml(event.thumbnailUrl)}"
+                                alt="${escHtml(title.substring(0, 80))}" loading="lazy" onerror="this.parentElement.classList.add('modal-tl-media-blank'); this.remove()">
+                        </div>
+                        `
+      : `
+                        <div class="modal-tl-media modal-tl-media-blank" aria-hidden="true">
+                            <i class="bi bi-calendar-event"></i>
+                        </div>
+                        `;
 
     htmlContent += `
-            <li class="mb-3 p-3 border rounded event-item${event.thumbnailUrl ? " event-item-has-thumb" : ""}" data-ckey="${`${event.year}:${(event.description || "").substring(0, 30)}`}">
-                <div class="event-item-inner">
-                    <div class="event-item-body">
-                        <div class="d-flex align-items-center flex-wrap gap-1 mb-1">
-                          <strong class="event-year-text">${event.year}</strong>
+            <article class="modal-tl-item event-item${event.thumbnailUrl ? " event-item-has-thumb" : ""}" role="listitem" data-ckey="${`${escHtml(event.year)}:${escHtml((event.description || "").substring(0, 30))}`}">
+                <div class="modal-tl-marker">
+                  <span class="event-year-text">${escHtml(event.year)}</span>
+                </div>
+                <div class="modal-tl-card">
+                    ${mediaHtml}
+                    <div class="modal-tl-body event-item-body">
+                        <div class="modal-tl-meta">
+                          <span class="modal-tl-type">${typeLabel}</span>
                           ${anniversaryBadge}
                         </div>
-                        <p class="mb-1">${specialEmphasis}${event.description}</p>
-                        ${event.commentary ? `<p class="mb-2 fst-italic event-commentary"><i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${event.commentary}</span></p>` : ""}
-                        <div class="event-actions">
+                        <p class="modal-tl-desc mb-1">${escHtml(event.description)}</p>
+                        ${event.commentary ? `<p class="mb-2 fst-italic event-commentary"><i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${escHtml(event.commentary)}</span></p>` : ""}
+                        <div class="event-actions modal-tl-actions">
                           ${
                             event.sourceUrl
-                              ? `<a href="${event.sourceUrl}" class="event-action-btn event-action-read btn btn-contrast btn-sm"
+                              ? `<a href="${escHtml(event.sourceUrl)}" class="event-action-btn event-action-read btn btn-contrast btn-sm"
                                  target="_blank" rel="noopener noreferrer">
-                                   Read More About ${event.title.length > 20 ? `${event.title.substring(0, 20)}...` : event.title}
+                                   Read More
                                  </a>`
                               : ""
                           }
                           <button class="event-action-btn event-action-share share-copy-btn btn btn-contrast btn-sm"
-                            data-desc="${(event.description || "").replace(/"/g, "&quot;")}"
-                            data-year="${event.year}"
-                            data-url="${event.sourceUrl || ""}">
+                            data-desc="${escHtml(event.description || "")}"
+                            data-year="${escHtml(event.year)}"
+                            data-url="${escHtml(event.sourceUrl || "")}">
                             Share
                           </button>
                           <a href="${waUrl}" class="event-action-btn event-action-wa btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">
@@ -2169,20 +2193,10 @@ function renderFilteredItems(itemsToRender) {
                           </a>
                         </div>
                     </div>
-                    ${
-                      event.thumbnailUrl
-                        ? `
-                        <div class="event-item-thumb">
-                            <img src="${event.thumbnailUrl}" class="rounded"
-                                alt="${event.title ? event.title.substring(0, 80) : ""}" onerror="this.parentElement.remove()">
-                        </div>
-                        `
-                        : ""
-                    }
                 </div>
-            </li>`;
+            </article>`;
   });
-  htmlContent += `</ul>`;
+  htmlContent += `</div>`;
   eventsListDiv.innerHTML = htmlContent;
 
   eventsListDiv.querySelectorAll(".share-copy-btn").forEach((btn) => {
@@ -2208,9 +2222,10 @@ function applyFilter() {
   setTimeout(() => {
     const eventsListDiv = document.getElementById("modal-events-list");
     if (eventsListDiv) {
-      const firstEvent = eventsListDiv.querySelector("li");
-      if (firstEvent) {
-        firstEvent.scrollIntoView({ behavior: "smooth", block: "start" });
+      const firstTimelineEvent =
+        eventsListDiv.querySelector(".modal-tl-item");
+      if (firstTimelineEvent) {
+        firstTimelineEvent.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
   }, 100);

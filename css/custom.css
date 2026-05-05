@@ -1175,6 +1175,166 @@ img {
   background: var(--bg);
 }
 
+.modal-timeline {
+  position: relative;
+  display: grid;
+  gap: 1rem;
+  padding: 0.25rem 0 0.5rem;
+}
+.modal-timeline::before {
+  content: "";
+  position: absolute;
+  left: 78px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+.modal-tl-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+.modal-tl-marker {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 1rem;
+}
+.modal-tl-marker .event-year-text {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  min-height: 34px;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.modal-tl-card {
+  display: flex;
+  flex-direction: column;
+  max-width: 430px;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.modal-tl-card:hover {
+  background: var(--bg-alt);
+}
+.modal-tl-media {
+  width: 100%;
+  height: 200px;
+  background: var(--bg-alt);
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+.modal-tl-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+  filter: brightness(90%);
+}
+.modal-tl-media-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    linear-gradient(135deg, rgba(164, 205, 49, 0.12), transparent 45%),
+    var(--bg-alt);
+  color: var(--accent);
+  font-size: 2rem;
+}
+.modal-tl-body {
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.modal-tl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin-bottom: 0.45rem;
+}
+.modal-tl-type {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+.modal-tl-desc {
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+.modal-tl-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.85rem;
+}
+.modal-tl-actions .event-action-btn {
+  width: 100%;
+  justify-content: center;
+  min-height: 42px;
+  padding: 9px 10px;
+  white-space: normal;
+  text-align: center;
+}
+.modal-tl-actions .event-action-read {
+  grid-column: 1 / -1;
+}
+@media (min-width: 768px) {
+  .modal-dialog.modal-lg {
+    max-width: 980px;
+  }
+  .modal-tl-media {
+    height: 220px;
+  }
+}
+@media (max-width: 575px) {
+  .modal-timeline::before {
+    left: 20px;
+  }
+  .modal-tl-item {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 0.7rem;
+  }
+  .modal-tl-marker {
+    justify-content: center;
+  }
+  .modal-tl-marker .event-year-text {
+    min-width: 38px;
+    min-height: 30px;
+    padding: 0.25rem 0.45rem;
+    font-size: 0.68rem;
+  }
+  .modal-tl-media {
+    height: 150px;
+  }
+  .modal-tl-media-blank {
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-tl-body {
+    padding: 0.9rem;
+  }
+}
+
 /* Lora font for daily history event items */
 .event-year-text {
   font-family: "Lora", Georgia, serif;

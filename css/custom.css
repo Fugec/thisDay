@@ -1303,10 +1303,31 @@ img {
 }
 @media (min-width: 768px) {
   .modal-dialog.modal-lg {
-    max-width: 980px;
+    max-width: min(1120px, calc(100vw - 4rem));
+  }
+  .modal-timeline {
+    gap: 1.15rem;
+  }
+  .modal-tl-card {
+    display: grid;
+    grid-template-columns: minmax(240px, 36%) minmax(0, 1fr);
+    max-width: none;
+    min-height: 230px;
   }
   .modal-tl-media {
-    height: 220px;
+    height: 100%;
+    min-height: 230px;
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+  }
+  .modal-tl-body {
+    min-height: 230px;
+  }
+  .modal-tl-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .modal-tl-actions .event-action-read {
+    grid-column: auto;
   }
 }
 @media (max-width: 575px) {

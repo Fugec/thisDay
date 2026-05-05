@@ -1211,12 +1211,14 @@ img {
   min-width: 56px;
   min-height: 34px;
   padding: 0.35rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg);
-  color: var(--accent);
+  border: 0;
+  border-radius: 20px;
+  background: var(--btn-bg);
+  color: #fff;
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  box-shadow: 0 0 0 3px var(--bg);
 }
 .modal-tl-card {
   display: flex;
@@ -1621,7 +1623,6 @@ img {
 /* Event years ago badge */
 .event-years-ago {
   font-size: 14px;
-  border: 1px solid var(--accent);
   color: var(--accent);
   padding: 2px 8px;
   border-radius: var(--radius);

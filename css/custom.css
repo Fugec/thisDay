@@ -1623,6 +1623,7 @@ img {
 /* Event years ago badge */
 .event-years-ago {
   font-size: 14px;
+  border: 1px solid var(--accent);
   color: var(--accent);
   padding: 2px 8px;
   border-radius: var(--radius);
@@ -1694,6 +1695,17 @@ img {
   font-size: 1.1rem;
   font-weight: 700;
   color: var(--text);
+}
+
+.modal-tl-marker .event-year-text {
+  background: var(--btn-bg);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
+.modal-tl-meta .event-years-ago {
+  border: 0;
 }
 
 .event-description {

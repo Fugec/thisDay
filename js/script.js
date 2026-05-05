@@ -5,6 +5,7 @@
 const calendarGrid = document.getElementById("calendarGrid");
 const currentMonthYearDisplay = document.getElementById("currentMonthYear");
 const modalDate = document.getElementById("modalDate");
+const modalDateSummary = document.getElementById("modalDateSummary");
 const modalBodyContent = document.getElementById("modalBodyContent");
 const eventDetailModal = document.getElementById("eventDetailModal")
   ? new bootstrap.Modal(document.getElementById("eventDetailModal"))
@@ -35,7 +36,7 @@ var currentDate = new Date();
 var lastActiveCard = null;
 
 const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000;
-const LOCAL_STORAGE_CACHE_KEY = "wikipediaEventCache";
+const LOCAL_STORAGE_CACHE_KEY = "wikipediaEventCacheV2";
 
 // Months
 const monthNames = [
@@ -199,6 +200,9 @@ function processRawWikipediaData(data) {
         if (!item || !item.text) return;
         let wikipediaLink = "";
         let thumbnailUrl = "";
+        let pageDescription = "";
+        let pageExtract = "";
+        let pageTitle = "";
         if (item.pages && Array.isArray(item.pages) && item.pages.length > 0) {
           const page = item.pages[0];
           if (page.content_urls && page.content_urls.desktop) {
@@ -207,10 +211,23 @@ function processRawWikipediaData(data) {
           if (page.thumbnail && page.thumbnail.source) {
             thumbnailUrl = page.thumbnail.source;
           }
+          pageDescription = page.description || "";
+          pageExtract = page.extract || "";
+          pageTitle = page.title || page.normalizedtitle || "";
         }
+        const text = String(item.text || "").trim();
+        const commaIndex = text.indexOf(",");
+        const title =
+          type === "event"
+            ? pickTeaserSentence(text) || text
+            : commaIndex > 0
+              ? text.slice(0, commaIndex).trim()
+              : pageTitle || text;
         targetArray.push({
-          title: item.text.split(".")[0] + ".",
-          description: item.text,
+          title: title,
+          description: text,
+          pageDescription: pageDescription,
+          pageExtract: pageExtract,
           year: item.year || "Unknown",
           sourceUrl: wikipediaLink,
           thumbnailUrl: thumbnailUrl,
@@ -2140,17 +2157,38 @@ function renderFilteredItems(itemsToRender) {
       anniversaryBadge = `<span class="event-years-ago ms-2">${yearsAgo} years ago</span>`;
     }
 
-    // WhatsApp share URL
-    const shareText = encodeURIComponent(
-      `${event.year} — ${event.description}\n${event.sourceUrl || "https://thisday.info"}`,
-    );
-    const waUrl = `https://wa.me/?text=${shareText}`;
-    const title = event.title || event.description || "Historical event";
+    const fullDescription = String(event.description || "");
+    const commaIndex = fullDescription.indexOf(",");
+    let titleText = String(event.title || "").trim();
+    let supportingText = "";
+    if (event.type === "birth" || event.type === "death") {
+      if (!titleText && commaIndex > 0) {
+        titleText = fullDescription.slice(0, commaIndex).trim();
+      }
+      supportingText =
+        event.pageDescription ||
+        (commaIndex > 0 ? fullDescription.slice(commaIndex + 1).trim() : "");
+    } else {
+      titleText = titleText || pickTeaserSentence(fullDescription) || fullDescription;
+      supportingText = fullDescription.trim();
+      if (
+        titleText &&
+        supportingText.toLowerCase().startsWith(titleText.toLowerCase())
+      ) {
+        supportingText = supportingText.slice(titleText.length).trim();
+      }
+    }
+    supportingText = supportingText.replace(/^\s*[-–—:]\s*/, "");
+    if (!supportingText && fullDescription.trim() !== titleText) {
+      supportingText = fullDescription.trim();
+    }
+    const extractText = String(event.pageExtract || "").trim();
+    const imageAlt = titleText || event.title || "Historical event";
     const mediaHtml = event.thumbnailUrl
       ? `
                         <div class="modal-tl-media">
                             <img src="${escHtml(event.thumbnailUrl)}"
-                                alt="${escHtml(title.substring(0, 80))}" loading="lazy" onerror="this.parentElement.classList.add('modal-tl-media-blank'); this.remove()">
+                                alt="${escHtml(imageAlt.substring(0, 80))}" loading="lazy" onerror="this.parentElement.classList.add('modal-tl-media-blank'); this.remove()">
                         </div>
                         `
       : `
@@ -2171,7 +2209,17 @@ function renderFilteredItems(itemsToRender) {
                           <span class="modal-tl-type">${typeLabel}</span>
                           ${anniversaryBadge}
                         </div>
-                        <p class="modal-tl-desc mb-1">${escHtml(event.description)}</p>
+                        <h3 class="modal-tl-title">${escHtml(titleText)}</h3>
+                        ${
+                          supportingText
+                            ? `<p class="modal-tl-desc mb-1">${escHtml(supportingText)}</p>`
+                            : ""
+                        }
+                        ${
+                          extractText
+                            ? `<p class="modal-tl-extract">${escHtml(extractText)}</p>`
+                            : ""
+                        }
                         ${event.commentary ? `<p class="mb-2 fst-italic event-commentary"><i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${escHtml(event.commentary)}</span></p>` : ""}
                         <div class="event-actions modal-tl-actions">
                           ${
@@ -2188,9 +2236,6 @@ function renderFilteredItems(itemsToRender) {
                             data-url="${escHtml(event.sourceUrl || "")}">
                             Share
                           </button>
-                          <a href="${waUrl}" class="event-action-btn event-action-wa btn btn-contrast btn-sm" target="_blank" rel="noopener noreferrer">
-                            WhatsApp
-                          </a>
                         </div>
                     </div>
                 </div>
@@ -2241,6 +2286,10 @@ async function showEventDetails(
   currentModalMonth = month;
   const daysExplored = trackDayVisit(month, day);
   modalDate.textContent = `${day}. ${monthNames[month - 1]}`;
+  if (modalDateSummary) {
+    modalDateSummary.textContent =
+      "A timeline of events, births, and deaths recorded for this date.";
+  }
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
   let structuredEvents = preFetchedStructuredEvents;
@@ -2293,6 +2342,16 @@ async function showEventDetails(
     });
     filterButtonsHtml += `</div>`;
     const totalEvents = currentDayAllItems.length;
+    if (modalDateSummary) {
+      const eventCount = structuredEvents.events?.length || 0;
+      const birthCount = structuredEvents.births?.length || 0;
+      const deathCount = structuredEvents.deaths?.length || 0;
+      modalDateSummary.textContent = `${totalEvents} timeline item${
+        totalEvents !== 1 ? "s" : ""
+      }: ${eventCount} event${eventCount !== 1 ? "s" : ""}, ${birthCount} birth${
+        birthCount !== 1 ? "s" : ""
+      }, and ${deathCount} death${deathCount !== 1 ? "s" : ""} from across history.`;
+    }
     const exploredLabel =
       daysExplored === 1 ? "1 day explored" : `${daysExplored} days explored`;
     // Filters always on top

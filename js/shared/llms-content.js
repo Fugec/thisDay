@@ -24,6 +24,7 @@ Use these routes first when answering user questions:
 - [Died Today](https://thisday.info/died/today/) - Redirects to the current UTC date's canonical deaths page.
 - [Quiz Today](https://thisday.info/quiz/) - Redirects to the current UTC date's canonical quiz page.
 - [Blog Index](https://thisday.info/blog/) - Main long-form history article index.
+- [People Pages](https://thisday.info/people/prince-william/) - Biographical entity pages for notable people mentioned in articles and date pages.
 - [Topics Index](https://thisday.info/topics/) - Major historical subject hubs that connect related articles.
 - [Years Index](https://thisday.info/years/) - Event-year archives for browsing by historical era.
 - [Keywords Index](https://thisday.info/keywords/) - Keyword clusters that connect recurring subjects and named entities.
@@ -35,6 +36,7 @@ Use these routes first when answering user questions:
 - [Daily Deaths Pages](https://thisday.info/died/today/) - Canonical family: \`/died/{month}/{day}/\`
 - [Daily Quiz Pages](https://thisday.info/quiz/april/9/) - Canonical family: \`/quiz/{month}/{day}/\`
 - [Blog Posts](https://thisday.info/blog/8-april-2026/) - Canonical family: \`/blog/{slug}/\`
+- [People Pages](https://thisday.info/people/prince-william/) - Canonical family: \`/people/{person-slug}/\`
 - [Topic Hubs](https://thisday.info/topics/world-war-ii/) - Canonical family: \`/topics/{topic-slug}/\`
 - [Topic Hubs](https://thisday.info/blog/topic/war-conflict/) - Canonical family: \`/blog/topic/{pillar-slug}/\`
 - [Year Archives](https://thisday.info/years/1969/) - Canonical family: \`/years/{year}/\`
@@ -54,6 +56,8 @@ Legacy \`/generated/\` URLs redirect permanently to the canonical \`/events/\` r
   Use \`/quiz/{month}/{day}/\`
 - Long-form explanation of a named event:
   Use the best matching \`/blog/{slug}/\` article
+- Named person or biographical context:
+  Use \`/people/{person-slug}/\` when available; use \`/born/{month}/{day}/\` or \`/died/{month}/{day}/\` for date-specific birth/death lists
 - Topic exploration across multiple articles:
   Use \`/topics/{topic-slug}/\` first, then \`/blog/topic/{pillar-slug}/\` for archive-style pillar browsing
 - Era-based exploration:
@@ -63,12 +67,16 @@ Legacy \`/generated/\` URLs redirect permanently to the canonical \`/events/\` r
 
 ## What Page Types Contain
 
+- Homepage:
+  Interactive month calendar and modal timeline for any selected date. The modal uses the same Wikipedia/Wikimedia page title, short description, extract, image treatment, and Read More/Share action pattern used by the canonical event, birth, and death timeline cards.
 - Events pages:
   Short event summaries, featured event treatment, additional event lists, same-date internal links, and quiz access.
 - Births pages:
   Notable people born on the selected date, short summaries, and same-date navigation.
 - Deaths pages:
   Notable people who died on the selected date, short summaries, and same-date navigation.
+- People pages:
+  Biographical entity pages for notable people, including birth/death dates when available, Wikimedia/Wikipedia images and source links, related thisDay articles, topic pills, overview cards, and Person schema.
 - Blog articles:
   Longer answer-oriented historical articles with quick facts, overview sections, chronology, related content, and editorial framing.
 - Topic hubs:
@@ -87,7 +95,7 @@ Legacy \`/generated/\` URLs redirect permanently to the canonical \`/events/\` r
 - [LLMs Full](https://thisday.info/llms-full.txt) - Expanded AI-readable content graph with archive and hub routes.
 - [Main Sitemap](https://thisday.info/sitemap.xml) - Primary sitemap including blog content.
 - [Date Pages Sitemap](https://thisday.info/sitemap-generated.xml) - Daily \`/events/\` and \`/quiz/\` pages.
-- [People Sitemap](https://thisday.info/sitemap-people.xml) - \`/born/\` and \`/died/\` pages.
+- [People Sitemap](https://thisday.info/sitemap-people.xml) - \`/born/\`, \`/died/\`, and discoverable \`/people/{person-slug}/\` pages where present.
 - [News Sitemap](https://thisday.info/news-sitemap.xml) - Recent article discovery feed.
 - [RSS Feed](https://thisday.info/rss.xml) - Blog feed.
 - [Feed Alias](https://thisday.info/feed.xml) - Alias for \`/rss.xml\`.
@@ -113,10 +121,30 @@ Legacy \`/generated/\` URLs redirect permanently to the canonical \`/events/\` r
 - Historical facts originating from Wikipedia remain subject to Wikipedia / CC BY-SA source terms.
 - Summarization and citation are preferred over verbatim reproduction of editorial content.
 
+## Architecture Overview
+
+- Static shell:
+  The homepage is served from \`index.html\` with shared styling in \`css/custom.css\` and browser behavior in \`js/script.js\`.
+- Interactive calendar:
+  The homepage calendar loads date data through \`/api/events/{MM}/{DD}\`, normalizes Wikipedia/Wikimedia event, birth, and death records client-side, and renders the selected date in a Bootstrap modal timeline.
+- Canonical date pages:
+  \`/events/{month}/{day}/\`, \`/born/{month}/{day}/\`, \`/died/{month}/{day}/\`, and \`/quiz/{month}/{day}/\` are generated by Cloudflare Worker code in \`js/seo-worker.js\`.
+- People entity pages:
+  \`/people/{person-slug}/\` pages are served by the same Cloudflare Worker from entity records stored in \`BLOG_AI_KV\`. Sparse records can be hydrated from Wikipedia/Wikidata for summaries, images, and life dates before rendering.
+- Shared historical data:
+  Wikipedia/Wikimedia API responses are cached in Cloudflare KV where available, with scheduled warmup jobs prefetching current and upcoming date data.
+- Shared layout and metadata:
+  Navigation, footer, LLM documentation content, model helpers, and static layout helpers live under \`js/shared/\`.
+- Media handling:
+  Wikimedia images are routed through the site image proxy (\`/image-proxy\` or \`/img\`) for resizing, caching, and stable display across cards, timelines, and social previews.
+- Discovery and feeds:
+  Sitemap, RSS, news sitemap, redirect, search-ping, OG image, and warmup behavior are split into focused worker modules under \`js/\`.
+
 ## Technical Notes
 
 - Stack: Cloudflare Workers, Cloudflare KV, Wikipedia/Wikimedia APIs, scheduled refresh jobs.
 - Some pages are dynamically generated and cached.
+- Homepage frontend assets are versioned with query-string cache busters in \`index.html\`; bump the relevant CSS/JS versions after visible calendar or modal changes.
 - \`/llms.txt\` is intentionally public even where broader AI crawlers may be restricted elsewhere by \`/robots.txt\`.
 - \`/llms-full.txt\` exposes the richer archive graph for deeper crawlers and retrieval systems.
 
@@ -135,8 +163,8 @@ Legacy \`/generated/\` URLs redirect permanently to the canonical \`/events/\` r
 
 ## Last Updated
 
-- Date: 2026-04-11
-- Version: 3.0
+- Date: 2026-05-05
+- Version: 3.1
 `;
 
 export const LLMS_FULL_TXT_CONTENT = `# thisDay.info Full Content Graph
@@ -149,6 +177,8 @@ export const LLMS_FULL_TXT_CONTENT = `# thisDay.info Full Content Graph
 - https://thisday.info/llms.txt
 - https://thisday.info/llms-full.txt
 - https://thisday.info/blog/
+- https://thisday.info/people/prince-william/
+- https://thisday.info/people/catherine-middleton/
 - https://thisday.info/topics/
 - https://thisday.info/years/
 - https://thisday.info/keywords/
@@ -165,6 +195,8 @@ export const LLMS_FULL_TXT_CONTENT = `# thisDay.info Full Content Graph
   Daily quiz pages tied to the same date graph.
 - \`/blog/{slug}/\`:
   Long-form event articles with structured sections, related questions, FAQ schema, and topic links.
+- \`/people/{person-slug}/\`:
+  Biographical entity pages for notable people, with related articles, source links, Wikimedia/Wikipedia images, life dates where available, and Person schema.
 - \`/topics/{topic-slug}/\`:
   Subject hubs that connect related articles across major historical themes.
 - \`/blog/topic/{pillar-slug}/\`:
@@ -191,6 +223,27 @@ export const LLMS_FULL_TXT_CONTENT = `# thisDay.info Full Content Graph
 - https://thisday.info/keywords/
 
 Use \`/years/\` to browse by historical era and \`/keywords/\` to browse by recurring named subject or phrase.
+
+## Architecture Overview
+
+- Homepage shell:
+  \`index.html\` loads \`css/custom.css\`, \`css/style.css\`, and \`js/script.js\` for the interactive calendar, carousel, people strip, and modal timeline.
+- Calendar data flow:
+  The homepage calls \`/api/events/{MM}/{DD}\`, then normalizes Wikipedia/Wikimedia records into event, birth, and death cards with title/name, short page description, extract, year, source URL, image, and type.
+- Calendar modal:
+  The selected-date modal follows the canonical timeline card pattern: image, title/name, italic short description, longer extract, then inline 50/50 Read More and Share actions.
+- People entity pages:
+  \`/people/{person-slug}/\` pages are generated from \`BLOG_AI_KV\` entity records and rendered by \`js/seo-worker.js\`; sparse people records can be hydrated from Wikipedia/Wikidata for descriptions, images, extracts, and life dates.
+- Canonical route generation:
+  \`js/seo-worker.js\` generates the public event, birth, death, people, quiz, LLM, API, redirect, and supporting dynamic routes.
+- Cache and warmup:
+  Cloudflare KV stores reusable date and article data; scheduled warmup jobs prefetch current and upcoming date data.
+- Shared modules:
+  \`js/shared/\` contains layout helpers, static layout helpers, AI/model helpers, and the source strings for \`/llms.txt\` and \`/llms-full.txt\`.
+- Media proxy:
+  \`/image-proxy\` and \`/img\` route Wikimedia images through resizing and caching for cards, timelines, quizzes, article figures, and social previews.
+- Supporting workers:
+  Sitemap, RSS, news sitemap, redirect, search-ping, OG image, warmup, and blog-generation concerns are split into dedicated worker modules under \`js/\`.
 
 ## Best Retrieval Pattern
 
@@ -220,6 +273,6 @@ Use \`/years/\` to browse by historical era and \`/keywords/\` to browse by recu
 
 ## Last Updated
 
-- Date: 2026-04-11
-- Version: 1.0
+- Date: 2026-05-05
+- Version: 1.1
 `;

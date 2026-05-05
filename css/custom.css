@@ -458,6 +458,7 @@ img {
   width: 100%;
   height: 380px;
   object-fit: cover;
+  object-position: top;
   filter: brightness(72%);
 }
 .events-featured-body {
@@ -521,6 +522,7 @@ img {
   width: 100%;
   height: 160px;
   object-fit: cover;
+  object-position: top;
   filter: brightness(78%);
   display: block;
 }
@@ -645,6 +647,7 @@ img {
   width: 100%;
   height: 200px;
   object-fit: cover;
+  object-position: top;
   display: block;
   filter: brightness(88%);
 }
@@ -896,6 +899,7 @@ img {
   width: 100%;
   height: 200px;
   object-fit: cover;
+  object-position: top;
 }
 .quiz-card-body {
   padding: 1.75rem 2rem;
@@ -1208,6 +1212,7 @@ img {
   height: auto;
   max-height: 320px;
   object-fit: cover;
+  object-position: top;
   border-radius: 8px;
 }
 

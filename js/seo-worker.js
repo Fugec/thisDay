@@ -668,6 +668,38 @@ const ENTITY_INLINE_AD = `<div class="ad-unit-container my-4">
        data-full-width-responsive="true"></ins>
 </div>`;
 
+function buildEntityBookOrAdSlot(entity) {
+  const topic = [
+    entity.name,
+    entity.description,
+    entity.sourcePostTitle,
+    ...(Array.isArray(entity.relatedTopics) ? entity.relatedTopics : []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const keywords = topic
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 4 && !["history", "world", "first", "second", "person", "article", "related"].includes(word))
+    .slice(0, 14)
+    .join(" ");
+
+  return `<div class="entity-book-slot my-4" data-entity-book-slot data-query="${escapeHtml(`${entity.name} biography history`)}" data-keywords="${escapeHtml(keywords)}" data-amazon-tag="thisday0c-20">
+    <section class="amazon-related mt-4 p-3 rounded" aria-label="Related book recommendations" style="display:none">
+      <div class="amazon-related-head"><span class="amazon-kicker">Related books</span></div>
+      <div class="amazon-slider-shell">
+        <button type="button" class="amazon-slider-btn" aria-label="Previous related books" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
+        <div class="amazon-slider-wrap"><div class="amazon-slider-track" aria-live="polite"></div></div>
+        <button type="button" class="amazon-slider-btn" aria-label="Next related books" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
+      </div>
+      <small class="article-meta d-block mt-2">Book covers from Open Library. As an Amazon Associate I earn from qualifying purchases.</small>
+    </section>
+    <div class="entity-book-fallback">${ENTITY_INLINE_AD}</div>
+  </div>`;
+}
+
 function buildEntityBodySections(entity) {
   const sections = Array.isArray(entity.bodySections) ? entity.bodySections : [];
   const validSections = sections
@@ -693,10 +725,10 @@ function buildEntityBodySections(entity) {
     ${validSections
       .map(
         (section, i) =>
-          `${i === 1 || i === 2 ? ENTITY_INLINE_AD : ""}<div class="entity-body-section">
+          `<div class="entity-body-section">
             <h2 class="h3">${escapeHtml(section.heading)}</h2>
             ${section.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
-          </div>`,
+          </div>${i === 0 ? buildEntityBookOrAdSlot(entity) : ""}${i === 1 ? `<div class="entity-career-ad">${ENTITY_INLINE_AD}</div>` : ""}`,
       )
       .join("")}
   </section>`;
@@ -723,21 +755,7 @@ function buildEntityRelatedPosts(entity, posts) {
 }
 
 function buildEntityAdUnits() {
-  return `<div class="ad-unit-container my-4">
-    <span class="ad-unit-label">Advertisement</span>
-    <ins class="adsbygoogle" style="display:block"
-         data-ad-client="ca-pub-8565025017387209"
-         data-ad-slot="9477779891"
-         data-ad-format="auto"
-         data-full-width-responsive="true"></ins>
-  </div>
-  <div class="ad-unit-container my-4">
-    <span class="ad-unit-label">Advertisement</span>
-    <ins class="adsbygoogle" style="display:block"
-         data-ad-client="ca-pub-8565025017387209"
-         data-ad-slot="9477779891"
-         data-ad-format="autorelaxed"></ins>
-  </div>`;
+  return "";
 }
 
 function wikiTitleFromEntityUrl(wikiUrl) {
@@ -980,6 +998,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;text-decoration:none}.pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
     .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}.dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}.slider-controls{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}.slider-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:50%;background:#fff;color:var(--btn-bg);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.slider-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.slider-btn:disabled{opacity:.35;cursor:default}
     .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:16px;line-height:1.75;margin-bottom:1rem}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+    .amazon-related{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px}.amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}.amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}.amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}.amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.amazon-slider-wrap::-webkit-scrollbar{display:none}.amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.amazon-product-card{flex:0 0 170px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}.amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.amazon-product-card small{color:var(--text-muted)}.amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden}.amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}@media(min-width:768px){.amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
     .entity-grid{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:720px){.entity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}.entity-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72);text-decoration:none;color:inherit}.entity-card:hover{background:var(--bg-alt);text-decoration:none;color:inherit}.border{border:1px solid var(--border)!important;box-shadow:none}.nav-inner{max-width:1920px!important;margin:0 auto!important}
     .entity-description{font-size:1rem;color:var(--text-muted);font-style:italic;line-height:1.4}.entity-dates{font-size:13px;color:var(--text-muted)}
     ${NAV_CSS}
@@ -1043,6 +1062,59 @@ document.querySelectorAll(".dyn-slider-wrap").forEach(function(slider){
   window.addEventListener("resize", update);
   update();
 });
+(function(){
+  document.querySelectorAll("[data-entity-book-slot]").forEach(function(slot){
+    if(slot.dataset.loaded==="true")return;
+    slot.dataset.loaded="true";
+    var slider=slot.querySelector(".amazon-related");
+    var track=slot.querySelector(".amazon-slider-track");
+    var fallback=slot.querySelector(".entity-book-fallback");
+    var careerAd=document.querySelector(".entity-career-ad");
+    var query=slot.dataset.query||"biography history";
+    var keywords=(slot.dataset.keywords||"").split(/\s+/).filter(Boolean);
+    var tag=slot.dataset.amazonTag||"thisday0c-20";
+    function escText(value){var s=String(value||"");return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+    function amazonUrl(title,author){return "https://www.amazon.com/s?k="+encodeURIComponent([title,author].filter(Boolean).join(" "))+"&tag="+encodeURIComponent(tag);}
+    function pushVisibleAds(){
+      if(location.hostname !== "thisday.info" && location.hostname !== "www.thisday.info") return;
+      document.querySelectorAll("ins.adsbygoogle").forEach(function(ins){
+        if(ins.getAttribute("data-adsbygoogle-status") || ins.getAttribute("data-ad-pushed")) return;
+        if((ins.offsetWidth || 0) === 0) return;
+        ins.setAttribute("data-ad-pushed", "1");
+        try{ (adsbygoogle = window.adsbygoogle || []).push({}); }catch(e){}
+      });
+    }
+    function showFallback(){
+      if(fallback)fallback.style.display="";
+      if(careerAd)careerAd.remove();
+      pushVisibleAds();
+    }
+    fetch("https://openlibrary.org/search.json?q="+encodeURIComponent(query)+"&mode=books&limit=10&fields=title,author_name,cover_i,subject")
+      .then(function(res){return res.ok?res.json():null;})
+      .then(function(data){
+        var docs=((data&&data.docs)||[]).filter(function(doc){
+          if(!doc||!doc.title||!doc.cover_i)return false;
+          var hay=[doc.title,(doc.author_name&&doc.author_name[0])||"",((doc.subject||[]).slice(0,8).join(" "))].join(" ").toLowerCase();
+          return !keywords.length||keywords.some(function(word){return hay.indexOf(word)!==-1;});
+        }).slice(0,5);
+        if(docs.length<1){showFallback();return;}
+        track.innerHTML=docs.map(function(doc){
+          var author=(doc.author_name&&doc.author_name[0])||"";
+          var title=doc.title||"Related book";
+          var cover="https://covers.openlibrary.org/b/id/"+doc.cover_i+"-M.jpg";
+          return '<a class="amazon-product-card" href="'+amazonUrl(title,author)+'" target="_blank" rel="sponsored noopener noreferrer">'+
+            '<span class="amazon-card-cover"><img src="'+cover+'" alt="'+escText(title)+' cover" loading="lazy"></span>'+
+            '<strong>'+escText(title)+'</strong>'+
+            (author?'<small>'+escText(author)+'</small>':'<small>View on Amazon</small>')+
+          '</a>';
+        }).join("");
+        if(fallback)fallback.remove();
+        if(slider)slider.style.display="";
+        pushVisibleAds();
+      })
+      .catch(showFallback);
+  });
+})();
 (function(){
   if(location.hostname !== "thisday.info" && location.hostname !== "www.thisday.info") return;
   function pushAds(){
@@ -2444,7 +2516,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 @keyframes marquee-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
 .card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
-.feat-img{width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin-bottom:20px}
+.feat-img{width:100%;max-height:420px;object-fit:cover;object-position:top;border-radius:8px;margin-bottom:20px}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
 
 .dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}
@@ -2534,22 +2606,17 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .tl-item-even .tl-body{order:3;padding-left:44px}
 .tl-node{flex:0 0 72px;display:flex;justify-content:center;padding-top:10px;position:relative;z-index:1}
 .tl-node-badge{display:inline-block;background:var(--btn-bg);color:#fff;font-size:13px;font-weight:400;padding:4px 9px;border-radius:20px;white-space:nowrap;font-family:Georgia,serif;letter-spacing:.01em;box-shadow:0 0 0 3px var(--bg)}
-.tl-card{border:1px solid var(--cbr);border-radius:10px;padding:13px 15px;background:var(--bg);transition:box-shadow .15s}
+.tl-card{border:1px solid var(--cbr);border-radius:10px;overflow:hidden;background:var(--bg);transition:box-shadow .15s;display:flex;flex-direction:column}
 .tl-card:hover{box-shadow:var(--shadow)}
+.tl-card-img{width:100%;height:200px;object-fit:cover;object-position:top;display:block}
+.tl-card-img-blank{width:100%;height:160px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:2rem;background:rgba(0,0,0,.05)}
+.tl-card-body{padding:14px 16px;flex:1;display:flex;flex-direction:column}
 .tl-card-title{font-weight:700;font-size:15px;line-height:1.4;color:var(--text);margin-bottom:4px}
-.tl-card-desc{font-size:15px;color:#333;line-height:1.6;margin-bottom:6px;font-style:italic}
-.tl-card-extract{font-size:15px;color:#333;line-height:1.6;margin-bottom:6px;opacity:.85;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
-.tl-card-inner{display:flex;gap:10px;align-items:flex-start}
-.tl-card-img{flex:0 0 78px;width:78px;height:auto;max-height:92px;object-fit:contain;border-radius:7px;background:rgba(0,0,0,.04);padding:2px;display:block;align-self:center}
-.tl-card-img-blank{flex:0 0 78px;width:78px;height:72px;border-radius:7px;background:rgba(0,0,0,.05);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.3rem;align-self:center}
-.tl-card-content{flex:1;min-width:0}
-.tl-btn{font-size:15px!important;font-weight:400!important;padding:4px 10px!important;margin-top:5px;display:inline-flex!important}
+.tl-card-desc{font-size:14px;color:#333;line-height:1.6;margin-bottom:6px;font-style:italic}
+.tl-card-extract{font-size:14px;color:#333;line-height:1.6;margin-bottom:10px;opacity:.85;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;flex:1}
+.tl-btn{font-size:15px!important;font-weight:400!important;padding:9px 10px!important;margin-top:auto;display:flex!important;justify-content:center!important;width:100%!important;box-sizing:border-box}
 .tl-thumb{width:100%;height:auto;max-height:130px;object-fit:contain;border-radius:8px;display:block;background:rgba(0,0,0,.04);padding:4px}
 .tl-thumb-blank{width:100%;height:100px;border-radius:8px;background:rgba(0,0,0,.05);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.6rem}
-@media(max-width:767px){
-  .tl-card-img,.tl-card-img-blank{flex:0 0 62px;width:62px;max-height:72px}
-  .tl-card-img-blank{height:58px}
-}
 /* Featured first-event style */
 .tl-card-feat{border-color:var(--btn-bg);border-width:2px;padding:16px 18px}
 .tl-feat-img{width:100%;max-height:180px;object-fit:contain;border-radius:8px;margin-bottom:10px;background:rgba(0,0,0,.04);padding:4px;display:block}
@@ -2970,14 +3037,12 @@ function generateEventsDateHTML(
         : `<img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-image-alt"></i></div>`;
     const card = `<div class="tl-card">
-  <div class="tl-card-inner">
-    ${imgHtml}
-    <div class="tl-card-content">
-      <div class="tl-card-title">${titleText}</div>
-      ${descText ? `<div class="tl-card-desc">${descText}</div>` : pageDesc ? `<div class="tl-card-desc">${pageDesc}</div>` : ""}
-      ${pageExtract ? `<div class="tl-card-extract">${pageExtract}</div>` : ""}
-      ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
-    </div>
+  ${imgHtml}
+  <div class="tl-card-body">
+    <div class="tl-card-title">${titleText}</div>
+    ${descText ? `<div class="tl-card-desc">${descText}</div>` : pageDesc ? `<div class="tl-card-desc">${pageDesc}</div>` : ""}
+    ${pageExtract ? `<div class="tl-card-extract">${pageExtract}</div>` : ""}
+    ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
   </div>
 </div>`;
     const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago">${yearStr}</span></div>`;
@@ -3011,14 +3076,12 @@ function generateEventsDateHTML(
         : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
     const card = `<div class="tl-card">
-  <div class="tl-card-inner">
-    ${imgHtml}
-    <div class="tl-card-content">
-      <div class="tl-card-title">${name}</div>
-      ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
-      ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-      ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
-    </div>
+  ${imgHtml}
+  <div class="tl-card-body">
+    <div class="tl-card-title">${name}</div>
+    ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
+    ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
+    ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
   </div>
 </div>`;
     const media = `<div class="tl-media"></div>`;
@@ -3100,7 +3163,7 @@ ${siteNav()}
     featured || others.length > 0
       ? `
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg && featured ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover"/>` : ""}
+    ${featImg && featured ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover;object-position:top"/>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
     <h2 style="margin-top:0">${featTitle}</h2>
@@ -3530,14 +3593,12 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
         : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
     const card = `<div class="tl-card">
-  <div class="tl-card-inner">
-    ${imgHtml}
-    <div class="tl-card-content">
-      <div class="tl-card-title">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
-      ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
-      ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-      ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
-    </div>
+  ${imgHtml}
+  <div class="tl-card-body">
+    <div class="tl-card-title">${name}</div>
+    ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
+    ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
+    ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
   </div>
 </div>`;
     const media = `<div class="tl-media"></div>`;
@@ -3623,7 +3684,7 @@ ${siteNav()}
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   ${featured || othersB.length > 0 ? `
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover"/>` : ""}
+    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover;object-position:top"/>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
     <h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>
@@ -3867,14 +3928,12 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
         : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
     const card = `<div class="tl-card">
-  <div class="tl-card-inner">
-    ${imgHtml}
-    <div class="tl-card-content">
-      <div class="tl-card-title">${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none">${name}</a>` : name}</div>
-      ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
-      ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-      ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
-    </div>
+  ${imgHtml}
+  <div class="tl-card-body">
+    <div class="tl-card-title">${name}</div>
+    ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
+    ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
+    ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
   </div>
 </div>`;
     const media = `<div class="tl-media"></div>`;
@@ -3960,7 +4019,7 @@ ${siteNav()}
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   ${featured || othersD.length > 0 ? `
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover"/>` : ""}
+    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover;object-position:top"/>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
     <h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>
@@ -4095,7 +4154,7 @@ async function handleBlogIndex(env, url) {
             return (
               `<div class="card-box mb-4"><div class="row g-0 align-items-center">` +
               (img
-                ? `<div class="col-4 col-md-3"><a href="/blog/${slug}/"><img src="${img}" alt="${title}" style="width:100%;height:120px;object-fit:cover;border-radius:8px" loading="lazy"></a></div>`
+                ? `<div class="col-4 col-md-3"><a href="/blog/${slug}/"><img src="${img}" alt="${title}" style="width:100%;height:120px;object-fit:cover;object-position:top;border-radius:8px" loading="lazy"></a></div>`
                 : "") +
               `<div class="${img ? "col-8 col-md-9 ps-3" : "col-12"}">` +
               `<h2 class="h5 mb-1"><a href="/blog/${slug}/" style="color:inherit;text-decoration:none">${title}</a></h2>` +
@@ -5966,10 +6025,10 @@ async function handleFetchRequest(request, env, ctx) {
     `https://www.google-analytics.com https://www.google.com https://www.google.ba https://www.gstatic.com ` +
     `https://www.googleadservices.com https://pagead2.googlesyndication.com ` +
     `https://*.adtrafficquality.google https://*.doubleclick.net ` +
-    `https://www.googletagmanager.com https://fundingchoicesmessages.google.com; ` +
+    `https://www.googletagmanager.com https://fundingchoicesmessages.google.com https://openlibrary.org; ` +
     `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://fundingchoicesmessages.google.com https://static.cloudflareinsights.com https://*.adtrafficquality.google 'unsafe-inline'; ` +
     `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
-    `img-src 'self' data: https://upload.wikimedia.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com https://img.youtube.com https://*.adtrafficquality.google https://*.doubleclick.net; ` +
+    `img-src 'self' data: https://upload.wikimedia.org https://covers.openlibrary.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com https://img.youtube.com https://*.adtrafficquality.google https://*.doubleclick.net; ` +
     `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
     `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com https://googleads.g.doubleclick.net https://fundingchoicesmessages.google.com https://*.adtrafficquality.google; ` +
     `manifest-src 'self'; ` +
@@ -7043,7 +7102,7 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 /* Image area */
 .qsc-img-wrap{position:relative;width:100%;height:220px;overflow:hidden;background:#1e293b}
 @media(min-width:600px){.qsc-img-wrap{height:280px}}
-.qsc-event-img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .4s ease}
+.qsc-event-img{width:100%;height:100%;object-fit:cover;object-position:top;display:block;transition:transform .4s ease}
 .qsc-slide.qsc-active .qsc-event-img{transform:scale(1.02)}
 .qsc-img-placeholder{background:linear-gradient(135deg,#1e3a5f 0%,#2d1b69 100%)}
 .qsc-img-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(0,0,0,.7) 0%,rgba(0,0,0,.1) 60%,transparent 100%)}
@@ -7083,7 +7142,7 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-rec-card{flex:0 0 130px;text-decoration:none;border-radius:12px;overflow:hidden;border:1.5px solid var(--cbr);background:var(--cb);transition:transform .15s,border-color .15s;display:block}
 .qsc-rec-card:hover{transform:translateY(-3px);border-color:#1a1a1a;text-decoration:none}
 .qsc-rec-img-wrap{height:82px;overflow:hidden;position:relative;background:linear-gradient(135deg,#1e3a5f 0%,#2d1b69 100%)}
-.qsc-rec-img{width:100%;height:100%;object-fit:cover;display:block}
+.qsc-rec-img{width:100%;height:100%;object-fit:cover;object-position:top;display:block}
 .qsc-rec-overlay{position:absolute;inset:0;background:rgba(0,0,0,.25)}
 .qsc-rec-badge{position:absolute;top:7px;right:8px;background:var(--badge);color:#fff;font-size:13px;font-weight:400;padding:2px 7px;border-radius:10px;letter-spacing:.04em;text-transform:uppercase}
 .qsc-rec-body{padding:8px 10px}

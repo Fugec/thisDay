@@ -1009,7 +1009,7 @@ async function populatePeopleStrip() {
 
     if (person.thumbnailUrl) {
       const img = document.createElement("img");
-      img.src = person.thumbnailUrl;
+      img.src = getOptimizedImageUrl(person.thumbnailUrl, 160, 80);
       img.alt = person.title || "";
       img.onerror = () => {
         circle.innerHTML = '<div class="person-circle-fallback"><i class="bi bi-person"></i></div>';
@@ -2429,7 +2429,7 @@ async function showEventDetails(
             <div class="born-died-person">
               ${
                 p.thumbnailUrl
-                  ? `<img src="${p.thumbnailUrl}" alt="${p.title || ""}" class="born-died-thumb" onerror="this.style.display='none'">`
+                  ? `<img src="${getOptimizedImageUrl(p.thumbnailUrl, 120, 80)}" alt="${p.title || ""}" class="born-died-thumb" onerror="this.style.display='none'">`
                   : `<div class="born-died-thumb-placeholder"></div>`
               }
               <div class="born-died-info">

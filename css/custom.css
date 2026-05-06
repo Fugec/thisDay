@@ -1342,11 +1342,15 @@ img {
   }
   .modal-tl-card {
     max-width: none;
+    flex-direction: row;
   }
   .modal-tl-media {
-    height: 200px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+    width: 50%;
+    height: auto;
+    min-height: 200px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
   }
   .modal-tl-actions .event-action-read {
     grid-column: auto;
@@ -1780,4 +1784,11 @@ img {
 article.p-4.rounded.border.shadow-sm {
   border: 0 solid #fff !important;
   box-shadow: none !important;
+}
+
+@media (min-width: 768px) {
+  .modal-timeline .event-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

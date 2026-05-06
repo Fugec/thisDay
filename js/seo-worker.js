@@ -28,6 +28,8 @@ import {
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
+const MIN_PERSON_ENTITY_BODY_WORDS = 150;
+const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 
 // --- Helper function to fetch daily events from Wikipedia API ---
 async function fetchDailyEvents(date) {
@@ -90,6 +92,14 @@ function extractLocationFromName(text) {
 }
 
 // --- Image Proxy: resize, cache, and optionally convert Wikipedia images ---
+function normalizeWikimediaImageUrl(src) {
+  return String(src || "")
+    // Wikimedia thumbnail URLs can arrive with their percent escapes escaped
+    // again by callers, e.g. "%2528" for an encoded "(". Keep UTF-8 escapes
+    // encoded, but collapse the extra layer so Wikimedia sees the real path.
+    .replace(/%25([0-9A-Fa-f]{2})/g, "%$1");
+}
+
 async function handleImageProxy(_request, url, ctx) {
   const src = url.searchParams.get("src");
   const width = Math.min(
@@ -118,10 +128,11 @@ async function handleImageProxy(_request, url, ctx) {
 
   let imageUrl;
   try {
+    const normalizedSrc = normalizeWikimediaImageUrl(src);
     // URLSearchParams already decoded the src param once — use it directly.
     // A second decodeURIComponent() would turn %C3%BC into ü (raw Unicode)
     // which Wikimedia rejects; percent-encoded form is the correct fetch URL.
-    const parsed = new URL(src);
+    const parsed = new URL(normalizedSrc);
     if (!parsed.hostname.endsWith("wikimedia.org")) {
       return new Response("Forbidden: only Wikimedia images allowed", {
         status: 403,
@@ -129,7 +140,7 @@ async function handleImageProxy(_request, url, ctx) {
     }
     // Resize by swapping the pixel-width segment in Wikipedia thumbnail paths
     // e.g. /320px-File.jpg  →  /1200px-File.jpg
-    imageUrl = src.replace(/\/\d+px-/, `/${width}px-`);
+    imageUrl = normalizedSrc.replace(/\/\d+px-/, `/${width}px-`);
   } catch {
     return new Response("Invalid URL", { status: 400 });
   }
@@ -866,14 +877,160 @@ function splitEntityHydratedSections(entity) {
   }));
 }
 
-async function hydrateSparseEntity(env, entity, type, ctx) {
-  const bodyWords = (Array.isArray(entity.bodySections) ? entity.bodySections : [])
+function entityBodyWordCount(entity) {
+  return (Array.isArray(entity?.bodySections) ? entity.bodySections : [])
     .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
     .join(" ")
     .split(/\s+/)
     .filter(Boolean).length;
+}
+
+function stripGenericEntityContextSections(sections) {
+  return (Array.isArray(sections) ? sections : []).filter((section) => {
+    const heading = String(section?.heading || "").toLowerCase();
+    const text = (Array.isArray(section?.paragraphs) ? section.paragraphs : [])
+      .join(" ")
+      .toLowerCase();
+    return !(
+      heading.includes("biographical notes") ||
+      text.includes("is included here because") ||
+      text.includes("the page is designed to give readers") ||
+      text.includes("for thisday readers, the point is navigation") ||
+      text.includes("is described in the source record as")
+    );
+  });
+}
+
+function entityFactParagraphs(entity) {
+  const name = entity.name || "This person";
+  const seen = new Set();
+  const normalizeSentence = (value) =>
+    String(value || "")
+      .replace(/\s+/g, " ")
+      .replace(/\(\s*([^)]*?)\s*$/, "")
+      .trim();
+  const addSentences = (value, target) => {
+    const sentences = cleanWikiExtract(value)
+      .match(/[^.!?]+[.!?]+(?:\s|$)/g) || [];
+    for (const sentence of sentences) {
+      const clean = normalizeSentence(sentence);
+      const key = clean.toLowerCase();
+      if (clean.length < 35 || seen.has(key)) continue;
+      seen.add(key);
+      target.push(clean);
+    }
+  };
+
+  const facts = [];
+  addSentences(entity.intro, facts);
+  addSentences(entity.summary, facts);
+  for (const card of Array.isArray(entity.overviewCards) ? entity.overviewCards : []) {
+    addSentences(card?.value, facts);
+  }
+
+  const lifeLine = entity.birthDate && entity.deathDate
+    ? `${name} lived from ${entity.birthDate} to ${entity.deathDate}.`
+    : entity.birthDate
+      ? `${name} was born on ${entity.birthDate}.`
+      : entity.deathDate
+        ? `${name} died on ${entity.deathDate}.`
+        : "";
+
+  const paragraphs = [];
+  if (lifeLine || facts[0]) {
+    paragraphs.push([lifeLine, facts[0]].filter(Boolean).join(" "));
+  }
+  if (facts.length > 1) paragraphs.push(facts.slice(1, 4).join(" "));
+  if (facts.length > 4) paragraphs.push(facts.slice(4, 7).join(" "));
+
+  return paragraphs
+    .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
+    .filter((paragraph) => paragraph.split(/\s+/).length >= 18);
+}
+
+function ensureEntityContextSections(entity, type) {
+  const minWords = type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
+  const bodySections = stripGenericEntityContextSections(entity.bodySections);
+  const currentWords = entityBodyWordCount({ bodySections });
+  if (currentWords >= minWords) return bodySections;
+
+  const name = entity.name || (type === "person" ? "This person" : "This event");
+  const sourcePost = entity.sourcePostTitle || "the related thisDay article";
+  const relatedTopics = Array.isArray(entity.relatedTopics) && entity.relatedTopics.length
+    ? entity.relatedTopics.join(", ")
+    : "the wider historical setting";
+
+  if (type === "person") {
+    if (bodySections.length > 0 && currentWords >= 35) return bodySections;
+    const factualParagraphs = entityFactParagraphs(entity);
+    bodySections.push({
+      heading: `${name}: biographical notes`,
+      paragraphs: factualParagraphs.length
+        ? factualParagraphs
+        : [
+            `${name} is connected with ${sourcePost}. ${entity.description ? `${name} is described as ${entity.description}.` : ""}`.trim(),
+          ].filter(Boolean),
+    });
+  } else {
+    bodySections.push({
+      heading: `${name} in context`,
+      paragraphs: [
+        `${name} is included here as a connected history page for ${sourcePost}. The page gathers the article link, source material, and topic context so readers can move from one date-based story into the wider background.`,
+        `The surrounding themes include ${relatedTopics}. Those links help explain why the event remains useful beyond its date: it connects people, institutions, consequences, and later memory in one navigable place.`,
+      ],
+    });
+  }
+
+  return bodySections;
+}
+
+function syncEntitySourcePostFromIndex(entity, posts) {
+  if (!entity || !Array.isArray(posts)) return entity;
+  const relatedSlug =
+    (Array.isArray(entity.relatedPosts) && entity.relatedPosts[0]) ||
+    String(entity.sourcePostUrl || "").match(/\/blog\/([^/]+)\//)?.[1] ||
+    "";
+  const sourcePost = relatedSlug
+    ? posts.find((post) => post?.slug === relatedSlug)
+    : null;
+  if (!sourcePost?.title) return entity;
+
+  const previousTitle = entity.sourcePostTitle || "";
+  if (previousTitle === sourcePost.title) return entity;
+
+  entity.sourcePostTitle = sourcePost.title;
+  entity.sourcePostUrl = entity.sourcePostUrl || `/blog/${sourcePost.slug}/`;
+  entity.updatedAt = new Date().toISOString();
+  entity._sourcePostSynced = true;
+
+  const replaceTitle = (value) =>
+    previousTitle
+      ? String(value || "").replaceAll(previousTitle, sourcePost.title)
+      : value;
+
+  if (Array.isArray(entity.bodySections)) {
+    entity.bodySections = entity.bodySections.map((section) => ({
+      ...section,
+      paragraphs: Array.isArray(section.paragraphs)
+        ? section.paragraphs.map(replaceTitle)
+        : section.paragraphs,
+    }));
+  }
+  if (Array.isArray(entity.overviewCards)) {
+    entity.overviewCards = entity.overviewCards.map((card) => ({
+      ...card,
+      value: replaceTitle(card.value),
+    }));
+  }
+  return entity;
+}
+
+async function hydrateSparseEntity(env, entity, type, ctx) {
+  entity.bodySections = stripGenericEntityContextSections(entity.bodySections);
+  const minWords = type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
+  const bodyWords = entityBodyWordCount(entity);
   const hasWikiMarkup = /={2,}[^=]+={2,}/.test(`${entity.intro || ""} ${entity.summary || ""}`);
-  const sparse = !entity.intro || !entity.summary || !entity.imageUrl || bodyWords < 150 || hasWikiMarkup;
+  const sparse = !entity.intro || !entity.summary || !entity.imageUrl || bodyWords < minWords || hasWikiMarkup;
   if (!sparse || !entity.wikiUrl) return entity;
 
   const wiki = await fetchEntityWikiHydration(entity, type).catch(() => ({}));
@@ -888,9 +1045,10 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
     deathDate: entity.deathDate || wiki.deathDate || "",
     updatedAt: new Date().toISOString(),
   };
-  if (bodyWords < 150 || hasWikiMarkup) {
+  if (bodyWords < minWords || hasWikiMarkup) {
     hydrated.bodySections = splitEntityHydratedSections(hydrated);
   }
+  hydrated.bodySections = ensureEntityContextSections(hydrated, type);
   if (hydrated.intro || hydrated.summary) delete hydrated.needsWikiRefresh;
 
   const write = env.BLOG_AI_KV?.put(entityKey(type, hydrated.slug), JSON.stringify(hydrated)).catch(() => {});
@@ -905,8 +1063,14 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     return fetch(request);
   }
   let entity = JSON.parse(raw);
-  entity = await hydrateSparseEntity(env, entity, type, ctx);
   const posts = await getBlogIndexEntries(env);
+  entity = syncEntitySourcePostFromIndex(entity, posts);
+  entity = await hydrateSparseEntity(env, entity, type, ctx);
+  if (entity._sourcePostSynced) {
+    delete entity._sourcePostSynced;
+    const write = env.BLOG_AI_KV?.put(entityKey(type, entity.slug), JSON.stringify(entity)).catch(() => {});
+    if (ctx?.waitUntil && write) ctx.waitUntil(write);
+  }
   const title = `${entity.name} | thisDay.`;
   const canonical = `${url.origin}${entity.url || url.pathname}`;
   const descriptionBase = type === "person"
@@ -918,10 +1082,9 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   const imageUrl = entity.imageUrl
     ? `${url.origin}/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=1200&h=630&fit=cover&q=85`
     : `${url.origin}/images/logo.png`;
-  const bodySectionWords = (Array.isArray(entity.bodySections) ? entity.bodySections : [])
-    .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
-    .join(" ").split(/\s+/).filter(Boolean).length;
-  const robotsMeta = bodySectionWords >= 150
+  const bodySectionWords = entityBodyWordCount(entity);
+  const minEntityWords = type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
+  const robotsMeta = bodySectionWords >= minEntityWords
     ? "index, follow, max-image-preview:large"
     : "noindex, follow";
   const schemaType = type === "person" ? "Person" : "Event";
@@ -947,7 +1110,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   });
   const imageFigure = entity.imageUrl
     ? `<figure class="entity-hero-image text-center mb-4">
-        <img src="/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=900&h=520&fit=cover&q=85" class="img-fluid rounded" alt="${escapeHtml(entity.name)}" loading="eager" />
+        <img src="/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=900&h=520&fit=cover&q=85" class="img-fluid rounded" alt="${escapeHtml(entity.name)}" loading="eager" style="object-position:top" />
         <figcaption class="article-meta mt-2"><small>Image via Wikimedia Commons or Wikipedia.</small></figcaption>
       </figure>`
     : "";
@@ -997,7 +1160,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}main{flex:1;margin-top:20px}p{font-size:15px;line-height:1.6}a{color:var(--btn-bg)}a:hover{color:var(--accent)}h1,h2,h3{color:var(--text)}.article-meta{color:var(--text-muted);font-size:13px}.breadcrumb{background:transparent;padding:0;margin-bottom:1rem}.breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
     .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;text-decoration:none}.pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
     .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}.dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}.slider-controls{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}.slider-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:50%;background:#fff;color:var(--btn-bg);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.slider-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.slider-btn:disabled{opacity:.35;cursor:default}
-    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:16px;line-height:1.75;margin-bottom:1rem}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px;object-fit:cover;object-position:top}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:16px;line-height:1.75;margin-bottom:1rem}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
     .amazon-related{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px}.amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}.amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}.amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}.amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.amazon-slider-wrap::-webkit-scrollbar{display:none}.amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.amazon-product-card{flex:0 0 170px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}.amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.amazon-product-card small{color:var(--text-muted)}.amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden}.amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}@media(min-width:768px){.amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
     .entity-grid{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:720px){.entity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}.entity-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72);text-decoration:none;color:inherit}.entity-card:hover{background:var(--bg-alt);text-decoration:none;color:inherit}.border{border:1px solid var(--border)!important;box-shadow:none}.nav-inner{max-width:1920px!important;margin:0 auto!important}
     .entity-description{font-size:1rem;color:var(--text-muted);font-style:italic;line-height:1.4}.entity-dates{font-size:13px;color:var(--text-muted)}

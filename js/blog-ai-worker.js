@@ -773,6 +773,56 @@ function alignContentDateFields(content, canonical = {}) {
   return safeContent;
 }
 
+function enforceSelectedEventDate(content, selectedEvent) {
+  if (!content || !selectedEvent) return content;
+  const monthDay =
+    extractMonthDayCandidate(selectedEvent.historicalDateISO) ||
+    extractMonthDayCandidate(selectedEvent.historicalDate);
+  const year =
+    Number.parseInt(selectedEvent.historicalYear, 10) ||
+    deriveHistoricalYear(selectedEvent);
+  if (!monthDay || !Number.isInteger(year) || year <= 0) return content;
+
+  const dateText = formatHistoricalDate(monthDay.month, monthDay.day, year);
+  const isoText = `${String(year).padStart(4, "0")}-${String(monthDay.month).padStart(2, "0")}-${String(monthDay.day).padStart(2, "0")}`;
+  const previous = {
+    historicalDate: content.historicalDate,
+    historicalYear: content.historicalYear,
+    historicalDateISO: content.historicalDateISO,
+    title: content.title,
+  };
+
+  content.eventTitle = String(content.eventTitle || selectedEvent.eventTitle || "")
+    .replace(/\s+[-—]\s+.*$/, "")
+    .trim();
+  content.historicalDate = dateText;
+  content.historicalYear = year;
+  content.historicalDateISO = isoText;
+  content.title = buildCanonicalTitle(content.eventTitle || selectedEvent.eventTitle, dateText);
+  if (content.eventTitle) content.jsonLdName = content.eventTitle;
+
+  if (Array.isArray(content.quickFacts)) {
+    content.quickFacts = content.quickFacts.map((fact) =>
+      fact && /^Date$/i.test(fact.label || "")
+        ? { ...fact, value: dateText }
+        : fact,
+    );
+  }
+
+  const changed = JSON.stringify(previous) !== JSON.stringify({
+    historicalDate: content.historicalDate,
+    historicalYear: content.historicalYear,
+    historicalDateISO: content.historicalDateISO,
+    title: content.title,
+  });
+  if (changed) {
+    console.warn(
+      `Date guard: enforced selected-event date for ${content.eventTitle || selectedEvent.eventTitle}: ${previous.historicalDate || previous.historicalYear || "unknown"} -> ${dateText}`,
+    );
+  }
+  return content;
+}
+
 async function chooseEventForDate(
   env,
   date,
@@ -2509,12 +2559,17 @@ export default {
             adInitJs + "\n" + bodyClose2,
           );
         }
-        // Repair stored posts whose featured image is a logo, seal, flag, or similar
-        // low-value asset. The replacement is persisted so the fix happens once.
+        // Repair stored posts whose featured image is broken or a logo, seal,
+        // flag, or similar low-value asset. The replacement is persisted so
+        // the fix happens once.
         {
           const wikiUrl = extractWikiUrl(patchedHtml);
           const coverUrl = extractCoverSrc(patchedHtml);
-          if (wikiUrl && coverUrl && isLowValueFeaturedImage(coverUrl)) {
+          const coverNeedsRepair =
+            wikiUrl &&
+            coverUrl &&
+            (isLowValueFeaturedImage(coverUrl) || !(await isWorkingImageUrl(coverUrl)));
+          if (coverNeedsRepair) {
             try {
               const replacement = await fetchWikipediaImage("", wikiUrl);
               if (replacement && replacement !== coverUrl) {
@@ -2563,18 +2618,37 @@ export default {
             }
           }
         }
-        if (articleEntitiesRaw && !patchedHtml.includes("data-entity-strip")) {
+        {
           try {
-            const entityMeta = JSON.parse(articleEntitiesRaw);
+            const parsedEntityMeta = articleEntitiesRaw
+              ? JSON.parse(articleEntitiesRaw)
+              : extractArticlePeopleMetaFromHtml(patchedHtml);
+            const entityMeta = await hydrateArticleEntityImages(
+              env,
+              parsedEntityMeta,
+            );
             const strip = buildArticleEntityStrip(entityMeta);
             if (strip) {
-              const heroAnchor = '<figure class="text-center mb-4">';
-              const heroIdx = patchedHtml.indexOf(heroAnchor);
-              if (heroIdx !== -1) {
-                patchedHtml =
-                  patchedHtml.slice(0, heroIdx) +
-                  strip + "\n" +
-                  patchedHtml.slice(heroIdx);
+              if (patchedHtml.includes("data-entity-strip")) {
+                patchedHtml = patchedHtml.replace(
+                  /<style>\.entity-strip\{[\s\S]*?<div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/,
+                  strip,
+                );
+              } else {
+                const heroAnchor = '<figure class="text-center mb-4">';
+                const heroIdx = patchedHtml.indexOf(heroAnchor);
+                if (heroIdx !== -1) {
+                  patchedHtml =
+                    patchedHtml.slice(0, heroIdx) +
+                    strip + "\n" +
+                    patchedHtml.slice(heroIdx);
+                }
+              }
+              if (ctx?.waitUntil) {
+                ctx.waitUntil((async () => {
+                  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, patchedHtml);
+                  await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(entityMeta));
+                })().catch(() => {}));
               }
             }
           } catch {
@@ -3771,7 +3845,7 @@ async function generateAndStore(
         : content;
 
     if (selectedEvent) {
-      alignContentDateFields(content, selectedEvent);
+      enforceSelectedEventDate(content, selectedEvent);
     }
 
     const dateValidation = validateContentDateForPublish(content, now);
@@ -3811,6 +3885,7 @@ async function generateAndStore(
       }
 
       content = await reviewContentWithSEOExpert(content, env);
+      if (selectedEvent) enforceSelectedEventDate(content, selectedEvent);
       const postReviewViolations = scanBannedPhrases(content);
       if (postReviewViolations.length > 0) {
         content = await fixBannedPhrases(env, content, postReviewViolations);
@@ -3821,6 +3896,7 @@ async function generateAndStore(
       }
 
       await factCheckContent(env, content);
+      if (selectedEvent) enforceSelectedEventDate(content, selectedEvent);
       await validateEyewitnessQuote(env, content);
       pillars = await classifyPillars(env, content);
 
@@ -3889,13 +3965,13 @@ async function generateAndStore(
       content = enforceEditorialNoteQuality(content);
     }
     if (selectedEvent) {
-      alignContentDateFields(content, selectedEvent);
+      enforceSelectedEventDate(content, selectedEvent);
     }
     break;
   }
 
   if (selectedEvent) {
-    alignContentDateFields(content, selectedEvent);
+    enforceSelectedEventDate(content, selectedEvent);
   }
 
   const finalDateValidation = validateContentDateForPublish(content, now);
@@ -5071,6 +5147,66 @@ function buildArticleEntityStrip(entityMeta) {
   return `${css}<div class="entity-strip" data-entity-strip="1"><div class="entity-strip-label">People in this story</div><div class="entity-person-chips">${chips}</div></div>`;
 }
 
+function extractArticlePeopleMetaFromHtml(html) {
+  const source = String(html || "");
+  const people = [];
+  const seen = new Set();
+  const personRe = /\{\s*"@type"\s*:\s*"Person"[\s\S]*?\}/g;
+  let match;
+
+  while ((match = personRe.exec(source)) && people.length < 6) {
+    const block = match[0] || "";
+    const nameMatch = block.match(/"name"\s*:\s*"([^"]+)"/);
+    const sameAsMatch = block.match(/"sameAs"\s*:\s*"(https:?\\?\/\\?\/en\.wikipedia\.org\\?\/wiki\\?\/[^"]+)"/);
+    const name = unesc(String(nameMatch?.[1] || "").replace(/\\"/g, '"')).trim();
+    const wikiUrl = String(sameAsMatch?.[1] || "").replace(/\\\//g, "/");
+    const slug = entitySlug(name);
+    if (!name || !slug || seen.has(slug)) continue;
+    seen.add(slug);
+    people.push({
+      type: "person",
+      slug,
+      name,
+      imageUrl: "",
+      wikiUrl,
+      url: `/people/${slug}/`,
+    });
+  }
+
+  return people;
+}
+
+async function hydrateArticleEntityImages(env, entityMeta) {
+  if (!Array.isArray(entityMeta) || !env?.BLOG_AI_KV) return entityMeta;
+  let changed = false;
+  const hydrated = [];
+
+  for (const item of entityMeta) {
+    const next = { ...item };
+    if (next.type === "person" && next.slug && next.name && !next.imageUrl) {
+      const key = entityKey("person", next.slug);
+      const record = await env.BLOG_AI_KV.get(key, { type: "json" }).catch(() => null);
+      if (record?.imageUrl) {
+        next.imageUrl = record.imageUrl;
+        changed = true;
+      } else {
+        const imageUrl = await fetchWikipediaImage(next.name, record?.wikiUrl || "");
+        if (imageUrl) {
+          next.imageUrl = imageUrl;
+          changed = true;
+          if (record) {
+            record.imageUrl = imageUrl;
+            env.BLOG_AI_KV.put(key, JSON.stringify(record)).catch(() => {});
+          }
+        }
+      }
+    }
+    hydrated.push(next);
+  }
+
+  return changed ? hydrated : entityMeta;
+}
+
 // ---------------------------------------------------------------------------
 // Blog quiz generation
 // ---------------------------------------------------------------------------
@@ -5817,19 +5953,6 @@ async function factCheckContent(env, content) {
     const result = JSON.parse(match[0]);
     if (result.passed === false && result.corrections) {
       const cor = result.corrections;
-
-      // Plausibility guard — reject year corrections more than 10 years off the
-      // original to prevent hallucinated rewrites from corrupting the post.
-      if (
-        typeof cor.historicalYear === "number" &&
-        typeof content.historicalYear === "number" &&
-        Math.abs(cor.historicalYear - content.historicalYear) > 10
-      ) {
-        console.warn(
-          `factCheck: year correction rejected (${content.historicalYear} → ${cor.historicalYear} exceeds ±10 yr window)`,
-        );
-        delete cor.historicalYear;
-      }
 
       const before = {
         historicalDate: content.historicalDate,

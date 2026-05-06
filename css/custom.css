@@ -1217,40 +1217,39 @@ img {
   padding-top: 1rem;
 }
 .modal-tl-marker .event-year-text {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 56px;
-  min-height: 34px;
-  padding: 0.35rem 0.65rem;
-  border: 0;
+  display: inline-block;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 9px;
   border-radius: 20px;
   background: var(--btn-bg);
   color: #fff;
-  font-size: 0.78rem;
+  font-family: Georgia, serif;
+  font-size: 13px;
   font-weight: 400;
+  line-height: normal;
   letter-spacing: 0.01em;
+  white-space: nowrap;
   box-shadow: 0 0 0 3px var(--bg);
 }
 .modal-tl-card {
+  min-width: 0;
+  border: 1px solid var(--cbr, var(--border));
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg);
+  transition: box-shadow 0.15s;
   display: flex;
   flex-direction: column;
-  max-width: 430px;
   width: 100%;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
 }
 .modal-tl-card:hover {
-  background: var(--bg-alt);
+  box-shadow: var(--shadow);
 }
 .modal-tl-media {
   width: 100%;
   height: 200px;
-  background: var(--bg-alt);
   overflow: hidden;
-  border-bottom: 1px solid var(--border);
 }
 .modal-tl-media img {
   width: 100%;
@@ -1258,23 +1257,25 @@ img {
   object-fit: cover;
   object-position: top;
   display: block;
-  filter: brightness(90%);
 }
 .modal-tl-media-blank {
+  width: 100%;
+  height: 160px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background:
-    linear-gradient(135deg, rgba(164, 205, 49, 0.12), transparent 45%),
-    var(--bg-alt);
-  color: var(--accent);
+  color: var(--text-muted);
   font-size: 2rem;
+  background: rgba(0, 0, 0, 0.05);
 }
 .modal-tl-body {
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
   flex: 1;
+}
+.modal-tl-body.event-item-body {
+  gap: 0;
 }
 .modal-tl-meta {
   display: flex;
@@ -1291,42 +1292,55 @@ img {
   color: var(--accent);
 }
 .modal-tl-title {
-  margin: 0 0 0.35rem;
-  color: var(--text);
-  font-size: 0.98rem;
   font-weight: 700;
+  font-size: 15px;
   line-height: 1.4;
+  color: var(--text);
+  margin: 0 0 4px;
 }
 .modal-tl-desc {
-  color: var(--text);
-  font-size: 0.9rem;
+  font-size: 14px;
+  color: #333;
   line-height: 1.6;
+  margin: 0 0 6px !important;
   font-style: italic;
-  opacity: 0.88;
+  font-family: inherit;
+}
+.modal-tl-body > .modal-tl-desc {
+  font-family: inherit;
 }
 .modal-tl-extract {
-  color: var(--text);
-  font-size: 0.9rem;
+  font-size: 14px;
+  color: #333;
   line-height: 1.6;
-  margin: 0 0 0.65rem;
-  opacity: 0.78;
+  opacity: 0.85;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  flex: 1;
+  margin: 0 0 10px;
+  font-family: inherit;
 }
-.modal-tl-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
+.modal-tl-body > .modal-tl-extract {
+  font-family: inherit;
+}
+.modal-tl-actions.event-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-top: auto;
-  padding-top: 0.85rem;
+  padding-top: 0;
 }
 .modal-tl-actions .event-action-btn {
+  display: flex !important;
   width: 100%;
+  box-sizing: border-box;
   justify-content: center;
-  min-height: 42px;
-  padding: 9px 10px;
+  min-height: 0;
+  padding: 9px 10px !important;
+  font-size: 15px !important;
+  font-weight: 400 !important;
   white-space: normal;
   text-align: center;
 }
@@ -1342,15 +1356,9 @@ img {
   }
   .modal-tl-card {
     max-width: none;
-    flex-direction: row;
   }
   .modal-tl-media {
-    width: 50%;
-    height: auto;
-    min-height: 200px;
-    flex-shrink: 0;
-    border-right: 1px solid var(--border);
-    border-bottom: 0;
+    height: 200px;
   }
   .modal-tl-actions .event-action-read {
     grid-column: auto;
@@ -1368,19 +1376,14 @@ img {
     justify-content: center;
   }
   .modal-tl-marker .event-year-text {
-    min-width: 38px;
-    min-height: 30px;
-    padding: 0.25rem 0.45rem;
-    font-size: 0.68rem;
-  }
-  .modal-tl-media {
-    height: 150px;
+    padding: 4px 9px;
+    font-size: 13px;
   }
   .modal-tl-media-blank {
-    border-bottom: 1px solid var(--border);
+    height: 160px;
   }
   .modal-tl-body {
-    padding: 0.9rem;
+    padding: 14px 16px;
   }
 }
 
@@ -1787,8 +1790,8 @@ article.p-4.rounded.border.shadow-sm {
 }
 
 @media (min-width: 768px) {
-  .modal-timeline .event-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .modal-timeline .modal-tl-actions.event-actions {
+    display: flex;
+    flex-direction: column;
   }
 }

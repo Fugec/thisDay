@@ -409,16 +409,13 @@ img {
   margin: 0 0 1rem;
   letter-spacing: -0.02em;
 }
-.hero-title-main,
-.hero-title-date {
-  display: block;
+.mobile-date-break {
+  display: none;
 }
 .hero-title-date {
   color: var(--accent);
   font-family: "Meddon", cursive;
-  white-space: nowrap;
   letter-spacing: 0;
-  line-height: 1;
 }
 .hero p {
   font-size: 1.1rem;
@@ -1579,6 +1576,9 @@ img {
   }
   .hero h1 {
     font-size: 2rem;
+  }
+  .mobile-date-break {
+    display: block;
   }
   .hero p {
     font-size: 1rem;

@@ -738,7 +738,7 @@ function buildEntityBodySections(entity) {
         (section, i) =>
           `<div class="entity-body-section">
             <h2 class="h3">${escapeHtml(section.heading)}</h2>
-            ${section.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
+            ${section.paragraphs.map((paragraph) => `<p>${escapeHtml(ensureCompleteSentences(paragraph))}</p>`).join("")}
           </div>${i === 0 ? buildEntityBookOrAdSlot(entity) : ""}${i === 1 ? `<div class="entity-career-ad">${ENTITY_INLINE_AD}</div>` : ""}`,
       )
       .join("")}
@@ -767,6 +767,126 @@ function buildEntityRelatedPosts(entity, posts) {
 
 function buildEntityAdUnits() {
   return "";
+}
+
+async function buildHomepageVideoCards(env) {
+  if (!env.BLOG_AI_KV) return "";
+  const [indexRaw, ytRaw] = await Promise.all([
+    env.BLOG_AI_KV.get("index").catch(() => null),
+    env.BLOG_AI_KV.get("youtube:uploaded").catch(() => null),
+  ]);
+  const index = indexRaw ? JSON.parse(indexRaw) : [];
+  const yt = ytRaw ? JSON.parse(ytRaw) : {};
+  const indexBySlug = Object.fromEntries(index.map((post) => [post.slug, post]));
+  return Object.entries(yt)
+    .filter(([, video]) => video?.youtubeId && video.privacy !== "private")
+    .sort(([, a], [, b]) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0))
+    .slice(0, 6)
+    .map(([slug, video]) => {
+      const post = indexBySlug[slug] || {};
+      const title = post.title || slug;
+      const shortTitle = title.length > 55 ? `${title.slice(0, 52)}...` : title;
+      const desc = post.description || "";
+      const shortDesc = desc.length > 90 ? `${desc.slice(0, 87)}...` : desc;
+      const thumbnail = `https://img.youtube.com/vi/${video.youtubeId}/hqdefault.jpg`;
+      return `<a class="blog-card video-card" href="https://www.youtube.com/shorts/${escapeHtml(video.youtubeId)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:inherit;">
+        <div class="video-card-thumb">
+          <img src="${escapeHtml(thumbnail)}" alt="${escapeHtml(shortTitle)}" loading="lazy" onerror="if(this.src.indexOf('hqdefault')>-1){this.src=this.src.replace('hqdefault','mqdefault');}else{this.style.display='none';}" />
+          <div class="video-card-play"><i class="bi bi-play-circle-fill"></i></div>
+        </div>
+        <div class="blog-card-body">
+          <div class="blog-card-date">YouTube Shorts</div>
+          <h3>${escapeHtml(shortTitle)}</h3>
+          ${shortDesc ? `<p>${escapeHtml(shortDesc)}</p>` : ""}
+          <span class="btn" style="align-self:flex-start;margin-top:auto">Watch <i class="bi bi-arrow-right"></i></span>
+        </div>
+      </a>`;
+    })
+    .join("");
+}
+
+async function handlePeopleIndexPage(request, env, url) {
+  const raw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
+  const index = await refreshEntityIndexFromStoredEntities(env, raw ? JSON.parse(raw) : [], "person");
+  const people = index
+    .filter((entry) => entry?.type === "person" && entry.slug && entry.name)
+    .sort((a, b) => {
+      const ai = a.indexable ? 1 : 0;
+      const bi = b.indexable ? 1 : 0;
+      if (ai !== bi) return bi - ai;
+      return String(a.name).localeCompare(String(b.name));
+    });
+  const pageTitle = "People in History | thisDay.";
+  const description = "Browse people connected to thisDay historical articles, with biographical context, source links, and related coverage.";
+  const cards = people.length
+    ? people.map((person) => {
+        const image = person.imageUrl
+          ? `<img src="/image-proxy?src=${encodeURIComponent(person.imageUrl)}&w=180&h=180&fit=cover&q=80" alt="${escapeHtml(person.name)}" loading="lazy">`
+          : `<span class="people-card-fallback" aria-hidden="true">${escapeHtml(String(person.name).slice(0, 1).toUpperCase())}</span>`;
+        const meta = [
+          person.indexable ? "Profile ready" : "Profile warming up",
+          Array.isArray(person.relatedPosts) && person.relatedPosts.length
+            ? `${person.relatedPosts.length} related article${person.relatedPosts.length === 1 ? "" : "s"}`
+            : "",
+        ].filter(Boolean).join(" · ");
+        return `<a class="people-card" href="/people/${escapeHtml(person.slug)}/">
+          <span class="people-card-image">${image}</span>
+          <span class="people-card-copy">
+            <strong>${escapeHtml(person.name)}</strong>
+            ${person.summary ? `<small>${escapeHtml(person.summary).slice(0, 145)}${person.summary.length > 145 ? "..." : ""}</small>` : ""}
+            <em>${escapeHtml(meta)}</em>
+          </span>
+        </a>`;
+      }).join("")
+    : `<p class="article-meta mb-0">People pages will appear here as new articles add entity records.</p>`;
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(pageTitle)}</title>
+  <link rel="canonical" href="${url.origin}/people/" />
+  <meta name="robots" content="index, follow" />
+  <meta name="description" content="${escapeHtml(description)}" />
+  <meta property="og:title" content="${escapeHtml(pageTitle)}" />
+  <meta property="og:description" content="${escapeHtml(description)}" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="${url.origin}/people/" />
+  <meta property="og:image" content="${url.origin}/images/logo.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="/images/favicon.ico" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="stylesheet" href="/css/custom.css" />
+  <style>
+    ${NAV_CSS}
+    ${FOOTER_CSS}
+    body{font-family:Lora,serif;background:#fff;color:#1a2e20;min-height:100vh;display:flex;flex-direction:column}main{flex:1}.people-grid{display:grid;grid-template-columns:1fr;gap:12px}.people-card{display:flex;gap:14px;padding:14px;border:1px solid #cfe0cf;border-radius:10px;background:#fff;color:inherit;text-decoration:none}.people-card:hover{background:#f2f7f2;color:inherit;text-decoration:none}.people-card-image{width:68px;height:68px;border-radius:50%;overflow:hidden;background:#f2f7f2;border:1px solid #cfe0cf;display:flex;align-items:center;justify-content:center;flex:0 0 68px}.people-card-image img{width:100%;height:100%;object-fit:cover;object-position:top}.people-card-fallback{font-size:1.5rem;color:#1b3a2d}.people-card-copy{min-width:0;display:flex;flex-direction:column;gap:3px}.people-card-copy strong{font-size:1rem;color:#1b3a2d}.people-card-copy small{font-size:14px;line-height:1.45;color:#1a2e20}.people-card-copy em{font-size:12px;color:#5c7a65;font-style:normal}.breadcrumb{background:transparent;padding:0}.breadcrumb-item a{color:#1b3a2d}@media(min-width:760px){.people-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  </style>
+</head>
+<body>
+${siteNav()}
+<main class="container my-5" style="max-width:1040px">
+  <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/">Home</a></li><li class="breadcrumb-item active" aria-current="page">People</li></ol></nav>
+  <header class="mb-4">
+    <h1 class="h2 fw-bold mb-2">People in History</h1>
+    <p class="article-meta mb-0">${escapeHtml(description)}</p>
+  </header>
+  <section class="people-grid">${cards}</section>
+</main>
+${siteFooter("yr")}
+${footerYearScript()}
+</body>
+</html>`;
+  return new Response(html, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=1800",
+    },
+  });
 }
 
 function wikiTitleFromEntityUrl(wikiUrl) {
@@ -883,6 +1003,78 @@ function entityBodyWordCount(entity) {
     .join(" ")
     .split(/\s+/)
     .filter(Boolean).length;
+}
+
+async function updateEntityIndexEntry(env, entity) {
+  if (!env.BLOG_AI_KV || !entity?.type || !entity?.slug) return;
+  const raw = await env.BLOG_AI_KV.get("entity-index-v1").catch(() => null);
+  const index = raw ? JSON.parse(raw) : [];
+  const minWords = entity.type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
+  const nextEntry = {
+    type: entity.type,
+    slug: entity.slug,
+    name: entity.name,
+    url: entity.url || (entity.type === "person" ? `/people/${entity.slug}/` : `/history/${entity.slug}/`),
+    wikiUrl: entity.wikiUrl || "",
+    imageUrl: entity.imageUrl || "",
+    summary: entity.summary || entity.description || "",
+    relatedPosts: Array.isArray(entity.relatedPosts) ? entity.relatedPosts : [],
+    updatedAt: entity.updatedAt || new Date().toISOString(),
+    indexable: entityBodyWordCount(entity) >= minWords,
+    ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
+  };
+  const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
+  byId.set(`${nextEntry.type}:${nextEntry.slug}`, {
+    ...(byId.get(`${nextEntry.type}:${nextEntry.slug}`) || {}),
+    ...nextEntry,
+  });
+  await env.BLOG_AI_KV.put(
+    "entity-index-v1",
+    JSON.stringify([...byId.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)))),
+  );
+}
+
+async function refreshEntityIndexFromStoredEntities(env, index, typeFilter = "person") {
+  if (!env.BLOG_AI_KV || !Array.isArray(index)) return index;
+  let changed = false;
+  const refreshed = [];
+  for (const entry of index) {
+    if (entry?.type !== typeFilter || !entry.slug) {
+      refreshed.push(entry);
+      continue;
+    }
+    const raw = await env.BLOG_AI_KV.get(entityKey(entry.type, entry.slug)).catch(() => null);
+    if (!raw) {
+      refreshed.push(entry);
+      continue;
+    }
+    try {
+      const entity = JSON.parse(raw);
+      const minWords = entity.type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
+      const next = {
+        ...entry,
+        name: entity.name || entry.name,
+        url: entity.url || entry.url,
+        wikiUrl: entity.wikiUrl || entry.wikiUrl || "",
+        imageUrl: entity.imageUrl || entry.imageUrl || "",
+        summary: entity.summary || entity.description || entry.summary || "",
+        relatedPosts: Array.isArray(entity.relatedPosts) ? entity.relatedPosts : (entry.relatedPosts || []),
+        updatedAt: entity.updatedAt || entry.updatedAt,
+        indexable: entityBodyWordCount(entity) >= minWords,
+      };
+      if (next.indexable) delete next.needsWikiRefresh;
+      if (JSON.stringify(next) !== JSON.stringify(entry)) changed = true;
+      refreshed.push(next);
+    } catch {
+      refreshed.push(entry);
+    }
+  }
+  if (changed) {
+    const sorted = refreshed.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    await env.BLOG_AI_KV.put("entity-index-v1", JSON.stringify(sorted)).catch(() => {});
+    return sorted;
+  }
+  return refreshed;
 }
 
 function stripGenericEntityContextSections(sections) {
@@ -1051,7 +1243,12 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
   hydrated.bodySections = ensureEntityContextSections(hydrated, type);
   if (hydrated.intro || hydrated.summary) delete hydrated.needsWikiRefresh;
 
-  const write = env.BLOG_AI_KV?.put(entityKey(type, hydrated.slug), JSON.stringify(hydrated)).catch(() => {});
+  const write = env.BLOG_AI_KV
+    ? Promise.all([
+        env.BLOG_AI_KV.put(entityKey(type, hydrated.slug), JSON.stringify(hydrated)),
+        updateEntityIndexEntry(env, hydrated),
+      ]).catch(() => {})
+    : null;
   if (ctx?.waitUntil && write) ctx.waitUntil(write);
   else if (write) await write;
   return hydrated;
@@ -1066,6 +1263,9 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   const posts = await getBlogIndexEntries(env);
   entity = syncEntitySourcePostFromIndex(entity, posts);
   entity = await hydrateSparseEntity(env, entity, type, ctx);
+  const indexWrite = updateEntityIndexEntry(env, entity).catch(() => {});
+  if (ctx?.waitUntil) ctx.waitUntil(indexWrite);
+  else await indexWrite;
   if (entity._sourcePostSynced) {
     delete entity._sourcePostSynced;
     const write = env.BLOG_AI_KV?.put(entityKey(type, entity.slug), JSON.stringify(entity)).catch(() => {});
@@ -1110,7 +1310,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   });
   const imageFigure = entity.imageUrl
     ? `<figure class="entity-hero-image text-center mb-4">
-        <img src="/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=900&h=520&fit=cover&q=85" class="img-fluid rounded" alt="${escapeHtml(entity.name)}" loading="eager" style="object-position:top" />
+        <img src="/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=900&q=85" class="img-fluid rounded" alt="${escapeHtml(entity.name)}" loading="eager" />
         <figcaption class="article-meta mt-2"><small>Image via Wikimedia Commons or Wikipedia.</small></figcaption>
       </figure>`
     : "";
@@ -1160,7 +1360,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}main{flex:1;margin-top:20px}p{font-size:15px;line-height:1.6}a{color:var(--btn-bg)}a:hover{color:var(--accent)}h1,h2,h3{color:var(--text)}.article-meta{color:var(--text-muted);font-size:13px}.breadcrumb{background:transparent;padding:0;margin-bottom:1rem}.breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
     .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;text-decoration:none}.pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
     .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}.dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}.slider-controls{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}.slider-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:50%;background:#fff;color:var(--btn-bg);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.slider-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.slider-btn:disabled{opacity:.35;cursor:default}
-    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px;object-fit:cover;object-position:top}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:16px;line-height:1.75;margin-bottom:1rem}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:16px;line-height:1.75;margin-bottom:1rem}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
     .amazon-related{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px}.amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}.amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}.amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}.amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.amazon-slider-wrap::-webkit-scrollbar{display:none}.amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.amazon-product-card{flex:0 0 170px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}.amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.amazon-product-card small{color:var(--text-muted)}.amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden}.amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}@media(min-width:768px){.amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
     .entity-grid{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:720px){.entity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}.entity-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72);text-decoration:none;color:inherit}.entity-card:hover{background:var(--bg-alt);text-decoration:none;color:inherit}.border{border:1px solid var(--border)!important;box-shadow:none}.nav-inner{max-width:1920px!important;margin:0 auto!important}
     .entity-description{font-size:1rem;color:var(--text-muted);font-style:italic;line-height:1.4}.entity-dates{font-size:13px;color:var(--text-muted)}
@@ -1256,7 +1456,7 @@ document.querySelectorAll(".dyn-slider-wrap").forEach(function(slider){
       .then(function(res){return res.ok?res.json():null;})
       .then(function(data){
         var docs=((data&&data.docs)||[]).filter(function(doc){
-          if(!doc||!doc.title||!doc.cover_i)return false;
+          if(!doc||!doc.title)return false;
           var hay=[doc.title,(doc.author_name&&doc.author_name[0])||"",((doc.subject||[]).slice(0,8).join(" "))].join(" ").toLowerCase();
           return !keywords.length||keywords.some(function(word){return hay.indexOf(word)!==-1;});
         }).slice(0,5);
@@ -1264,9 +1464,9 @@ document.querySelectorAll(".dyn-slider-wrap").forEach(function(slider){
         track.innerHTML=docs.map(function(doc){
           var author=(doc.author_name&&doc.author_name[0])||"";
           var title=doc.title||"Related book";
-          var cover="https://covers.openlibrary.org/b/id/"+doc.cover_i+"-M.jpg";
+          var cover=doc.cover_i?"https://covers.openlibrary.org/b/id/"+doc.cover_i+"-M.jpg":"";
           return '<a class="amazon-product-card" href="'+amazonUrl(title,author)+'" target="_blank" rel="sponsored noopener noreferrer">'+
-            '<span class="amazon-card-cover"><img src="'+cover+'" alt="'+escText(title)+' cover" loading="lazy"></span>'+
+            (cover?'<span class="amazon-card-cover"><img src="'+cover+'" alt="'+escText(title)+' cover" loading="lazy"></span>':'<span class="amazon-card-cover amazon-card-cover-fallback" aria-hidden="true"><i class="bi bi-book"></i></span>')+
             '<strong>'+escText(title)+'</strong>'+
             (author?'<small>'+escText(author)+'</small>':'<small>View on Amazon</small>')+
           '</a>';
@@ -2054,6 +2254,13 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function ensureCompleteSentences(text) {
+  if (!text) return "";
+  const t = String(text).replace(/[…]+$/, "").trim();
+  const match = t.match(/^([\s\S]*[.!?])/);
+  return match ? match[1].trim() : "";
 }
 
 function buildEventAnswerBlock({
@@ -3429,13 +3636,18 @@ function serveEventsDateSitemap(siteUrl) {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
 }
 
-function servePeopleSitemap(siteUrl) {
+async function servePeopleSitemap(siteUrl, env) {
   let urls = "";
   for (let m = 0; m < 12; m++) {
     for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
       urls += `  <url>\n    <loc>${siteUrl}/born/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
       urls += `  <url>\n    <loc>${siteUrl}/died/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
     }
+  }
+  const entityRaw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
+  const entityIndex = await refreshEntityIndexFromStoredEntities(env, entityRaw ? JSON.parse(entityRaw) : [], "person");
+  for (const person of entityIndex.filter((entry) => entry?.type === "person" && entry.indexable && entry.url)) {
+    urls += `  <url>\n    <loc>${siteUrl}${person.url}</loc>\n  </url>\n`;
   }
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}</urlset>`;
 }
@@ -5344,6 +5556,10 @@ async function handleFetchRequest(request, env, ctx) {
     return Response.redirect(`${url.origin}/died/today/`, 301);
   }
 
+  if (url.pathname === "/people" || url.pathname === "/people/") {
+    return handlePeopleIndexPage(request, env, url);
+  }
+
   const personEntityMatch = url.pathname.match(/^\/people\/([a-z0-9-]+)\/?$/);
   if (personEntityMatch) {
     return handleEntityPage(request, env, url, "person", personEntityMatch[1], ctx);
@@ -5429,7 +5645,7 @@ async function handleFetchRequest(request, env, ctx) {
   // Sitemap for born/died pages (366 × 2 = 732 URLs)
   if (url.pathname === "/sitemap-people.xml") {
     const siteUrl = `${url.protocol}//${url.host}`;
-    return new Response(servePeopleSitemap(siteUrl), {
+    return new Response(await servePeopleSitemap(siteUrl, env), {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
@@ -5647,6 +5863,7 @@ async function handleFetchRequest(request, env, ctx) {
   if (ogImageUrl === "https://thisday.info/images/logo.png") {
     ogImageUrl = `/og-image?title=${encodeURIComponent(dynamicTitle)}&date=${encodeURIComponent(formattedDate)}`;
   }
+  const homepageVideoCards = await buildHomepageVideoCards(env).catch(() => "");
 
   // Fetch the original index.html from the origin server
   const originalResponse = await fetch(url.origin, request);
@@ -5732,6 +5949,13 @@ async function handleFetchRequest(request, env, ctx) {
     .on("meta[property='og:image:height']", {
       element(element) {
         element.setAttribute("content", "630");
+      },
+    })
+    .on("#videoGrid", {
+      element(element) {
+        if (homepageVideoCards) {
+          element.setInnerContent(homepageVideoCards, { html: true });
+        }
       },
     });
 

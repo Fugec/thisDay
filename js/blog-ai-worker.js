@@ -715,6 +715,30 @@ function buildCanonicalTitle(eventTitle, historicalDate) {
   return historicalDate ? `${baseTitle} — ${historicalDate}` : baseTitle;
 }
 
+function eventTitleFromCandidate(parsedTitle, candidate) {
+  const aiTitle = String(parsedTitle || "").replace(/\s+[-—]\s+.*$/, "").trim();
+  const pageTitle = String(candidate?.pageTitle || "").trim();
+  const eventText = String(candidate?.text || "").replace(/\s+/g, " ").trim();
+
+  if (aiTitle && aiTitle.toLowerCase() !== pageTitle.toLowerCase()) {
+    return aiTitle;
+  }
+
+  if (!eventText) return aiTitle || pageTitle;
+
+  const firstSentence = eventText
+    .split(/(?<=[.!?])\s+/)[0]
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!firstSentence) return aiTitle || pageTitle;
+
+  const maxLength = 96;
+  return firstSentence.length > maxLength
+    ? `${firstSentence.slice(0, maxLength).trim()}...`
+    : firstSentence;
+}
+
 function alignContentDateFields(content, canonical = {}) {
   const safeContent = content || {};
   const targetMonthDay =
@@ -993,7 +1017,7 @@ async function chooseEventForDate(
     if (!matchedCandidate) {
       throw new Error(`Event selector chose an event outside the vetted list: ${parsed.eventTitle}`);
     }
-    parsed.eventTitle = matchedCandidate.pageTitle;
+    parsed.eventTitle = eventTitleFromCandidate(parsed.eventTitle, matchedCandidate);
     parsed.historicalYear = Number.parseInt(matchedCandidate.year, 10);
     parsed.historicalDate = `${monthName} ${day}, ${matchedCandidate.year}`;
     parsed.historicalDateISO = `${String(matchedCandidate.year).padStart(4, "0")}-${mPad}-${dPad}`;
@@ -3023,16 +3047,29 @@ async function maybeGenerateBlogPost(env, ctx) {
     const index = indexRaw ? JSON.parse(indexRaw) : [];
     todayInIndex = index.some((entry) => entry?.slug === todaySlug);
   }
-  if (!todayPost) {
-    const todayDraft = await env.BLOG_AI_KV.get(`${KV_DRAFT_PREFIX}${todaySlug}`);
-    if (todayDraft) {
+  for (let daysBack = 0; daysBack <= 3; daysBack++) {
+    const draftDate = new Date();
+    draftDate.setDate(draftDate.getDate() - daysBack);
+    const draftSlug = buildSlug(draftDate);
+    const draftRaw = await env.BLOG_AI_KV.get(`${KV_DRAFT_PREFIX}${draftSlug}`);
+    if (!draftRaw) continue;
+
+    const postRaw = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${draftSlug}`);
+    let inIndex = false;
+    if (postRaw) {
+      const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      inIndex = index.some((entry) => entry?.slug === draftSlug);
+    }
+
+    if (!postRaw || !inIndex) {
       try {
-        await enrichPublishedPost(env, todaySlug);
-        console.log(`Blog AI: recovered draft and published /blog/${todaySlug}/.`);
-        return;
+        await enrichPublishedPost(env, draftSlug);
+        console.log(`Blog AI: recovered draft and published /blog/${draftSlug}/.`);
+        if (draftSlug === todaySlug) return;
       } catch (err) {
         console.error(
-          `Blog AI: draft recovery failed for ${todaySlug} — ${err.message}`,
+          `Blog AI: draft recovery failed for ${draftSlug} — ${err.message}`,
         );
       }
     }
@@ -4006,13 +4043,15 @@ async function generateAndStore(
     });
   }
 
-  // Core write is done. Lightweight publishes still need the enrichment pass
-  // to promote draft:* into post:* + index, so runPostPublishExtras handles
-  // that critical path before returning.
-  if (ctx?.waitUntil) {
-    ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish }));
+  // Lightweight publishes are not actually visible until the draft is promoted
+  // into post:* and the index. Keep that critical path awaited so retries and
+  // manual responses reflect the real publish state.
+  if (lightweightPublish) {
+    await runPostPublishExtras(env, slug, content, { scheduleEnrichment: true });
+  } else if (ctx?.waitUntil) {
+    ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: false }));
   } else {
-    await runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish });
+    await runPostPublishExtras(env, slug, content, { scheduleEnrichment: false });
   }
 
   console.log(
@@ -4040,7 +4079,7 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
         message,
         date: new Date(),
       });
-      return;
+      throw err;
     }
     return;
   }
@@ -5142,7 +5181,7 @@ function buildArticleEntityStrip(entityMeta) {
     `</a>`,
   ).join("");
 
-  const css = `<style>.entity-strip{margin:0 0 1.25rem}.entity-strip-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted,#5c7a65);margin-bottom:.65rem}.entity-person-chips{display:flex;flex-wrap:wrap;gap:1rem}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
+  const css = `<style>.entity-strip{margin:0 0 1.25rem}.entity-strip-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted,#5c7a65);margin-bottom:.65rem}.entity-person-chips{display:flex;flex-wrap:wrap;gap:1rem}.person-pill{display:inline-flex;align-items:center;gap:.55rem;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:14px;font-weight:600}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
 
   return `${css}<div class="entity-strip" data-entity-strip="1"><div class="entity-strip-label">People in this story</div><div class="entity-person-chips">${chips}</div></div>`;
 }
@@ -6978,17 +7017,17 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
     .then(function(res){return res.ok?res.json():null;})
     .then(function(data){
       var docs=((data&&data.docs)||[]).filter(function(doc){
-        if(!doc||!doc.title||!doc.cover_i)return false;
+        if(!doc||!doc.title)return false;
         var hay=[doc.title,(doc.author_name&&doc.author_name[0])||'',((doc.subject||[]).slice(0,8).join(' '))].join(' ').toLowerCase();
         return !keywords.length || keywords.some(function(word){return hay.indexOf(word)!==-1;});
       }).slice(0,5);
-      if(docs.length<3)return;
+      if(!docs.length)return;
       track.innerHTML=docs.map(function(doc){
         var author=(doc.author_name&&doc.author_name[0])||'';
         var title=doc.title||'Related book';
-        var cover='https://covers.openlibrary.org/b/id/'+doc.cover_i+'-M.jpg';
+        var cover=doc.cover_i?'https://covers.openlibrary.org/b/id/'+doc.cover_i+'-M.jpg':'';
         return '<a class="amazon-product-card" href="'+amazonUrl(title,author)+'" target="_blank" rel="sponsored noopener noreferrer">'+
-          '<span class="amazon-card-cover"><img src="'+cover+'" alt="'+escText(title)+' cover" loading="lazy"></span>'+
+          (cover?'<span class="amazon-card-cover"><img src="'+cover+'" alt="'+escText(title)+' cover" loading="lazy"></span>':'<span class="amazon-card-cover amazon-card-cover-fallback" aria-hidden="true"><i class="bi bi-book"></i></span>')+
           '<strong>'+escText(title)+'</strong>'+
           (author?'<small>'+escText(author)+'</small>':'<small>View on Amazon</small>')+
         '</a>';

@@ -8,7 +8,8 @@
  *         mixed with background music (assets/background.mp3) at 15% volume.
  * Image:  Exact Wikipedia-article mode. Pulls scene images only from the
  *         specific Wikipedia article tied to the post topic.
- * Schedule: Mon/Tue/Thu/Fri via GitHub Actions cron at 01:00 UTC
+ * Schedule: Mon/Tue/Thu/Fri via GitHub Actions cron at 13:00 UTC
+ *           (about 09:00 Eastern during daylight saving time)
  *
  * Run:        npm start
  * Auth setup: npm run auth   (one-time, to get YOUTUBE_REFRESH_TOKEN)

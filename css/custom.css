@@ -409,6 +409,17 @@ img {
   margin: 0 0 1rem;
   letter-spacing: -0.02em;
 }
+.hero-title-main,
+.hero-title-date {
+  display: block;
+}
+.hero-title-date {
+  color: var(--accent);
+  font-family: "Meddon", cursive;
+  white-space: nowrap;
+  letter-spacing: 0;
+  line-height: 1;
+}
 .hero p {
   font-size: 1.1rem;
   color: #4a4a4a;
@@ -1314,10 +1325,6 @@ img {
   color: #333;
   line-height: 1.6;
   opacity: 0.85;
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
   flex: 1;
   margin: 0 0 10px;
   font-family: inherit;

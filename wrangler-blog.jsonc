@@ -31,7 +31,8 @@
   // 5 minutes after warmup-worker (00:01) has populated the events KV cache.
   // Blog post is the source of truth for the video narration + metadata.
   // Failsafe check follows at 00:35.
-  // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 01:00 UTC.
+  // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 13:00 UTC
+  // (about 09:00 Eastern during daylight saving time).
   "triggers": {
     "crons": ["5 0 * * *"],
   },

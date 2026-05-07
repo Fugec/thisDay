@@ -1,11 +1,12 @@
 name: YouTube Auto-Upload
 
 on:
-  # Runs Mon/Tue/Thu/Fri at 01:00 UTC — after blog post is generated at 00:05 and
-  # failsafe check at 00:35. Gives the blog worker 55 min to finish.
+  # Runs Mon/Tue/Thu/Fri at 13:00 UTC — a US morning slot
+  # (about 09:00 Eastern during daylight saving time).
+  # Runs after blog post generation at 00:05 UTC and failsafe check at 00:35 UTC.
   # Uses fallback ELEVENLABS_API_KEY_2/3 if primary hits quota.
   schedule:
-    - cron: "0 1 * * 1,2,4,5"
+    - cron: "0 13 * * 1,2,4,5"
 
   # Allow a manual run from the Actions tab (e.g. to back-fill or re-upload)
   workflow_dispatch:

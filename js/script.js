@@ -984,8 +984,16 @@ async function populatePeopleStrip() {
 
   const section = document.getElementById("peopleStrip");
   let data = { births: [], deaths: [] };
+  let articlePeople = [];
   try {
-    data = await fetchWikipediaEvents(month, day);
+    const results = await Promise.allSettled([
+      fetchWikipediaEvents(month, day),
+      fetch("/people/index.json").then((r) => (r.ok ? r.json() : [])),
+    ]);
+    if (results[0].status === "fulfilled") data = results[0].value || data;
+    if (results[1].status === "fulfilled" && Array.isArray(results[1].value)) {
+      articlePeople = results[1].value;
+    }
   } catch (e) {
     if (section) section.style.display = "none";
     return;
@@ -993,13 +1001,14 @@ async function populatePeopleStrip() {
 
   const births = (data.births || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 8);
   const deaths = (data.deaths || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 8);
+  const fromArticles = articlePeople.filter(p => p && p.name && p.slug).slice(0, 8);
 
-  if (!births.length && !deaths.length) {
+  if (!births.length && !deaths.length && !fromArticles.length) {
     if (section) section.style.display = "none";
     return;
   }
 
-  function makePill(person, href) {
+  function makePill(person, href, options = {}) {
     const a = document.createElement("a");
     a.className = "person-pill";
     a.href = href;
@@ -1007,10 +1016,13 @@ async function populatePeopleStrip() {
     const circle = document.createElement("div");
     circle.className = "person-circle";
 
-    if (person.thumbnailUrl) {
+    const imageUrl = person.thumbnailUrl || person.imageUrl || "";
+    if (imageUrl) {
       const img = document.createElement("img");
-      img.src = getOptimizedImageUrl(person.thumbnailUrl, 160, 80);
-      img.alt = person.title || "";
+      img.src = options.useProxy
+        ? "/image-proxy?src=" + encodeURIComponent(imageUrl) + "&w=160&h=160&fit=cover&q=80"
+        : getOptimizedImageUrl(imageUrl, 160, 80);
+      img.alt = person.title || person.name || "";
       img.onerror = () => {
         circle.innerHTML = '<div class="person-circle-fallback"><i class="bi bi-person"></i></div>';
       };
@@ -1021,11 +1033,11 @@ async function populatePeopleStrip() {
 
     const name = document.createElement("div");
     name.className = "person-pill-name";
-    name.textContent = person.title || "";
+    name.textContent = person.title || person.name || "";
 
     const year = document.createElement("div");
     year.className = "person-pill-year";
-    year.textContent = person.year ? person.year : "";
+    year.textContent = options.meta || (person.year ? person.year : "");
 
     a.appendChild(circle);
     a.appendChild(name);
@@ -1033,52 +1045,68 @@ async function populatePeopleStrip() {
     return a;
   }
 
-  // Remove skeleton
-  if (skeleton) skeleton.remove();
-  track.innerHTML = "";
+  function makeSeeAllPill(label, href) {
+    const a = document.createElement("a");
+    a.className = "person-pill person-pill-see-all";
+    a.href = href;
+    a.innerHTML =
+      '<div class="person-circle person-circle-see-all"><i class="bi bi-arrow-right"></i></div>' +
+      '<div class="person-pill-name">' + label + '</div>' +
+      '<div class="person-pill-year">See all</div>';
+    return a;
+  }
 
-  // Born group
-  if (births.length) {
+  function appendPeopleGroup({ labelHtml, items, href, itemHref, pillOptions, seeAllHref }) {
+    if (!items.length) return false;
     const wrap = document.createElement("div");
     wrap.className = "people-group-wrap";
 
     const label = document.createElement("h3");
-    label.className = "group-label born";
-    label.innerHTML = '<i class="bi bi-sunrise"></i> Born';
+    label.className = "group-label";
+    label.innerHTML = labelHtml;
 
     const group = document.createElement("div");
     group.className = "people-group";
-    births.forEach(p => group.appendChild(makePill(p, "/born/today/")));
+    items.forEach((p) => group.appendChild(makePill(p, itemHref ? itemHref(p) : href, pillOptions)));
+    if (seeAllHref) group.appendChild(makeSeeAllPill("See all", seeAllHref));
 
     wrap.appendChild(label);
     wrap.appendChild(group);
     track.appendChild(wrap);
+    return true;
   }
 
-  // Divider
-  if (births.length && deaths.length) {
+  function appendDivider() {
     const div = document.createElement("div");
     div.className = "people-divider";
     track.appendChild(div);
   }
 
-  // Died group
-  if (deaths.length) {
-    const wrap = document.createElement("div");
-    wrap.className = "people-group-wrap";
+  // Remove skeleton
+  if (skeleton) skeleton.remove();
+  track.innerHTML = "";
 
-    const label = document.createElement("h3");
-    label.className = "group-label died";
-    label.innerHTML = '<i class="bi bi-sunset"></i> Died';
-
-    const group = document.createElement("div");
-    group.className = "people-group";
-    deaths.forEach(p => group.appendChild(makePill(p, "/died/today/")));
-
-    wrap.appendChild(label);
-    wrap.appendChild(group);
-    track.appendChild(wrap);
-  }
+  let hasGroup = appendPeopleGroup({
+    labelHtml: '<i class="bi bi-sunrise"></i> Born Today',
+    items: births,
+    href: "/born/today/",
+    seeAllHref: "/born/today/",
+  });
+  if (hasGroup && deaths.length) appendDivider();
+  hasGroup = appendPeopleGroup({
+    labelHtml: '<i class="bi bi-sunset"></i> Died Today',
+    items: deaths,
+    href: "/died/today/",
+    seeAllHref: "/died/today/",
+  }) || hasGroup;
+  if (hasGroup && fromArticles.length) appendDivider();
+  appendPeopleGroup({
+    labelHtml: '<i class="bi bi-journal-richtext"></i> From Articles',
+    items: fromArticles,
+    itemHref: (p) => p.url || ("/people/" + p.slug + "/"),
+    pillOptions: { useProxy: true, meta: "Article profile" },
+    seeAllHref: "/people/",
+  });
 }
 
 async function populateTodayEventCard() {

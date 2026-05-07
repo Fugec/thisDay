@@ -315,6 +315,16 @@ h3 {
   color: var(--text-muted);
   font-size: 1.4rem;
 }
+.person-circle-see-all {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--btn-bg);
+  font-size: 1.1rem;
+}
+.person-pill-see-all:hover .person-circle-see-all {
+  background: var(--bg-alt);
+}
 .person-pill-name {
   font-size: 0.68rem;
   font-weight: 700;

@@ -889,6 +889,30 @@ ${footerYearScript()}
   });
 }
 
+async function handlePeopleIndexJson(env) {
+  const raw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
+  const index = await refreshEntityIndexFromStoredEntities(env, raw ? JSON.parse(raw) : [], "person");
+  const people = index
+    .filter((entry) => entry?.type === "person" && entry.indexable && entry.slug && entry.name)
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+    .slice(0, 12)
+    .map((person) => ({
+      name: person.name,
+      slug: person.slug,
+      url: person.url || `/people/${person.slug}/`,
+      imageUrl: person.imageUrl || "",
+      summary: person.summary || "",
+      relatedCount: Array.isArray(person.relatedPosts) ? person.relatedPosts.length : 0,
+      updatedAt: person.updatedAt || "",
+    }));
+  return new Response(JSON.stringify(people), {
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=1800",
+    },
+  });
+}
+
 function wikiTitleFromEntityUrl(wikiUrl) {
   try {
     const parsed = new URL(wikiUrl);
@@ -5558,6 +5582,10 @@ async function handleFetchRequest(request, env, ctx) {
 
   if (url.pathname === "/people" || url.pathname === "/people/") {
     return handlePeopleIndexPage(request, env, url);
+  }
+
+  if (url.pathname === "/people/index.json") {
+    return handlePeopleIndexJson(env);
   }
 
   const personEntityMatch = url.pathname.match(/^\/people\/([a-z0-9-]+)\/?$/);

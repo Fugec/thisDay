@@ -999,9 +999,9 @@ async function populatePeopleStrip() {
     return;
   }
 
-  const births = (data.births || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 8);
-  const deaths = (data.deaths || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 8);
-  const fromArticles = articlePeople.filter(p => p && p.name && p.slug).slice(0, 8);
+  const births = (data.births || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 6);
+  const deaths = (data.deaths || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 6);
+  const fromArticles = articlePeople.filter(p => p && p.name && p.slug).slice(0, 6);
 
   if (!births.length && !deaths.length && !fromArticles.length) {
     if (section) section.style.display = "none";
@@ -1068,7 +1068,9 @@ async function populatePeopleStrip() {
     const group = document.createElement("div");
     group.className = "people-group";
     items.forEach((p) => group.appendChild(makePill(p, itemHref ? itemHref(p) : href, pillOptions)));
-    if (seeAllHref) group.appendChild(makeSeeAllPill("See all", seeAllHref));
+    if (seeAllHref && !group.querySelector(".person-pill-see-all")) {
+      group.appendChild(makeSeeAllPill("See all", seeAllHref));
+    }
 
     wrap.appendChild(label);
     wrap.appendChild(group);

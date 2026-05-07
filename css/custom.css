@@ -47,6 +47,9 @@ img {
   max-width: 100%;
   height: auto;
 }
+h3 {
+  font-size: 17.6px !important;
+}
 
 /* Nav */
 .site-chrome {

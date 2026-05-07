@@ -410,12 +410,15 @@ img {
   letter-spacing: -0.02em;
 }
 .mobile-date-break {
-  display: none;
+  display: none !important;
 }
 .hero-title-date {
   color: var(--accent);
   font-family: "Meddon", cursive;
   letter-spacing: 0;
+}
+.hero-title-tail {
+  white-space: nowrap;
 }
 .hero p {
   font-size: 1.1rem;
@@ -1578,7 +1581,7 @@ img {
     font-size: 2rem;
   }
   .mobile-date-break {
-    display: block;
+    display: block !important;
   }
   .hero p {
     font-size: 1rem;

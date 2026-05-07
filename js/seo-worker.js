@@ -1029,6 +1029,18 @@ function entityBodyWordCount(entity) {
     .filter(Boolean).length;
 }
 
+function hasIncompleteEntityParagraphs(entity) {
+  return (Array.isArray(entity?.bodySections) ? entity.bodySections : []).some((section) =>
+    (Array.isArray(section?.paragraphs) ? section.paragraphs : []).some((paragraph) => {
+      const text = String(paragraph || "").replace(/\s+/g, " ").trim();
+      if (!text) return false;
+      if (/(?:\.{3}|…)$/.test(text)) return true;
+      if (/[.!?]["')\]]?$/.test(text)) return false;
+      return text.split(/\s+/).filter(Boolean).length >= 12;
+    }),
+  );
+}
+
 async function updateEntityIndexEntry(env, entity) {
   if (!env.BLOG_AI_KV || !entity?.type || !entity?.slug) return;
   const raw = await env.BLOG_AI_KV.get("entity-index-v1").catch(() => null);
@@ -1117,6 +1129,32 @@ function stripGenericEntityContextSections(sections) {
   });
 }
 
+function inferEntityTopicPillars(entity, type) {
+  if (type !== "person") return Array.isArray(entity?.relatedTopics) ? entity.relatedTopics : [];
+  const text = [
+    entity?.name,
+    entity?.description,
+    entity?.summary,
+    entity?.intro,
+    entity?.sourcePostTitle,
+    ...(Array.isArray(entity?.relatedTopics) ? entity.relatedTopics : []),
+    ...(Array.isArray(entity?.overviewCards) ? entity.overviewCards.map((card) => `${card?.label || ""} ${card?.value || ""}`) : []),
+    ...(Array.isArray(entity?.bodySections)
+      ? entity.bodySections.flatMap((section) => [
+          section?.heading || "",
+          ...(Array.isArray(section?.paragraphs) ? section.paragraphs : []),
+        ])
+      : []),
+  ].join(" ").toLowerCase();
+  const current = Array.isArray(entity?.relatedTopics) ? entity.relatedTopics.filter(Boolean) : [];
+  const sportsRe = /\b(sport|sports|athlete|athletics|football|soccer|basketball|baseball|tennis|golf|boxing|wrestling|cricket|rugby|hockey|olympic|paralympic|champion|championship|racing driver|motorsport|motor racing|formula|formula one|formula 1|grand prix|w series|indy|indy nxt|nascar|karting)\b/i;
+  if (!sportsRe.test(text)) return current;
+
+  const next = current.filter((topic) => topic !== "Arts & Culture");
+  if (!next.includes("Sports")) next.unshift("Sports");
+  return [...new Set(next)].slice(0, 4);
+}
+
 function entityFactParagraphs(entity) {
   const name = entity.name || "This person";
   const seen = new Set();
@@ -1153,15 +1191,119 @@ function entityFactParagraphs(entity) {
         : "";
 
   const paragraphs = [];
-  if (lifeLine || facts[0]) {
-    paragraphs.push([lifeLine, facts[0]].filter(Boolean).join(" "));
+  const factualSentences = facts.slice();
+  if (lifeLine) {
+    if (factualSentences.length) factualSentences[0] = `${lifeLine} ${factualSentences[0]}`;
+    else factualSentences.push(lifeLine);
   }
-  if (facts.length > 1) paragraphs.push(facts.slice(1, 4).join(" "));
-  if (facts.length > 4) paragraphs.push(facts.slice(4, 7).join(" "));
+
+  let current = [];
+  let words = 0;
+  for (const sentence of factualSentences) {
+    const count = sentence.split(/\s+/).filter(Boolean).length;
+    if (current.length && words + count > 150) {
+      paragraphs.push(current.join(" "));
+      current = [sentence];
+      words = count;
+    } else {
+      current.push(sentence);
+      words += count;
+    }
+  }
+  if (current.length) paragraphs.push(current.join(" "));
 
   return paragraphs
     .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
     .filter((paragraph) => paragraph.split(/\s+/).length >= 18);
+}
+
+function splitCompleteSentences(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .match(/[^.!?]+[.!?]+(?:\s|$)/g) || [];
+}
+
+function chunkSentences(sentences, maxWords = 150) {
+  const paragraphs = [];
+  let current = [];
+  let words = 0;
+  for (const sentence of sentences) {
+    const clean = String(sentence || "").replace(/\s+/g, " ").trim();
+    if (!clean) continue;
+    const count = clean.split(/\s+/).filter(Boolean).length;
+    if (current.length && words + count > maxWords) {
+      paragraphs.push(current.join(" "));
+      current = [clean];
+      words = count;
+    } else {
+      current.push(clean);
+      words += count;
+    }
+  }
+  if (current.length) paragraphs.push(current.join(" "));
+  return paragraphs;
+}
+
+function rebuildPersonBodySections(entity) {
+  const name = entity.name || "This person";
+  const paragraphs = entityFactParagraphs(entity);
+  if (!paragraphs.length) return splitEntityHydratedSections(entity);
+
+  const allSentences = paragraphs
+    .flatMap(splitCompleteSentences)
+    .map((sentence) => sentence.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  if (!allSentences.length) return splitEntityHydratedSections(entity);
+
+  const introSentences = allSentences.slice(0, 1);
+  const remaining = allSentences.slice(1);
+  const significanceRe = /\b(first|only|youngest|oldest|inaugural|champion|championship|title|record|historic|pioneer|trailblaz|legacy|significance|significant|influential|impact|recognized|recognised|regarded|remembered|notable|major|leading|award|honou?r|inducted|transition|among the most|one of the most|best known|known for|famous for|renowned|helped to|became the first|most successful|w series|formula|indy|grand prix|olympic|nobel|pulitzer|academy award|grammy)\b/i;
+  const backgroundRe = /\b(born|birth|father|mother|son of|daughter of|brother|sister|relationship|resides|educated at|education|school|college|university|grew up|family|childhood|raised)\b/i;
+  const careerRe = /\b(career|started|began|competes|competed|racing|driver|served|worked|became|joined|graduated|studied|composed|published|president|minister|officer|executive|administrator|founded|created|led|appointed|played|performed|managed|headed|won|signed|wrote|directed|commanded|represented)\b/i;
+  const contributionRe = /\b(served as|president|minister|officer|executive|administrator|founded|created|led|appointed|composed|published|performed|managed|headed|won|directed|commanded|represented|developed|established)\b/i;
+  const used = new Set(introSentences.map((sentence) => sentence.toLowerCase()));
+  const whoSentences = introSentences.slice();
+  const careerSentences = [];
+  const significanceSentences = [];
+  for (const sentence of remaining) {
+    const key = sentence.toLowerCase();
+    if (used.has(key)) continue;
+    if (backgroundRe.test(sentence)) {
+      whoSentences.push(sentence);
+      used.add(key);
+    } else if (significanceRe.test(sentence)) {
+      significanceSentences.push(sentence);
+      used.add(key);
+    } else if (careerRe.test(sentence)) {
+      careerSentences.push(sentence);
+      used.add(key);
+    } else {
+      careerSentences.push(sentence);
+      used.add(key);
+    }
+  }
+
+  const careerFallback = remaining.filter((sentence) => {
+    const key = sentence.toLowerCase();
+    return !backgroundRe.test(sentence) && !significanceSentences.some((item) => item.toLowerCase() === key);
+  });
+
+  const sections = [];
+  sections.push({
+    heading: `Who was ${name}?`,
+    paragraphs: chunkSentences(whoSentences.length ? whoSentences : allSentences.slice(0, 1)),
+  });
+  sections.push({
+    heading: "Career and public life",
+    paragraphs: chunkSentences(careerSentences.length ? careerSentences : careerFallback),
+  });
+  sections.push({
+    heading: "Historical significance",
+    paragraphs: chunkSentences(significanceSentences.length
+      ? significanceSentences
+      : careerSentences.filter((sentence) => contributionRe.test(sentence)).slice(0, 3)),
+  });
+  return sections.filter((section) => section.paragraphs.length > 0);
 }
 
 function ensureEntityContextSections(entity, type) {
@@ -1177,6 +1319,10 @@ function ensureEntityContextSections(entity, type) {
     : "the wider historical setting";
 
   if (type === "person") {
+    if (hasIncompleteEntityParagraphs({ bodySections })) {
+      const rebuilt = rebuildPersonBodySections({ ...entity, bodySections });
+      if (rebuilt.length) return rebuilt;
+    }
     if (bodySections.length > 0 && currentWords >= 35) return bodySections;
     const factualParagraphs = entityFactParagraphs(entity);
     bodySections.push({
@@ -1246,7 +1392,8 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
   const minWords = type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
   const bodyWords = entityBodyWordCount(entity);
   const hasWikiMarkup = /={2,}[^=]+={2,}/.test(`${entity.intro || ""} ${entity.summary || ""}`);
-  const sparse = !entity.intro || !entity.summary || !entity.imageUrl || bodyWords < minWords || hasWikiMarkup;
+  const hasIncompleteBody = type === "person" && hasIncompleteEntityParagraphs(entity);
+  const sparse = !entity.intro || !entity.summary || !entity.imageUrl || bodyWords < minWords || hasWikiMarkup || hasIncompleteBody;
   if (!sparse || !entity.wikiUrl) return entity;
 
   const wiki = await fetchEntityWikiHydration(entity, type).catch(() => ({}));
@@ -1261,8 +1408,10 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
     deathDate: entity.deathDate || wiki.deathDate || "",
     updatedAt: new Date().toISOString(),
   };
-  if (bodyWords < minWords || hasWikiMarkup) {
-    hydrated.bodySections = splitEntityHydratedSections(hydrated);
+  if (bodyWords < minWords || hasWikiMarkup || hasIncompleteBody) {
+    hydrated.bodySections = type === "person"
+      ? rebuildPersonBodySections(hydrated)
+      : splitEntityHydratedSections(hydrated);
   }
   hydrated.bodySections = ensureEntityContextSections(hydrated, type);
   if (hydrated.intro || hydrated.summary) delete hydrated.needsWikiRefresh;
@@ -1287,6 +1436,17 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   const posts = await getBlogIndexEntries(env);
   entity = syncEntitySourcePostFromIndex(entity, posts);
   entity = await hydrateSparseEntity(env, entity, type, ctx);
+  entity.relatedTopics = inferEntityTopicPillars(entity, type);
+  if (type === "person" && url.searchParams.has("repair")) {
+    entity.bodySections = rebuildPersonBodySections(entity);
+    entity.relatedTopics = inferEntityTopicPillars(entity, type);
+    entity.updatedAt = new Date().toISOString();
+    const repairWrite = env.BLOG_AI_KV
+      ?.put(entityKey(type, entity.slug), JSON.stringify(entity))
+      .catch(() => {});
+    if (ctx?.waitUntil && repairWrite) ctx.waitUntil(repairWrite);
+    else if (repairWrite) await repairWrite;
+  }
   const indexWrite = updateEntityIndexEntry(env, entity).catch(() => {});
   if (ctx?.waitUntil) ctx.waitUntil(indexWrite);
   else await indexWrite;
@@ -2282,7 +2442,7 @@ function escapeHtml(s) {
 
 function ensureCompleteSentences(text) {
   if (!text) return "";
-  const t = String(text).replace(/[…]+$/, "").trim();
+  const t = String(text).replace(/\s+/g, " ").replace(/(?:\.{3}|…)+$/, "").trim();
   const match = t.match(/^([\s\S]*[.!?])/);
   return match ? match[1].trim() : "";
 }

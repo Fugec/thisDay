@@ -328,6 +328,12 @@ const PILLAR_QUESTION_HEADINGS = {
     ()  => `How did it influence what came after?`,
     (t) => `Why is ${t} still remembered?`,
   ],
+  "Sports": [
+    (t) => `What made ${t} significant?`,
+    ()  => `Who shaped the competition?`,
+    ()  => `What record or achievement mattered most?`,
+    (t) => `Why does ${t} still matter in sport?`,
+  ],
   "Economy & Business": [
     (t) => `What caused ${t}?`,
     (t) => `Who were the key players in ${t}?`,
@@ -538,6 +544,7 @@ const PILLAR_AUTHORITY_EXTRA = {
   "Exploration & Discovery": { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
   "Health & Medicine":       { name: "MedlinePlus (NIH)",url: (q) => `https://medlineplus.gov/search/?query=${q}` },
   "Arts & Culture":          { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
+  "Sports":                  { name: "Olympics",         url: (q) => `https://olympics.com/en/search?q=${q}` },
   "Social & Human Rights":   { name: "PBS",              url: (q) => `https://www.pbs.org/search/?q=${q}` },
   "Disasters & Accidents":   { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
   "War & Conflict":          { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
@@ -578,6 +585,7 @@ const BLOG_PILLARS = [
   "Politics & Government",
   "Science & Technology",
   "Arts & Culture",
+  "Sports",
   "Disasters & Accidents",
   "Social & Human Rights",
   "Economy & Business",
@@ -6022,6 +6030,26 @@ async function factCheckContent(env, content) {
 // Pillar classification — assigns article to one or more content pillars
 // ---------------------------------------------------------------------------
 
+function normalizePillarsForContent(pillars, content) {
+  const haystack = normalizeTopicMatchText(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.keywords,
+      content?.description,
+      content?.contentRationale,
+      ...(Array.isArray(content?.keyTerms) ? content.keyTerms.map((term) => term?.term || "") : []),
+    ].join(" "),
+  );
+  const isSports = /\b(sport|sports|athlete|athletics|football|soccer|basketball|baseball|tennis|golf|boxing|wrestling|cricket|rugby|hockey|olympic|paralympic|champion|championship|tournament|match|race|racing driver|motorsport|motor racing|formula|formula one|formula 1|grand prix|w series|indy|indy nxt|nascar|karting)\b/i.test(haystack);
+  let next = Array.isArray(pillars) ? pillars.filter((pillar) => BLOG_PILLARS.includes(pillar)) : [];
+  if (isSports) {
+    next = next.filter((pillar) => pillar !== "Arts & Culture");
+    next.unshift("Sports");
+  }
+  return [...new Set(next)].slice(0, 3);
+}
+
 /**
  * Classifies an article into 1–3 of the BLOG_PILLARS categories.
  * Returns an array of pillar name strings, or null if classification fails.
@@ -6044,6 +6072,7 @@ async function classifyPillars(env, content) {
     `- Use "Born on This Day" only if the article's primary focus is a person's birth.\n` +
     `- Use "Died on This Day" only if the article's primary focus is a person's death.\n` +
     `- Use "Famous Persons" for general biographical articles not specifically about birth or death.\n` +
+    `- Use "Sports" for athletes, motorsport, Formula racing, championships, records, matches, tournaments, or other competitive sport stories.\n` +
     `- Reply with ONLY a JSON object: { "pillars": ["exact category name", ...] }`;
 
   try {
@@ -6073,13 +6102,16 @@ async function classifyPillars(env, content) {
       console.warn(
         `classifyPillars: no valid pillars in response ${JSON.stringify(pillars)}`,
       );
-      return null;
+      const fallback = normalizePillarsForContent([], content);
+      return fallback.length ? fallback : null;
     }
-    console.log(`classifyPillars: assigned [${valid.join(", ")}]`);
-    return valid;
+    const normalized = normalizePillarsForContent(valid, content);
+    console.log(`classifyPillars: assigned [${normalized.join(", ")}]`);
+    return normalized;
   } catch (err) {
     console.warn(`classifyPillars: skipped — ${err.message}`);
-    return null;
+    const fallback = normalizePillarsForContent([], content);
+    return fallback.length ? fallback : null;
   }
 }
 
@@ -8585,6 +8617,8 @@ const PILLAR_DESCRIPTIONS = {
     "Discoveries, inventions, missions, and the breakthroughs that changed how we understand the world.",
   "Arts & Culture":
     "Literature, music, art, film, and the cultural moments that left a lasting mark on society.",
+  "Sports":
+    "Athletes, races, records, championships, and sporting moments that shaped competition and public memory.",
   "Disasters & Accidents":
     "Natural disasters, industrial accidents, and catastrophes and the human stories behind them.",
   "Social & Human Rights":

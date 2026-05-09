@@ -873,7 +873,7 @@ async function chooseEventForDate(
       : "";
   const avoidPillars =
     recentPillars.length > 0
-      ? `Avoid these pillar categories from the last 7 posts: ${recentPillars.join(", ")}.\n`
+      ? `Avoid these pillar categories — they were used in recent posts and must not repeat back-to-back: ${recentPillars.join(", ")}.\n`
       : "";
   const preferPillars =
     preferredPillars.length > 0
@@ -931,8 +931,7 @@ async function chooseEventForDate(
         return !takenAllTime.some((taken) =>
           haystack.includes(String(taken || "").toLowerCase()),
         );
-      })
-      .slice(0, 20);
+      });
   } catch (err) {
     console.warn(`Event selector candidate load failed: ${err.message}`);
   }
@@ -954,7 +953,9 @@ async function chooseEventForDate(
     `${avoidTitles}${avoidPillars}${preferPillars}${candidateSection}\n` +
     `Requirements:\n` +
     `- The event must actually have happened on ${monthName} ${day}\n` +
-    `- Prefer globally recognizable or vividly visual events with strong Wikipedia coverage\n` +
+    `- Strongly prefer events with global significance: major wars and battles, landmark treaties, world-changing political milestones, famous scientific or cultural breakthroughs, events covered by every world history textbook\n` +
+    `- Avoid local or regional sports disasters, niche criminal incidents, or events significant only to a single country\n` +
+    `- Avoid events where the Wikipedia page title is just a country name (e.g. "Ghana", "Armenia", "Florida") — those usually mean the article is a generic country page, not a dedicated event article\n` +
     `- Do not choose an event from any other calendar day\n` +
     `- If a vetted event list is provided above, your answer must match one entry from that list\n` +
     `- If a vetted list is provided, include "candidateIndex": N where N is the number (1, 2, 3...) from the list\n` +
@@ -4051,15 +4052,13 @@ async function generateAndStore(
     });
   }
 
-  // Lightweight publishes are not actually visible until the draft is promoted
-  // into post:* and the index. Keep that critical path awaited so retries and
-  // manual responses reflect the real publish state.
-  if (lightweightPublish) {
-    await runPostPublishExtras(env, slug, content, { scheduleEnrichment: true });
-  } else if (ctx?.waitUntil) {
-    ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: false }));
+  // Always use ctx.waitUntil for extras so enrichment runs in a fresh subrequest
+  // budget — post generation already spends ~20+ subrequests and sharing the
+  // budget with entity Wikipedia/AI calls hits Cloudflare's per-invocation limit.
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish }));
   } else {
-    await runPostPublishExtras(env, slug, content, { scheduleEnrichment: false });
+    await runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish });
   }
 
   console.log(
@@ -4581,14 +4580,14 @@ function buildPersonOverviewCards(entity) {
     { label: "Major work", value: majorWork },
     { label: "Significance", value: significance },
   ].filter((c) => c.value);
-  if (description) cards.unshift({ label: "Role", value: description });
-  if (lifeDates) cards.unshift({ label: "Born / Died", value: lifeDates });
+  if (description) cards.unshift({ label: "Main role", value: description });
+  if (lifeDates) cards.unshift({ label: "Life and death", value: lifeDates });
   return cards;
 }
 
 function normalizeEntityCards(cards, fallbackCards, type) {
   const wantedLabels = type === "person"
-    ? ["Born / Died", "Role", "Known for", "Major work", "Significance"]
+    ? ["Life and death", "Main role", "Known for", "Major work", "Significance", "Context"]
     : ["What happened", "Date", "Location", "Key people", "Outcome", "Why it matters"];
   const source = Array.isArray(cards) ? cards : [];
   const normalized = [];
@@ -4638,14 +4637,17 @@ function expandedEntityCardValue(label, currentValue, entity, content, fallbackV
     .join(", ");
 
   if (entity.type === "person") {
-    if (label === "Born / Died") {
+    if (label === "Life and death") {
       const dates = entity.birthDate && entity.deathDate
         ? `${entity.birthDate} – ${entity.deathDate}`
         : entity.birthDate ? `b. ${entity.birthDate}` : "";
       return dates || fallback || current;
     }
-    if (label === "Role") {
+    if (label === "Main role") {
       return description || fallback || current || summary;
+    }
+    if (label === "Context") {
+      return content.contentRationale || findEntityFact(facts, [/legacy/i, /impact/i, /influenced/i, /remembered/i, /shaped/i], fallback || current || summary);
     }
     if (label === "Known for") {
       return findEntityFact(facts, [/primary author/i, /founded/i, /invented/i, /discovered/i, /pioneered/i, /proponent/i, /known for/i, /best known/i], description || summary || current || fallback);
@@ -4874,7 +4876,7 @@ function buildFallbackEntityBodySections(entity, content) {
       sections.push({
         heading: `Who is ${entity.name}?`,
         paragraphs: [
-          `${lifeLine} ${summary || `${entity.name} is connected to a dated historical event in thisDay coverage.`}`.trim(),
+          `${lifeLine} ${summary}`.trim(),
           [educationFact, serviceFact].filter(Boolean).join(" ") || (description ? `${entity.name} is described as ${description}.` : summary),
         ].filter(Boolean),
       });
@@ -4895,13 +4897,6 @@ function buildFallbackEntityBodySections(entity, content) {
         paragraphs: introParagraphs.slice(4, 6),
       });
     }
-
-    sections.push({
-      heading: `${entity.name} on thisDay`,
-      paragraphs: [
-        `${sourceTitle} connects ${entity.name} to a specific historical moment.${articleDescription ? ` ${articleDescription}` : ""}`,
-      ].filter(Boolean),
-    });
 
     return sections.filter((s) => s.paragraphs.filter(Boolean).length > 0);
   }
@@ -7170,8 +7165,9 @@ function injectEventImages(html, eventImages) {
   let floatIdx = 0;
   let imageIdx = 0;
 
-  for (const anchor of SECTION_ANCHORS) {
+  for (let si = 0; si < SECTION_ANCHORS.length; si++) {
     if (imageIdx >= eventImages.length) break;
+    const anchor = SECTION_ANCHORS[si];
     const anchorPos = html.indexOf(anchor);
     if (anchorPos === -1) continue;
     if (anchorPos - lastInjectedAt < MIN_GAP) continue;
@@ -7180,10 +7176,16 @@ function injectEventImages(html, eventImages) {
     const pPos = html.indexOf("<p", anchorPos);
     if (pPos === -1) continue;
 
-    // Skip this section if a <figure already exists within MIN_GAP chars (person image already placed)
-    const windowEnd = Math.min(pPos + MIN_GAP, html.length);
-    const windowStart = Math.max(0, pPos - MIN_GAP);
-    if (html.slice(windowStart, windowEnd).includes("<figure")) continue;
+    // Skip this section if a <figure already exists anywhere between this anchor
+    // and the next section anchor (covers person images injected anywhere in the section)
+    const nextAnchorPos = (() => {
+      for (let j = si + 1; j < SECTION_ANCHORS.length; j++) {
+        const pos = html.indexOf(SECTION_ANCHORS[j]);
+        if (pos !== -1) return pos;
+      }
+      return html.length;
+    })();
+    if (html.slice(anchorPos, nextAnchorPos).includes("<figure")) continue;
 
     const fig = figHtml(eventImages[imageIdx], floats[floatIdx % 2]);
     html = html.slice(0, pPos) + fig + html.slice(pPos);

@@ -5238,7 +5238,7 @@ async function hydrateArticleEntityImages(env, entityMeta) {
   for (const item of entityMeta) {
     const next = { ...item };
     if (next.type === "person" && next.slug && next.name && !next.imageUrl) {
-      const key = entityKey("person", next.slug);
+      const key = `${KV_ENTITY_PREFIX}person:${next.slug}`;
       const record = await env.BLOG_AI_KV.get(key, { type: "json" }).catch(() => null);
       if (record?.imageUrl) {
         next.imageUrl = record.imageUrl;

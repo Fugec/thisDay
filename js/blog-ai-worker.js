@@ -4252,7 +4252,7 @@ function normalizeEventTitleAction(content) {
   const currentTitle = String(content.title || "").trim();
   if (!currentEvent) return;
 
-  const hasAction = /\b(founding|founded|formed|created|established|launched|opened|signed|adopted|ratified|declared|began|ended|fell|rose|assassinated|elected|discovered|invented|published|landed|launched|battle|siege|revolt|revolution|war|attack|bombing|crash|trial|coronation|independence)\b/i.test(currentEvent);
+  const hasAction = /\b(founding|founded|formed|created|established|launch|launched|opening|opened|signing|signed|adopted|ratified|declared|began|ended|fell|rose|assassinated|elected|discovered|invented|published|landed|battle|siege|revolt|revolution|war|attack|bombing|crash|trial|coronation|independence|completion|creation)\b/i.test(currentEvent);
   if (hasAction) return;
 
   const evidence = [

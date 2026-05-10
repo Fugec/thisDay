@@ -923,9 +923,12 @@ async function chooseEventForDate(
           text: String(event?.text || "").replace(/\s+/g, " ").trim(),
           pageTitle: String(pageTitle).trim(),
           pageUrl: String(pageUrl).trim(),
+          hasThumbnail: !!firstPage?.thumbnail?.source,
+          extractLength: String(firstPage?.extract || "").length,
         };
       })
       .filter((event) => event.year && event.text && event.pageTitle)
+      .filter((event) => event.hasThumbnail && event.extractLength >= 300)
       .filter((event) => {
         const haystack = `${event.pageTitle} ${event.text}`.toLowerCase();
         return !takenAllTime.some((taken) =>
@@ -1613,8 +1616,10 @@ export default {
         env.BLOG_AI_KV.get(KV_INDEX_KEY),
         env.BLOG_AI_KV.get("youtube:uploaded"),
       ]);
-      const index = indexRaw ? JSON.parse(indexRaw) : [];
-      const yt = ytRaw ? JSON.parse(ytRaw) : {};
+      let index = [];
+      if (indexRaw) { try { const t = indexRaw.trimStart(); const s = t.indexOf("["); index = JSON.parse(s > 0 ? t.slice(s) : t); } catch { index = []; } }
+      let yt = {};
+      if (ytRaw) { try { yt = JSON.parse(ytRaw); } catch { yt = {}; } }
       const indexBySlug = Object.fromEntries(index.map((p) => [p.slug, p]));
       const videos = Object.entries(yt)
         .filter(([, v]) => v.youtubeId && v.privacy !== "private")
@@ -1645,7 +1650,14 @@ export default {
     // Legacy alias: /blog/archive.json
     if (path === "/blog/index.json" || path === "/blog/archive.json") {
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
-      const index = indexRaw ? JSON.parse(indexRaw) : [];
+      let index = [];
+      if (indexRaw) {
+        try {
+          const trimmed = indexRaw.trimStart();
+          const jsonStart = trimmed.indexOf("[");
+          index = JSON.parse(jsonStart > 0 ? trimmed.slice(jsonStart) : trimmed);
+        } catch { index = []; }
+      }
       return new Response(JSON.stringify(index), {
         headers: {
           "Content-Type": "application/json",

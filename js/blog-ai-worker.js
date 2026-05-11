@@ -1992,6 +1992,34 @@ export default {
         );
         // Patch legacy Did You Know bullet boxes into the card slider used by newer posts.
         patchedHtml = replaceLegacyDidYouKnowBlocks(patchedHtml);
+        // Wrap header + figure in article-hero-wrap for mobile full-bleed hero.
+        // Only applies to old posts that don't have the wrapper yet.
+        let _heroPatched = false;
+        if (!patchedHtml.includes('article-hero-wrap') && patchedHtml.includes('<header class="mb-4 text-center">')) {
+          _heroPatched = true;
+          patchedHtml = patchedHtml.replace(
+            /(<header class="mb-4 text-center">[\s\S]*?<\/header>)([\s\S]*?)(<figure class="text-center mb-4">[\s\S]*?<\/figure>)/,
+            (_, hdr, middle, fig) => {
+              const hdrPatched = hdr.replace('class="mb-4 text-center"', 'class="mb-4 text-center article-hero-header"');
+              const figPatched = fig.replace('class="text-center mb-4"', 'class="text-center mb-4 article-hero-fig"');
+              return `<div class="article-hero-wrap">\n${hdrPatched}\n${figPatched}\n<div class="article-hero-overlay" aria-hidden="true"></div>\n</div>${middle}`;
+            },
+          );
+        }
+        // Inject hero CSS for old posts that predate the article-hero-wrap feature.
+        if (!patchedHtml.includes('.article-hero-wrap') && patchedHtml.includes('</head>')) {
+          _heroPatched = true;
+          patchedHtml = patchedHtml.replace(
+            '</head>',
+            `<style>.article-hero-wrap{position:relative;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:2;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}</style></head>`,
+          );
+        }
+        // Persist hero-patched HTML back to KV so the next request loads pre-patched HTML
+        // and skips the expensive hero-wrap regex entirely — prevents recurring Error 1102.
+        if (_heroPatched && ctx?.waitUntil) {
+          const _heroHtml = patchedHtml;
+          ctx.waitUntil(env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, _heroHtml).catch(() => {}));
+        }
         // Patch old byline link /about/ → /about/editorial/ (E-E-A-T signal)
         if (patchedHtml.includes('href="/about/" rel="author"')) {
           patchedHtml = patchedHtml.replaceAll(
@@ -2605,100 +2633,94 @@ export default {
           );
         }
         // Repair stored posts whose featured image is broken or a logo, seal,
-        // flag, or similar low-value asset. The replacement is persisted so
-        // the fix happens once.
-        {
-          const wikiUrl = extractWikiUrl(patchedHtml);
-          const coverUrl = extractCoverSrc(patchedHtml);
-          const coverNeedsRepair =
-            wikiUrl &&
-            coverUrl &&
-            (isLowValueFeaturedImage(coverUrl) || !(await isWorkingImageUrl(coverUrl)));
-          if (coverNeedsRepair) {
-            try {
-              const replacement = await fetchWikipediaImage("", wikiUrl);
-              if (replacement && replacement !== coverUrl) {
-                patchedHtml = patchedHtml
-                  .replaceAll(encodeURIComponent(coverUrl), encodeURIComponent(replacement))
-                  .replaceAll(coverUrl, replacement);
-                if (ctx?.waitUntil) {
-                  ctx.waitUntil((async () => {
-                    await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, patchedHtml);
-                    const indexRaw2 = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
-                    const index2 = indexRaw2 ? JSON.parse(indexRaw2) : [];
-                    const found = index2.find((entry) => entry?.slug === slug);
-                    if (found) {
-                      found.imageUrl = replacement;
-                      await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index2));
-                    }
-                  })().catch(() => {}));
+        // flag, or similar low-value asset. Fully non-blocking — network calls
+        // (isWorkingImageUrl + fetchWikipediaImage) moved to waitUntil so they
+        // never block the response and can't trigger 1102.
+        if (ctx?.waitUntil) {
+          const wikiUrlForRepair = extractWikiUrl(patchedHtml);
+          const coverUrlForRepair = extractCoverSrc(patchedHtml);
+          if (wikiUrlForRepair && coverUrlForRepair) {
+            const htmlForRepair = patchedHtml;
+            ctx.waitUntil((async () => {
+              try {
+                const needsRepair =
+                  isLowValueFeaturedImage(coverUrlForRepair) ||
+                  !(await isWorkingImageUrl(coverUrlForRepair));
+                if (!needsRepair) return;
+                const replacement = await fetchWikipediaImage("", wikiUrlForRepair);
+                if (!replacement || replacement === coverUrlForRepair) return;
+                const repaired = htmlForRepair
+                  .replaceAll(encodeURIComponent(coverUrlForRepair), encodeURIComponent(replacement))
+                  .replaceAll(coverUrlForRepair, replacement);
+                await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, repaired);
+                const indexRaw2 = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+                const index2 = indexRaw2 ? JSON.parse(indexRaw2) : [];
+                const found = index2.find((entry) => entry?.slug === slug);
+                if (found) {
+                  found.imageUrl = replacement;
+                  await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index2));
                 }
+              } catch {
+                // best-effort repair
               }
-            } catch {
-              // best-effort repair
-            }
+            })());
           }
         }
         // Backfill inline figures for already-stored posts that shipped without them.
-        // Lazily inject and persist back to KV so the article gets figures immediately.
-        // DYN slides hide images via CSS; this only affects main article body figures.
-        if (!/<figure style="float:(?:right|left);/i.test(patchedHtml)) {
-          const wikiUrl = extractWikiUrl(patchedHtml);
-          const coverUrl = extractCoverSrc(patchedHtml);
-          if (wikiUrl) {
-            try {
-              const imgs = await fetchEventImages(wikiUrl, coverUrl, 2);
-              if (imgs.length > 0) {
-                patchedHtml = injectEventImages(patchedHtml, imgs);
-                if (ctx?.waitUntil) {
-                  ctx.waitUntil(
-                    env.BLOG_AI_KV
-                      .put(`${KV_POST_PREFIX}${slug}`, patchedHtml)
-                      .catch(() => {}),
-                  );
+        // Fully non-blocking — fetchEventImages (2 Wikipedia API calls) moved to
+        // waitUntil so it never blocks the response and can't trigger 1102.
+        // Figures appear from the second request onwards (same pattern as entity strip).
+        if (!/<figure style="float:(?:right|left);/i.test(patchedHtml) && ctx?.waitUntil) {
+          const wikiUrlForFigs = extractWikiUrl(patchedHtml);
+          const coverUrlForFigs = extractCoverSrc(patchedHtml);
+          if (wikiUrlForFigs) {
+            const htmlForFigs = patchedHtml;
+            ctx.waitUntil((async () => {
+              try {
+                const imgs = await fetchEventImages(wikiUrlForFigs, coverUrlForFigs, 2);
+                if (imgs.length > 0) {
+                  const withFigures = injectEventImages(htmlForFigs, imgs);
+                  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, withFigures);
                 }
+              } catch {
+                // best-effort backfill
               }
-            } catch {
-              // backfill is best-effort
-            }
+            })());
           }
         }
-        {
-          try {
-            const parsedEntityMeta = articleEntitiesRaw
-              ? JSON.parse(articleEntitiesRaw)
-              : extractArticlePeopleMetaFromHtml(patchedHtml);
-            const entityMeta = await hydrateArticleEntityImages(
-              env,
-              parsedEntityMeta,
-            );
-            const strip = buildArticleEntityStrip(entityMeta);
-            if (strip) {
-              if (patchedHtml.includes("data-entity-strip")) {
-                patchedHtml = patchedHtml.replace(
+        // Entity strip — fully non-blocking. Serve the cached HTML immediately;
+        // hydrate + inject in the background so no KV reads block the response.
+        if (ctx?.waitUntil) {
+          const htmlSnapshot = patchedHtml;
+          ctx.waitUntil((async () => {
+            try {
+              const parsedEntityMeta = articleEntitiesRaw
+                ? JSON.parse(articleEntitiesRaw)
+                : extractArticlePeopleMetaFromHtml(htmlSnapshot);
+              const entityMeta = await hydrateArticleEntityImages(env, parsedEntityMeta);
+              const strip = buildArticleEntityStrip(entityMeta);
+              if (!strip) return;
+              let updated = htmlSnapshot;
+              if (updated.includes("data-entity-strip")) {
+                updated = updated.replace(
                   /<style>\.entity-strip\{[\s\S]*?<div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/,
                   strip,
                 );
               } else {
-                const heroAnchor = '<figure class="text-center mb-4">';
-                const heroIdx = patchedHtml.indexOf(heroAnchor);
+                const heroAnchor = updated.includes('<figure class="text-center mb-4 article-hero-fig">')
+                  ? '<figure class="text-center mb-4 article-hero-fig">'
+                  : '<figure class="text-center mb-4">';
+                const heroIdx = updated.indexOf(heroAnchor);
                 if (heroIdx !== -1) {
-                  patchedHtml =
-                    patchedHtml.slice(0, heroIdx) +
-                    strip + "\n" +
-                    patchedHtml.slice(heroIdx);
+                  updated = updated.slice(0, heroIdx) + strip + "\n" + updated.slice(heroIdx);
                 }
               }
-              if (ctx?.waitUntil) {
-                ctx.waitUntil((async () => {
-                  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, patchedHtml);
-                  await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(entityMeta));
-                })().catch(() => {}));
-              }
+              await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, updated);
+              await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(entityMeta));
+            } catch {
+              // best-effort
             }
-          } catch {
-            // malformed entity meta — skip strip
-          }
+          })());
         }
         const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
         if (ytEntry?.youtubeId && ytEntry.privacy !== "private") {
@@ -3096,53 +3118,8 @@ async function maybeGenerateBlogPost(env, ctx) {
     }
   }
 
-  // Refresh entities whose Wikipedia data was empty at creation time (needsWikiRefresh flag).
-  // Runs up to 5 entities per cron tick so it doesn't delay new post generation.
-  try {
-    const entityIdxRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
-    const entityIdx = entityIdxRaw ? JSON.parse(entityIdxRaw) : [];
-    const stale = entityIdx.filter((e) =>
-      e.wikiUrl &&
-      (e.needsWikiRefresh || !e.indexable || !e.summary || !e.imageUrl)
-    );
-    const toRefresh = stale.slice(0, 5);
-    const postIndexRaw = toRefresh.length ? await env.BLOG_AI_KV.get(KV_INDEX_KEY) : null;
-    const postIndex = postIndexRaw ? JSON.parse(postIndexRaw) : [];
-    for (const entry of toRefresh) {
-      try {
-        const kvKey = `entity-v1:${entry.type}:${entry.slug}`;
-        const entityRaw = await env.BLOG_AI_KV.get(kvKey);
-        if (!entityRaw) continue;
-        const entity = JSON.parse(entityRaw);
-        const freshWiki = await fetchWikipediaEntityData({ wikiUrl: entity.wikiUrl, term: entity.name, type: entity.type }).catch(() => ({}));
-        if (!freshWiki.intro && !freshWiki.summary) continue; // still failing, keep flag
-        entity.summary = freshWiki.summary || "";
-        entity.intro = freshWiki.intro || freshWiki.summary || "";
-        entity.description = freshWiki.description || entity.description || "";
-        entity.imageUrl = freshWiki.imageUrl || entity.imageUrl || "";
-        if (freshWiki.birthDate) entity.birthDate = freshWiki.birthDate;
-        if (freshWiki.deathDate) entity.deathDate = freshWiki.deathDate;
-        delete entity.needsWikiRefresh;
-        entity.updatedAt = new Date().toISOString();
-        // Regenerate cards and body sections now that we have real data
-        const sourceIdx = postIndex.find((e) => e.slug === entity.sourcePostSlug) || {};
-        const sourceContent = { ...sourceIdx, historicalDate: inferHistoricalDateFromEntry(sourceIdx) };
-        const fallbackCards = entity.type === "person" ? buildPersonOverviewCards(entity) : buildEventOverviewCards(entity, sourceContent);
-        entity.overviewCards = await generateEntityOverviewCards(env, entity, sourceContent, fallbackCards);
-        const fallbackSections = buildFallbackEntityBodySections(entity, sourceContent);
-        entity.bodySections = await generateEntityBodySections(env, entity, sourceContent, fallbackSections);
-        await env.BLOG_AI_KV.put(kvKey, JSON.stringify(entity));
-        // Clear flag in index
-        await upsertEntityIndex(env, [entity]);
-        console.log(`Blog AI: refreshed wiki data for entity ${kvKey}`);
-      } catch (refreshErr) {
-        console.warn(`Blog AI: wiki refresh failed for ${entry.slug} — ${refreshErr.message}`);
-      }
-    }
-  } catch (idxErr) {
-    console.warn(`Blog AI: entity refresh scan failed — ${idxErr.message}`);
-  }
-
+  // Skip check comes BEFORE entity refresh so generation subrequests are never
+  // consumed by the refresh when a new post still needs to be written today.
   if (lastGen) {
     const diffDays = Math.round(
       (new Date(today) - new Date(lastGen)) / 86_400_000,
@@ -3151,6 +3128,49 @@ async function maybeGenerateBlogPost(env, ctx) {
       console.log(
         `Blog AI: last post was ${diffDays} day(s) ago — skipping (need ${EVERY_OTHER_DAYS}).`,
       );
+      // Post is already published — safe to spend subrequests on entity refresh.
+      try {
+        const entityIdxRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
+        const entityIdx = entityIdxRaw ? JSON.parse(entityIdxRaw) : [];
+        const stale = entityIdx.filter((e) =>
+          e.wikiUrl &&
+          (e.needsWikiRefresh || !e.indexable || !e.summary || !e.imageUrl)
+        );
+        const toRefresh = stale.slice(0, 3);
+        const postIndexRaw = toRefresh.length ? await env.BLOG_AI_KV.get(KV_INDEX_KEY) : null;
+        const postIndex = postIndexRaw ? JSON.parse(postIndexRaw) : [];
+        for (const entry of toRefresh) {
+          try {
+            const kvKey = `entity-v1:${entry.type}:${entry.slug}`;
+            const entityRaw = await env.BLOG_AI_KV.get(kvKey);
+            if (!entityRaw) continue;
+            const entity = JSON.parse(entityRaw);
+            const freshWiki = await fetchWikipediaEntityData({ wikiUrl: entity.wikiUrl, term: entity.name, type: entity.type }).catch(() => ({}));
+            if (!freshWiki.intro && !freshWiki.summary) continue;
+            entity.summary = freshWiki.summary || "";
+            entity.intro = freshWiki.intro || freshWiki.summary || "";
+            entity.description = freshWiki.description || entity.description || "";
+            entity.imageUrl = freshWiki.imageUrl || entity.imageUrl || "";
+            if (freshWiki.birthDate) entity.birthDate = freshWiki.birthDate;
+            if (freshWiki.deathDate) entity.deathDate = freshWiki.deathDate;
+            delete entity.needsWikiRefresh;
+            entity.updatedAt = new Date().toISOString();
+            const sourceIdx = postIndex.find((e) => e.slug === entity.sourcePostSlug) || {};
+            const sourceContent = { ...sourceIdx, historicalDate: inferHistoricalDateFromEntry(sourceIdx) };
+            const fallbackCards = entity.type === "person" ? buildPersonOverviewCards(entity) : buildEventOverviewCards(entity, sourceContent);
+            entity.overviewCards = await generateEntityOverviewCards(env, entity, sourceContent, fallbackCards);
+            const fallbackSections = buildFallbackEntityBodySections(entity, sourceContent);
+            entity.bodySections = await generateEntityBodySections(env, entity, sourceContent, fallbackSections);
+            await env.BLOG_AI_KV.put(kvKey, JSON.stringify(entity));
+            await upsertEntityIndex(env, [entity]);
+            console.log(`Blog AI: refreshed wiki data for entity ${kvKey}`);
+          } catch (refreshErr) {
+            console.warn(`Blog AI: wiki refresh failed for ${entry.slug} — ${refreshErr.message}`);
+          }
+        }
+      } catch (idxErr) {
+        console.warn(`Blog AI: entity refresh scan failed — ${idxErr.message}`);
+      }
       return;
     }
   }
@@ -3199,7 +3219,7 @@ async function maybeGenerateBlogPost(env, ctx) {
  * Fetches a real image URL from the Wikipedia REST API for the given event title.
  * Falls back to null if the request fails or no image is found.
  */
-async function fetchWikipediaImage(eventTitle, wikiUrl) {
+async function fetchWikipediaImage(eventTitle, wikiUrl, { skipCommonsSearch = false } = {}) {
   try {
     // Prefer the article slug from the wikiUrl so we hit the right page
     let title = eventTitle;
@@ -3210,7 +3230,8 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
 
     const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
 
-    // 1. REST summary — fastest, returns lead/thumbnail image
+    // 1. REST summary — Wikipedia's explicit lead/featured image for the page.
+    //    Trusted unconditionally: if Wikipedia chose it as the lead, we use it.
     const summaryRes = await fetch(
       `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
       { headers: ua },
@@ -3218,7 +3239,7 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
     if (summaryRes.ok) {
       const d = await summaryRes.json();
       const img = d.thumbnail?.source ?? d.originalimage?.source ?? null;
-      if (img && !isLowValueFeaturedImage(img)) return img;
+      if (img) return img;
     }
 
     // 2. MediaWiki images list + imageinfo — catches infobox images not exposed
@@ -3253,6 +3274,8 @@ async function fetchWikipediaImage(eventTitle, wikiUrl) {
 
     // 3. Wikimedia Commons search — fallback for articles that use only fair-use
     //    images not hosted on Commons, which are invisible to the REST summary API.
+    //    Skipped for person entities: text search returns unrelated images too often.
+    if (skipCommonsSearch) return null;
     const commonsRes = await fetch(
       `https://commons.wikimedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(title)}&srnamespace=6&srlimit=5&format=json`,
       { headers: ua },
@@ -5186,7 +5209,7 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars) {
 
 function buildArticleEntityStrip(entityMeta) {
   if (!Array.isArray(entityMeta) || entityMeta.length === 0) return "";
-  const people = entityMeta.filter((e) => e.type === "person" && e.slug && e.name);
+  const people = entityMeta.filter((e) => e.type === "person" && e.slug && e.name && !e.skipStrip);
   if (people.length === 0) return "";
 
   const chips = people.map((e) =>
@@ -5244,7 +5267,8 @@ async function hydrateArticleEntityImages(env, entityMeta) {
         next.imageUrl = record.imageUrl;
         changed = true;
       } else {
-        const imageUrl = await fetchWikipediaImage(next.name, record?.wikiUrl || "");
+        // No image in entity-v1 or post-entities — try Wikipedia steps 1+2 only (no Commons text search).
+        const imageUrl = await fetchWikipediaImage(next.name, record?.wikiUrl || next.wikiUrl || "", { skipCommonsSearch: true });
         if (imageUrl) {
           next.imageUrl = imageUrl;
           changed = true;
@@ -5252,6 +5276,10 @@ async function hydrateArticleEntityImages(env, entityMeta) {
             record.imageUrl = imageUrl;
             env.BLOG_AI_KV.put(key, JSON.stringify(record)).catch(() => {});
           }
+        } else {
+          // No Wikipedia image found → not enough content to show in strip.
+          next.skipStrip = true;
+          changed = true;
         }
       }
     }
@@ -6928,8 +6956,8 @@ async function fetchKeyPersonImages(env, keyTerms) {
         results.push({ name: kt.term, imageUrl: cached.imageUrl, wikiUrl: kt.wikiUrl });
         continue;
       }
-      // Cache miss — fetch from Wikipedia and store (fire-and-forget write)
-      const imageUrl = await fetchWikipediaImage(kt.term, kt.wikiUrl);
+      // Cache miss — fetch from Wikipedia (steps 1+2 only, no Commons text search for persons).
+      const imageUrl = await fetchWikipediaImage(kt.term, kt.wikiUrl, { skipCommonsSearch: true });
       if (!imageUrl) continue;
       env.BLOG_AI_KV.put(cacheKey, JSON.stringify({ imageUrl }), { expirationTtl: KV_PERSON_IMAGE_TTL }).catch(() => {});
       results.push({ name: kt.term, imageUrl, wikiUrl: kt.wikiUrl });
@@ -7834,6 +7862,7 @@ ${JSON.stringify({
       .ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px;font-size:15px}
       .ai-answer-item strong{font-size:.74rem;letter-spacing:.03em;text-transform:uppercase;color:var(--text-muted)}
       .tdq-cta-sub{color:var(--text-muted)}
+      .article-hero-wrap{position:relative;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:2;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}
       ${BLOG_NAV_WIDTH_FIX_CSS}
       ${NAV_CSS}
       ${FOOTER_CSS}
@@ -7858,35 +7887,37 @@ ${JSON.stringify({
 
         <article class="p-4 rounded border" style="background-color: var(--bg); color: var(--text)">
 
-          <header class="mb-4 text-center">
-            <h1 class="mb-2 fw-bold">${esc(c.title)}</h1>
-            <p class="article-meta mb-0">
-              <small>
-                Published: ${esc(publishedStr)} &nbsp;|&nbsp;
-                Event Date: ${esc(c.historicalDate)} &nbsp;|&nbsp;
-                By <a href="/about/editorial/" rel="author" style="color:inherit">thisDay. Editorial Team</a>${readingTime}
-              </small>
-            </p>
-            ${pillarPills}
-          </header>
+          <div class="article-hero-wrap">
+            <header class="mb-4 text-center article-hero-header">
+              <h1 class="mb-2 fw-bold">${esc(c.title)}</h1>
+              <p class="article-meta mb-0">
+                <small>
+                  Published: ${esc(publishedStr)} &nbsp;|&nbsp;
+                  Event Date: ${esc(c.historicalDate)} &nbsp;|&nbsp;
+                  By <a href="/about/editorial/" rel="author" style="color:inherit">thisDay. Editorial Team</a>${readingTime}
+                </small>
+              </p>
+              ${pillarPills}
+            </header>
+            ${c.imageUrl ? `<figure class="text-center mb-4 article-hero-fig">
+              <img
+                src="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800&q=85"
+                srcset="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=400 400w, /image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800 800w"
+                sizes="(max-width:640px) 100vw, 800px"
+                class="img-fluid rounded"
+                alt="${esc(c.imageAlt)}"
+                style="max-height: 400px; object-fit: cover; object-position: center; width: 100%"
+                loading="eager"
+                onerror="this.onerror=null;this.removeAttribute('srcset');this.src='${esc(c.imageUrl)}';"
+              />
+              <figcaption class="article-meta mt-2">
+                <small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small>
+              </figcaption>
+            </figure>
+            <div class="article-hero-overlay" aria-hidden="true"></div>` : ""}
+          </div>
 
           ${buildArticleAnswerBlock(c)}
-
-          ${c.imageUrl ? `<figure class="text-center mb-4">
-            <img
-              src="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800&q=85"
-              srcset="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=400 400w, /image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800 800w"
-              sizes="(max-width:640px) 100vw, 800px"
-              class="img-fluid rounded"
-              alt="${esc(c.imageAlt)}"
-              style="max-height: 400px; object-fit: cover; object-position: top; width: 100%"
-              loading="eager"
-              onerror="this.onerror=null;this.removeAttribute('srcset');this.src='${esc(c.imageUrl)}';"
-            />
-            <figcaption class="article-meta mt-2">
-              <small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small>
-            </figcaption>
-          </figure>` : ""}
 
           <!-- Did You Know -->
           ${didYouKnowSlider}

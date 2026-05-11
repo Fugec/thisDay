@@ -379,8 +379,8 @@ h3 {
   height: 64px;
   border-radius: 50%;
 }
-/* Desktop: full-width spread layout */
-@media (min-width: 768px) {
+/* Desktop: full-width spread layout — only above 1920px */
+@media (min-width: 1921px) {
   .people-track {
     overflow-x: visible;
     flex-wrap: nowrap;

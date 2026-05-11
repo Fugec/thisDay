@@ -3070,7 +3070,12 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 @keyframes marquee-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 
 .card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
-.feat-img{width:100%;max-height:420px;object-fit:cover;object-position:top;border-radius:8px;margin-bottom:20px}
+.feat-img{width:100%;max-height:420px;object-fit:cover;object-position:center;border-radius:8px;margin-bottom:20px}
+.feat-hero-wrap{position:relative;height:380px;overflow:hidden;border-radius:8px 8px 0 0}
+.feat-hero-img{position:absolute!important;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;display:block}
+.feat-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}
+.feat-hero-content{position:absolute;bottom:0;left:0;right:0;z-index:2;padding:1.5rem 1.5rem 1.5rem;text-align:center}
+.feat-hero-title{color:#fff!important;text-align:center;margin:0;font-size:1.35rem}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
 
 .dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}
@@ -3717,10 +3722,14 @@ ${siteNav()}
     featured || others.length > 0
       ? `
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg && featured ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover;object-position:top"/>` : ""}
+    ${featImg && featured ? `<div class="feat-hero-wrap">
+      <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-hero-img" loading="eager"/>
+      <div class="feat-hero-overlay"></div>
+      <div class="feat-hero-content"><h2 class="feat-hero-title">${featTitle}</h2></div>
+    </div>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
-    <h2 style="margin-top:0">${featTitle}</h2>
+    ${!featImg ? `<h2 style="margin-top:0">${featTitle}</h2>` : ""}
     ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
     ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
@@ -4243,10 +4252,14 @@ ${siteNav()}
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   ${featured || othersB.length > 0 ? `
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover;object-position:top"/>` : ""}
+    ${featImg && featured ? `<div class="feat-hero-wrap">
+      <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-hero-img" loading="eager"/>
+      <div class="feat-hero-overlay"></div>
+      <div class="feat-hero-content"><h2 class="feat-hero-title">${escapeHtml(String(featured.year))} — ${featName}</h2></div>
+    </div>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
-    <h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>
+    ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
     ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
     ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
@@ -4578,10 +4591,14 @@ ${siteNav()}
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
   ${featured || othersD.length > 0 ? `
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-img" loading="eager" style="width:100%;display:block;max-height:380px;object-fit:cover;object-position:top"/>` : ""}
+    ${featImg && featured ? `<div class="feat-hero-wrap">
+      <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-hero-img" loading="eager"/>
+      <div class="feat-hero-overlay"></div>
+      <div class="feat-hero-content"><h2 class="feat-hero-title">${escapeHtml(String(featured.year))} — ${featName}</h2></div>
+    </div>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
-    <h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>
+    ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
     ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
     ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}

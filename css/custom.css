@@ -241,7 +241,7 @@ h3 {
   padding-right: 0;
 }
 .homepage-section-title-date {
-  padding: 0px 10px 40px 30px;
+  padding: 0px 10px 40px 0px;
 }
 .people-strip {
   border-bottom: 1px solid var(--border);
@@ -802,7 +802,9 @@ h3 {
   color: #fff;
   opacity: 0.85;
   pointer-events: none;
-  transition: opacity 0.2s, transform 0.2s;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
 }
 .video-card:hover .video-card-play {
   opacity: 1;

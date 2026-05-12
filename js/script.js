@@ -1061,7 +1061,7 @@ async function populatePeopleStrip() {
     const wrap = document.createElement("div");
     wrap.className = "people-group-wrap";
 
-    const label = document.createElement("h3");
+    const label = document.createElement("h2");
     label.className = "group-label";
     label.innerHTML = labelHtml;
 
@@ -1089,21 +1089,21 @@ async function populatePeopleStrip() {
   track.innerHTML = "";
 
   let hasGroup = appendPeopleGroup({
-    labelHtml: '<i class="bi bi-sunrise"></i> Born Today',
+    labelHtml: "Born Today",
     items: births,
     href: "/born/today/",
     seeAllHref: "/born/today/",
   });
   if (hasGroup && deaths.length) appendDivider();
   hasGroup = appendPeopleGroup({
-    labelHtml: '<i class="bi bi-sunset"></i> Died Today',
+    labelHtml: "Died Today",
     items: deaths,
     href: "/died/today/",
     seeAllHref: "/died/today/",
   }) || hasGroup;
   if (hasGroup && fromArticles.length) appendDivider();
   appendPeopleGroup({
-    labelHtml: '<i class="bi bi-journal-richtext"></i> From Articles',
+    labelHtml: "From Articles",
     items: fromArticles,
     itemHref: (p) => p.url || ("/people/" + p.slug + "/"),
     pillOptions: { useProxy: true, meta: "Article profile" },

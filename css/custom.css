@@ -226,6 +226,20 @@ h3 {
 }
 
 /* People Strip */
+.homepage-section-title {
+  margin: 0;
+  padding: 1.75rem 1.5rem 0.85rem;
+  color: var(--text);
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.homepage-section-title-inner {
+  max-width: 1920px;
+  margin: 0 auto;
+  padding-left: 0;
+  padding-right: 0;
+}
 .people-strip {
   border-bottom: 1px solid var(--border);
   padding: 1rem 1.5rem;
@@ -995,7 +1009,7 @@ h3 {
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);
 }
-.month-nav h2 {
+.month-nav h3 {
   font-size: 1.5rem;
   font-weight: 700;
   margin: 0;
@@ -1663,7 +1677,7 @@ h3 {
   .caption-text {
     font-size: 1rem;
   }
-  .month-nav h2 {
+  .month-nav h3 {
     font-size: 1.5rem;
     font-weight: 600;
   }

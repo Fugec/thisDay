@@ -74,6 +74,26 @@ export function hasAnyTextAIProvider(env) {
   );
 }
 
+function isSubrequestLimitError(err) {
+  return /too many subrequests/i.test(err?.message || String(err || ""));
+}
+
+function hasSubrequestLimitFailure(failureReasons) {
+  return failureReasons.some((reason) => /too many subrequests/i.test(reason));
+}
+
+function getProviderAttemptLimit(env) {
+  const parsed = Number(env?.AI_PROVIDER_ATTEMPT_LIMIT);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 6;
+}
+
+function guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons) {
+  if (providerAttempts < providerAttemptLimit) return;
+  throw new Error(
+    `callAI failed. AI provider attempt limit ${providerAttemptLimit} reached. ${failureReasons.join(" | ")}`,
+  );
+}
+
 /**
  * Calls AI with a Workers AI → Groq fallback chain.
  * Always resolves to the raw text string from the model.
@@ -96,6 +116,8 @@ export function hasAnyTextAIProvider(env) {
  */
 export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_000, cfModel, temperature = 0.3 } = {}) {
   const failureReasons = [];
+  const providerAttemptLimit = getProviderAttemptLimit(env);
+  let providerAttempts = 0;
 
   // 1. Groq — preferred when configured, especially on Free-plan Workers where
   // Workers AI can consume the per-invocation subrequest budget too early.
@@ -105,6 +127,8 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
   }
   for (const key of groqKeys) {
     try {
+      guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
+      providerAttempts += 1;
       const res = await fetch(GROQ_URL, {
         method: "POST",
         headers: {
@@ -132,7 +156,11 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
     } catch (err) {
       console.warn(`Groq request failed (${err.message})`);
       failureReasons.push(`Groq request failed: ${err.message}`);
+      if (isSubrequestLimitError(err)) break;
     }
+  }
+  if (hasSubrequestLimitFailure(failureReasons)) {
+    throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
   }
 
   // 2. OpenRouter — free router with OpenAI-compatible chat completions.
@@ -140,6 +168,8 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
   if (openRouterKeys.length > 0) {
     for (const openRouterKey of openRouterKeys) {
     try {
+      guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
+      providerAttempts += 1;
       const res = await fetch(OPENROUTER_URL, {
         method: "POST",
         headers: {
@@ -168,7 +198,11 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
     } catch (err) {
       console.warn(`OpenRouter request failed (${err.message})`);
       failureReasons.push(`OpenRouter request failed: ${err.message}`);
+      if (isSubrequestLimitError(err)) break;
     }
+    }
+    if (hasSubrequestLimitFailure(failureReasons)) {
+      throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
     }
   } else {
     failureReasons.push("OpenRouter API key missing");
@@ -179,6 +213,8 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
   if (cerebrasKeys.length > 0) {
     for (const cerebrasKey of cerebrasKeys) {
     try {
+      guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
+      providerAttempts += 1;
       const res = await fetch(CEREBRAS_URL, {
         method: "POST",
         headers: {
@@ -207,7 +243,11 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
     } catch (err) {
       console.warn(`Cerebras request failed (${err.message})`);
       failureReasons.push(`Cerebras request failed: ${err.message}`);
+      if (isSubrequestLimitError(err)) break;
     }
+    }
+    if (hasSubrequestLimitFailure(failureReasons)) {
+      throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
     }
   } else {
     failureReasons.push("Cerebras API key missing");
@@ -216,6 +256,8 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
   // 4. Anthropic — useful when Groq is rate-limited and Workers AI quota is exhausted.
   if (env.ANTHROPIC_API_KEY) {
     try {
+      guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
+      providerAttempts += 1;
       const systemMessages = messages
         .filter((message) => message?.role === "system" && typeof message?.content === "string")
         .map((message) => message.content.trim())
@@ -267,6 +309,9 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
     } catch (err) {
       console.warn(`Anthropic request failed (${err.message})`);
       failureReasons.push(`Anthropic request failed: ${err.message}`);
+      if (isSubrequestLimitError(err)) {
+        throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
+      }
     }
   } else {
     failureReasons.push("Anthropic API key missing");
@@ -275,6 +320,8 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
   // 5. Workers AI — built-in fallback when external providers are unavailable
   if (env.AI) {
     try {
+      guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
+      providerAttempts += 1;
       const model = cfModel ?? (await resolveAiModel(env.BLOG_AI_KV).catch(() => null));
       const timeout = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("Workers AI timeout")), timeoutMs),
@@ -291,6 +338,9 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
     } catch (err) {
       console.warn(`Workers AI failed (${err.message})`);
       failureReasons.push(`Workers AI failed: ${err.message}`);
+      if (isSubrequestLimitError(err)) {
+        throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
+      }
     }
   } else {
     failureReasons.push("Workers AI binding missing");

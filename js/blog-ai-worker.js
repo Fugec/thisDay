@@ -3181,7 +3181,9 @@ async function maybeGenerateBlogPost(env, ctx) {
 
   // Retry up to 3 times — CF Workers AI occasionally times out on the first attempt.
   let lastError;
+  let attemptsMade = 0;
   for (let attempt = 1; attempt <= 3; attempt++) {
+    attemptsMade = attempt;
     try {
       await generateAndStore(env, ctx, null, null, null, {
         lightweightPublish: true,
@@ -3193,6 +3195,7 @@ async function maybeGenerateBlogPost(env, ctx) {
     } catch (err) {
       lastError = err;
       console.error(`Blog AI: attempt ${attempt}/3 failed — ${err.message}`);
+      if (/too many subrequests/i.test(err.message || "")) break;
       if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt));
     }
   }
@@ -3207,7 +3210,7 @@ async function maybeGenerateBlogPost(env, ctx) {
   });
   await env.BLOG_AI_KV.put(
     `error:${today}`,
-    `Generation failed after 3 attempts: ${errMsg}`,
+    `Generation failed after ${attemptsMade} attempt(s): ${errMsg}`,
     { expirationTtl: 7 * 86_400 }, // auto-expire after 7 days
   );
   console.error(

@@ -3071,11 +3071,18 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 
 .card-box{background:var(--cb);border:1px solid var(--cbr);border-radius:10px;padding:22px;margin-bottom:22px}
 .feat-img{width:100%;max-height:420px;object-fit:cover;object-position:center;border-radius:8px;margin-bottom:20px}
-.feat-hero-wrap{position:relative;height:380px;overflow:hidden;border-radius:8px 8px 0 0}
-.feat-hero-img{position:absolute!important;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;display:block}
-.feat-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}
-.feat-hero-content{position:absolute;bottom:0;left:0;right:0;z-index:2;padding:1.5rem 1.5rem 1.5rem;text-align:center}
-.feat-hero-title{color:#fff!important;text-align:center;margin:0;font-size:1.35rem}
+.article-hero-wrap{position:relative;margin:.75rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}
+.article-hero-img{position:absolute!important;inset:0;width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important;display:block;z-index:0}
+.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}
+.article-hero-content{position:relative;z-index:2;width:100%;padding:2rem 1.5rem 2.5rem;text-align:center}
+.article-hero-title{color:#fff!important;text-align:center;margin:0;font-size:1.75rem;font-weight:700;line-height:1.15}
+.article-hero-subtitle{max-width:620px;margin:.8rem auto 0;color:rgba(255,255,255,.82)!important;font-size:15px;line-height:1.55;text-align:center}
+.article-hero-meta{max-width:620px;margin:.65rem auto 0;color:rgba(255,255,255,.74)!important;font-size:.82rem!important;line-height:1.5;text-align:center}
+.article-hero-meta a{color:inherit!important}
+.article-hero-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:1rem}
+.article-hero-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid rgba(255,255,255,.3);border-radius:999px;background:rgba(255,255,255,.12);color:#fff!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none}
+.article-hero-pill-featured{background:rgba(27,58,45,.85);border-color:rgba(255,255,255,.35);color:#fff!important}
+@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:.75rem 0 1.5rem;justify-content:center}.article-hero-title{font-size:1.7rem}}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
 
 .dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}
@@ -3712,25 +3719,35 @@ ${siteNav()}
     </ol>
   </nav>
   <h1 class="mb-2">${escapeHtml(mDisplay)} ${day} in History</h1>
-  <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+  ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     ${events.length > 0 ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
     ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
-  </div>
-  <p class="text-muted mb-2" style="font-size:15px">${escapeHtml(eventsIntroLine)}</p>
-  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  </div>`}
+  ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(eventsIntroLine)}</p>
+  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
   ${
     featured || others.length > 0
       ? `
+  ${featImg && featured ? `<div class="article-hero-wrap">
+    <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="article-hero-img" loading="eager"/>
+    <div class="article-hero-overlay"></div>
+    <div class="article-hero-content">
+      <h2 class="article-hero-title">${featTitle}</h2>
+      ${featRemainder ? `<p class="article-hero-subtitle">${escapeHtml(featRemainder)}</p>` : ""}
+      <p class="article-hero-meta">${escapeHtml(eventsIntroLine)}</p>
+      <p class="article-hero-meta">By <a href="/about/" rel="author">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+      <div class="article-hero-pill-row">
+        <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-calendar-event me-1"></i>Historical Events</span>
+        ${events.length > 0 ? `<span class="article-hero-pill"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
+        ${evEraRange ? `<span class="article-hero-pill"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
+      </div>
+    </div>
+  </div>` : ""}
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg && featured ? `<div class="feat-hero-wrap">
-      <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="feat-hero-img" loading="eager"/>
-      <div class="feat-hero-overlay"></div>
-      <div class="feat-hero-content"><h2 class="feat-hero-title">${featTitle}</h2></div>
-    </div>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${featTitle}</h2>` : ""}
-    ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
+    ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
     ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${others.length > 0 ? `
@@ -4244,23 +4261,33 @@ ${siteNav()}
     </ol>
   </nav>
   <h1 class="mb-2">Famous Birthdays on ${escapeHtml(mDisplay)} ${day}</h1>
-  <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+  ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
-  </div>
-  <p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
-  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  </div>`}
+  ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
+  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
   ${featured || othersB.length > 0 ? `
+  ${featImg && featured ? `<div class="article-hero-wrap">
+    <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="article-hero-img" loading="eager"/>
+    <div class="article-hero-overlay"></div>
+    <div class="article-hero-content">
+      <h2 class="article-hero-title">${escapeHtml(String(featured.year))} — ${featName}</h2>
+      ${featRemainder ? `<p class="article-hero-subtitle">${escapeHtml(featRemainder)}</p>` : ""}
+      <p class="article-hero-meta">${escapeHtml(introLine)}</p>
+      <p class="article-hero-meta">By <a href="/about/" rel="author">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+      <div class="article-hero-pill-row">
+        <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-person-heart me-1"></i>Famous Birthdays</span>
+        <span class="article-hero-pill"><i class="bi bi-people me-1"></i>${births.length} people</span>
+        ${eraRange ? `<span class="article-hero-pill"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+      </div>
+    </div>
+  </div>` : ""}
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg && featured ? `<div class="feat-hero-wrap">
-      <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-hero-img" loading="eager"/>
-      <div class="feat-hero-overlay"></div>
-      <div class="feat-hero-content"><h2 class="feat-hero-title">${escapeHtml(String(featured.year))} — ${featName}</h2></div>
-    </div>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
-    ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
+    ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
     ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${othersB.length > 0 ? `
@@ -4583,23 +4610,33 @@ ${siteNav()}
     </ol>
   </nav>
   <h1 class="mb-2">Notable Deaths on ${escapeHtml(mDisplay)} ${day}</h1>
-  <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+  ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
-  </div>
-  <p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
-  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+  </div>`}
+  ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
+  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
   ${featured || othersD.length > 0 ? `
+  ${featImg && featured ? `<div class="article-hero-wrap">
+    <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="article-hero-img" loading="eager"/>
+    <div class="article-hero-overlay"></div>
+    <div class="article-hero-content">
+      <h2 class="article-hero-title">${escapeHtml(String(featured.year))} — ${featName}</h2>
+      ${featRemainder ? `<p class="article-hero-subtitle">${escapeHtml(featRemainder)}</p>` : ""}
+      <p class="article-hero-meta">${escapeHtml(introLine)}</p>
+      <p class="article-hero-meta">By <a href="/about/" rel="author">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+      <div class="article-hero-pill-row">
+        <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-flower1 me-1"></i>Notable Deaths</span>
+        <span class="article-hero-pill"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
+        ${eraRange ? `<span class="article-hero-pill"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+      </div>
+    </div>
+  </div>` : ""}
   <div class="card-box" style="padding:0;overflow:hidden">
-    ${featImg && featured ? `<div class="feat-hero-wrap">
-      <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="feat-hero-img" loading="eager"/>
-      <div class="feat-hero-overlay"></div>
-      <div class="feat-hero-content"><h2 class="feat-hero-title">${escapeHtml(String(featured.year))} — ${featName}</h2></div>
-    </div>` : ""}
     <div style="padding:20px 24px">
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
-    ${featRemainder ? `<p class="mb-3">${escapeHtml(featRemainder)}</p>` : ""}
+    ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
     ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${othersD.length > 0 ? `
@@ -4831,7 +4868,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v19-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v26-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -4839,7 +4876,7 @@ async function handleBornPage(request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const patched = cached.includes('ai-card-patch-v1') ? cached : cached.replace('</head>', '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         return new Response(patched, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
@@ -4923,7 +4960,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v18-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v25-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -4931,7 +4968,7 @@ async function handleDiedPage(request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const patched = cached.includes('ai-card-patch-v1') ? cached : cached.replace('</head>', '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         return new Response(patched, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
@@ -5163,7 +5200,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v38-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v45-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -5171,7 +5208,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const patched = cached.includes('ai-card-patch-v1') ? cached : cached.replace('</head>', '<style>/*ai-card-patch-v1*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         return new Response(patched, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",

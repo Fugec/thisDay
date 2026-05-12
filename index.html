@@ -112,7 +112,7 @@
       sizes="16x16"
       href="icons/favicon-16x16.png"
     />
-    <link rel="stylesheet" href="css/custom.css?v=13" />
+    <link rel="stylesheet" href="css/custom.css?v=14" />
 
     <link rel="manifest" href="/manifest.json" />
     <link
@@ -176,6 +176,9 @@
 
     <!-- People Today -->
     <section class="people-strip" id="peopleStrip">
+      <h2 class="homepage-section-title homepage-section-title-inner">
+        Born and Died Today
+      </h2>
       <div class="people-track-wrap">
         <div class="people-track" id="peopleTrack">
           <!-- Skeleton shown while loading -->
@@ -207,6 +210,7 @@
     </section>
 
     <!-- Blog Posts Section -->
+    <h2 class="homepage-section-title">Latest History Articles</h2>
     <section class="blog-section">
       <div class="blog-grid" id="blogGrid">
         <!-- Populated by JavaScript -->
@@ -219,6 +223,7 @@
     </section>
 
     <!-- Event Section (replaces Quiz) -->
+    <h2 class="homepage-section-title">Start Exploring Today</h2>
     <section class="event-section">
       <div class="event-wrap">
         <div class="quiz-card" id="todayEventCard">
@@ -258,6 +263,7 @@
     </section>
 
     <!-- Today's Events Section (identical style to blog-section) -->
+    <h2 class="homepage-section-title">Today in History</h2>
     <section class="blog-section" id="todaysEventsSection">
       <div class="blog-grid" id="todaysEventsGrid">
         <!-- Populated by JavaScript with today's Wikipedia events -->
@@ -304,6 +310,7 @@
     </script>
 
     <!-- Featured Videos Section -->
+    <h2 class="homepage-section-title">History Videos</h2>
     <section class="blog-section video-section">
       <div class="blog-grid video-grid" id="videoGrid">
         <!-- Populated by JavaScript -->
@@ -360,12 +367,15 @@
 
     <!-- Calendar -->
     <main class="calendar-section">
+      <h2 class="homepage-section-title homepage-section-title-inner">
+        Explore History by Date
+      </h2>
       <div class="month-nav">
         <button class="btn" id="prevMonthBtn" aria-label="Previous month">
           <i class="bi bi-chevron-left"></i>
           <span class="d-none d-sm-inline">Prev</span>
         </button>
-        <h2 id="currentMonthYear"></h2>
+        <h3 id="currentMonthYear"></h3>
         <button class="btn" id="nextMonthBtn" aria-label="Next month">
           <span class="d-none d-sm-inline">Next</span>
           <i class="bi bi-chevron-right"></i>
@@ -511,7 +521,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="js/script.js?v=12"></script>
+    <script src="js/script.js?v=13"></script>
     <script src="/js/chatbot.js?v=5"></script>
 
     <script>

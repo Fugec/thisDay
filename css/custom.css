@@ -228,7 +228,7 @@ h3 {
 /* People Strip */
 .homepage-section-title {
   margin: 0;
-  padding: 40px 10px;
+  padding: 40px 10px 40px 30px;
   color: var(--text);
   font-size: 1.35rem;
   font-weight: 700;
@@ -241,7 +241,7 @@ h3 {
   padding-right: 0;
 }
 .homepage-section-title-date {
-  padding: 0px 10px 40px 10px;
+  padding: 0px 10px 40px 30px;
 }
 .people-strip {
   border-bottom: 1px solid var(--border);
@@ -280,6 +280,9 @@ h3 {
   font-weight: 700;
   margin: 0 0 0.6rem;
   line-height: 1.35;
+}
+.people-group-wrap .group-label {
+  padding: 20px 0 10px 0 !important;
 }
 .people-divider {
   width: 1px;

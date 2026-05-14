@@ -30,6 +30,9 @@ const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
+const WIKIMEDIA_THUMBNAIL_STEPS = [
+  20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840,
+];
 
 // --- Helper function to fetch daily events from Wikipedia API ---
 async function fetchDailyEvents(date) {
@@ -100,6 +103,29 @@ function normalizeWikimediaImageUrl(src) {
     .replace(/%25([0-9A-Fa-f]{2})/g, "%$1");
 }
 
+function getWikimediaThumbnailStep(width) {
+  const requested = Number.isFinite(width) && width > 0 ? width : 1200;
+  return (
+    WIKIMEDIA_THUMBNAIL_STEPS.find((step) => step >= requested) ||
+    WIKIMEDIA_THUMBNAIL_STEPS[WIKIMEDIA_THUMBNAIL_STEPS.length - 1]
+  );
+}
+
+function buildWikimediaFetchUrl(src, width) {
+  const normalizedSrc = normalizeWikimediaImageUrl(src);
+  const parsed = new URL(normalizedSrc);
+  if (!parsed.hostname.endsWith("wikimedia.org")) {
+    throw new Error("Only Wikimedia images are allowed");
+  }
+
+  // Wikimedia rejects arbitrary thumbnail widths now. Use the next supported
+  // source bucket, then let Cloudflare Image Resizing deliver the requested size.
+  return normalizedSrc.replace(
+    /\/\d+px-(?=[^/?#]+(?:[?#]|$))/,
+    `/${getWikimediaThumbnailStep(width)}px-`,
+  );
+}
+
 async function handleImageProxy(_request, url, ctx) {
   const src = url.searchParams.get("src");
   const width = Math.min(
@@ -128,20 +154,13 @@ async function handleImageProxy(_request, url, ctx) {
 
   let imageUrl;
   try {
-    const normalizedSrc = normalizeWikimediaImageUrl(src);
-    // URLSearchParams already decoded the src param once — use it directly.
-    // A second decodeURIComponent() would turn %C3%BC into ü (raw Unicode)
-    // which Wikimedia rejects; percent-encoded form is the correct fetch URL.
-    const parsed = new URL(normalizedSrc);
-    if (!parsed.hostname.endsWith("wikimedia.org")) {
+    imageUrl = buildWikimediaFetchUrl(src, width);
+  } catch (err) {
+    if (err.message === "Only Wikimedia images are allowed") {
       return new Response("Forbidden: only Wikimedia images allowed", {
         status: 403,
       });
     }
-    // Resize by swapping the pixel-width segment in Wikipedia thumbnail paths
-    // e.g. /320px-File.jpg  →  /1200px-File.jpg
-    imageUrl = normalizedSrc.replace(/\/\d+px-/, `/${width}px-`);
-  } catch {
     return new Response("Invalid URL", { status: 400 });
   }
 

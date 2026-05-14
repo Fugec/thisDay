@@ -128,11 +128,55 @@ const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
+const ARTICLE_HERO_CSS =
+  `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
+const ENTITY_STRIP_BLOCK_RE =
+  /<style>\.entity-strip\{[\s\S]*?<\/style><div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/;
+const VIDEO_THUMBNAIL_OVERRIDES = {
+  "13-may-2026":
+    "https://thisday.info/image-proxy?src=https%3A%2F%2Fupload.wikimedia.org%2Fwikipedia%2Fcommons%2Ff%2Ffb%2FGIRO8076_Pogacar_%252853750349243%2529.jpg",
+};
 
 function buildSocialPreviewImageUrl(imageUrl) {
   return imageUrl
     ? `https://thisday.info/image-proxy?src=${encodeURIComponent(imageUrl)}&${SOCIAL_PREVIEW_IMAGE_PARAMS}`
     : "https://thisday.info/images/logo.png";
+}
+
+function findArticleHeroWrapEnd(html, heroStart) {
+  if (heroStart < 0) return -1;
+  const divRe = /<\/?div\b[^>]*>/gi;
+  divRe.lastIndex = heroStart;
+  let depth = 0;
+  let match;
+  while ((match = divRe.exec(html))) {
+    if (/^<div\b/i.test(match[0])) {
+      depth += 1;
+    } else {
+      depth -= 1;
+      if (depth === 0) return match.index + match[0].length;
+    }
+  }
+  return -1;
+}
+
+function moveEntityStripOutOfArticleHero(html) {
+  const heroStart = html.indexOf('<div class="article-hero-wrap">');
+  if (heroStart === -1 || !html.includes('data-entity-strip="1"')) return html;
+  const heroEnd = findArticleHeroWrapEnd(html, heroStart);
+  if (heroEnd === -1) return html;
+
+  const scoped = html.slice(heroStart);
+  const stripMatch = scoped.match(ENTITY_STRIP_BLOCK_RE);
+  if (!stripMatch) return html;
+
+  const strip = stripMatch[0];
+  const stripIndex = heroStart + stripMatch.index;
+  if (stripIndex >= heroEnd) return html;
+
+  const withoutStrip = html.slice(0, stripIndex) + html.slice(stripIndex + strip.length);
+  const newHeroEnd = heroEnd - strip.length;
+  return withoutStrip.slice(0, newHeroEnd) + "\n" + strip + withoutStrip.slice(newHeroEnd);
 }
 
 function buildArticleAnswerBlock(content) {
@@ -149,7 +193,7 @@ function buildArticleAnswerBlock(content) {
     .map((f) => `      <div class="ai-answer-item"><strong>${esc(f.label)}</strong><span>${esc(f.value)}</span></div>`)
     .join("\n");
 
-  return `<section class="ai-answer-card mb-4" aria-label="Short answer">
+  return `<section class="ai-answer-card article-body-layer mb-4" aria-label="Short answer">
     <div class="ai-answer-kicker">Short answer</div>
     <div class="ai-answer-grid" aria-label="Key facts">
 ${gridItems}
@@ -1633,7 +1677,9 @@ export default {
             title: post.title ?? slug,
             description: post.description ?? "",
             uploadedAt: v.uploadedAt,
-            thumbnail: `https://img.youtube.com/vi/${v.youtubeId}/hqdefault.jpg`,
+            thumbnail:
+              VIDEO_THUMBNAIL_OVERRIDES[slug] ??
+              `https://img.youtube.com/vi/${v.youtubeId}/hqdefault.jpg`,
           };
         });
       return new Response(JSON.stringify(videos), {
@@ -2007,11 +2053,16 @@ export default {
           );
         }
         // Inject hero CSS for old posts that predate the article-hero-wrap feature.
+        const oldHeroCssPattern = /\.article-hero-wrap\{position:relative;margin:-1\.5rem -1\.5rem 1\.5rem;[\s\S]*?@media\(max-width:767px\)\{\.article-hero-wrap\{left:50%;transform:translateX\(-50%\);width:100vw;height:100svh;border-radius:0;margin:-1\.5rem 0 1\.5rem;justify-content:center\}\}/g;
+        if (oldHeroCssPattern.test(patchedHtml)) {
+          _heroPatched = true;
+          patchedHtml = patchedHtml.replace(oldHeroCssPattern, ARTICLE_HERO_CSS);
+        }
         if (!patchedHtml.includes('.article-hero-wrap') && patchedHtml.includes('</head>')) {
           _heroPatched = true;
           patchedHtml = patchedHtml.replace(
             '</head>',
-            `<style>.article-hero-wrap{position:relative;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:2;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}</style></head>`,
+            `<style>${ARTICLE_HERO_CSS}</style></head>`,
           );
         }
         // Persist hero-patched HTML back to KV so the next request loads pre-patched HTML
@@ -2584,7 +2635,7 @@ export default {
             '',
           ).replace(
             '</head>',
-            '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>',
+            '<style>/*ai-card-patch-v2*/.ai-answer-card{position:relative!important;z-index:1!important;clear:both!important;background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>',
           );
         }
         // Font-size consistency patch: 15px on .mb-2 and .ai-answer-item value text.
@@ -2707,14 +2758,23 @@ export default {
                   strip,
                 );
               } else {
-                const heroAnchor = updated.includes('<figure class="text-center mb-4 article-hero-fig">')
-                  ? '<figure class="text-center mb-4 article-hero-fig">'
-                  : '<figure class="text-center mb-4">';
-                const heroIdx = updated.indexOf(heroAnchor);
-                if (heroIdx !== -1) {
-                  updated = updated.slice(0, heroIdx) + strip + "\n" + updated.slice(heroIdx);
+                const heroWrapIdx = updated.indexOf('<div class="article-hero-wrap">');
+                const heroWrapEnd = findArticleHeroWrapEnd(updated, heroWrapIdx);
+                if (heroWrapEnd !== -1) {
+                  updated = updated.slice(0, heroWrapEnd) + "\n" + strip + updated.slice(heroWrapEnd);
+                } else {
+                  const heroAnchor = updated.includes('<figure class="text-center mb-4 article-hero-fig">')
+                    ? '<figure class="text-center mb-4 article-hero-fig">'
+                    : '<figure class="text-center mb-4">';
+                  const heroIdx = updated.indexOf(heroAnchor);
+                  const figureEnd = heroIdx !== -1 ? updated.indexOf("</figure>", heroIdx) : -1;
+                  if (figureEnd !== -1) {
+                    const insertAfter = figureEnd + "</figure>".length;
+                    updated = updated.slice(0, insertAfter) + "\n" + strip + updated.slice(insertAfter);
+                  }
                 }
               }
+              updated = moveEntityStripOutOfArticleHero(updated);
               await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, updated);
               await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(entityMeta));
             } catch {
@@ -2762,7 +2822,9 @@ export default {
               "@type": "VideoObject",
               name: postTitle,
               description: postDesc,
-              thumbnailUrl: `https://img.youtube.com/vi/${ytEntry.youtubeId}/maxresdefault.jpg`,
+              thumbnailUrl:
+                VIDEO_THUMBNAIL_OVERRIDES[slug] ??
+                `https://img.youtube.com/vi/${ytEntry.youtubeId}/maxresdefault.jpg`,
               uploadDate: ytEntry.uploadedAt ?? new Date().toISOString(),
               duration: "PT45S",
               embedUrl: `https://www.youtube.com/embed/${ytEntry.youtubeId}`,
@@ -2782,7 +2844,7 @@ export default {
               `<script type="application/ld+json">${JSON.stringify(videoSchema)}<\/script></head>`,
             );
           }
-          return htmlResponse(ytHtml);
+          return htmlResponse(moveEntityStripOutOfArticleHero(ytHtml));
         }
         // Inline quiz JSON so popup opens instantly (no fetch round-trip)
         const inlineQuizRaw = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
@@ -2822,7 +2884,13 @@ export default {
             }
           })(),
         );
-        return htmlResponse(patchedHtml);
+        const entityStripFixedHtml = moveEntityStripOutOfArticleHero(patchedHtml);
+        if (entityStripFixedHtml !== patchedHtml && ctx?.waitUntil) {
+          ctx.waitUntil(
+            env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, entityStripFixedHtml).catch(() => {}),
+          );
+        }
+        return htmlResponse(entityStripFixedHtml);
       }
     }
 
@@ -7857,7 +7925,7 @@ ${JSON.stringify({
       .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--border);text-align:left;color:var(--text)}
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
       .site-table th{background:var(--bg-alt);font-weight:600;white-space:nowrap;width:40%}
-      .ai-answer-card{background:#f5f5f5;border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px;font-size:15px}
+      .ai-answer-card{position:relative;z-index:1;clear:both;background:#f5f5f5;border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px;font-size:15px}
       .ai-answer-card p{margin-bottom:.75rem;font-size:15px}
       .ai-answer-kicker{display:none!important}
       .ai-answer-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
@@ -7865,7 +7933,7 @@ ${JSON.stringify({
       .ai-answer-item{display:flex;flex-direction:column;gap:3px;padding:10px 12px;background:rgba(255,255,255,.65);border:1px solid rgba(27,58,45,.08);border-radius:10px;font-size:15px}
       .ai-answer-item strong{font-size:.74rem;letter-spacing:.03em;text-transform:uppercase;color:var(--text-muted)}
       .tdq-cta-sub{color:var(--text-muted)}
-      .article-hero-wrap{position:relative;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:2;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}
+      ${ARTICLE_HERO_CSS}
       ${BLOG_NAV_WIDTH_FIX_CSS}
       ${NAV_CSS}
       ${FOOTER_CSS}

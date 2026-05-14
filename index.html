@@ -112,7 +112,7 @@
       sizes="16x16"
       href="icons/favicon-16x16.png"
     />
-    <link rel="stylesheet" href="css/custom.css?v=20" />
+    <link rel="stylesheet" href="css/custom.css?v=21" />
 
     <link rel="manifest" href="/manifest.json" />
     <link
@@ -157,10 +157,22 @@
       <p class="eyebrow">On This Day</p>
       <h1 id="dynamicTitle">What Happened in History?</h1>
       <script>
-        (function(){var now=new Date(),m=now.toLocaleDateString("en-US",{month:"long"}),d=now.getDate(),el=document.getElementById("dynamicTitle");if(el)el.innerHTML='What happened on<span class="mobile-date-break"></span> <span class="hero-title-tail"><span class="hero-title-date">'+m+", "+d+"</span> in History?</span>";}());
+        (function () {
+          var now = new Date(),
+            m = now.toLocaleDateString("en-US", { month: "long" }),
+            d = now.getDate(),
+            el = document.getElementById("dynamicTitle");
+          if (el)
+            el.innerHTML =
+              'What happened on<span class="mobile-date-break"></span> <span class="hero-title-tail"><span class="hero-title-date">' +
+              m +
+              ", " +
+              d +
+              "</span> in History?</span>";
+        })();
       </script>
       <p>
-        Every date hides a story. Thisday.info surfaces the wars declared,
+        Every date hides a story. Here you can explore the wars declared,
         inventions patented, leaders born, and empires fallen on this exact
         calendar day, across thousands of years of recorded human history.
       </p>
@@ -315,7 +327,12 @@
       <div class="blog-cta-col">
         <p>Featured Videos</p>
         <h3>Watch history come alive in 60 seconds</h3>
-        <a href="https://www.youtube.com/@thisDay_info/shorts" target="_blank" rel="noopener noreferrer" class="btn">
+        <a
+          href="https://www.youtube.com/@thisDay_info/shorts"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn"
+        >
           See All Videos <i class="bi bi-youtube"></i>
         </a>
       </div>
@@ -324,15 +341,24 @@
     <script>
       (function () {
         fetch("/blog/videos.json")
-          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(function (r) {
+            return r.ok ? r.json() : [];
+          })
           .then(function (videos) {
             var grid = document.getElementById("videoGrid");
             if (!grid || !videos.length) return;
             grid.innerHTML = "";
-            var escHtml = function(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); };
+            var escHtml = function (s) {
+              return String(s)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+            };
             videos.forEach(function (v) {
               var title = v.title || "";
-              var shortTitle = title.length > 55 ? title.slice(0, 52) + "…" : title;
+              var shortTitle =
+                title.length > 55 ? title.slice(0, 52) + "…" : title;
               var desc = v.description || "";
               var shortDesc = desc.length > 90 ? desc.slice(0, 87) + "…" : desc;
               var ytUrl = "https://www.youtube.com/shorts/" + v.youtubeId;
@@ -344,18 +370,24 @@
               card.style.cssText = "text-decoration:none;color:inherit;";
               card.innerHTML =
                 '<div class="video-card-thumb">' +
-                '<img src="' + escHtml(v.thumbnail) + '" alt="' + escHtml(shortTitle) + '" loading="lazy" onerror="if(this.src.indexOf(\'hqdefault\')>-1){this.src=this.src.replace(\'hqdefault\',\'mqdefault\');}else{this.style.display=\'none\';}" />' +
+                '<img src="' +
+                escHtml(v.thumbnail) +
+                '" alt="' +
+                escHtml(shortTitle) +
+                "\" loading=\"lazy\" onerror=\"if(this.src.indexOf('hqdefault')>-1){this.src=this.src.replace('hqdefault','mqdefault');}else{this.style.display='none';}\" />" +
                 '<div class="video-card-play"><i class="bi bi-play-circle-fill"></i></div>' +
-                '</div>' +
+                "</div>" +
                 '<div class="blog-card-body">' +
                 '<div class="blog-card-date">YouTube Shorts</div>' +
-                '<h3>' + escHtml(shortTitle) + '</h3>' +
-                (shortDesc ? '<p>' + escHtml(shortDesc) + '</p>' : '') +
+                "<h3>" +
+                escHtml(shortTitle) +
+                "</h3>" +
+                (shortDesc ? "<p>" + escHtml(shortDesc) + "</p>" : "") +
                 '<span class="btn" style="align-self:flex-start;margin-top:auto">Watch <i class="bi bi-arrow-right"></i></span>' +
-                '</div>';
+                "</div>";
               grid.appendChild(card);
             });
-            var section = grid.closest('.blog-section');
+            var section = grid.closest(".blog-section");
             if (section) section.scrollLeft = 0;
           })
           .catch(function () {});
@@ -364,7 +396,9 @@
 
     <!-- Calendar -->
     <main class="calendar-section">
-      <h2 class="homepage-section-title homepage-section-title-inner homepage-section-title-date">
+      <h2
+        class="homepage-section-title homepage-section-title-inner homepage-section-title-date"
+      >
         Explore History by Date
       </h2>
       <div class="month-nav">
@@ -569,7 +603,7 @@
                 "</div>";
               grid.appendChild(card);
             });
-            var section = grid.closest('.blog-section');
+            var section = grid.closest(".blog-section");
             if (section) section.scrollLeft = 0;
           })
           .catch(function () {});
@@ -648,7 +682,7 @@
 
               grid.appendChild(card);
             });
-            var section = grid.closest('.blog-section');
+            var section = grid.closest(".blog-section");
             if (section) section.scrollLeft = 0;
           } catch (err) {
             var grid = document.getElementById("todaysEventsGrid");

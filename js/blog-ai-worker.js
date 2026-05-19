@@ -767,12 +767,45 @@ function buildCanonicalTitle(eventTitle, historicalDate) {
   return historicalDate ? `${baseTitle} — ${historicalDate}` : baseTitle;
 }
 
+function getTitleLead(title) {
+  return String(title || "")
+    .replace(/\s+[-—]\s+.*$/, "")
+    .trim();
+}
+
+function buildDisplayTitle(currentTitle, eventTitle, historicalDate) {
+  const currentLead = getTitleLead(currentTitle);
+  const lead =
+    (currentLead && !isWeakCtaTitleLead(currentLead) ? currentLead : "") ||
+    getTitleLead(eventTitle) ||
+    "Historical Event";
+  return historicalDate ? `${lead} — ${historicalDate}` : lead;
+}
+
+function isWeakCtaTitleLead(value) {
+  const lead = String(value || "").trim();
+  if (!lead) return true;
+  return /^(discover|uncover|explore|learn|read|inside|remembering|a look at|the story of|what happened|why it matters)\b/i.test(lead) ||
+    /\b(details of|story behind|history of|what happened)\b/i.test(lead);
+}
+
 function eventTitleFromCandidate(parsedTitle, candidate) {
   const aiTitle = String(parsedTitle || "").replace(/\s+[-—]\s+.*$/, "").trim();
   const pageTitle = String(candidate?.pageTitle || "").trim();
   const eventText = String(candidate?.text || "").replace(/\s+/g, " ").trim();
+  const evidenceTitle = deriveCtaEventTitle(pageTitle || aiTitle, eventText);
+  if (evidenceTitle && evidenceTitle !== pageTitle) {
+    return evidenceTitle.length > 96
+      ? `${evidenceTitle.slice(0, 96).trim()}...`
+      : evidenceTitle;
+  }
 
-  if (aiTitle && aiTitle.toLowerCase() !== pageTitle.toLowerCase()) {
+  if (
+    aiTitle &&
+    aiTitle.toLowerCase() !== pageTitle.toLowerCase() &&
+    hasStrongTitleAction(aiTitle) &&
+    !/\b(Founding|Creation|Launch|Opening|Completion|Presentation)\b$/i.test(aiTitle)
+  ) {
     return aiTitle;
   }
 
@@ -823,7 +856,8 @@ function alignContentDateFields(content, canonical = {}) {
     safeContent.eventTitle = canonicalEventTitle;
   }
   if (safeContent.eventTitle && safeContent.historicalDate) {
-    safeContent.title = buildCanonicalTitle(
+    safeContent.title = buildDisplayTitle(
+      safeContent.title,
       safeContent.eventTitle,
       safeContent.historicalDate,
     );
@@ -874,7 +908,11 @@ function enforceSelectedEventDate(content, selectedEvent) {
   content.historicalDate = dateText;
   content.historicalYear = year;
   content.historicalDateISO = isoText;
-  content.title = buildCanonicalTitle(content.eventTitle || selectedEvent.eventTitle, dateText);
+  content.title = buildDisplayTitle(
+    content.title,
+    content.eventTitle || selectedEvent.eventTitle,
+    dateText,
+  );
   if (content.eventTitle) content.jsonLdName = content.eventTitle;
 
   if (Array.isArray(content.quickFacts)) {
@@ -897,6 +935,137 @@ function enforceSelectedEventDate(content, selectedEvent) {
     );
   }
   return content;
+}
+
+function isGenericEventPageTitle(pageTitle) {
+  const normalized = normalizeTopicMatchText(pageTitle);
+  if (!normalized) return true;
+  const genericTitles = new Set([
+    "egypt",
+    "pakistan",
+    "croatia",
+    "great britain",
+    "world war ii",
+    "american revolutionary war",
+    "byzantine empire",
+    "president of romania",
+    "royal thai armed forces",
+    "united states congress",
+    "act of parliament",
+    "soviet mars program",
+    "venera program",
+    "space shuttle program",
+  ]);
+  return genericTitles.has(normalized);
+}
+
+function scoreBlogEventCandidate(event) {
+  const haystack = normalizeTopicMatchText(
+    `${event?.pageTitle || ""} ${event?.text || ""}`,
+  );
+  const title = normalizeTopicMatchText(event?.pageTitle || "");
+  let score = 0;
+
+  // Dedicated event pages are usually a better article seed than broad country
+  // or institution pages attached to an event blurb.
+  if (/^\d{4}\b/.test(title)) score += 10;
+  if (
+    /\b(crash|flight|helicopter|disaster|bombing|shooting|massacre|assassination|battle|war|invasion|coup|revolution|independence|treaty|crisis|expedition|deportation|fire|explosion)\b/.test(
+      haystack,
+    )
+  ) {
+    score += 28;
+  }
+  if (
+    /\b(president|prime minister|foreign minister|king|queen|emperor|pope|monarch|supreme leader|head of state|john f kennedy|martin luther king|winston churchill|napoleon|atat rk|ataturk|anne boleyn)\b/.test(
+      haystack,
+    )
+  ) {
+    score += 28;
+  }
+  if (
+    /\b(killed|dead|dies|death|beheaded|assassinated|all on board|crashes|explodes|surrenders|defeat|defeats|ratifies|cedes|annexes)\b/.test(
+      haystack,
+    )
+  ) {
+    score += 24;
+  }
+  if (
+    /\b(global audience|billion|world s first|first man made|first national|all on board|foreign minister|president of iran|treaty of guadalupe hidalgo|turkish war of independence|nullification crisis|battle of rocroi)\b/.test(
+      haystack,
+    )
+  ) {
+    score += 22;
+  }
+  if (Number.parseInt(event?.year, 10) >= 1900) score += 4;
+  if (event?.hasThumbnail) score += 4;
+  if (Number.parseInt(event?.extractLength, 10) >= 450) score += 4;
+
+  if (isGenericEventPageTitle(event?.pageTitle)) score -= 22;
+  if (
+    /\b(sports?|football club|club|team|league|match|cycling|race|birthday salute|commemoration day|awareness day|testing day|mother s day)\b/.test(
+      haystack,
+    )
+  ) {
+    score -= 32;
+  }
+  if (/\b(founded|founding|established|opens|birthday|appointed)\b/.test(haystack)) {
+    score -= 12;
+  }
+  if (/\b(local|regional|vocational school|municipal)\b/.test(haystack)) {
+    score -= 10;
+  }
+
+  return score;
+}
+
+function rankBlogEventCandidates(events) {
+  return events
+    .map((event) => ({
+      ...event,
+      editorialScore: scoreBlogEventCandidate(event),
+    }))
+    .sort((a, b) => {
+      if (b.editorialScore !== a.editorialScore) {
+        return b.editorialScore - a.editorialScore;
+      }
+      return Number.parseInt(b.year, 10) - Number.parseInt(a.year, 10);
+    });
+}
+
+function truncateSelectorText(value, maxLength = 210) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function formatSelectorEventLine(event, index, { includeScore = false } = {}) {
+  const parts = [
+    `${index + 1}. ${event.year || "Unknown"}`,
+    event.pageTitle ? `${event.pageTitle}` : "Untitled page",
+  ];
+  const media = event.hasThumbnail ? "image" : "no image";
+  const extract = Number.parseInt(event.extractLength, 10) || 0;
+  const score = includeScore ? `, editorial priority: ${event.editorialScore}` : "";
+  return `${parts.join(": ")} — ${truncateSelectorText(event.text)} (${media}, extract: ${extract}${score})${event.pageUrl ? ` [${event.pageUrl}]` : ""}`;
+}
+
+function applyMajorEventGuard(matchedCandidate, candidateEvents) {
+  const topCandidate = candidateEvents?.[0] || null;
+  if (!matchedCandidate || !topCandidate || matchedCandidate === topCandidate) {
+    return matchedCandidate;
+  }
+
+  const matchedScore = Number.parseInt(matchedCandidate.editorialScore, 10) || 0;
+  const topScore = Number.parseInt(topCandidate.editorialScore, 10) || 0;
+  if (topScore >= 60 && topScore >= matchedScore + 30) {
+    console.warn(
+      `Event selector override: "${matchedCandidate.pageTitle}" scored ${matchedScore}, using higher-priority "${topCandidate.pageTitle}" scored ${topScore}.`,
+    );
+    return topCandidate;
+  }
+
+  return matchedCandidate;
 }
 
 async function chooseEventForDate(
@@ -925,6 +1094,7 @@ async function chooseEventForDate(
       : "";
 
   let candidateEvents = [];
+  let allEvents = [];
   try {
     let eventsData =
       (env.EVENTS_KV &&
@@ -950,7 +1120,7 @@ async function chooseEventForDate(
       }
     }
 
-    candidateEvents = (eventsData?.events || [])
+    allEvents = (eventsData?.events || [])
       .map((event) => {
         const firstPage = event?.pages?.[0] || {};
         const pageTitle =
@@ -971,7 +1141,9 @@ async function chooseEventForDate(
           extractLength: String(firstPage?.extract || "").length,
         };
       })
-      .filter((event) => event.year && event.text && event.pageTitle)
+      .filter((event) => event.year && event.text && event.pageTitle);
+
+    candidateEvents = allEvents
       .filter((event) => event.hasThumbnail && event.extractLength >= 300)
       .filter((event) => {
         const haystack = `${event.pageTitle} ${event.text}`.toLowerCase();
@@ -979,35 +1151,48 @@ async function chooseEventForDate(
           haystack.includes(String(taken || "").toLowerCase()),
         );
       });
+    candidateEvents = rankBlogEventCandidates(candidateEvents);
   } catch (err) {
     console.warn(`Event selector candidate load failed: ${err.message}`);
   }
 
+  const allEventsSection =
+    allEvents.length > 0
+      ? `First, review the full event inventory for ${monthName} ${day}. Do not choose yet; compare the whole date before using the ranked shortlist.\n` +
+        allEvents
+          .map((event, index) => formatSelectorEventLine(event, index))
+          .join("\n") +
+        `\nOnly after reviewing all ${allEvents.length} entries should you choose the article topic.\n`
+      : "";
+
   const candidateSection =
     candidateEvents.length > 0
-      ? `Choose ONLY from this vetted list of real events for ${monthName} ${day}:\n` +
+      ? `Then choose ONLY from this ranked, vetted list of article-ready events for ${monthName} ${day}:\n` +
         candidateEvents
           .map(
             (event, index) =>
-              `${index + 1}. ${event.year}: ${event.pageTitle} — ${event.text}${event.pageUrl ? ` [${event.pageUrl}]` : ""}`,
+              formatSelectorEventLine(event, index, { includeScore: true }),
           )
           .join("\n") +
-        `\nDo not invent a different event, year, or title.`
+        `\nThe list is sorted by editorial priority. Prefer the highest-ranked candidate unless it is already covered or clearly unsuitable. Do not invent a different event, year, or title.`
       : `No vetted event list is available, so be extremely conservative and choose only an event you are certain happened on ${monthName} ${day}.`;
 
   const prompt =
     `Select a single real historical event that happened on ${monthName} ${day} in any year.\n` +
-    `${avoidTitles}${avoidPillars}${preferPillars}${candidateSection}\n` +
+    `${avoidTitles}${avoidPillars}${preferPillars}${allEventsSection}${candidateSection}\n` +
     `Requirements:\n` +
     `- The event must actually have happened on ${monthName} ${day}\n` +
+    `- Review the full event inventory first, then make the final selection from the ranked vetted list. Do not stop at the first familiar or underrepresented category.\n` +
+    `- Category rotation is only a tie-breaker. Never choose a niche sports, club, observance, or local item ahead of a major disaster, national-leader death, war, independence event, treaty, or political crisis.\n` +
     `- Strongly prefer events with global significance: major wars and battles, landmark treaties, world-changing political milestones, famous scientific or cultural breakthroughs, events covered by every world history textbook\n` +
     `- Avoid local or regional sports disasters, niche criminal incidents, or events significant only to a single country\n` +
     `- Avoid events where the Wikipedia page title is just a country name (e.g. "Ghana", "Armenia", "Florida") — those usually mean the article is a generic country page, not a dedicated event article\n` +
     `- Do not choose an event from any other calendar day\n` +
     `- If a vetted event list is provided above, your answer must match one entry from that list\n` +
-    `- If a vetted list is provided, include "candidateIndex": N where N is the number (1, 2, 3...) from the list\n` +
+    `- If a vetted list is provided, include "candidateIndex": N where N is the number (1, 2, 3...) from the ranked vetted list\n` +
+    `- Include "reviewedEventCount" with the number of full-inventory entries you reviewed, and "strongestRejected" naming the strongest alternative you rejected\n` +
     `- Respond with JSON only\n` +
-    `{"candidateIndex":1,"eventTitle":"Exact title from list","historicalDate":"Month Day, Year","historicalDateISO":"YYYY-MM-DD","wikiUrl":"https://en.wikipedia.org/wiki/Article","why":"short reason under 25 words"}`;
+    `{"candidateIndex":1,"reviewedEventCount":${allEvents.length},"eventTitle":"Exact title from ranked vetted list","historicalDate":"Month Day, Year","historicalDateISO":"YYYY-MM-DD","wikiUrl":"https://en.wikipedia.org/wiki/Article","strongestRejected":"Candidate title","why":"short reason under 25 words"}`;
 
   const raw = await callAI(
     env,
@@ -1073,6 +1258,7 @@ async function chooseEventForDate(
     if (!matchedCandidate) {
       throw new Error(`Event selector chose an event outside the vetted list: ${parsed.eventTitle}`);
     }
+    matchedCandidate = applyMajorEventGuard(matchedCandidate, candidateEvents);
     parsed.eventTitle = eventTitleFromCandidate(parsed.eventTitle, matchedCandidate);
     parsed.historicalYear = Number.parseInt(matchedCandidate.year, 10);
     parsed.historicalDate = `${monthName} ${day}, ${matchedCandidate.year}`;
@@ -3923,10 +4109,15 @@ async function generateAndStore(
       .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
 
     // Last 7 posts → pillars to avoid repeating this week
-    recentPillars = sorted
-      .slice(0, 7)
-      .filter((e) => Array.isArray(e.pillars) && e.pillars.length > 0)
-      .map((e) => e.pillars[0]); // primary pillar only
+    recentPillars = [
+      ...new Set(
+        sorted
+          .slice(0, 7)
+          .filter((e) => Array.isArray(e.pillars) && e.pillars.length > 0)
+          .map((e) => e.pillars[0]),
+      ),
+    ]; // primary pillar only
+    const recentPillarSet = new Set(recentPillars);
 
     const recentClassified = sorted
       .slice(0, 30)
@@ -3942,7 +4133,12 @@ async function generateAndStore(
       }
       // Prefer the 3 least-covered pillars (excluding Born/Died which are niche)
       preferredPillars = Object.entries(counts)
-        .filter(([p]) => p !== "Born on This Day" && p !== "Died on This Day")
+        .filter(
+          ([p]) =>
+            p !== "Born on This Day" &&
+            p !== "Died on This Day" &&
+            !recentPillarSet.has(p),
+        )
         .sort((a, b) => a[1] - b[1])
         .slice(0, 3)
         .map(([p]) => p);
@@ -4299,6 +4495,26 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
 
 function normalizeContentMetadata(content) {
   normalizeEventTitleAction(content);
+  if (isWeakCtaTitleLead(getTitleLead(content.title))) {
+    content.title = buildDisplayTitle(
+      content.eventTitle,
+      content.eventTitle,
+      content.historicalDate,
+    );
+  }
+  const titleLead = getTitleLead(content.title);
+  const eventLead = getTitleLead(content.eventTitle);
+  if (
+    titleLead &&
+    eventLead &&
+    titleLead.length > eventLead.length &&
+    titleLead.length <= 96 &&
+    hasStrongTitleAction(titleLead) &&
+    normalizeTopicMatchText(titleLead).startsWith(normalizeTopicMatchText(eventLead))
+  ) {
+    content.eventTitle = titleLead;
+    content.jsonLdName = titleLead;
+  }
   alignJsonLdMetadata(content);
 
   if (!content.description || content.description.length < 120 || /^Discover the story of /i.test(content.description)) {
@@ -4340,35 +4556,98 @@ function alignJsonLdMetadata(content) {
   if (!content.jsonLdDescription && content.description) content.jsonLdDescription = content.description;
 }
 
+function hasStrongTitleAction(value) {
+  return /\b(founded|forms?|created|established|launches?|launched|opens?|opened|held|honors?|honoured|signs?|signed|adopts?|adopted|ratifies?|ratified|declares?|declared|begins?|began|ends?|ended|falls?|fell|rises?|rose|kills?|killed|dies|assassinated|elects?|elected|discovers?|discovered|invents?|invented|publishes?|published|lands?|landed|strikes?|rules?|crashes?|explodes?|sinks?|surrenders?|defeats?|deports?|fires?|battle|siege|revolt|revolution|war|attack|bombing|crash|trial|coronation|independence)\b/i.test(
+    value,
+  );
+}
+
+function stripLazyTitleSuffix(value) {
+  return String(value || "")
+    .replace(/\s+\b(Founding|Creation|Launch|Opening|Completion|Presentation)\b$/i, "")
+    .trim();
+}
+
+function evidenceForTitle(content) {
+  return plainText(
+    [
+      content.title,
+      content.eventTitle,
+      content.description,
+      content.jsonLdDescription,
+      content.contentRationale,
+      ...(content.overviewParagraphs || []),
+      ...(content.quickFacts || []).map((fact) => `${fact?.label || ""}: ${fact?.value || ""}`),
+    ].join(" "),
+  );
+}
+
+function deriveCtaEventTitle(currentEvent, evidence) {
+  const base = stripLazyTitleSuffix(currentEvent);
+  const text = String(evidence || "").replace(/\s+/g, " ").trim();
+
+  if (/helicopter crash in iran|president ebrahim raisi|varzaqan helicopter/i.test(text)) {
+    return "Iran Helicopter Crash Kills President Raisi";
+  }
+  if (/egyptair flight 804/i.test(text)) {
+    return "EgyptAir Flight 804 Crashes in the Mediterranean";
+  }
+  if (/brown v\.?\s*board|segregation unconstitutional|school segregation/i.test(text)) {
+    return "Brown v. Board Strikes Down School Segregation";
+  }
+  if (/first academy awards|first oscars|wings/i.test(text)) {
+    return "First Oscars Honor Wings in Hollywood";
+  }
+  if (/las vegas/i.test(text) && /land auction|railroad|san pedro|salt lake railroad|founded/i.test(text)) {
+    return "Las Vegas Begins as Railroad Land Auction";
+  }
+  if (/israeli independence|state of israel|david ben-gurion|declared the establishment/i.test(text)) {
+    return "Israel Declares Independence";
+  }
+  if (/prince harry|meghan markle|st george/i.test(text) && /wedding|married|chapel/i.test(text)) {
+    return "Prince Harry and Meghan Markle Marry at Windsor";
+  }
+
+  if (/\bcrashes?\b/i.test(text) && !/\bcrashes?\b/i.test(base)) return `${base} Crashes`;
+  if (/\bkills?\b|\bdead\b|\bdies\b/i.test(text) && !/\bkills?|dies|death\b/i.test(base)) return `${base} Kills`;
+  if (/\bdeclares? independence\b/i.test(text) && !/\bdeclares?\b/i.test(base)) return `${base} Declares Independence`;
+  if (/\brules?\b.*\bunconstitutional\b/i.test(text) && !/\brules?\b/i.test(base)) return `${base} Rules Unconstitutional`;
+  if (/\bratifies?\b/i.test(text) && !/\bratifies?\b/i.test(base)) return `${base} Ratified`;
+  if (/\bsigns?\b|\bsigned\b/i.test(text) && !/\bsigns?|signed\b/i.test(base)) return `${base} Signed`;
+  if (/\bopens?\b|\bopened\b|\binaugurated\b/i.test(text) && !/\bopens?|opened|inaugurated\b/i.test(base)) return `${base} Opens`;
+  if (/\blaunched|launches\b/i.test(text) && !/\blaunch/i.test(base)) return `${base} Launches`;
+  if (/\bfounded|founds|is founded|was founded\b/i.test(text) && !/\bfounded\b/i.test(base)) return `${base} Founded`;
+  if (/\bestablished|establishes\b/i.test(text) && !/\bestablished\b/i.test(base)) return `${base} Established`;
+
+  return currentEvent;
+}
+
 function normalizeEventTitleAction(content) {
   if (!content) return;
   const currentEvent = String(content.eventTitle || "").trim();
   const currentTitle = String(content.title || "").trim();
   if (!currentEvent) return;
 
-  const hasAction = /\b(founding|founded|formed|created|established|launch|launched|opening|opened|signing|signed|adopted|ratified|declared|began|ended|fell|rose|assassinated|elected|discovered|invented|published|landed|battle|siege|revolt|revolution|war|attack|bombing|crash|trial|coronation|independence|completion|creation)\b/i.test(currentEvent);
-  if (hasAction) return;
+  const evidence = evidenceForTitle(content);
+  const titleLead = getTitleLead(currentTitle);
+  const lazySuffix = /\b(Founding|Creation|Launch|Opening|Completion|Presentation)\b$/i;
+  const genericNounTitle = /\b(Independence|Ruling|Decision|Ceremony)\b$/i;
+  const needsRepair =
+    !hasStrongTitleAction(currentEvent) ||
+    lazySuffix.test(currentEvent) ||
+    lazySuffix.test(titleLead) ||
+    genericNounTitle.test(currentEvent) ||
+    genericNounTitle.test(titleLead);
 
-  const evidence = [
-    content.description,
-    content.jsonLdDescription,
-    ...(content.overviewParagraphs || []),
-    ...(content.quickFacts || []).map((fact) => `${fact?.label || ""}: ${fact?.value || ""}`),
-  ].join(" ");
+  if (!needsRepair) return;
 
-  let suffix = "";
-  if (/\bfounded|founding|constitution came into effect|established\b/i.test(evidence)) suffix = "Founding";
-  else if (/\blaunched|began|started\b/i.test(evidence)) suffix = "Launch";
-  else if (/\bcreated|formed\b/i.test(evidence)) suffix = "Creation";
-  else if (/\bsigned|ratified|adopted\b/i.test(evidence)) suffix = "Signing";
-  else if (/\bopened|inaugurated\b/i.test(evidence)) suffix = "Opening";
+  const improvedEvent = deriveCtaEventTitle(currentEvent, evidence);
+  if (!improvedEvent || improvedEvent === currentEvent) return;
 
-  if (!suffix) return;
-  const improvedEvent = `${currentEvent} ${suffix}`;
   content.eventTitle = improvedEvent;
   content.jsonLdName = improvedEvent;
-  if (currentTitle.startsWith(currentEvent)) {
-    content.title = improvedEvent + currentTitle.slice(currentEvent.length);
+  if (currentTitle) {
+    content.title = buildDisplayTitle(improvedEvent, improvedEvent, content.historicalDate);
   }
   if (Array.isArray(content.quickFacts)) {
     content.quickFacts = content.quickFacts.map((fact) =>
@@ -5762,17 +6041,18 @@ HARD RULE — NO FAKE SUSPENSE OPENERS: Do not start any sentence with: "So,", "
 DO NOT open consecutive paragraphs with the same word or conjunction. Each paragraph must begin with a structurally different sentence.
 
 Title rules:
-- The "title" field MUST follow exactly this format: "[Specific Action or Event] — ${monthName} ${day}, Year"
-- The first part MUST describe WHAT HAPPENED — it must contain an action verb or clearly describe the event. Examples: "Amtrak Founded", "Geocaching Invented", "Apollo 11 Lands on Moon", "Assassination of Julius Caesar", "Fall of Constantinople", "Berlin Wall Falls". NEVER use a bare noun or organization name alone (e.g. "Amtrak", "Geocaching", "NASA", "IBM" are WRONG — they describe a subject, not an event).
-- The "eventTitle" field must follow the same rule: it must describe the action/event, not just name the subject. Good: "Amtrak Founded". Bad: "Amtrak".
+- The "title" field is the public card headline and MUST follow exactly this format: "[CTA headline with a strong verb] — ${monthName} ${day}, Year"
+- The first part must make someone want to click while staying factual. Use active, specific verbs such as "Kills", "Strikes Down", "Declares", "Crashes", "Falls", "Opens", "Lands", "Ratifies", "Publishes", "Honors", "Begins", "Ends", "Surrenders", "Departs", or "Launches".
+- Avoid lazy suffix titles. Do NOT append "Founding", "Creation", "Launch", "Opening", "Completion", or "Presentation" just to make a noun sound like an event. Use them only if the source event is literally a founding/opening/launch and no more specific verb is available. Prefer "Rosenborg BK Founded" over "Rosenborg BK Founding"; prefer "First Oscars Honor Wings" over "The First Oscars Founding"; prefer "Brown v. Board Strikes Down School Segregation" over "Brown v. Board of Education Founding"; prefer "Israel Declares Independence" over "Israeli Independence".
+- The "eventTitle" field should be the concise canonical event name. It may be simpler than the title, but it still needs to name the action or event clearly. Good: "Iran Helicopter Crash Kills President Raisi". Bad: "Ebrahim Raisi" or "Iran".
 - Do NOT use colloquial date names or phrases like "Ides of March", "D-Day", or "Black Tuesday" as the title — use the actual event name instead.
 - The separator between event name and date MUST be " — " (space, em dash, space).
 
 Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation — just the JSON.
 
 {
-  "title": "Specific Event Name — ${monthName} ${day}, Year",
-  "eventTitle": "Short event name",
+  "title": "CTA headline with a strong verb — ${monthName} ${day}, Year",
+  "eventTitle": "Concise event name with action",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
   "historicalDateISO": "YYYY-MM-DD",
@@ -5894,25 +6174,16 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   const year = parsed.historicalYear ?? date.getFullYear();
   const expectedDateSuffix = `${monthName} ${day}, ${year}`;
   const hasSeparator = parsed.title && parsed.title.includes(" — ");
-  // Also rebuild if the event part (before " — ") doesn't exactly match eventTitle —
-  // catches cases like "Ides of March Assassination of Julius Caesar — …" where the
-  // AI prefixed a colloquial name before the real event name.
-  const eventPart = hasSeparator ? parsed.title.split(" — ")[0].trim() : "";
-  const eventPartMismatch =
-    parsed.eventTitle && eventPart !== parsed.eventTitle.trim();
   if (
     !parsed.title ||
-    !parsed.title.includes(monthName) ||
-    !hasSeparator ||
-    eventPartMismatch
+    !parsed.title.includes(expectedDateSuffix) ||
+    !hasSeparator
   ) {
-    const cleanTitle = (
-      parsed.eventTitle ??
-      eventPart ??
-      parsed.title ??
-      "Untitled"
-    ).trim();
-    parsed.title = `${cleanTitle} — ${expectedDateSuffix}`;
+    parsed.title = buildDisplayTitle(
+      parsed.title,
+      parsed.eventTitle ?? "Untitled",
+      expectedDateSuffix,
+    );
   }
 
   enforceAnswerFirstSections(parsed);
@@ -6899,9 +7170,11 @@ async function reviewContentWithSEOExpert(content, env) {
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
     "- keywords: 5–8 specific terms including year, location, key people, historical context\n" +
     "- imageAlt: vivid 8–15 word description of what is visible in the image\n" +
-    "- title: keep format 'Event Name — Month Day, Year'. Only change event name if vague or generic.\n\n" +
+    "- eventTitle: concise canonical event label with an active verb when possible\n" +
+    "- title: keep format 'CTA headline — Month Day, Year'. Improve dull card headlines with a specific verb and concrete hook.\n\n" +
     "Return ONLY a JSON object with fields that need improvement. Omit fields that are already good.\n" +
-    "Ban vague copy such as 'dramatic and unexpected', 'significant turning point', 'remarkable', 'important moment', 'in the history of', or 'changed everything' unless a concrete fact immediately follows.";
+    "Ban vague copy such as 'dramatic and unexpected', 'significant turning point', 'remarkable', 'important moment', 'in the history of', or 'changed everything' unless a concrete fact immediately follows. " +
+    "Do not use lazy suffix headlines like 'Founding', 'Creation', 'Launch', 'Opening', 'Completion', or 'Presentation' unless the event text literally says that happened.";
 
   const seoUserMessage =
     `Title: ${content.title}\n` +
@@ -6952,6 +7225,7 @@ async function reviewContentWithSEOExpert(content, env) {
   // SEO pass only touches meta fields — paragraphs were handled in Pass 1
   const ALLOWED_FIELDS = [
     "title",
+    "eventTitle",
     "description",
     "ogDescription",
     "twitterDescription",
@@ -6986,14 +7260,18 @@ async function reviewContentWithSEOExpert(content, env) {
 
   // Guard: if the expert changed the title, make sure format is still correct
   if (improved.title !== content.title) {
+    const expectedDate = content.historicalDate || "";
+    const improvedLead = getTitleLead(improved.title);
     if (
       !improved.title.includes(" — ") ||
-      !improved.title.includes(
-        content.historicalDate?.split(",")[1]?.trim() ?? "",
-      )
+      (expectedDate && !improved.title.includes(expectedDate)) ||
+      isWeakCtaTitleLead(improvedLead)
     ) {
       improved.title = content.title; // revert bad title
     }
+  }
+  if (improved.eventTitle !== content.eventTitle && improved.title === content.title) {
+    improved.title = buildDisplayTitle(content.title, improved.eventTitle, content.historicalDate);
   }
 
   console.log(`SEO expert: reviewed content — ${changed} field(s) improved`);
@@ -7498,6 +7776,117 @@ function injectLinks(html, keyTerms = [], existingIndex = [], ownEventTitle = ""
 // HTML builders
 // ---------------------------------------------------------------------------
 
+function compactHeadingSubject(content) {
+  return getTitleLead(content?.eventTitle || content?.title || "the Event")
+    .replace(/\b(Founding|Creation|Launch|Opening|Completion|Presentation)\b$/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 70);
+}
+
+function buildArticleSectionHeadings(content, pillars = []) {
+  const subject = compactHeadingSubject(content);
+  const haystack = normalizeTopicMatchText(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.description,
+      content?.keywords,
+      ...(pillars || []),
+    ].join(" "),
+  );
+
+  const headings = {
+    overview: `Inside ${subject}`,
+    eyewitness: "What People Saw and Reported",
+    aftermath: "What Changed Next",
+    legacy: "Why It Still Matters",
+    analysis: "Our Take: Choices, Consequences, and Blind Spots",
+    good: "What Worked",
+    bad: "What Failed",
+  };
+
+  if (/\b(crash|flight|helicopter|disaster|explosion|fire|oil spill|bombing|shooting|massacre)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Disaster and Its Immediate Cause",
+      eyewitness: "First Reports From the Scene",
+      aftermath: "Rescue, Response, and Fallout",
+      legacy: "The Questions the Disaster Left Behind",
+      analysis: "Our Take: Risk, Response, and Accountability",
+      good: "What Worked Under Pressure",
+      bad: "What Failed Before Impact",
+    };
+  }
+
+  if (/\b(court|supreme court|ruling|decision|law|act|segregation|constitutional|unconstitutional|rights)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Case and the Stakes",
+      eyewitness: "The Record Behind the Ruling",
+      aftermath: "The Ruling Meets Reality",
+      legacy: "The Fight the Decision Did Not Finish",
+      analysis: "Our Take: Legal Strategy and Its Limits",
+      good: "What the Strategy Got Right",
+      bad: "Where the System Resisted",
+    };
+  }
+
+  if (/\b(independence|declares|declaration|referendum|statehood|revolution|uprising|revolt)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Break With the Old Order",
+      eyewitness: "Voices From the Moment",
+      aftermath: "Recognition, Resistance, and First Consequences",
+      legacy: "The Nation That Emerged Afterward",
+      analysis: "Our Take: Courage, Timing, and Cost",
+      good: "What the Leaders Got Right",
+      bad: "What the Break Could Not Solve",
+    };
+  }
+
+  if (/\b(war|battle|siege|invasion|army|military|troops|forces|surrender|defeat|treaty|campaign)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Clash and the Stakes",
+      eyewitness: "Reports From the Front",
+      aftermath: "The Military and Political Fallout",
+      legacy: "How the Balance of Power Shifted",
+      analysis: "Our Take: Strategy, Mistakes, and Momentum",
+      good: "What Worked on the Ground",
+      bad: "Where Command Failed",
+    };
+  }
+
+  if (/\b(academy awards|oscars|wedding|film|music|art|culture|ceremony|prince|meghan|harry)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Ceremony and the Signal",
+      eyewitness: "How the Moment Looked in Public",
+      aftermath: "Public Reaction and Institutional Fallout",
+      legacy: "The Image That Outlived the Day",
+      analysis: "Our Take: Image, Power, and Public Memory",
+      good: "What the Moment Achieved",
+      bad: "What the Pageantry Hid",
+    };
+  }
+
+  if (/\b(science|technology|computer|space|shuttle|probe|invented|discovered|first|medical|vaccine)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Breakthrough and the Problem It Solved",
+      eyewitness: "How Observers Understood It",
+      aftermath: "Testing, Adoption, and Pushback",
+      legacy: "The Future It Made Possible",
+      analysis: "Our Take: Ingenuity, Limits, and Timing",
+      good: "What the Innovators Got Right",
+      bad: "What Slowed the Breakthrough",
+    };
+  }
+
+  return headings;
+}
+
 /**
  * Builds the full blog post HTML page, matching the structure of existing
  * hand-written posts on thisday.info.
@@ -7510,6 +7899,7 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
   const publishedStr = `${monthName} ${day}, ${publishYear}`;
 
   const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || []);
+  const sectionHeadings = buildArticleSectionHeadings(c, currentPillars);
 
   const overviewParas = (c.overviewParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
@@ -7997,7 +8387,7 @@ ${JSON.stringify({
           ${
             overviewParas
               ? `<section class="mt-4" style="overflow:hidden;">
-            <h2 class="h3">Overview</h2>
+            <h2 class="h3">${esc(sectionHeadings.overview)}</h2>
 ${overviewParas}
           </section>`
               : ""
@@ -8025,7 +8415,7 @@ ${overviewParas}
             eyewitnessParas
               ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
           <section class="mt-5">
-            <h2 class="h3">Eyewitness Accounts</h2>
+            <h2 class="h3">${esc(sectionHeadings.eyewitness)}</h2>
 ${eyewitnessParas}
 ${eyewitnessQuoteBlock}
           </section>`
@@ -8050,7 +8440,7 @@ ${eyewitnessQuoteBlock}
           ${
             aftermathParas
               ? `<section class="mt-5">
-            <h2 class="h3">Aftermath</h2>
+            <h2 class="h3">${esc(sectionHeadings.aftermath)}</h2>
 ${aftermathParas}
           </section>`
               : ""
@@ -8060,7 +8450,7 @@ ${aftermathParas}
           ${
             conclusionParas
               ? `<section class="mt-5">
-            <h2 class="h3">Legacy</h2>
+            <h2 class="h3">${esc(sectionHeadings.legacy)}</h2>
 ${conclusionParas}
           </section>`
               : ""
@@ -8070,11 +8460,11 @@ ${conclusionParas}
           ${
             analysisGoodItems || analysisBadItems
               ? `<section class="mt-5">
-            <h2 class="h3">Our Take: What Went Right &amp; What Went Wrong</h2>
+            <h2 class="h3">${esc(sectionHeadings.analysis)}</h2>
             <div class="row g-3 mt-1">
               <div class="col-md-6">
                 <div class="analysis-good p-3 rounded h-100">
-                  <h3 style="color:#16a34a">What Went Right</h3>
+                  <h3 style="color:#16a34a">${esc(sectionHeadings.good)}</h3>
                   <ul class="mb-0">
 ${analysisGoodItems}
                   </ul>
@@ -8082,7 +8472,7 @@ ${analysisGoodItems}
               </div>
               <div class="col-md-6">
                 <div class="analysis-bad p-3 rounded h-100">
-                  <h3 style="color:#dc2626">What Went Wrong</h3>
+                  <h3 style="color:#dc2626">${esc(sectionHeadings.bad)}</h3>
                   <ul class="mb-0">
 ${analysisBadItems}
                   </ul>

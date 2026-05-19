@@ -22,6 +22,7 @@
  *   YOUTUBE_REGEN_SECRET   (auth for POST /blog/publish regeneration)
  *   YOUTUBE_PRIVACY        (optional: private or public, default public)
  *   WIKI_IMAGE_MIN_COUNT   (optional: min usable wiki images for multi-scene video; default 3)
+ *   ALLOW_SILENT_VIDEO     (optional: true only for deliberate music-only uploads)
  *
  * Optional expert-model fallbacks used by helper modules:
  *   GROQ_API_KEY...        (narration/history review helpers)
@@ -234,10 +235,14 @@ function ensureSocialPrereqs() {
 
 async function main() {
   const privacyMode = process.env.YOUTUBE_PRIVACY || "public";
+  const allowSilentVideo = process.env.ALLOW_SILENT_VIDEO === "true";
   const maxUploadsPerRun = 1; // FORCE: Only upload 1 video per run
 
   const todaySlug = getTodaySlug();
   console.log(`YouTube privacy mode: ${privacyMode}`);
+  if (allowSilentVideo) {
+    console.warn("Warning: ALLOW_SILENT_VIDEO=true — uploads may have no narration.");
+  }
   console.log(`Today's slug: ${todaySlug}`);
   console.log(
     `Max uploads this run: ${maxUploadsPerRun} (LIMITED TO TODAY ONLY)`,
@@ -357,6 +362,11 @@ async function main() {
           script,
         );
         narrationPath = narrPath;
+        if (!narrationPath && !allowSilentVideo) {
+          throw new Error(
+            "NARRATION_UNAVAILABLE: ElevenLabs did not return narration audio; refusing to upload a music-only video.",
+          );
+        }
 
         // ── Image pre-check ────────────────────────────────────────────────────
         // Multi-scene mode builds from article/Wikipedia images instead of a

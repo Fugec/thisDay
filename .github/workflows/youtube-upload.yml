@@ -58,6 +58,7 @@ jobs:
           ELEVENLABS_API_KEY_2: ${{ secrets.ELEVENLABS_API_KEY_2 }}
           ELEVENLABS_API_KEY_3: ${{ secrets.ELEVENLABS_API_KEY_3 }}
           YOUTUBE_PRIVACY: ${{ secrets.YOUTUBE_PRIVACY }}
+          ALLOW_SILENT_VIDEO: ${{ secrets.ALLOW_SILENT_VIDEO }}
           REUPLOAD_SLUGS: ${{ secrets.REUPLOAD_SLUGS }}
           MAX_UPLOADS_PER_RUN: ${{ secrets.MAX_UPLOADS_PER_RUN }}
           BLOG_WORKER_URL: ${{ secrets.BLOG_WORKER_URL }}

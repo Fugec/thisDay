@@ -4585,6 +4585,7 @@ function evidenceForTitle(content) {
 function deriveCtaEventTitle(currentEvent, evidence) {
   const base = stripLazyTitleSuffix(currentEvent);
   const text = String(evidence || "").replace(/\s+/g, " ").trim();
+  const baseHasStrongAction = hasStrongTitleAction(base);
 
   if (/helicopter crash in iran|president ebrahim raisi|varzaqan helicopter/i.test(text)) {
     return "Iran Helicopter Crash Kills President Raisi";
@@ -4608,16 +4609,16 @@ function deriveCtaEventTitle(currentEvent, evidence) {
     return "Prince Harry and Meghan Markle Marry at Windsor";
   }
 
-  if (/\bcrashes?\b/i.test(text) && !/\bcrashes?\b/i.test(base)) return `${base} Crashes`;
-  if (/\bkills?\b|\bdead\b|\bdies\b/i.test(text) && !/\bkills?|dies|death\b/i.test(base)) return `${base} Kills`;
-  if (/\bdeclares? independence\b/i.test(text) && !/\bdeclares?\b/i.test(base)) return `${base} Declares Independence`;
-  if (/\brules?\b.*\bunconstitutional\b/i.test(text) && !/\brules?\b/i.test(base)) return `${base} Rules Unconstitutional`;
-  if (/\bratifies?\b/i.test(text) && !/\bratifies?\b/i.test(base)) return `${base} Ratified`;
-  if (/\bsigns?\b|\bsigned\b/i.test(text) && !/\bsigns?|signed\b/i.test(base)) return `${base} Signed`;
-  if (/\bopens?\b|\bopened\b|\binaugurated\b/i.test(text) && !/\bopens?|opened|inaugurated\b/i.test(base)) return `${base} Opens`;
-  if (/\blaunched|launches\b/i.test(text) && !/\blaunch/i.test(base)) return `${base} Launches`;
-  if (/\bfounded|founds|is founded|was founded\b/i.test(text) && !/\bfounded\b/i.test(base)) return `${base} Founded`;
-  if (/\bestablished|establishes\b/i.test(text) && !/\bestablished\b/i.test(base)) return `${base} Established`;
+  if (!baseHasStrongAction && /\bcrashes?\b/i.test(text) && !/\bcrashes?\b/i.test(base)) return `${base} Crashes`;
+  if (!baseHasStrongAction && /\bkills?\b|\bdead\b|\bdies\b/i.test(text) && !/\bkills?|dies|death\b/i.test(base)) return `${base} Kills`;
+  if (!baseHasStrongAction && /\bdeclares? independence\b/i.test(text) && !/\bdeclares?\b/i.test(base)) return `${base} Declares Independence`;
+  if (!baseHasStrongAction && /\brules?\b.*\bunconstitutional\b/i.test(text) && !/\brules?\b/i.test(base)) return `${base} Rules Unconstitutional`;
+  if (!baseHasStrongAction && /\bratifies?\b/i.test(text) && !/\bratifies?\b/i.test(base)) return `${base} Ratified`;
+  if (!baseHasStrongAction && /\bsigns?\b|\bsigned\b/i.test(text) && !/\bsigns?|signed\b/i.test(base)) return `${base} Signed`;
+  if (!baseHasStrongAction && /\bopens?\b|\bopened\b|\binaugurated\b/i.test(text) && !/\bopens?|opened|inaugurated\b/i.test(base)) return `${base} Opens`;
+  if (!baseHasStrongAction && /\blaunched|launches\b/i.test(text) && !/\blaunch/i.test(base)) return `${base} Launches`;
+  if (!baseHasStrongAction && /\bfounded|founds|is founded|was founded\b/i.test(text) && !/\bfounded\b/i.test(base)) return `${base} Founded`;
+  if (!baseHasStrongAction && /\bestablished|establishes\b/i.test(text) && !/\bestablished\b/i.test(base)) return `${base} Established`;
 
   return currentEvent;
 }

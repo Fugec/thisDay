@@ -35,9 +35,34 @@ import { callAI, hasAnyTextAIProvider } from "./shared/ai-call.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
+const FEATURED_IMAGE_CHECK_MARKER = "<!-- featured-image-check-v1 -->";
+const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
+const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
 
 function utcDateString(value = new Date()) {
   return value.toISOString().slice(0, 10);
+}
+
+function addHtmlMarker(html, marker) {
+  const source = String(html || "");
+  if (!marker || source.includes(marker)) return source;
+  const target = source.includes("</head>")
+    ? "</head>"
+    : source.includes("</body>")
+      ? "</body>"
+      : source.includes("</html>")
+        ? "</html>"
+        : "";
+  return target
+    ? source.replace(target, `${marker}\n${target}`)
+    : `${source}\n${marker}`;
+}
+
+function blogKvBackgroundWritesPaused(env) {
+  const raw = String(env?.BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL || "").trim();
+  if (!raw) return false;
+  const until = Date.parse(raw);
+  return Number.isFinite(until) && Date.now() < until;
 }
 
 async function getPipelineState(env) {
@@ -1829,6 +1854,10 @@ export default {
       return Response.redirect(`${url.origin}/blog/`, 301);
     }
 
+    if (path === "/blog") {
+      return serveListing(env);
+    }
+
     const legacyArchivePostMatch = path.match(/^\/blog\/archive\/([^/]+)\/?$/);
     if (legacyArchivePostMatch) {
       return Response.redirect(`${url.origin}/blog/${legacyArchivePostMatch[1]}/`, 301);
@@ -1985,6 +2014,15 @@ export default {
           },
         });
       }
+      if (blogKvBackgroundWritesPaused(env)) {
+        return new Response(JSON.stringify({ error: "Quiz not found" }), {
+          status: 404,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      }
       // Quiz not in KV — generate on-demand using rich content from the post HTML
       try {
         const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
@@ -2051,6 +2089,7 @@ export default {
         env.BLOG_AI_KV.get(`post-entities:${slug}`).catch(() => null),
       ]);
       if (html) {
+        const allowArticleKvBackgroundWrites = !blogKvBackgroundWritesPaused(env);
         const extractWikiUrl = (doc) => {
           const s = String(doc || "");
           const m =
@@ -2253,7 +2292,7 @@ export default {
         }
         // Persist hero-patched HTML back to KV so the next request loads pre-patched HTML
         // and skips the expensive hero-wrap regex entirely — prevents recurring Error 1102.
-        if (_heroPatched && ctx?.waitUntil) {
+        if (_heroPatched && allowArticleKvBackgroundWrites && ctx?.waitUntil) {
           const _heroHtml = patchedHtml;
           ctx.waitUntil(env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, _heroHtml).catch(() => {}));
         }
@@ -2873,7 +2912,11 @@ export default {
         // flag, or similar low-value asset. Fully non-blocking — network calls
         // (isWorkingImageUrl + fetchWikipediaImage) moved to waitUntil so they
         // never block the response and can't trigger 1102.
-        if (ctx?.waitUntil) {
+        if (
+          allowArticleKvBackgroundWrites &&
+          ctx?.waitUntil &&
+          !patchedHtml.includes(FEATURED_IMAGE_CHECK_MARKER)
+        ) {
           const wikiUrlForRepair = extractWikiUrl(patchedHtml);
           const coverUrlForRepair = extractCoverSrc(patchedHtml);
           if (wikiUrlForRepair && coverUrlForRepair) {
@@ -2883,12 +2926,27 @@ export default {
                 const needsRepair =
                   isLowValueFeaturedImage(coverUrlForRepair) ||
                   !(await isWorkingImageUrl(coverUrlForRepair));
-                if (!needsRepair) return;
+                if (!needsRepair) {
+                  await env.BLOG_AI_KV.put(
+                    `${KV_POST_PREFIX}${slug}`,
+                    addHtmlMarker(htmlForRepair, FEATURED_IMAGE_CHECK_MARKER),
+                  );
+                  return;
+                }
                 const replacement = await fetchWikipediaImage("", wikiUrlForRepair);
-                if (!replacement || replacement === coverUrlForRepair) return;
-                const repaired = htmlForRepair
-                  .replaceAll(encodeURIComponent(coverUrlForRepair), encodeURIComponent(replacement))
-                  .replaceAll(coverUrlForRepair, replacement);
+                if (!replacement || replacement === coverUrlForRepair) {
+                  await env.BLOG_AI_KV.put(
+                    `${KV_POST_PREFIX}${slug}`,
+                    addHtmlMarker(htmlForRepair, FEATURED_IMAGE_CHECK_MARKER),
+                  );
+                  return;
+                }
+                const repaired = addHtmlMarker(
+                  htmlForRepair
+                    .replaceAll(encodeURIComponent(coverUrlForRepair), encodeURIComponent(replacement))
+                    .replaceAll(coverUrlForRepair, replacement),
+                  FEATURED_IMAGE_CHECK_MARKER,
+                );
                 await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, repaired);
                 const indexRaw2 = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
                 const index2 = indexRaw2 ? JSON.parse(indexRaw2) : [];
@@ -2907,7 +2965,12 @@ export default {
         // Fully non-blocking — fetchEventImages (2 Wikipedia API calls) moved to
         // waitUntil so it never blocks the response and can't trigger 1102.
         // Figures appear from the second request onwards (same pattern as entity strip).
-        if (!/<figure style="float:(?:right|left);/i.test(patchedHtml) && ctx?.waitUntil) {
+        if (
+          !/<figure style="float:(?:right|left);/i.test(patchedHtml) &&
+          !patchedHtml.includes(EVENT_FIGURES_BACKFILL_MARKER) &&
+          allowArticleKvBackgroundWrites &&
+          ctx?.waitUntil
+        ) {
           const wikiUrlForFigs = extractWikiUrl(patchedHtml);
           const coverUrlForFigs = extractCoverSrc(patchedHtml);
           if (wikiUrlForFigs) {
@@ -2915,9 +2978,12 @@ export default {
             ctx.waitUntil((async () => {
               try {
                 const imgs = await fetchEventImages(wikiUrlForFigs, coverUrlForFigs, 2);
-                if (imgs.length > 0) {
-                  const withFigures = injectEventImages(htmlForFigs, imgs);
-                  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, withFigures);
+                const withFigures = imgs.length > 0
+                  ? injectEventImages(htmlForFigs, imgs)
+                  : htmlForFigs;
+                const checkedHtml = addHtmlMarker(withFigures, EVENT_FIGURES_BACKFILL_MARKER);
+                if (checkedHtml !== htmlForFigs) {
+                  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, checkedHtml);
                 }
               } catch {
                 // best-effort backfill
@@ -2926,17 +2992,43 @@ export default {
           }
         }
         // Entity strip — fully non-blocking. Serve the cached HTML immediately;
-        // hydrate + inject in the background so no KV reads block the response.
-        if (ctx?.waitUntil) {
+        // hydrate + inject only when the stored article is missing cached data.
+        const entityStripKnownEmpty = String(articleEntitiesRaw || "").trim() === "[]";
+        if (
+          ctx?.waitUntil &&
+          allowArticleKvBackgroundWrites &&
+          !entityStripKnownEmpty &&
+          !patchedHtml.includes(ENTITY_STRIP_BACKFILL_MARKER) &&
+          (!patchedHtml.includes('data-entity-strip="1"') || !articleEntitiesRaw)
+        ) {
           const htmlSnapshot = patchedHtml;
           ctx.waitUntil((async () => {
             try {
               const parsedEntityMeta = articleEntitiesRaw
                 ? JSON.parse(articleEntitiesRaw)
                 : extractArticlePeopleMetaFromHtml(htmlSnapshot);
+              if (!Array.isArray(parsedEntityMeta) || parsedEntityMeta.length === 0) {
+                if (!articleEntitiesRaw) {
+                  await env.BLOG_AI_KV.put(`post-entities:${slug}`, "[]");
+                }
+                return;
+              }
               const entityMeta = await hydrateArticleEntityImages(env, parsedEntityMeta);
               const strip = buildArticleEntityStrip(entityMeta);
-              if (!strip) return;
+              const entityMetaRaw = JSON.stringify(entityMeta);
+              if (!strip) {
+                const writes = [
+                  env.BLOG_AI_KV.put(
+                    `${KV_POST_PREFIX}${slug}`,
+                    addHtmlMarker(htmlSnapshot, ENTITY_STRIP_BACKFILL_MARKER),
+                  ),
+                ];
+                if (!articleEntitiesRaw || entityMetaRaw !== articleEntitiesRaw) {
+                  writes.push(env.BLOG_AI_KV.put(`post-entities:${slug}`, entityMetaRaw));
+                }
+                await Promise.all(writes);
+                return;
+              }
               let updated = htmlSnapshot;
               if (updated.includes("data-entity-strip")) {
                 updated = updated.replace(
@@ -2961,8 +3053,15 @@ export default {
                 }
               }
               updated = moveEntityStripOutOfArticleHero(updated);
-              await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, updated);
-              await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(entityMeta));
+              const writes = [];
+              if (updated !== htmlSnapshot) {
+                updated = addHtmlMarker(updated, ENTITY_STRIP_BACKFILL_MARKER);
+                writes.push(env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, updated));
+              }
+              if (!articleEntitiesRaw || entityMetaRaw !== articleEntitiesRaw) {
+                writes.push(env.BLOG_AI_KV.put(`post-entities:${slug}`, entityMetaRaw));
+              }
+              await Promise.all(writes);
             } catch {
               // best-effort
             }
@@ -3044,7 +3143,7 @@ export default {
           );
         }
         // Pre-warm quiz in background so it's ready before the user clicks "Take the Quiz"
-        ctx.waitUntil(
+        if (allowArticleKvBackgroundWrites) ctx.waitUntil(
           (async () => {
             const cached =
               inlineQuizRaw ||
@@ -3071,7 +3170,11 @@ export default {
           })(),
         );
         const entityStripFixedHtml = moveEntityStripOutOfArticleHero(patchedHtml);
-        if (entityStripFixedHtml !== patchedHtml && ctx?.waitUntil) {
+        if (
+          entityStripFixedHtml !== patchedHtml &&
+          allowArticleKvBackgroundWrites &&
+          ctx?.waitUntil
+        ) {
           ctx.waitUntil(
             env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, entityStripFixedHtml).catch(() => {}),
           );
@@ -4341,6 +4444,10 @@ async function generateAndStore(
     );
   } else {
     const bookCoverUrl = await fetchBookCover(content.bookSearchQuery).catch(() => null);
+    const entityMeta = await upsertEntitiesForContent(env, content, slug, now, pillars).catch((err) => {
+      console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
+      return [];
+    });
 
     await savePublishedPost(env, {
       slug,
@@ -4351,6 +4458,7 @@ async function generateAndStore(
       bookCoverUrl,
       personImages,
       eventImages,
+      entityMeta,
     });
   }
 
@@ -4661,11 +4769,12 @@ function normalizeEventTitleAction(content) {
 
 async function savePublishedPost(
   env,
-  { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [], eventImages = [] },
+  { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [], eventImages = [], entityMeta = [] },
 ) {
   const safePillars = Array.isArray(pillars) ? pillars : [];
   const safePersonImages = Array.isArray(personImages) ? personImages : [];
   const safeEventImages = Array.isArray(eventImages) ? eventImages : [];
+  const safeEntityMeta = Array.isArray(entityMeta) ? entityMeta : [];
 
   alignContentDateFields(content);
   const dateValidation = validateContentDateForPublish(content, date);
@@ -4677,6 +4786,15 @@ async function savePublishedPost(
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
   if (safePersonImages.length > 0) html = injectPersonImages(html, safePersonImages);
   if (safeEventImages.length > 0) html = injectEventImages(html, safeEventImages);
+  if (safeEntityMeta.length > 0) {
+    html = injectArticleEntityStrip(html, safeEntityMeta);
+    html = addHtmlMarker(html, ENTITY_STRIP_BACKFILL_MARKER);
+  }
+  html = addHtmlMarker(html, FEATURED_IMAGE_CHECK_MARKER);
+  if (safePersonImages.length > 0 || safeEventImages.length > 0) {
+    html = addHtmlMarker(html, EVENT_FIGURES_BACKFILL_MARKER);
+  }
+  assertPublishedArticleCompleteness(html, content);
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
 
   const deduped = [...existingIndex].filter((e) => e.slug !== slug);
@@ -4756,8 +4874,9 @@ async function enrichPublishedPost(env, slug) {
     throw new Error(`Refusing to enrich ${slug}: ${dateValidation.reason}`);
   }
   normalizeContentMetadata(enriched);
-  await upsertEntitiesForContent(env, enriched, slug, date, pillars).catch((err) => {
+  const entityMeta = await upsertEntitiesForContent(env, enriched, slug, date, pillars).catch((err) => {
     console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
+    return [];
   });
   await savePublishedPost(env, {
     slug,
@@ -4768,6 +4887,7 @@ async function enrichPublishedPost(env, slug) {
     bookCoverUrl,
     personImages,
     eventImages,
+    entityMeta,
   });
   await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`).catch(() => {});
   await runPostPublishExtras(env, slug, enriched, { scheduleEnrichment: false });
@@ -5573,6 +5693,51 @@ function buildArticleEntityStrip(entityMeta) {
   const css = `<style>.entity-strip{margin:0 0 1.25rem}.entity-strip-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted,#5c7a65);margin-bottom:.65rem}.entity-person-chips{display:flex;flex-wrap:wrap;gap:1rem}.person-pill{display:inline-flex;align-items:center;gap:.55rem;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:14px;font-weight:600}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
 
   return `${css}<div class="entity-strip" data-entity-strip="1"><div class="entity-strip-label">People in this story</div><div class="entity-person-chips">${chips}</div></div>`;
+}
+
+function injectArticleEntityStrip(html, entityMeta) {
+  const strip = buildArticleEntityStrip(entityMeta);
+  if (!strip) return html;
+  let updated = String(html || "");
+  if (updated.includes('data-entity-strip="1"')) {
+    return updated.replace(
+      /<style>\.entity-strip\{[\s\S]*?<div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/,
+      strip,
+    );
+  }
+  const heroWrapIdx = updated.indexOf('<div class="article-hero-wrap">');
+  const heroWrapEnd = findArticleHeroWrapEnd(updated, heroWrapIdx);
+  if (heroWrapEnd !== -1) {
+    return updated.slice(0, heroWrapEnd) + "\n" + strip + updated.slice(heroWrapEnd);
+  }
+  const answerIdx = updated.indexOf('<section class="ai-answer-card');
+  if (answerIdx !== -1) {
+    return updated.slice(0, answerIdx) + strip + "\n" + updated.slice(answerIdx);
+  }
+  return updated;
+}
+
+function assertPublishedArticleCompleteness(html, content) {
+  const source = String(html || "");
+  const checks = [
+    ["article shell", /<article\b/i],
+    ["hero image area", /article-hero-wrap/i],
+    ["short answer card", /ai-answer-card/i],
+    ["related Amazon block", /class="amazon-related/i],
+    ["Amazon recommendation cards", /amazon-product-card/i],
+  ];
+  const hasPersonTerms = (content.keyTerms || []).some(
+    (term) => String(term?.type || "").toLowerCase() === "person" && term?.term,
+  );
+  if (hasPersonTerms) {
+    checks.push(["people entity strip", /data-entity-strip="1"/i]);
+  }
+  const missing = checks
+    .filter(([, pattern]) => !pattern.test(source))
+    .map(([label]) => label);
+  if (missing.length > 0) {
+    throw new Error(`Article completeness check failed: missing ${missing.join(", ")}`);
+  }
 }
 
 function extractArticlePeopleMetaFromHtml(html) {
@@ -7391,6 +7556,13 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
     query: item.query,
     type: item.type || "book",
   }));
+  const fallbackCards = sliderItems.map((item) =>
+    `<a class="amazon-product-card" href="${esc(amazonSearchUrl(item.query))}" target="_blank" rel="sponsored noopener noreferrer" data-amazon-fallback="1">` +
+    `<span class="amazon-card-cover amazon-card-cover-fallback" aria-hidden="true"><i class="bi bi-book"></i></span>` +
+    `<strong>${esc(item.label)}</strong>` +
+    `<small>View on Amazon</small>` +
+    `</a>`,
+  ).join("");
   const openLibraryQuery = String(c.bookSearchQuery || sliderItems[0]?.query || `${topic} history book`)
     .replace(/\s+/g, " ")
     .trim();
@@ -7407,14 +7579,14 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
     .slice(0, 14)
     .join(" ");
 
-  return `<section class="amazon-related mt-4 p-3 rounded" aria-label="Related book recommendations" style="display:none">
+  return `<section class="amazon-related mt-4 p-3 rounded" aria-label="Related book recommendations">
             <div class="amazon-related-head">
               <span class="amazon-kicker">Related books</span>
             </div>
             <div class="amazon-slider-shell" data-open-library-books data-query="${esc(openLibraryQuery)}" data-keywords="${esc(bookKeywords)}" data-amazon-tag="${esc(AMAZON_ASSOCIATE_TAG)}">
               <button type="button" class="amazon-slider-btn" aria-label="Previous Amazon recommendations" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
               <div class="amazon-slider-wrap">
-                <div class="amazon-slider-track" aria-live="polite"></div>
+                <div class="amazon-slider-track" aria-live="polite">${fallbackCards}</div>
               </div>
               <button type="button" class="amazon-slider-btn" aria-label="Next Amazon recommendations" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
             </div>
@@ -7437,9 +7609,9 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
         if(!doc||!doc.title)return false;
         var hay=[doc.title,(doc.author_name&&doc.author_name[0])||'',((doc.subject||[]).slice(0,8).join(' '))].join(' ').toLowerCase();
         return !keywords.length || keywords.some(function(word){return hay.indexOf(word)!==-1;});
-      }).slice(0,5);
-      if(!docs.length)return;
-      track.innerHTML=docs.map(function(doc){
+	      }).slice(0,5);
+	      if(!docs.length)return;
+	      track.innerHTML=docs.map(function(doc){
         var author=(doc.author_name&&doc.author_name[0])||'';
         var title=doc.title||'Related book';
         var cover=doc.cover_i?'https://covers.openlibrary.org/b/id/'+doc.cover_i+'-M.jpg':'';
@@ -7448,10 +7620,9 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
           '<strong>'+escText(title)+'</strong>'+
           (author?'<small>'+escText(author)+'</small>':'<small>View on Amazon</small>')+
         '</a>';
-      }).join('');
-      shell.closest('.amazon-related').style.display='';
-    }).catch(function(){});
-})();
+	      }).join('');
+	    }).catch(function(){});
+	  })();
             </script>
           </section>`;
 }
@@ -7807,7 +7978,61 @@ function buildArticleSectionHeadings(content, pillars = []) {
     bad: "What Failed",
   };
 
-  if (/\b(crash|flight|helicopter|disaster|explosion|fire|oil spill|bombing|shooting|massacre)\b/.test(haystack)) {
+  const safePillars = Array.isArray(pillars) ? pillars : [];
+  const primaryPillar = safePillars[0] || "";
+  const hasPillar = (pillar) => safePillars.includes(pillar);
+  const sportsSignal =
+    hasPillar("Sports") ||
+    /\b(sports?|athlete|football|soccer|basketball|baseball|tennis|golf|boxing|wrestling|cricket|rugby|hockey|olympic|paralympic|champion|championship|tournament|match|grand prix|formula one|formula 1|motorsport|motor racing|nascar|indy)\b/.test(haystack);
+  const healthSignal =
+    hasPillar("Health & Medicine") ||
+    /\b(health|medicine|medical|vaccine|vaccination|pandemic|epidemic|disease|hospital|surgery|doctor|physician|public health|virus|plague|treatment|diagnosis|patient)\b/.test(haystack);
+  const economySignal =
+    hasPillar("Economy & Business") ||
+    /\b(economy|economic|business|market|stock exchange|stock market|wall street|bank|banking|company|corporation|trade|tariff|currency|inflation|financial|finance|industry|industrial|railroad land auction)\b/.test(haystack);
+  const explicitDisaster =
+    /\b(crash(?:es|ed)?|collision|accident|disaster|catastrophe|explosion|fires?|oil spill|bombing|shooting|massacre|earthquake|flood|eruption|hurricane|tornado|sinking|sank|shipwreck)\b/.test(haystack);
+
+  if (primaryPillar === "Born on This Day") {
+    return {
+      ...headings,
+      overview: "The Life That Began Here",
+      eyewitness: "The World Around the Birth",
+      aftermath: "The Work That Followed",
+      legacy: "Why This Life Still Matters",
+      analysis: "Our Take: Talent, Timing, and Legacy",
+      good: "What the Life Gave the World",
+      bad: "What the Story Often Leaves Out",
+    };
+  }
+
+  if (primaryPillar === "Died on This Day") {
+    return {
+      ...headings,
+      overview: "The Final Days and the Loss",
+      eyewitness: "How the Death Was Reported",
+      aftermath: "Mourning, Succession, and Immediate Consequences",
+      legacy: "The Legacy That Outlived Them",
+      analysis: "Our Take: Reputation, Memory, and Myth",
+      good: "What Endured Afterward",
+      bad: "What the Legacy Could Not Fix",
+    };
+  }
+
+  if (primaryPillar === "Famous Persons") {
+    return {
+      ...headings,
+      overview: "The Life and the Turning Point",
+      eyewitness: "How Contemporaries Saw Them",
+      aftermath: "Work, Reputation, and Later Years",
+      legacy: "The Legacy They Left",
+      analysis: "Our Take: Character, Choices, and Memory",
+      good: "What They Gave Their Era",
+      bad: "What the Reputation Hides",
+    };
+  }
+
+  if (primaryPillar === "Disasters & Accidents" || (explicitDisaster && !economySignal && !healthSignal)) {
     return {
       ...headings,
       overview: "The Disaster and Its Immediate Cause",
@@ -7820,7 +8045,59 @@ function buildArticleSectionHeadings(content, pillars = []) {
     };
   }
 
-  if (/\b(court|supreme court|ruling|decision|law|act|segregation|constitutional|unconstitutional|rights)\b/.test(haystack)) {
+  if (sportsSignal) {
+    return {
+      ...headings,
+      overview: "The Contest and the Stakes",
+      eyewitness: "How the Crowd Saw It",
+      aftermath: "Records, Reactions, and Consequences",
+      legacy: "The Standard It Set",
+      analysis: "Our Take: Pressure, Skill, and Legacy",
+      good: "What the Competitors Got Right",
+      bad: "What the Result Exposed",
+    };
+  }
+
+  if (healthSignal) {
+    return {
+      ...headings,
+      overview: "The Medical Problem and the Breakthrough",
+      eyewitness: "What Doctors and Patients Saw",
+      aftermath: "Treatment, Policy, and Public Response",
+      legacy: "The Practice It Changed",
+      analysis: "Our Take: Evidence, Ethics, and Access",
+      good: "What the Researchers Got Right",
+      bad: "What Care Still Missed",
+    };
+  }
+
+  if (economySignal) {
+    return {
+      ...headings,
+      overview: "The Money, Market, and Stakes",
+      eyewitness: "Reports From the Economic Front",
+      aftermath: "Losses, Laws, and Institutional Fallout",
+      legacy: "The System It Changed",
+      analysis: "Our Take: Incentives, Risk, and Consequences",
+      good: "What the Decision Got Right",
+      bad: "What the System Missed",
+    };
+  }
+
+  if (/\b(exploration|discovery|expedition|voyage|flight|landing|aviation|aircraft|airplane|plane|transatlantic|space|mission|journey|route|pilot|aviator)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Journey and the Stakes",
+      eyewitness: "Reports From the Route",
+      aftermath: "Recognition, Imitation, and First Consequences",
+      legacy: "The Boundary It Moved",
+      analysis: "Our Take: Risk, Skill, and Public Myth",
+      good: "What the Explorer Got Right",
+      bad: "What the Legend Left Out",
+    };
+  }
+
+  if (/\b(court|supreme court|ruling|decision|verdict|trial|constitutional|unconstitutional|lawsuit|legal case)\b/.test(haystack)) {
     return {
       ...headings,
       overview: "The Case and the Stakes",
@@ -7830,6 +8107,19 @@ function buildArticleSectionHeadings(content, pillars = []) {
       analysis: "Our Take: Legal Strategy and Its Limits",
       good: "What the Strategy Got Right",
       bad: "Where the System Resisted",
+    };
+  }
+
+  if (hasPillar("Social & Human Rights") || /\b(civil rights|human rights|voting rights|suffrage|apartheid|protest|march|boycott|strike|equality|segregation|abolition|emancipation|labor rights|workers rights)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Injustice and the Demand for Change",
+      eyewitness: "Voices From the Movement",
+      aftermath: "Rights Won, Resisted, and Enforced",
+      legacy: "The Fight That Continued",
+      analysis: "Our Take: Courage, Strategy, and Backlash",
+      good: "What the Movement Got Right",
+      bad: "What Justice Still Left Unfinished",
     };
   }
 
@@ -7846,7 +8136,7 @@ function buildArticleSectionHeadings(content, pillars = []) {
     };
   }
 
-  if (/\b(war|battle|siege|invasion|army|military|troops|forces|surrender|defeat|treaty|campaign)\b/.test(haystack)) {
+  if (hasPillar("War & Conflict") || /\b(war|battle|siege|invasion|army|military|troops|forces|surrender|defeat|treaty|campaign)\b/.test(haystack)) {
     return {
       ...headings,
       overview: "The Clash and the Stakes",
@@ -7859,7 +8149,7 @@ function buildArticleSectionHeadings(content, pillars = []) {
     };
   }
 
-  if (/\b(academy awards|oscars|wedding|film|music|art|culture|ceremony|prince|meghan|harry)\b/.test(haystack)) {
+  if (hasPillar("Arts & Culture") || /\b(academy awards|oscars|wedding|film|music|art|culture|ceremony|prince|meghan|harry|literature|book|novel|poem|painting|artist|museum|theatre|theater|opera|festival)\b/.test(haystack)) {
     return {
       ...headings,
       overview: "The Ceremony and the Signal",
@@ -7872,7 +8162,7 @@ function buildArticleSectionHeadings(content, pillars = []) {
     };
   }
 
-  if (/\b(science|technology|computer|space|shuttle|probe|invented|discovered|first|medical|vaccine)\b/.test(haystack)) {
+  if (hasPillar("Science & Technology") || /\b(science|technology|computer|shuttle|probe|invented|invention|discovered|first|research|laboratory|engineer|machine|satellite|rocket)\b/.test(haystack)) {
     return {
       ...headings,
       overview: "The Breakthrough and the Problem It Solved",
@@ -7882,6 +8172,19 @@ function buildArticleSectionHeadings(content, pillars = []) {
       analysis: "Our Take: Ingenuity, Limits, and Timing",
       good: "What the Innovators Got Right",
       bad: "What Slowed the Breakthrough",
+    };
+  }
+
+  if (hasPillar("Politics & Government") || /\b(politics|government|election|president|prime minister|parliament|congress|senate|minister|cabinet|coup|constitution|diplomacy|administration|policy|office|king|queen|monarch|empire|republic)\b/.test(haystack)) {
+    return {
+      ...headings,
+      overview: "The Power Struggle and the Stakes",
+      eyewitness: "Voices From the Political Moment",
+      aftermath: "Law, Office, and Public Reaction",
+      legacy: "The Order It Left Behind",
+      analysis: "Our Take: Power, Principle, and Cost",
+      good: "What the Leaders Got Right",
+      bad: "Where Power Overreached",
     };
   }
 

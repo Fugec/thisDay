@@ -20,6 +20,12 @@
   "compatibility_date": "2026-03-14",
   "main": "js/blog-ai-worker.js",
 
+  "vars": {
+    // Temporary write pause while today's free KV write quota recovers.
+    // Cloudflare KV free limits reset at 00:00 UTC.
+    "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "2026-05-22T00:00:00Z",
+  },
+
   // Routes — this worker handles:
   //   /blog/archive/          → listing page
   //   /blog/archive/[slug]/   → individual post pages

@@ -5910,24 +5910,23 @@ function assertArticleStructure(html) {
 }
 
 /**
- * Tier 2 — soft asset-quality check. Returns the (possibly marker-patched)
- * html and a list of human-readable warnings. Never throws — missing assets
- * are decorative and will be backfilled on first page view.
+ * Tier 2 — soft asset-quality check. Returns a list of human-readable
+ * warnings and the original html unchanged. Never throws and never adds
+ * backfill markers — the repair triggers on the page-serve path check for
+ * the ABSENCE of those markers to know whether to run. Adding them here
+ * would tell the repair system "already done" and suppress the backfill.
  */
 function softCheckArticleAssets(html, content) {
-  let source = String(html || "");
+  const source = String(html || "");
   const issues = [];
 
   const hasPersonTerms = (content.keyTerms || []).some(
     (term) => String(term?.type || "").toLowerCase() === "person" && term?.term,
   );
 
-  // Entity strip — required when article has named people but couldn't be fetched
+  // Entity strip — repair trigger fires on page view when marker is absent
   if (hasPersonTerms && !/data-entity-strip="1"/i.test(source)) {
     issues.push("missing people entity strip (will backfill on page view)");
-    if (!source.includes(ENTITY_STRIP_BACKFILL_MARKER)) {
-      source = addHtmlMarker(source, ENTITY_STRIP_BACKFILL_MARKER);
-    }
   } else if (hasPersonTerms) {
     const strip = extractArticleEntityStripHtml(source);
     if (strip) {
@@ -5936,28 +5935,19 @@ function softCheckArticleAssets(html, content) {
       const fallbacks = countHtmlMatches(strip, /person-circle-fallback/gi);
       if (personCards > 0 && fallbacks > 0) {
         issues.push(`people entity strip has ${fallbacks} fallback avatar(s) (will repair)`);
-        if (!source.includes(ENTITY_STRIP_BACKFILL_MARKER)) {
-          source = addHtmlMarker(source, ENTITY_STRIP_BACKFILL_MARKER);
-        }
       } else if (personCards > 0 && personImages < personCards) {
         issues.push(`people entity strip has ${personImages}/${personCards} real image(s) (will repair)`);
-        if (!source.includes(ENTITY_STRIP_BACKFILL_MARKER)) {
-          source = addHtmlMarker(source, ENTITY_STRIP_BACKFILL_MARKER);
-        }
       }
     }
   }
 
-  // Amazon covers — real <img> elements required; fallback icons mean Open Library failed
+  // Amazon covers — repair trigger fires on page view when marker is absent + fallbacks present
   const amazonTrack = source.match(/<div class="amazon-slider-track"[^>]*>([\s\S]*?)<\/div>/i)?.[1] || "";
   if (amazonTrack) {
     const amazonCards = countHtmlMatches(amazonTrack, /class="amazon-product-card"/gi);
     const amazonCovers = countHtmlMatches(amazonTrack, /class="amazon-card-cover"><img\b/gi);
     if (amazonCards > 0 && amazonCovers < Math.min(3, amazonCards)) {
       issues.push(`Amazon covers ${amazonCovers}/${amazonCards} (will backfill on page view)`);
-      if (!source.includes(AMAZON_COVERS_BACKFILL_MARKER)) {
-        source = addHtmlMarker(source, AMAZON_COVERS_BACKFILL_MARKER);
-      }
     }
   }
 

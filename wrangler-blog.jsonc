@@ -24,6 +24,8 @@
     // Temporary write pause while today's free KV write quota recovers.
     // Cloudflare KV free limits reset at 00:00 UTC.
     "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "2026-05-22T00:00:00Z",
+    // Base URL for self-subrequest enrichment calls (POST /blog/enrich).
+    "WORKER_BASE_URL": "https://thisday.info",
   },
 
   // Routes — this worker handles:

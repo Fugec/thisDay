@@ -38,6 +38,10 @@ const DEBUG_BUILD = "2026-04-28-ai-debug-1";
 const FEATURED_IMAGE_CHECK_MARKER = "<!-- featured-image-check-v1 -->";
 const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
 const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
+const AMAZON_COVERS_BACKFILL_MARKER = "<!-- amazon-covers-backfill-v1 -->";
+const KV_REPAIR_ATTEMPT_PREFIX = "repair-attempt-v1:";
+const REPAIR_ATTEMPT_TTL = 60 * 60 * 24; // 1 day
+const REPAIR_ATTEMPT_LIMIT = 2; // per slug, per repair type, per TTL window
 
 function utcDateString(value = new Date()) {
   return value.toISOString().slice(0, 10);
@@ -63,6 +67,52 @@ function blogKvBackgroundWritesPaused(env) {
   if (!raw) return false;
   const until = Date.parse(raw);
   return Number.isFinite(until) && Date.now() < until;
+}
+
+function repairAttemptKey(slug, type) {
+  return `${KV_REPAIR_ATTEMPT_PREFIX}${type}:${slug}`;
+}
+
+async function canRunRepairAttempt(env, slug, type, limit = REPAIR_ATTEMPT_LIMIT) {
+  if (!env?.BLOG_AI_KV || !slug || !type) return false;
+  try {
+    const key = repairAttemptKey(slug, type);
+    const raw = await env.BLOG_AI_KV.get(key);
+    const current = Math.max(0, Number.parseInt(raw || "0", 10) || 0);
+    if (current >= limit) return false;
+    await env.BLOG_AI_KV.put(key, String(current + 1), {
+      expirationTtl: REPAIR_ATTEMPT_TTL,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function clearRepairAttempt(env, slug, type) {
+  if (!env?.BLOG_AI_KV || !slug || !type) return;
+  await env.BLOG_AI_KV.delete(repairAttemptKey(slug, type)).catch(() => {});
+}
+
+/**
+ * Fires POST /blog/enrich?slug=<slug> as a self-subrequest so enrichment runs
+ * in a brand-new Worker invocation with its own fresh subrequest budget.
+ * Best-effort — logs status but never throws.
+ */
+async function selfEnrichFetch(env, slug) {
+  try {
+    const base = String(env?.WORKER_BASE_URL || "https://thisday.info").replace(/\/$/, "");
+    const url = `${base}/blog/enrich?slug=${encodeURIComponent(slug)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: env.PUBLISH_SECRET
+        ? { Authorization: `Bearer ${env.PUBLISH_SECRET}` }
+        : {},
+    });
+    console.log(`Blog: self-enrich for ${slug} → HTTP ${res.status}`);
+  } catch (err) {
+    console.error(`Blog: self-enrich fetch failed for ${slug}: ${err.message}`);
+  }
 }
 
 async function getPipelineState(env) {
@@ -240,7 +290,8 @@ function buildDidYouKnowSlider(facts) {
             </article>`;
   }).join("\n");
 
-  return `<section class="dyn-slider-shell mb-4" aria-label="Did you know">
+  return `<h2 class="h3">Did You Know?</h2>
+          <section class="dyn-slider-shell mb-4" aria-label="Did you know">
             <button type="button" class="dyn-slider-btn dyn-slider-btn-prev" aria-label="Previous" onclick="this.parentElement.querySelector('.dyn-slider-wrap').scrollBy({left:-280,behavior:'smooth'})">&#8249;</button>
             <div class="dyn-slider-wrap">
               <div class="dyn-slider-track">
@@ -1672,6 +1723,7 @@ export default {
     }
 
     // Admin: rewrite stored HTML with response-time page quality normalizations.
+    // POST /blog/backfill-page-quality?latest=true
     // POST /blog/backfill-page-quality?all=true
     // POST /blog/backfill-page-quality?slug=22-march-2026
     if (path === "/blog/backfill-page-quality" && request.method === "POST") {
@@ -1681,17 +1733,25 @@ export default {
       }
       const params = new URL(request.url).searchParams;
       const targetSlug = params.get("slug");
+      const backfillLatest = params.get("latest") === "true";
       const backfillAll = params.get("all") === "true";
       const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
       const index = indexRaw ? JSON.parse(indexRaw) : [];
+      const latestSlug = [...index]
+        .filter((entry) => entry?.slug)
+        .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0))[0]?.slug;
       const slugs = targetSlug
         ? [targetSlug]
-        : backfillAll
-          ? index.map((entry) => entry.slug).filter(Boolean)
-          : [];
+        : backfillLatest
+          ? latestSlug
+            ? [latestSlug]
+            : []
+          : backfillAll
+            ? index.map((entry) => entry.slug).filter(Boolean)
+            : [];
       if (slugs.length === 0) {
         return jsonResponse(
-          { status: "error", message: "Provide ?slug=X or ?all=true" },
+          { status: "error", message: "Provide ?slug=X, ?latest=true, or ?all=true" },
           400,
         );
       }
@@ -2671,11 +2731,15 @@ export default {
               exploreHtml &&
               !patchedHtml.includes('data-explore-injected="1"')
             ) {
-              const afterWikiAnchor = patchedHtml.includes("<!-- Quiz CTA -->")
-                ? "<!-- Quiz CTA -->"
-                : patchedHtml.includes("You Might Also Like")
-                  ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
-                  : "</article>";
+              const afterWikiAnchor = patchedHtml.includes('<div class="authority-links mt-3 mb-4">')
+                ? '<div class="authority-links mt-3 mb-4">'
+                : patchedHtml.includes('<section class="amazon-related')
+                  ? '<section class="amazon-related'
+                  : patchedHtml.includes("<!-- Quiz CTA -->")
+                    ? "<!-- Quiz CTA -->"
+                    : patchedHtml.includes("You Might Also Like")
+                      ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
+                      : "</article>";
               patchedHtml = patchedHtml.replace(
                 afterWikiAnchor,
                 exploreHtml + "\n          " + afterWikiAnchor,
@@ -2739,11 +2803,15 @@ export default {
             ? `<img src="/image-proxy?src=${encodeURIComponent(eventsThumb)}&w=80&q=75" alt="Explore ${esc(sp.monthDisplay)} ${esc(sp.day)} in history" width="64" height="64" style="width:64px;height:64px;min-width:64px;object-fit:cover;border-radius:8px;flex-shrink:0;display:block" loading="lazy"/>`
             : "";
           const exploreCard = buildDateExploreCard(sp, thumb);
-          const anchor = patchedHtml.includes("<!-- Quiz CTA -->")
-            ? "<!-- Quiz CTA -->"
-            : patchedHtml.includes("You Might Also Like")
-              ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
-              : "</article>";
+          const anchor = patchedHtml.includes('<div class="authority-links mt-3 mb-4">')
+            ? '<div class="authority-links mt-3 mb-4">'
+            : patchedHtml.includes('<section class="amazon-related')
+              ? '<section class="amazon-related'
+              : patchedHtml.includes("<!-- Quiz CTA -->")
+                ? "<!-- Quiz CTA -->"
+                : patchedHtml.includes("You Might Also Like")
+                  ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
+                  : "</article>";
           patchedHtml = patchedHtml.replace(
             anchor,
             exploreCard + "\n          " + anchor,
@@ -2854,15 +2922,7 @@ export default {
         }
         // Inject updated ai-answer-card styles into older stored posts (removes green gradient,
         // hides kicker, h2 title, and injected figure/p to match the current clean card design).
-        if (!patchedHtml.includes('ai-card-patch-v2')) {
-          patchedHtml = patchedHtml.replace(
-            /<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/,
-            '',
-          ).replace(
-            '</head>',
-            '<style>/*ai-card-patch-v2*/.ai-answer-card{position:relative!important;z-index:1!important;clear:both!important;background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>',
-          );
-        }
+        patchedHtml = normalizeAiAnswerCardHtml(patchedHtml);
         // Font-size consistency patch: 15px on .mb-2 and .ai-answer-item value text.
         if (!patchedHtml.includes('font-patch-v1')) {
           patchedHtml = patchedHtml.replace(
@@ -2923,6 +2983,7 @@ export default {
             const htmlForRepair = patchedHtml;
             ctx.waitUntil((async () => {
               try {
+                if (!(await canRunRepairAttempt(env, slug, "featured-image"))) return;
                 const needsRepair =
                   isLowValueFeaturedImage(coverUrlForRepair) ||
                   !(await isWorkingImageUrl(coverUrlForRepair));
@@ -2931,6 +2992,7 @@ export default {
                     `${KV_POST_PREFIX}${slug}`,
                     addHtmlMarker(htmlForRepair, FEATURED_IMAGE_CHECK_MARKER),
                   );
+                  await clearRepairAttempt(env, slug, "featured-image");
                   return;
                 }
                 const replacement = await fetchWikipediaImage("", wikiUrlForRepair);
@@ -2939,6 +3001,7 @@ export default {
                     `${KV_POST_PREFIX}${slug}`,
                     addHtmlMarker(htmlForRepair, FEATURED_IMAGE_CHECK_MARKER),
                   );
+                  await clearRepairAttempt(env, slug, "featured-image");
                   return;
                 }
                 const repaired = addHtmlMarker(
@@ -2955,6 +3018,7 @@ export default {
                   found.imageUrl = replacement;
                   await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(index2));
                 }
+                await clearRepairAttempt(env, slug, "featured-image");
               } catch {
                 // best-effort repair
               }
@@ -2977,6 +3041,7 @@ export default {
             const htmlForFigs = patchedHtml;
             ctx.waitUntil((async () => {
               try {
+                if (!(await canRunRepairAttempt(env, slug, "event-figures"))) return;
                 const imgs = await fetchEventImages(wikiUrlForFigs, coverUrlForFigs, 2);
                 const withFigures = imgs.length > 0
                   ? injectEventImages(htmlForFigs, imgs)
@@ -2984,6 +3049,7 @@ export default {
                 const checkedHtml = addHtmlMarker(withFigures, EVENT_FIGURES_BACKFILL_MARKER);
                 if (checkedHtml !== htmlForFigs) {
                   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, checkedHtml);
+                  await clearRepairAttempt(env, slug, "event-figures");
                 }
               } catch {
                 // best-effort backfill
@@ -2994,16 +3060,18 @@ export default {
         // Entity strip — fully non-blocking. Serve the cached HTML immediately;
         // hydrate + inject only when the stored article is missing cached data.
         const entityStripKnownEmpty = String(articleEntitiesRaw || "").trim() === "[]";
+        const entityStripNeedsImageRepair = articleEntityStripNeedsImageRepair(patchedHtml);
         if (
           ctx?.waitUntil &&
           allowArticleKvBackgroundWrites &&
           !entityStripKnownEmpty &&
-          !patchedHtml.includes(ENTITY_STRIP_BACKFILL_MARKER) &&
-          (!patchedHtml.includes('data-entity-strip="1"') || !articleEntitiesRaw)
+          (!patchedHtml.includes(ENTITY_STRIP_BACKFILL_MARKER) || entityStripNeedsImageRepair) &&
+          (!patchedHtml.includes('data-entity-strip="1"') || !articleEntitiesRaw || entityStripNeedsImageRepair)
         ) {
           const htmlSnapshot = patchedHtml;
           ctx.waitUntil((async () => {
             try {
+              if (!(await canRunRepairAttempt(env, slug, "entity-strip"))) return;
               const parsedEntityMeta = articleEntitiesRaw
                 ? JSON.parse(articleEntitiesRaw)
                 : extractArticlePeopleMetaFromHtml(htmlSnapshot);
@@ -3011,22 +3079,25 @@ export default {
                 if (!articleEntitiesRaw) {
                   await env.BLOG_AI_KV.put(`post-entities:${slug}`, "[]");
                 }
+                await clearRepairAttempt(env, slug, "entity-strip");
                 return;
               }
               const entityMeta = await hydrateArticleEntityImages(env, parsedEntityMeta);
               const strip = buildArticleEntityStrip(entityMeta);
               const entityMetaRaw = JSON.stringify(entityMeta);
               if (!strip) {
+                const strippedHtml = htmlSnapshot.replace(ENTITY_STRIP_BLOCK_RE, "");
                 const writes = [
                   env.BLOG_AI_KV.put(
                     `${KV_POST_PREFIX}${slug}`,
-                    addHtmlMarker(htmlSnapshot, ENTITY_STRIP_BACKFILL_MARKER),
+                    addHtmlMarker(strippedHtml, ENTITY_STRIP_BACKFILL_MARKER),
                   ),
                 ];
                 if (!articleEntitiesRaw || entityMetaRaw !== articleEntitiesRaw) {
                   writes.push(env.BLOG_AI_KV.put(`post-entities:${slug}`, entityMetaRaw));
                 }
                 await Promise.all(writes);
+                await clearRepairAttempt(env, slug, "entity-strip");
                 return;
               }
               let updated = htmlSnapshot;
@@ -3062,6 +3133,34 @@ export default {
                 writes.push(env.BLOG_AI_KV.put(`post-entities:${slug}`, entityMetaRaw));
               }
               await Promise.all(writes);
+              if (!articleEntityStripNeedsImageRepair(updated)) {
+                await clearRepairAttempt(env, slug, "entity-strip");
+              }
+            } catch {
+              // best-effort
+            }
+          })());
+        }
+        if (
+          ctx?.waitUntil &&
+          allowArticleKvBackgroundWrites &&
+          amazonTracksNeedCoverBackfill(patchedHtml) &&
+          !patchedHtml.includes(AMAZON_COVERS_BACKFILL_MARKER)
+        ) {
+          const htmlSnapshot = patchedHtml;
+          ctx.waitUntil((async () => {
+            try {
+              if (!(await canRunRepairAttempt(env, slug, "amazon-covers"))) return;
+              const key = `${KV_POST_PREFIX}${slug}`;
+              const latestHtml = await env.BLOG_AI_KV.get(key).catch(() => null) || htmlSnapshot;
+              const updated = await hydrateAmazonBlocksInHtml(latestHtml);
+              if (updated !== latestHtml) {
+                await env.BLOG_AI_KV.put(
+                  key,
+                  addHtmlMarker(updated, AMAZON_COVERS_BACKFILL_MARKER),
+                );
+                await clearRepairAttempt(env, slug, "amazon-covers");
+              }
             } catch {
               // best-effort
             }
@@ -4462,13 +4561,22 @@ async function generateAndStore(
     });
   }
 
-  // Always use ctx.waitUntil for extras so enrichment runs in a fresh subrequest
-  // budget — post generation already spends ~20+ subrequests and sharing the
-  // budget with entity Wikipedia/AI calls hits Cloudflare's per-invocation limit.
-  if (ctx?.waitUntil) {
-    ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish }));
+  if (lightweightPublish) {
+    // Fire enrichment as a self-subrequest so it runs in a NEW Worker invocation
+    // with its own fresh subrequest budget, completely separate from the generation
+    // budget spent above. ctx.waitUntil shares the same budget, so we use a fetch
+    // to /blog/enrich instead of calling enrichPublishedPost inline.
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(selfEnrichFetch(env, slug));
+    } else {
+      await selfEnrichFetch(env, slug);
+    }
   } else {
-    await runPostPublishExtras(env, slug, content, { scheduleEnrichment: lightweightPublish });
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: false }));
+    } else {
+      await runPostPublishExtras(env, slug, content, { scheduleEnrichment: false });
+    }
   }
 
   console.log(
@@ -4774,13 +4882,20 @@ async function savePublishedPost(
   const safePillars = Array.isArray(pillars) ? pillars : [];
   const safePersonImages = Array.isArray(personImages) ? personImages : [];
   const safeEventImages = Array.isArray(eventImages) ? eventImages : [];
-  const safeEntityMeta = Array.isArray(entityMeta) ? entityMeta : [];
+  let safeEntityMeta = Array.isArray(entityMeta) ? entityMeta : [];
 
   alignContentDateFields(content);
   const dateValidation = validateContentDateForPublish(content, date);
   if (!dateValidation.ok) {
     throw new Error(`Refusing to publish ${slug}: ${dateValidation.reason}`);
   }
+  await hydrateContentAssetsForPublish(content, safePillars).catch((err) => {
+    console.warn(`Article asset hydration failed for ${slug}: ${err.message}`);
+  });
+  safeEntityMeta = await hydrateArticleEntityImages(env, safeEntityMeta).catch((err) => {
+    console.warn(`Article entity image hydration failed for ${slug}: ${err.message}`);
+    return safeEntityMeta;
+  });
 
   const rawHtml = buildPostHTML(content, date, slug, existingIndex, safePillars, bookCoverUrl);
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
@@ -4794,8 +4909,26 @@ async function savePublishedPost(
   if (safePersonImages.length > 0 || safeEventImages.length > 0) {
     html = addHtmlMarker(html, EVENT_FIGURES_BACKFILL_MARKER);
   }
-  assertPublishedArticleCompleteness(html, content);
-  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, html);
+  // Tier 1: hard structural check — throws if buildPostHTML produced a broken article.
+  assertArticleStructure(html);
+  // Tier 2: soft asset-quality check — adds backfill markers, logs warnings, never throws.
+  const { html: checkedHtml, issues: assetIssues } = softCheckArticleAssets(html, content);
+  if (assetIssues.length > 0) {
+    console.warn(`Blog: asset quality warnings for ${slug}: ${assetIssues.join("; ")}`);
+  }
+  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, checkedHtml);
+  if (safeEntityMeta.length > 0) {
+    const lightweightEntities = safeEntityMeta.map((e) => ({
+      type: e.type,
+      slug: e.slug,
+      name: e.name,
+      imageUrl: e.imageUrl || "",
+      url: e.url,
+      wikiUrl: e.wikiUrl || "",
+      ...(e.skipStrip ? { skipStrip: true } : {}),
+    }));
+    await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(lightweightEntities)).catch(() => {});
+  }
 
   const deduped = [...existingIndex].filter((e) => e.slug !== slug);
   const entry = {
@@ -5631,6 +5764,11 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars) {
     if (!type || !slugPart) continue;
     const wikiData = term.wikiUrl ? await fetchWikipediaEntityData(term).catch(() => ({})) : {};
     const wikiEmpty = !wikiData.intro && !wikiData.summary;
+    const entityImageUrl = wikiData.imageUrl || (
+      type === "person" && term.wikiUrl
+        ? await fetchWikipediaImage(term.term, term.wikiUrl, { skipCommonsSearch: true }).catch(() => "")
+        : ""
+    );
     const url = type === "person" ? `/people/${slugPart}/` : `/history/${slugPart}/`;
     const entity = {
       type,
@@ -5642,7 +5780,7 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars) {
       sourcePostTitle: content.title || "",
       sourcePostUrl: `/blog/${slug}/`,
       sourcePublishedAt: date.toISOString(),
-      imageUrl: wikiData.imageUrl || (type === "event" ? content.imageUrl : ""),
+      imageUrl: entityImageUrl || (type === "event" ? content.imageUrl : ""),
       summary: wikiData.summary || "",
       intro: wikiData.intro || wikiData.summary || "",
       description: wikiData.description || "",
@@ -5717,7 +5855,44 @@ function injectArticleEntityStrip(html, entityMeta) {
   return updated;
 }
 
-function assertPublishedArticleCompleteness(html, content) {
+function countHtmlMatches(source, pattern) {
+  return (String(source || "").match(pattern) || []).length;
+}
+
+function extractArticleEntityStripHtml(html) {
+  const match = String(html || "").match(
+    /<div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/i,
+  );
+  return match?.[0] || "";
+}
+
+function articleEntityStripNeedsImageRepair(html) {
+  const strip = extractArticleEntityStripHtml(html);
+  if (!strip) return false;
+  const personCards = countHtmlMatches(strip, /class="person-pill"/gi);
+  if (personCards === 0) return false;
+  const personImages = countHtmlMatches(strip, /class="person-circle"><img\b/gi);
+  const fallbacks = countHtmlMatches(strip, /person-circle-fallback/gi);
+  return fallbacks > 0 || personImages < personCards;
+}
+
+function amazonTracksNeedCoverBackfill(html) {
+  const tracks = [...String(html || "").matchAll(/<div class="amazon-slider-track"[^>]*>([\s\S]*?)<\/div>/gi)];
+  if (tracks.length === 0) return false;
+  return tracks.some(([, track]) => {
+    const cardCount = countHtmlMatches(track, /class="amazon-product-card"/gi);
+    if (cardCount === 0) return false;
+    const coverCount = countHtmlMatches(track, /class="amazon-card-cover"><img\b/gi);
+    return /data-amazon-fallback="1"/i.test(track) || coverCount < Math.min(3, cardCount);
+  });
+}
+
+/**
+ * Tier 1 — hard structural check. Throws if any required element generated
+ * entirely from local draft content is missing. These never depend on external
+ * network calls so a failure means buildPostHTML broke, not a transient error.
+ */
+function assertArticleStructure(html) {
   const source = String(html || "");
   const checks = [
     ["article shell", /<article\b/i],
@@ -5726,18 +5901,67 @@ function assertPublishedArticleCompleteness(html, content) {
     ["related Amazon block", /class="amazon-related/i],
     ["Amazon recommendation cards", /amazon-product-card/i],
   ];
-  const hasPersonTerms = (content.keyTerms || []).some(
-    (term) => String(term?.type || "").toLowerCase() === "person" && term?.term,
-  );
-  if (hasPersonTerms) {
-    checks.push(["people entity strip", /data-entity-strip="1"/i]);
-  }
   const missing = checks
     .filter(([, pattern]) => !pattern.test(source))
     .map(([label]) => label);
   if (missing.length > 0) {
-    throw new Error(`Article completeness check failed: missing ${missing.join(", ")}`);
+    throw new Error(`Article structure check failed: missing ${missing.join(", ")}`);
   }
+}
+
+/**
+ * Tier 2 — soft asset-quality check. Returns the (possibly marker-patched)
+ * html and a list of human-readable warnings. Never throws — missing assets
+ * are decorative and will be backfilled on first page view.
+ */
+function softCheckArticleAssets(html, content) {
+  let source = String(html || "");
+  const issues = [];
+
+  const hasPersonTerms = (content.keyTerms || []).some(
+    (term) => String(term?.type || "").toLowerCase() === "person" && term?.term,
+  );
+
+  // Entity strip — required when article has named people but couldn't be fetched
+  if (hasPersonTerms && !/data-entity-strip="1"/i.test(source)) {
+    issues.push("missing people entity strip (will backfill on page view)");
+    if (!source.includes(ENTITY_STRIP_BACKFILL_MARKER)) {
+      source = addHtmlMarker(source, ENTITY_STRIP_BACKFILL_MARKER);
+    }
+  } else if (hasPersonTerms) {
+    const strip = extractArticleEntityStripHtml(source);
+    if (strip) {
+      const personCards = countHtmlMatches(strip, /class="person-pill"/gi);
+      const personImages = countHtmlMatches(strip, /class="person-circle"><img\b/gi);
+      const fallbacks = countHtmlMatches(strip, /person-circle-fallback/gi);
+      if (personCards > 0 && fallbacks > 0) {
+        issues.push(`people entity strip has ${fallbacks} fallback avatar(s) (will repair)`);
+        if (!source.includes(ENTITY_STRIP_BACKFILL_MARKER)) {
+          source = addHtmlMarker(source, ENTITY_STRIP_BACKFILL_MARKER);
+        }
+      } else if (personCards > 0 && personImages < personCards) {
+        issues.push(`people entity strip has ${personImages}/${personCards} real image(s) (will repair)`);
+        if (!source.includes(ENTITY_STRIP_BACKFILL_MARKER)) {
+          source = addHtmlMarker(source, ENTITY_STRIP_BACKFILL_MARKER);
+        }
+      }
+    }
+  }
+
+  // Amazon covers — real <img> elements required; fallback icons mean Open Library failed
+  const amazonTrack = source.match(/<div class="amazon-slider-track"[^>]*>([\s\S]*?)<\/div>/i)?.[1] || "";
+  if (amazonTrack) {
+    const amazonCards = countHtmlMatches(amazonTrack, /class="amazon-product-card"/gi);
+    const amazonCovers = countHtmlMatches(amazonTrack, /class="amazon-card-cover"><img\b/gi);
+    if (amazonCards > 0 && amazonCovers < Math.min(3, amazonCards)) {
+      issues.push(`Amazon covers ${amazonCovers}/${amazonCards} (will backfill on page view)`);
+      if (!source.includes(AMAZON_COVERS_BACKFILL_MARKER)) {
+        source = addHtmlMarker(source, AMAZON_COVERS_BACKFILL_MARKER);
+      }
+    }
+  }
+
+  return { html: source, issues };
 }
 
 function extractArticlePeopleMetaFromHtml(html) {
@@ -5781,12 +6005,14 @@ async function hydrateArticleEntityImages(env, entityMeta) {
       const record = await env.BLOG_AI_KV.get(key, { type: "json" }).catch(() => null);
       if (record?.imageUrl) {
         next.imageUrl = record.imageUrl;
+        delete next.skipStrip;
         changed = true;
       } else {
         // No image in entity-v1 or post-entities — try Wikipedia steps 1+2 only (no Commons text search).
         const imageUrl = await fetchWikipediaImage(next.name, record?.wikiUrl || next.wikiUrl || "", { skipCommonsSearch: true });
         if (imageUrl) {
           next.imageUrl = imageUrl;
+          delete next.skipStrip;
           changed = true;
           if (record) {
             record.imageUrl = imageUrl;
@@ -7518,13 +7744,13 @@ function amazonSearchUrl(query) {
   return `https://www.amazon.com/s?k=${encodeURIComponent(safeQuery)}&tag=${encodeURIComponent(AMAZON_ASSOCIATE_TAG)}`;
 }
 
-function buildAmazonRelatedBlock(c, currentPillars = []) {
+function buildAmazonRelatedData(c, currentPillars = []) {
   const topic = String(c.amazonBookTopic || c.bookSearchQuery || c.eventTitle || c.title || "")
     .replace(/^books?\s+(about|on)\s+/i, "")
     .replace(/\s+[-—]\s+.*$/, "")
     .replace(/\s+/g, " ")
     .trim();
-  if (!topic) return "";
+  if (!topic) return null;
 
   const eventText = `${c.eventTitle || ""} ${c.keywords || ""} ${(currentPillars || []).join(" ")}`.toLowerCase();
   const secondary =
@@ -7556,13 +7782,6 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
     query: item.query,
     type: item.type || "book",
   }));
-  const fallbackCards = sliderItems.map((item) =>
-    `<a class="amazon-product-card" href="${esc(amazonSearchUrl(item.query))}" target="_blank" rel="sponsored noopener noreferrer" data-amazon-fallback="1">` +
-    `<span class="amazon-card-cover amazon-card-cover-fallback" aria-hidden="true"><i class="bi bi-book"></i></span>` +
-    `<strong>${esc(item.label)}</strong>` +
-    `<small>View on Amazon</small>` +
-    `</a>`,
-  ).join("");
   const openLibraryQuery = String(c.bookSearchQuery || sliderItems[0]?.query || `${topic} history book`)
     .replace(/\s+/g, " ")
     .trim();
@@ -7579,14 +7798,154 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
     .slice(0, 14)
     .join(" ");
 
+  return { topic, sliderItems, openLibraryQuery, bookKeywords };
+}
+
+function buildAmazonFallbackCards(sliderItems) {
+  return sliderItems.map((item) =>
+    `<a class="amazon-product-card" href="${esc(amazonSearchUrl(item.query))}" target="_blank" rel="sponsored noopener noreferrer" data-amazon-fallback="1">` +
+    `<span class="amazon-card-cover amazon-card-cover-fallback" aria-hidden="true"><i class="bi bi-book"></i></span>` +
+    `<strong>${esc(item.label)}</strong>` +
+    `<small>View on Amazon</small>` +
+    `</a>`,
+  ).join("");
+}
+
+function buildOpenLibraryAmazonCards(books) {
+  return (books || [])
+    .filter((book) => book?.title && book?.coverUrl)
+    .slice(0, 5)
+    .map((book) => {
+      const author = String(book.author || "").trim();
+      const searchQuery = [book.title, author].filter(Boolean).join(" ");
+      return `<a class="amazon-product-card" href="${esc(amazonSearchUrl(searchQuery))}" target="_blank" rel="sponsored noopener noreferrer">` +
+        `<span class="amazon-card-cover"><img src="${esc(book.coverUrl)}" alt="${esc(book.title)} cover" loading="lazy"></span>` +
+        `<strong>${esc(book.title)}</strong>` +
+        (author ? `<small>${esc(author)}</small>` : `<small>View on Amazon</small>`) +
+        `</a>`;
+    })
+    .join("");
+}
+
+function normalizeOpenLibraryBook(doc) {
+  const title = String(doc?.title || "").trim();
+  const author = Array.isArray(doc?.author_name)
+    ? String(doc.author_name[0] || "").trim()
+    : "";
+  const coverId = doc?.cover_i;
+  if (!title || !coverId) return null;
+  return {
+    title,
+    author,
+    coverUrl: `https://covers.openlibrary.org/b/id/${coverId}-M.jpg`,
+    firstPublishYear: doc?.first_publish_year || null,
+    subjects: Array.isArray(doc?.subject) ? doc.subject.slice(0, 8) : [],
+  };
+}
+
+function splitBookKeywords(keywords) {
+  return String(keywords || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 4);
+}
+
+async function fetchOpenLibraryBooks(query, keywords = "", limit = 5) {
+  const cleanQuery = String(query || "").replace(/\s+/g, " ").trim();
+  if (!cleanQuery) return [];
+  try {
+    const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
+    const res = await fetch(
+      `https://openlibrary.org/search.json?q=${encodeURIComponent(cleanQuery)}&mode=books&limit=12&fields=title,author_name,cover_i,first_publish_year,subject`,
+      { headers: ua },
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const docs = (data?.docs || [])
+      .map(normalizeOpenLibraryBook)
+      .filter(Boolean);
+    if (!docs.length) return [];
+
+    const words = splitBookKeywords(keywords);
+    const seen = new Set();
+    const dedupe = (book) => {
+      const key = normalizeTopicMatchText(`${book.title} ${book.author}`);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    };
+    const matching = words.length
+      ? docs.filter((book) => {
+          const hay = `${book.title} ${book.author} ${(book.subjects || []).join(" ")}`.toLowerCase();
+          return words.some((word) => hay.includes(word));
+        })
+      : docs;
+    const ordered = matching.length
+      ? [...matching, ...docs.filter((book) => !matching.includes(book))]
+      : docs;
+    return ordered.filter(dedupe).slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+async function hydrateContentAssetsForPublish(content, currentPillars = []) {
+  const related = buildAmazonRelatedData(content, currentPillars);
+  if (!related) return content;
+  const existingBooks = Array.isArray(content.openLibraryBooks)
+    ? content.openLibraryBooks.filter((book) => book?.title && book?.coverUrl)
+    : [];
+  if (existingBooks.length >= 3) return content;
+
+  const queries = [
+    related.openLibraryQuery,
+    `${related.topic} history`,
+    content.eventTitle,
+    ...(Array.isArray(content.keyTerms)
+      ? content.keyTerms
+          .filter((term) => String(term?.type || "").toLowerCase() === "person")
+          .map((term) => `${term.term} biography`)
+      : []),
+  ]
+    .map((query) => String(query || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const books = [];
+  const seen = new Set();
+  for (const query of queries) {
+    if (books.length >= 5) break;
+    const found = await fetchOpenLibraryBooks(query, related.bookKeywords, 5).catch(() => []);
+    for (const book of found) {
+      const key = normalizeTopicMatchText(`${book.title} ${book.author}`);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      books.push(book);
+      if (books.length >= 5) break;
+    }
+  }
+  if (books.length > 0) {
+    content.openLibraryBooks = books;
+  }
+  return content;
+}
+
+function buildAmazonRelatedBlock(c, currentPillars = []) {
+  const related = buildAmazonRelatedData(c, currentPillars);
+  if (!related) return "";
+
+  const hydratedCards = buildOpenLibraryAmazonCards(c.openLibraryBooks || []);
+  const fallbackCards = buildAmazonFallbackCards(related.sliderItems);
+  const cards = hydratedCards || fallbackCards;
+
   return `<section class="amazon-related mt-4 p-3 rounded" aria-label="Related book recommendations">
             <div class="amazon-related-head">
               <span class="amazon-kicker">Related books</span>
             </div>
-            <div class="amazon-slider-shell" data-open-library-books data-query="${esc(openLibraryQuery)}" data-keywords="${esc(bookKeywords)}" data-amazon-tag="${esc(AMAZON_ASSOCIATE_TAG)}">
+            <div class="amazon-slider-shell" data-open-library-books data-query="${esc(related.openLibraryQuery)}" data-keywords="${esc(related.bookKeywords)}" data-amazon-tag="${esc(AMAZON_ASSOCIATE_TAG)}">
               <button type="button" class="amazon-slider-btn" aria-label="Previous Amazon recommendations" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
               <div class="amazon-slider-wrap">
-                <div class="amazon-slider-track" aria-live="polite">${fallbackCards}</div>
+                <div class="amazon-slider-track" aria-live="polite">${cards}</div>
               </div>
               <button type="button" class="amazon-slider-btn" aria-label="Next Amazon recommendations" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
             </div>
@@ -7602,7 +7961,7 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
   var tag=shell.dataset.amazonTag||'${AMAZON_ASSOCIATE_TAG}';
   function escText(value){return String(value||'').replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
   function amazonUrl(title,author){return 'https://www.amazon.com/s?k='+encodeURIComponent([title,author].filter(Boolean).join(' '))+'&tag='+encodeURIComponent(tag);}
-  fetch('https://openlibrary.org/search.json?q='+encodeURIComponent(query)+'&mode=books&limit=8&fields=title,author_name,cover_i,first_publish_year')
+  fetch('https://openlibrary.org/search.json?q='+encodeURIComponent(query)+'&mode=books&limit=8&fields=title,author_name,cover_i,first_publish_year,subject')
     .then(function(res){return res.ok?res.json():null;})
     .then(function(data){
       var docs=((data&&data.docs)||[]).filter(function(doc){
@@ -7625,6 +7984,48 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
 	  })();
             </script>
           </section>`;
+}
+
+function readHtmlAttr(tag, name) {
+  const escapedName = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(tag || "").match(new RegExp(`${escapedName}="([^"]*)"`, "i"));
+  return match ? unesc(match[1]) : "";
+}
+
+async function hydrateAmazonBlocksInHtml(html) {
+  const source = String(html || "");
+  const trackRe = /(<div class="amazon-slider-shell"[^>]*data-open-library-books[^>]*>[\s\S]*?<div class="amazon-slider-track"[^>]*>)([\s\S]*?)(<\/div>)/gi;
+  let result = "";
+  let lastIndex = 0;
+  let changed = false;
+  let match;
+
+  while ((match = trackRe.exec(source))) {
+    const [full, prefix, trackHtml, suffix] = match;
+    result += source.slice(lastIndex, match.index);
+    lastIndex = match.index + full.length;
+
+    if (!amazonTracksNeedCoverBackfill(`<div class="amazon-slider-track">${trackHtml}</div>`)) {
+      result += full;
+      continue;
+    }
+
+    const shellTag = prefix.match(/<div class="amazon-slider-shell"[^>]*>/i)?.[0] || "";
+    const query = readHtmlAttr(shellTag, "data-query") || "history books";
+    const keywords = readHtmlAttr(shellTag, "data-keywords");
+    const books = await fetchOpenLibraryBooks(query, keywords, 5).catch(() => []);
+    const cards = buildOpenLibraryAmazonCards(books);
+    if (!cards) {
+      result += full;
+      continue;
+    }
+
+    result += prefix + cards + suffix;
+    changed = true;
+  }
+
+  if (!changed) return source;
+  return result + source.slice(lastIndex);
 }
 
 /**
@@ -8619,7 +9020,7 @@ ${JSON.stringify({
       .site-table th,.site-table td{padding:8px 14px;border-bottom:1px solid var(--border);text-align:left;color:var(--text)}
       .site-table tr:last-child th,.site-table tr:last-child td{border-bottom:none}
       .site-table th{background:var(--bg-alt);font-weight:600;white-space:nowrap;width:40%}
-      .ai-answer-card{position:relative;z-index:1;clear:both;background:#f5f5f5;border:1px solid rgba(27,58,45,.14);border-radius:12px;padding:18px 20px;font-size:15px}
+      .ai-answer-card{position:relative;z-index:1;clear:both;background:#fff;border:0;padding:0;font-size:15px}
       .ai-answer-card p{margin-bottom:.75rem;font-size:15px}
       .ai-answer-kicker{display:none!important}
       .ai-answer-grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
@@ -8697,19 +9098,6 @@ ${overviewParas}
               : ""
           }
 
-          ${bookCoverUrl && c.bookSearchQuery ? `<!-- Free Library Reading -->
-          <div class="mt-3 p-3 rounded" style="background-color: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08); display:flex; align-items:flex-start; gap:14px;">
-            <a href="https://openlibrary.org/search?q=${encodeURIComponent(c.bookSearchQuery)}&mode=books" target="_blank" rel="noopener noreferrer" style="flex-shrink:0;">
-              <img src="${esc(bookCoverUrl)}" alt="Book cover" loading="lazy" style="width:60px;height:auto;border-radius:4px;display:block;">
-            </a>
-            <div>
-              <strong style="font-size:0.9rem;">Free library reading</strong><br>
-              <small class="article-meta">You can also browse free digital editions and catalog records at
-                <a href="https://openlibrary.org/search?q=${encodeURIComponent(c.bookSearchQuery)}&mode=books" target="_blank" rel="noopener noreferrer">Open Library</a>.
-              </small>
-            </div>
-          </div>` : ""}
-
           ${buildAuthorityLinksBlock(c, currentPillars)}
 
           ${buildAmazonRelatedBlock(c, currentPillars)}
@@ -8761,9 +9149,21 @@ ${conclusionParas}
           }
 
           <!-- Personal Analysis -->
+          ${bookCoverUrl && c.bookSearchQuery ? `<!-- Free Library Reading -->
+          <div class="mt-3 p-3 rounded" style="background-color: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08); display:flex; align-items:flex-start; gap:14px;">
+            <a href="https://openlibrary.org/search?q=${encodeURIComponent(c.bookSearchQuery)}&mode=books" target="_blank" rel="noopener noreferrer" style="flex-shrink:0;">
+              <img src="${esc(bookCoverUrl)}" alt="Book cover" loading="lazy" style="width:60px;height:auto;border-radius:4px;display:block;">
+            </a>
+            <div>
+              <strong style="font-size:0.9rem;">Free library reading</strong><br>
+              <small class="article-meta">You can also browse free digital editions and catalog records at
+                <a href="https://openlibrary.org/search?q=${encodeURIComponent(c.bookSearchQuery)}&mode=books" target="_blank" rel="noopener noreferrer">Open Library</a>.
+              </small>
+            </div>
+          </div>` : ""}
           ${
             analysisGoodItems || analysisBadItems
-              ? `<section class="mt-5">
+              ? `<section class="mt-5" style="margin-top:2rem!important">
             <h2 class="h3">${esc(sectionHeadings.analysis)}</h2>
             <div class="row g-3 mt-1">
               <div class="col-md-6">
@@ -9963,12 +10363,178 @@ function stripDynSliderFiguresHtml(html) {
   );
 }
 
+function findDivBlockRangeContaining(html, phrase, classPattern = null) {
+  const source = String(html || "");
+  const phraseIndex = source.indexOf(phrase);
+  if (phraseIndex === -1) return null;
+  const divRe = /<div\b[^>]*>/gi;
+  let match;
+  let found = null;
+  while ((match = divRe.exec(source))) {
+    if (match.index > phraseIndex) break;
+    if (classPattern && !classPattern.test(match[0])) continue;
+    const end = findArticleHeroWrapEnd(source, match.index);
+    if (end !== -1 && end > phraseIndex) {
+      found = { start: match.index, end };
+    }
+  }
+  if (!found) return null;
+
+  const nearby = source.slice(Math.max(0, found.start - 100), found.start);
+  const commentMatch = nearby.match(/<!-- Free Library Reading -->\s*$/);
+  if (commentMatch) {
+    found.start -= commentMatch[0].length;
+  }
+  return found;
+}
+
+function findExploreCardRange(html) {
+  const source = String(html || "");
+  const start = source.indexOf('<div data-explore-injected="1"');
+  if (start === -1) return null;
+  const end = findArticleHeroWrapEnd(source, start);
+  return end === -1 ? null : { start, end };
+}
+
+function findElementBlockEnd(html, elementStart, tagName) {
+  if (elementStart < 0 || !tagName) return -1;
+  const safeTag = String(tagName).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tagRe = new RegExp(`</?${safeTag}\\b[^>]*>`, "gi");
+  tagRe.lastIndex = elementStart;
+  let depth = 0;
+  let match;
+  while ((match = tagRe.exec(html))) {
+    if (new RegExp(`^<${safeTag}\\b`, "i").test(match[0])) {
+      depth += 1;
+    } else {
+      depth -= 1;
+      if (depth === 0) return match.index + match[0].length;
+    }
+  }
+  return -1;
+}
+
+function findSectionRangeContaining(html, phrase, classPattern = null) {
+  const source = String(html || "");
+  const phraseIndex = source.indexOf(phrase);
+  if (phraseIndex === -1) return null;
+  const sectionRe = /<section\b[^>]*>/gi;
+  let match;
+  let found = null;
+  while ((match = sectionRe.exec(source))) {
+    if (match.index > phraseIndex) break;
+    if (classPattern && !classPattern.test(match[0])) continue;
+    const end = findElementBlockEnd(source, match.index, "section");
+    if (end !== -1 && end > phraseIndex) {
+      found = { start: match.index, end };
+    }
+  }
+  return found;
+}
+
+function moveHtmlRangeBefore(html, range, anchorIndex) {
+  if (!range || anchorIndex === -1) return html;
+  if (anchorIndex >= range.start && anchorIndex <= range.end) return html;
+  const between = range.end <= anchorIndex ? html.slice(range.end, anchorIndex) : "";
+  if (range.end <= anchorIndex && between.replace(/\s+/g, "") === "") return html;
+
+  const block = html.slice(range.start, range.end).trim();
+  const without = html.slice(0, range.start) + html.slice(range.end);
+  const adjustedAnchor = anchorIndex > range.start ? anchorIndex - (range.end - range.start) : anchorIndex;
+  return `${without.slice(0, adjustedAnchor)}${block}\n          ${without.slice(adjustedAnchor)}`;
+}
+
+function normalizeArticleLayoutHtml(body) {
+  let html = String(body || "");
+
+  if (html.includes('<section class="dyn-slider-shell') && !html.includes("<h2 class=\"h3\">Did You Know?</h2>")) {
+    html = html.replace(
+      '<section class="dyn-slider-shell',
+      '<h2 class="h3">Did You Know?</h2>\n          <section class="dyn-slider-shell',
+    );
+  }
+
+  const freeLibraryRange = findDivBlockRangeContaining(
+    html,
+    "Free library reading",
+    /\bclass="[^"]*\bmt-3\b[^"]*\bp-3\b[^"]*\brounded\b/i,
+  );
+  const analysisAnchor = html.indexOf("<!-- Personal Analysis -->");
+  if (freeLibraryRange && analysisAnchor !== -1) {
+    html = moveHtmlRangeBefore(html, freeLibraryRange, analysisAnchor);
+  }
+
+  html = html.replace(
+    /(<!-- Personal Analysis -->\s*)<section class="mt-5"(?![^>]*margin-top)/i,
+    '$1<section class="mt-5" style="margin-top:2rem!important"',
+  );
+
+  const exploreRange = findExploreCardRange(html);
+  const authorityAnchor = html.indexOf('<div class="authority-links mt-3 mb-4">');
+  const amazonAnchor = html.indexOf('<section class="amazon-related');
+  const exploreAnchor = authorityAnchor !== -1 ? authorityAnchor : amazonAnchor;
+  if (exploreRange && exploreAnchor !== -1) {
+    html = moveHtmlRangeBefore(html, exploreRange, exploreAnchor);
+  }
+
+  const relatedQuestionsRange =
+    findSectionRangeContaining(
+      html,
+      "Related questions",
+      /\bclass="[^"]*\bmt-5\b[^"]*\bp-4\b[^"]*\brounded\b[^"]*\bborder\b/i,
+    ) ||
+    findSectionRangeContaining(html, "related-question-grid");
+  const disclosureCommentAnchor = html.indexOf("<!-- AI & Editorial Disclosure -->");
+  const disclosureRange = findDivBlockRangeContaining(
+    html,
+    "About this article",
+    /\bclass="[^"]*\bmt-5\b[^"]*\bp-3\b[^"]*\brounded\b/i,
+  );
+  const disclosureAnchor =
+    disclosureCommentAnchor !== -1
+      ? disclosureCommentAnchor
+      : disclosureRange?.start ?? -1;
+  if (relatedQuestionsRange && disclosureAnchor !== -1) {
+    html = moveHtmlRangeBefore(html, relatedQuestionsRange, disclosureAnchor);
+  }
+
+  return html;
+}
+
+function normalizeAiAnswerCardHtml(body) {
+  let html = String(body || "");
+  if (!html.includes("ai-answer-card")) return html;
+
+  html = html.replace(
+    /<style>\/\*ai-card-patch-v[12]\*\/[\s\S]*?<\/style>/g,
+    "",
+  );
+
+  const hasCurrentPatch = html.includes("ai-card-patch-v3");
+  const needsPatch =
+    !hasCurrentPatch &&
+    (/\.ai-answer-card\{[^}]*background:#f5f5f5/i.test(html) ||
+      /\.ai-answer-card\{[^}]*border:1px/i.test(html) ||
+      /\.ai-answer-card\{[^}]*padding:18px/i.test(html) ||
+      /ai-card-patch-v[12]/i.test(html));
+
+  if (!needsPatch || !html.includes("</head>")) return html;
+
+  const patch =
+    "<style>/*ai-card-patch-v3*/.ai-answer-card{position:relative!important;z-index:1!important;clear:both!important;background:#fff!important;background-image:none!important;border:0!important;padding:0!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style>";
+  return html.replace("</head>", `${patch}</head>`);
+}
+
 function prepareHtmlResponse(body) {
   return normalizeImageAltHtml(
     normalizeCrawlableLinksHtml(
       normalizeSearchPreviewHtml(
         normalizeHeadingAuditHtml(
-          stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+          normalizeAiAnswerCardHtml(
+            normalizeArticleLayoutHtml(
+              stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+            ),
+          ),
         ),
       ),
     ),

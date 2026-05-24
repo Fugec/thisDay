@@ -4276,7 +4276,26 @@ async function generateAndStore(
   forceImage = null,
   { lightweightPublish = false } = {},
 ) {
-  const parsedForceDate = forceDate ? new Date(forceDate + "T12:00:00Z") : null;
+  // Accept both ISO format ("2026-05-25") and slug format ("25-may-2026").
+  // The slug format is what buildSlug() produces, but "new Date('25-may-2026T12:00:00Z')"
+  // is invalid JS — normalise it to ISO before parsing.
+  const normaliseForceDate = (s) => {
+    if (!s) return null;
+    // Already ISO: "2026-05-25"
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // Slug form: "25-may-2026"
+    const m = s.match(/^(\d{1,2})-([a-z]+)-(\d{4})$/i);
+    if (m) {
+      const monthIdx = MONTH_NAMES.findIndex(
+        (name) => name.toLowerCase() === m[2].toLowerCase(),
+      );
+      if (monthIdx >= 0) {
+        return `${m[3]}-${String(monthIdx + 1).padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+      }
+    }
+    return s; // pass through, let Date() deal with it
+  };
+  const parsedForceDate = forceDate ? new Date(normaliseForceDate(forceDate) + "T12:00:00Z") : null;
   const now = parsedForceDate && !isNaN(parsedForceDate) ? parsedForceDate : new Date();
   const activeModel = await resolveAiModel(env.BLOG_AI_KV);
 
@@ -4994,6 +5013,13 @@ async function enrichPublishedPost(env, slug) {
       : Promise.resolve([]),
     fetchBookCover(enriched.bookSearchQuery).catch(() => null),
   ]);
+
+  // If the primary image check failed, fall back to the first event figure already
+  // embedded in the article rather than publishing with a broken featured image.
+  if (!workingImage && eventImages?.length > 0) {
+    enriched.imageUrl = eventImages[0].imageUrl;
+    console.log(`Blog: featured image fallback → event figure "${eventImages[0].imageUrl}" for ${slug}`);
+  }
 
   await generateEditorialNote(env, enriched, date);
   const editorialQualityIssues = scanArticleQuality(enriched);
@@ -8259,6 +8285,24 @@ function injectPersonImages(html, personImages) {
 
       // Enforce minimum distance from last injected image
       if (pStart - lastInjectedAt < MIN_GAP) { searchFrom = nameIdx + 1; continue; }
+
+      // Skip if this <p> is inside a dyn-slide article — figures there are stripped on serve.
+      // Check: if the last <article ... dyn-slide ...> before pStart is more recent than the
+      // last </article> before pStart, we are inside an open dyn-slide element.
+      {
+        const before = html.slice(0, pStart);
+        const dynSlideRe = /<article\b[^>]*\bdyn-slide\b[^>]*>/gi;
+        let lastDynOpen = -1;
+        let dm;
+        while ((dm = dynSlideRe.exec(before))) lastDynOpen = dm.index;
+        if (lastDynOpen !== -1) {
+          const articleCloseRe = /<\/article>/gi;
+          let lastClose = -1;
+          let cm;
+          while ((cm = articleCloseRe.exec(before))) lastClose = cm.index;
+          if (lastDynOpen > lastClose) { searchFrom = nameIdx + 1; continue; }
+        }
+      }
 
       // Inject figure as a sibling immediately before <p> — valid HTML5, float aligns with paragraph text
       const figure = figHtml(person);

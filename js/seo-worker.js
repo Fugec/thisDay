@@ -190,6 +190,11 @@ async function handleImageProxy(_request, url, ctx) {
     });
 
     if (!imageResponse.ok) {
+      // On 429 (rate-limited by Wikimedia) redirect the browser to the original
+      // image URL so it fetches directly — avoids a blank image with no retries.
+      if (imageResponse.status === 429) {
+        return Response.redirect(src, 302);
+      }
       return new Response("Image not found", { status: imageResponse.status });
     }
 

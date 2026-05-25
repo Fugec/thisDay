@@ -52,11 +52,27 @@ self.addEventListener("activate", (event) => {
 
 // Fetch strategy:
 // - HTML (navigation): network-first, fall back to cache
-// - Static assets (JS/CSS/images): cache-first, fall back to network
+// - Other intercepted GET requests: cache-first, fall back to network or 503
 // - Wikipedia API: network-only (always fresh, handled by app-level cache)
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
+  const unavailableResponse = () =>
+    new Response("", {
+      status: 503,
+      statusText: "Service Unavailable",
+    });
+  const cacheSuccessfulResponse = (response) => {
+    if (response.ok) {
+      event.waitUntil(
+        caches
+          .open(CACHE_NAME)
+          .then((cache) => cache.put(request, response.clone()))
+          .catch(() => {}),
+      );
+    }
+    return response;
+  };
 
   // Skip non-GET requests and cross-origin requests except allowed CDNs
   if (request.method !== "GET") return;
@@ -76,29 +92,24 @@ self.addEventListener("fetch", (event) => {
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
-          return response;
-        })
-        .catch(() => caches.match(request).then((r) => r || caches.match("/"))),
+        .then(cacheSuccessfulResponse)
+        .catch(() =>
+          caches
+            .match(request)
+            .then((cached) => cached || caches.match("/"))
+            .then((cached) => cached || unavailableResponse()),
+        ),
     );
     return;
   }
 
-  // Static assets — cache-first for speed
+  // Other GET requests, including scripted HTML fetches — cache-first for speed
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        }
-        return response;
-      });
+      return fetch(request)
+        .then(cacheSuccessfulResponse)
+        .catch(() => unavailableResponse());
     }),
   );
 });

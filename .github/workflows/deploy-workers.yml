@@ -24,13 +24,13 @@ jobs:
           node-version: "22"
 
       - name: Deploy SEO worker
-        run: npx wrangler deploy --config wrangler.jsonc
+        run: npx wrangler@latest deploy --config wrangler.jsonc
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       - name: Deploy blog worker
-        run: npx wrangler deploy --config wrangler-blog.jsonc
+        run: npx wrangler@latest deploy --config wrangler-blog.jsonc
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

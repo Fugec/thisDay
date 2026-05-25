@@ -20,18 +20,16 @@
   "compatibility_date": "2026-03-14",
   "main": "js/blog-ai-worker.js",
 
-  // Unbound usage model: HTTP handlers and ctx.waitUntil get up to 15 minutes
-  // (vs 30 seconds on Bundled). Required because enrichPublishedPost makes
-  // 10+ AI API calls that together take several minutes of wall-clock time.
-  // Also raises the subrequest limit from 50 → 1000 per invocation.
-  "usage_model": "unbound",
+  // NOTE: usage_model: "unbound" is deprecated and ignored by Wrangler v4+.
+  // Scheduled enrichment runs inside the cron invocation. Manual/failsafe
+  // POST /blog/publish awaits enrichment and returns an error if promotion
+  // cannot finish in its request. Self-subrequests are not used because
+  // requests to this worker route can bypass the handler and reach origin.
 
   "vars": {
     // Temporary write pause while today's free KV write quota recovers.
     // Cloudflare KV free limits reset at 00:00 UTC.
     "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "2026-05-22T00:00:00Z",
-    // Base URL for self-subrequest enrichment calls (POST /blog/enrich).
-    "WORKER_BASE_URL": "https://thisday.info",
   },
 
   // Routes — this worker handles:
@@ -68,6 +66,7 @@
   // Cloudflare Workers AI — free tier, no external key required.
   "ai": {
     "binding": "AI",
+    "remote": true,
   },
 
   // Secrets (set via `wrangler secret put <NAME> --config wrangler-blog.jsonc`):

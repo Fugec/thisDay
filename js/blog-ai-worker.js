@@ -94,35 +94,6 @@ async function clearRepairAttempt(env, slug, type) {
   await env.BLOG_AI_KV.delete(repairAttemptKey(slug, type)).catch(() => {});
 }
 
-/**
- * Fires POST /blog/enrich?slug=<slug> as a self-subrequest so enrichment runs
- * in a brand-new Worker invocation with its own fresh subrequest budget.
- * Best-effort — logs status but never throws.
- */
-async function selfEnrichFetch(env, slug, { maxAttempts = 3 } = {}) {
-  const base = String(env?.WORKER_BASE_URL || "https://thisday.info").replace(/\/$/, "");
-  const url = `${base}/blog/enrich?slug=${encodeURIComponent(slug)}`;
-  const headers = env.PUBLISH_SECRET ? { Authorization: `Bearer ${env.PUBLISH_SECRET}` } : {};
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const res = await fetch(url, { method: "POST", headers });
-      console.log(`Blog: self-enrich for ${slug} → HTTP ${res.status} (attempt ${attempt}/${maxAttempts})`);
-      if (res.ok) return true;
-      // Non-2xx response — log body for diagnostics then retry.
-      const body = await res.text().catch(() => "");
-      console.error(`Blog: self-enrich non-ok for ${slug} (attempt ${attempt}/${maxAttempts}): ${body.slice(0, 200)}`);
-    } catch (err) {
-      console.error(`Blog: self-enrich fetch failed for ${slug} (attempt ${attempt}/${maxAttempts}): ${err.message}`);
-    }
-    if (attempt < maxAttempts) {
-      // Exponential back-off: 30 s, 60 s between attempts.
-      await new Promise((r) => setTimeout(r, 30_000 * attempt));
-    }
-  }
-  console.error(`Blog: self-enrich failed all ${maxAttempts} attempts for ${slug}`);
-  return false;
-}
 
 async function getPipelineState(env) {
   const raw = await env.BLOG_AI_KV.get(PIPELINE_STATE_KEY);
@@ -221,8 +192,36 @@ const VIDEO_THUMBNAIL_OVERRIDES = {
     "https://thisday.info/image-proxy?src=https%3A%2F%2Fupload.wikimedia.org%2Fwikipedia%2Fcommons%2Ff%2Ffb%2FGIRO8076_Pogacar_%252853750349243%2529.jpg",
 };
 
+function isProxyableArticleImageUrl(imageUrl) {
+  try {
+    const parsed = new URL(String(imageUrl || ""));
+    const hostname = parsed.hostname.toLowerCase();
+    return (
+      parsed.protocol === "https:" &&
+      (hostname === "wikimedia.org" || hostname.endsWith(".wikimedia.org"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function wikimediaImageFileKey(imageUrl) {
+  try {
+    const parsed = new URL(String(imageUrl || ""), "https://thisday.info");
+    const source = parsed.pathname === "/image-proxy"
+      ? parsed.searchParams.get("src") || ""
+      : String(imageUrl || "");
+    const sourceUrl = new URL(source);
+    return decodeURIComponent(sourceUrl.pathname.split("/").pop() || "")
+      .replace(/^\d+px-/i, "")
+      .toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
 function buildSocialPreviewImageUrl(imageUrl) {
-  return imageUrl
+  return isProxyableArticleImageUrl(imageUrl)
     ? `https://thisday.info/image-proxy?src=${encodeURIComponent(imageUrl)}&${SOCIAL_PREVIEW_IMAGE_PARAMS}`
     : "https://thisday.info/images/logo.png";
 }
@@ -265,14 +264,21 @@ function moveEntityStripOutOfArticleHero(html) {
 
 function buildArticleAnswerBlock(content) {
   // Build grid rows from quickFacts; fall back to the four core fields when empty.
-  const facts = content.quickFacts?.length
-    ? content.quickFacts
+  const usableFacts = (Array.isArray(content.quickFacts) ? content.quickFacts : []).filter(
+    (fact) =>
+      fact &&
+      typeof fact === "object" &&
+      String(fact.label || "").trim() &&
+      String(fact.value || "").trim(),
+  );
+  const facts = usableFacts.length
+    ? usableFacts
     : [
         { label: "Event",     value: content.eventTitle },
         { label: "Date",      value: content.historicalDate },
         { label: "Location",  value: content.location || content.country || "Historical location" },
-        { label: "Significance", value: (content.quickFacts || []).find((f) => /significance|impact|legacy/i.test(f.label))?.value || content.description },
-      ];
+        { label: "Significance", value: content.description },
+      ].filter((fact) => String(fact.value || "").trim());
   const gridItems = facts
     .map((f) => `      <div class="ai-answer-item"><strong>${esc(f.label)}</strong><span>${esc(f.value)}</span></div>`)
     .join("\n");
@@ -286,8 +292,9 @@ ${gridItems}
 }
 
 function buildDidYouKnowSlider(facts) {
-  const cleanedFacts = (facts || [])
-    .map((fact) => String(fact || "").trim())
+  const cleanedFacts = (Array.isArray(facts) ? facts : [])
+    .filter((fact) => typeof fact === "string")
+    .map((fact) => fact.trim())
     .filter(Boolean);
   if (!cleanedFacts.length) return "";
 
@@ -1476,7 +1483,11 @@ export default {
         const forcedEvent = publishUrl.searchParams.get("force-event") || null;
         const forceDate = publishUrl.searchParams.get("force-date") || null;
         const forceImage = publishUrl.searchParams.get("force-image") || null;
-        await generateAndStore(env, ctx, forcedEvent, forceDate, forceImage, {
+        // Pass null ctx so enrichPublishedPost runs synchronously in the HTTP
+        // response path (up to ~100s Cloudflare edge timeout) rather than in
+        // ctx.waitUntil which is capped at 30s for HTTP handlers on the free
+        // plan. The cron handler passes its own ctx for the normal daily path.
+        await generateAndStore(env, null, forcedEvent, forceDate, forceImage, {
           lightweightPublish: true,
         });
         return jsonResponse({ status: "ok", message: "Blog post published." });
@@ -1510,15 +1521,34 @@ export default {
       if (!slug) {
         return jsonResponse({ status: "error", message: "Provide ?slug=X" }, 400);
       }
-      // Return 200 immediately so the HTTP response is not held open for the
-      // duration of enrichment (which can take several minutes across many AI
-      // calls). The actual work runs in ctx.waitUntil, which gets the full
-      // 15-minute Unbound budget regardless of response time.
-      // Callers verify success by checking for post:${slug} in KV afterward.
+      // Default requests return immediately and run enrichment in ctx.waitUntil.
+      // Manual recovery can request ?sync=true to keep the work in the response
+      // path when background lifetime is too short to promote an existing draft.
+      // Diagnostic: confirm this handler was reached (not inside ctx.waitUntil)
+      await env.BLOG_AI_KV.put(
+        `debug:enrich-handler:${slug}`,
+        JSON.stringify({ ts: new Date().toISOString(), slug }),
+        { expirationTtl: 7 * 86_400 },
+      ).catch(() => {});
+      const recordEnrichError = async (err) => {
+        console.error(`Blog AI: enrichment failed for ${slug} — ${err.message}`);
+        await env.BLOG_AI_KV.put(
+          `debug:enrich-error:${slug}`,
+          JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), ts: new Date().toISOString() }),
+          { expirationTtl: 7 * 86_400 },
+        ).catch(() => {});
+      };
+      if (enrichUrl.searchParams.get("sync") === "true") {
+        try {
+          await enrichPublishedPost(env, slug);
+          return jsonResponse({ status: "ok", slug, message: "Enrichment completed." });
+        } catch (err) {
+          await recordEnrichError(err);
+          return jsonResponse({ status: "error", slug, message: err.message }, 500);
+        }
+      }
       ctx.waitUntil(
-        enrichPublishedPost(env, slug).catch((err) => {
-          console.error(`Blog AI: enrichment failed for ${slug} — ${err.message}`);
-        }),
+        enrichPublishedPost(env, slug).catch(recordEnrichError),
       );
       return jsonResponse({ status: "ok", slug, message: "Enrichment started." });
     }
@@ -2185,7 +2215,6 @@ export default {
             return m[1];
           }
         };
-
         // Patch old quiz API path in already-stored HTML
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
         // Ensure the "Explore [Month Day] in History" card matches the post slug,
@@ -3038,38 +3067,6 @@ export default {
             })());
           }
         }
-        // Backfill inline figures for already-stored posts that shipped without them.
-        // Fully non-blocking — fetchEventImages (2 Wikipedia API calls) moved to
-        // waitUntil so it never blocks the response and can't trigger 1102.
-        // Figures appear from the second request onwards (same pattern as entity strip).
-        if (
-          !/<figure style="float:(?:right|left);/i.test(patchedHtml) &&
-          !patchedHtml.includes(EVENT_FIGURES_BACKFILL_MARKER) &&
-          allowArticleKvBackgroundWrites &&
-          ctx?.waitUntil
-        ) {
-          const wikiUrlForFigs = extractWikiUrl(patchedHtml);
-          const coverUrlForFigs = extractCoverSrc(patchedHtml);
-          if (wikiUrlForFigs) {
-            const htmlForFigs = patchedHtml;
-            ctx.waitUntil((async () => {
-              try {
-                if (!(await canRunRepairAttempt(env, slug, "event-figures"))) return;
-                const imgs = await fetchEventImages(wikiUrlForFigs, coverUrlForFigs, 2);
-                const withFigures = imgs.length > 0
-                  ? injectEventImages(htmlForFigs, imgs)
-                  : htmlForFigs;
-                const checkedHtml = addHtmlMarker(withFigures, EVENT_FIGURES_BACKFILL_MARKER);
-                if (checkedHtml !== htmlForFigs) {
-                  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, checkedHtml);
-                  await clearRepairAttempt(env, slug, "event-figures");
-                }
-              } catch {
-                // best-effort backfill
-              }
-            })());
-          }
-        }
         // Entity strip — fully non-blocking. Serve the cached HTML immediately;
         // hydrate + inject only when the stored article is missing cached data.
         const entityStripKnownEmpty = String(articleEntitiesRaw || "").trim() === "[]";
@@ -3575,16 +3572,25 @@ async function maybeGenerateBlogPost(env, ctx) {
     }
 
     if (!postRaw || !inIndex) {
-      // Use selfEnrichFetch (separate Worker invocation) so the enrichment gets
-      // its own fresh 50-subrequest budget and doesn't eat into this cron's budget.
-      // maxAttempts=1: no retry here — today's generation must still run after.
-      console.log(`Blog AI: recovering draft for /blog/${draftSlug}/ via self-enrich...`);
-      const recovered = await selfEnrichFetch(env, draftSlug, { maxAttempts: 1 });
+      // Run enrichPublishedPost directly (self-subrequests to our own zone hit
+      // the origin server — 405 — so selfEnrichFetch cannot be used here).
+      // On the paid plan (1000 subreqs, CPU-only limit) there is ample budget.
+      console.log(`Blog AI: recovering draft for /blog/${draftSlug}/...`);
+      let recovered = false;
+      try {
+        await enrichPublishedPost(env, draftSlug);
+        recovered = true;
+      } catch (err) {
+        console.error(`Blog AI: draft recovery failed for ${draftSlug} — ${err.message}`);
+        await env.BLOG_AI_KV.put(
+          `debug:enrich-error:${draftSlug}`,
+          JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), ts: new Date().toISOString(), source: 'draftRecovery' }),
+          { expirationTtl: 7 * 86_400 },
+        ).catch(() => {});
+      }
       if (recovered) {
         console.log(`Blog AI: recovered draft and published /blog/${draftSlug}/.`);
         if (draftSlug === todaySlug) return;
-      } else {
-        console.error(`Blog AI: draft recovery failed for ${draftSlug} — selfEnrichFetch returned non-ok`);
       }
     }
   }
@@ -3693,7 +3699,11 @@ async function maybeGenerateBlogPost(env, ctx) {
  * Fetches a real image URL from the Wikipedia REST API for the given event title.
  * Falls back to null if the request fails or no image is found.
  */
-async function fetchWikipediaImage(eventTitle, wikiUrl, { skipCommonsSearch = false } = {}) {
+async function fetchWikipediaImage(
+  eventTitle,
+  wikiUrl,
+  { skipCommonsSearch = false, skipArticleSearch = false } = {},
+) {
   try {
     // Prefer the article slug from the wikiUrl so we hit the right page
     let title = eventTitle;
@@ -3746,6 +3756,26 @@ async function fetchWikipediaImage(eventTitle, wikiUrl, { skipCommonsSearch = fa
       }
     }
 
+    // Drafts occasionally contain a plausible but nonexistent Wikipedia URL.
+    // Search by the human-readable event title before falling back to Commons.
+    if (!wikiUrl && eventTitle && !skipArticleSearch) {
+      const searchRes = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(eventTitle)}&srnamespace=0&srlimit=1&format=json`,
+        { headers: ua },
+      );
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        const resultTitle = searchData?.query?.search?.[0]?.title || "";
+        if (resultTitle && resultTitle.toLowerCase() !== String(title).toLowerCase()) {
+          const searchedImage = await fetchWikipediaImage(resultTitle, "", {
+            skipCommonsSearch: true,
+            skipArticleSearch: true,
+          });
+          if (searchedImage) return searchedImage;
+        }
+      }
+    }
+
     // 3. Wikimedia Commons search — fallback for articles that use only fair-use
     //    images not hosted on Commons, which are invisible to the REST summary API.
     //    Skipped for person entities: text search returns unrelated images too often.
@@ -3782,6 +3812,7 @@ async function fetchWikipediaImage(eventTitle, wikiUrl, { skipCommonsSearch = fa
 function isLowValueFeaturedImage(url) {
   const value = String(url || "").toLowerCase();
   if (!value) return true;
+  if (!isProxyableArticleImageUrl(value)) return true;
   return /(?:^|[\/_.%-])(logo|wordmark|icon|symbol|emblem|seal|flag|map|coa)(?:[\/_.%-]|$)/i.test(value);
 }
 
@@ -3854,7 +3885,9 @@ async function resolveWorkingImageForContent(content) {
   const uniqueCandidates = [...new Set(candidates.filter(Boolean))];
 
   for (const candidate of uniqueCandidates) {
-    if (await isWorkingImageUrl(candidate)) return candidate;
+    if (isProxyableArticleImageUrl(candidate) && await isWorkingImageUrl(candidate)) {
+      return candidate;
+    }
   }
 
   return null;
@@ -4455,6 +4488,29 @@ async function generateAndStore(
       throw new Error(dateValidation.reason);
     }
 
+    try {
+      assertRequiredContentBlocks(content);
+    } catch (err) {
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        console.warn(
+          `Blog AI: incomplete generated content for "${content?.title || "untitled"}" - ${err.message}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await callWorkersAI(
+          env,
+          now,
+          avoid,
+          activeModel,
+          selectedForcedEvent,
+          preferredPillars,
+          contextHook,
+          recentPillars,
+        );
+        continue;
+      }
+      throw err;
+    }
+
     // Post-generation banned phrase scan + targeted fix pass.
     // If violations are found, one focused AI call patches only the offending paragraphs.
     // Falls back to original paragraphs if the fix call fails or produces worse output.
@@ -4513,7 +4569,7 @@ async function generateAndStore(
       [personImages, eventImages] = await Promise.all([
         fetchKeyPersonImages(env, content.keyTerms).catch(() => []),
         content.wikiUrl
-          ? fetchEventImages(content.wikiUrl, content.imageUrl, 3).catch(() => [])
+          ? fetchEventImages(content.wikiUrl, content.imageUrl, 3, content.eventTitle).catch(() => [])
           : Promise.resolve([]),
       ]);
       const wikiImageTotal = personImages.length + eventImages.length;
@@ -4563,6 +4619,9 @@ async function generateAndStore(
     throw new Error(finalDateValidation.reason);
   }
 
+  // Persist canonical date fields in lightweight drafts even when the AI
+  // supplied the date only in its title; later SEO edits may rewrite titles.
+  alignContentDateFields(content);
   normalizeContentMetadata(content);
 
   const slug = buildSlug(now);
@@ -4596,14 +4655,28 @@ async function generateAndStore(
   }
 
   if (lightweightPublish) {
-    // Fire enrichment as a self-subrequest so it runs in a NEW Worker invocation
-    // with its own fresh subrequest budget, completely separate from the generation
-    // budget spent above. ctx.waitUntil shares the same budget, so we use a fetch
-    // to /blog/enrich instead of calling enrichPublishedPost inline.
+    // Run enrichment directly in ctx.waitUntil (same invocation, shared budget).
+    // Self-subrequests (fetch to our own zone) bypass Workers and hit the origin
+    // server — 405 — so selfEnrichFetch can't be used here. On the Workers Paid
+    // plan the subrequest budget is 1000 and CPU time is 30 s; with skipAiGeneration
+    // on entities (~15 subreqs total for enrichment) we're well within limits.
+    const enrichErr = (err) => {
+      console.error(`Blog: enrichment failed for ${slug} — ${err.message}`);
+      return env.BLOG_AI_KV.put(
+        `debug:enrich-error:${slug}`,
+        JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), ts: new Date().toISOString() }),
+        { expirationTtl: 7 * 86_400 },
+      ).catch(() => {});
+    };
     if (ctx?.waitUntil) {
-      ctx.waitUntil(selfEnrichFetch(env, slug));
+      ctx.waitUntil(enrichPublishedPost(env, slug).catch(enrichErr));
     } else {
-      await selfEnrichFetch(env, slug);
+      try {
+        await enrichPublishedPost(env, slug);
+      } catch (err) {
+        await enrichErr(err);
+        throw err;
+      }
     }
   } else {
     if (ctx?.waitUntil) {
@@ -4806,10 +4879,48 @@ function alignJsonLdMetadata(content) {
   if (!content.jsonLdDescription && content.description) content.jsonLdDescription = content.description;
 }
 
+/**
+ * Returns true if the title already contains a recognisable action verb or event noun.
+ *
+ * Three-layer approach to avoid the "endless growing list" problem:
+ *   1. Event nouns that inherently imply a historical action (battle, crash, etc.)
+ *   2. Known-verb fast path for the most frequent headline verbs
+ *   3. Structural suffix detection — catches virtually all regular English present-tense
+ *      verbs (disintegrates, explodes, collapses, launches, vanishes, …) and past-tense
+ *      forms without enumerating every word.
+ */
 function hasStrongTitleAction(value) {
-  return /\b(founded|forms?|created|established|launches?|launched|opens?|opened|held|honors?|honoured|signs?|signed|adopts?|adopted|ratifies?|ratified|declares?|declared|begins?|began|ends?|ended|falls?|fell|rises?|rose|kills?|killed|dies|assassinated|elects?|elected|discovers?|discovered|invents?|invented|publishes?|published|lands?|landed|strikes?|rules?|crashes?|explodes?|sinks?|surrenders?|defeats?|deports?|fires?|battle|siege|revolt|revolution|war|attack|bombing|crash|trial|coronation|independence)\b/i.test(
-    value,
-  );
+  const s = String(value || "");
+
+  // 1. Event nouns that already describe an action without needing a separate verb
+  if (/\b(battle|siege|revolt|revolution|war|attack|bombing|raid|massacre|trial|coronation|independence|crash|assassination|execution)\b/i.test(s)) return true;
+
+  // 2. High-frequency headline verbs (fast exact match)
+  if (/\b(founded?|forms?|created?|established?|launches?|launched|opens?|opened|held?|honors?|honoured?|signs?|signed|adopts?|adopted|ratifi(?:es|ed)|declar(?:es|ed)|begins?|began|ends?|fell|ris(?:es)|rose|kills?|killed|d(?:ie|ied|ies)|assassinat(?:es|ed)|elects?|elected|discover(?:s|ed)|invent(?:s|ed)|publish(?:es|ed)|lands?|landed|strikes?|struck|rules?|ruled|crashes?|explod(?:es|ed)|sinks?|sank|surrenders?|defeats?|deports?|fires?|collaps(?:es|ed)|destroys?|destroyed|burns?|burned|vanish(?:es|ed)|disappear(?:s|ed)|ignit(?:es|ed)|erupts?|plunges?|escapes?|acquit(?:ted)?|convict(?:ed)?|execut(?:es|ed)|rescu(?:es|ed)|detains?|arrests?|resign(?:s|ed)|appoints?|invad(?:es|ed)|withdraws?|surviv(?:es|ed)|captur(?:es|ed)|liber(?:ates|ated)|freed?|imprison(?:s|ed)|fl(?:ees|ed)|disintegrat(?:es|ed))\b/i.test(s)) return true;
+
+  // 3. Structural suffix detection — English present-tense 3rd-person singular verbs
+  //    almost always end in one of these patterns when the stem ends in a vowel+consonant+e.
+  //    Word must be ≥7 chars total to avoid false matches on short nouns.
+  //    -ates (disintegrates, accelerates, evacuates, decimates)
+  //    -ites (ignites, unites, excites, incites)
+  //    -odes (explodes, erodes)
+  //    -ides (guides, collides, divides, presides)
+  //    -ades (invades, blockades, serenades)
+  //    -izes/-ises (nationalizes, organizes, privatizes)
+  //    -aves (saves, behaves, engraves)
+  //    -ives (survives, arrives, derives)
+  //    -oves (improves, removes, approves)
+  //    -apes (escapes)
+  //    -ashes/-ishes/-ushes (crashes, vanishes, ambushes)
+  //    -aches/-atches/-etches (detaches, dispatches)
+  //    -ches/-shes (launches, crashes — redundant safety net)
+  if (/\b\w{6,}(?:ates|ites|odes|ides|ades|izes|ises|aves|ives|oves|apes)\b/i.test(s)) return true;
+  if (/\b\w{5,}(?:ashes|ishes|ushes|aches|atches|etches|itches)\b/i.test(s)) return true;
+
+  // 4. Past-tense forms of the same verb families (ended, invaded, collapsed, …)
+  if (/\b\w{7,}(?:ated|ited|oded|ided|aded|ized|ised|aved|ived|oved|aped)\b/i.test(s)) return true;
+
+  return false;
 }
 
 function stripLazyTitleSuffix(value) {
@@ -4832,13 +4943,44 @@ function evidenceForTitle(content) {
   );
 }
 
+/**
+ * Structural guard: returns true if the last word of the title looks like
+ * a present-tense or past-tense verb. Prevents double-verb stacking
+ * (e.g. "Disintegrates Crashes", "Vanishes Kills").
+ *
+ * Strategy: check the last word of the title against hasStrongTitleAction (which
+ * already handles all known cases correctly) PLUS a suffix-based catch-all for
+ * words not in the known list.
+ */
+function titleEndsWithVerb(s) {
+  const lastWord = (String(s || "").trim().match(/\S+$/) || [""])[0];
+  if (!lastWord || lastWord.length < 4) return false;
+  // Layer A: known verb forms only (intentionally excludes event nouns like "crash",
+  // "independence", "battle" from hasStrongTitleAction layer 1 — those are nouns,
+  // not evidence that the title has a verb).
+  if (/^(founded?|forms?|created?|established?|launches?|launched|opens?|opened|held?|honors?|honoured?|signs?|signed|adopts?|adopted|ratifi(?:es|ed)|declar(?:es|ed)|begins?|began|ends?|fell|ris(?:es)|rose|kills?|killed|d(?:ie|ied|ies)|assassinat(?:es|ed)|elects?|elected|discover(?:s|ed)|invent(?:s|ed)|publish(?:es|ed)|lands?|landed|strikes?|struck|rules?|ruled|crashes?|explod(?:es|ed)|sinks?|sank|surrenders?|defeats?|deports?|fires?|collaps(?:es|ed)|destroys?|destroyed|burns?|burned|vanish(?:es|ed)|disappear(?:s|ed)|ignit(?:es|ed)|erupts?|plunges?|escapes?|acquit(?:ted)?|convict(?:ed)?|execut(?:es|ed)|rescu(?:es|ed)|detains?|arrests?|resign(?:s|ed)|appoints?|invad(?:es|ed)|withdraws?|surviv(?:es|ed)|captur(?:es|ed)|liber(?:ates|ated)|freed?|imprison(?:s|ed)|fl(?:ees|ed)|disintegrat(?:es|ed))$/i.test(lastWord)) return true;
+  // Layer B: structural suffix catch-all — virtually all regular English present-tense
+  // verbs ending in a vowel+consonant+e pattern (≥5 chars to avoid short nouns).
+  return lastWord.length >= 5 &&
+    /(?:ates|ites|etes|odes|ides|ades|izes|ises|aves|ives|oves|apes|anes|ines|ones|enes|ashes|ishes|ushes|arches|atches|etches|itches|ches|shes)$/i.test(lastWord);
+}
+
 function deriveCtaEventTitle(currentEvent, evidence) {
   const base = stripLazyTitleSuffix(currentEvent);
   const text = String(evidence || "").replace(/\s+/g, " ").trim();
+
+  // Structural guard: if the title already ends with a word that looks like a verb,
+  // leave it alone — don't try to append another verb. This is the reliable,
+  // list-free check that prevents "X Disintegrates Crashes"-style stacking.
+  if (titleEndsWithVerb(base)) return currentEvent;
+
   const baseHasStrongAction = hasStrongTitleAction(base);
 
   if (/helicopter crash in iran|president ebrahim raisi|varzaqan helicopter/i.test(text)) {
     return "Iran Helicopter Crash Kills President Raisi";
+  }
+  if (/china airlines.*flight 611|flight 611.*china airlines|china airlines 611/i.test(text)) {
+    return "China Airlines Flight 611 Disintegrates in Mid-Air";
   }
   if (/egyptair flight 804/i.test(text)) {
     return "EgyptAir Flight 804 Crashes in the Mediterranean";
@@ -4931,6 +5073,7 @@ async function savePublishedPost(
     return safeEntityMeta;
   });
 
+  assertRequiredContentBlocks(content);
   const rawHtml = buildPostHTML(content, date, slug, existingIndex, safePillars, bookCoverUrl);
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
   if (safePersonImages.length > 0) html = injectPersonImages(html, safePersonImages);
@@ -4940,7 +5083,7 @@ async function savePublishedPost(
     html = addHtmlMarker(html, ENTITY_STRIP_BACKFILL_MARKER);
   }
   html = addHtmlMarker(html, FEATURED_IMAGE_CHECK_MARKER);
-  if (safePersonImages.length > 0 || safeEventImages.length > 0) {
+  if (/<figure style="float:(?:right|left);/i.test(html)) {
     html = addHtmlMarker(html, EVENT_FIGURES_BACKFILL_MARKER);
   }
   // Tier 1: hard structural check — throws if buildPostHTML produced a broken article.
@@ -4984,6 +5127,16 @@ async function savePublishedPost(
 }
 
 async function enrichPublishedPost(env, slug) {
+  // Diagnostic checkpoint writer — expires in 7 days so we can diagnose failures
+  const chk = (step) =>
+    env.BLOG_AI_KV.put(
+      `debug:enrich-step:${slug}`,
+      JSON.stringify({ step, ts: new Date().toISOString() }),
+      { expirationTtl: 7 * 86_400 },
+    ).catch(() => {});
+
+  await chk("started");
+
   const draftRaw = await env.BLOG_AI_KV.get(`${KV_DRAFT_PREFIX}${slug}`);
   if (!draftRaw) throw new Error(`No draft found for ${slug}`);
 
@@ -4992,10 +5145,14 @@ async function enrichPublishedPost(env, slug) {
   const publishedAt = draft?.publishedAt;
   if (!content || !publishedAt) throw new Error(`Draft payload invalid for ${slug}`);
 
+  // Recover older drafts that used a dated title as their only date source
+  // before any enrichment rewrite can remove that title suffix.
+  alignContentDateFields(content);
   const date = new Date(publishedAt);
   const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
   const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
 
+  await chk("pre-banned-phrases");
   const violations = scanBannedPhrases(content);
   const fixed = violations.length > 0
     ? await fixBannedPhrases(env, content, violations)
@@ -5004,7 +5161,11 @@ async function enrichPublishedPost(env, slug) {
   const qualityRepaired = qualityIssues.length > 0
     ? await improveArticleQuality(env, fixed, qualityIssues)
     : fixed;
+
+  await chk("pre-seo-review");
   let enriched = await reviewContentWithSEOExpert(qualityRepaired, env);
+  await chk("post-seo-review");
+
   const postReviewViolations = scanBannedPhrases(enriched);
   if (postReviewViolations.length > 0) {
     enriched = await fixBannedPhrases(env, enriched, postReviewViolations);
@@ -5014,29 +5175,38 @@ async function enrichPublishedPost(env, slug) {
     enriched = await improveArticleQuality(env, enriched, postReviewQualityIssues);
   }
 
+  await chk("pre-factcheck");
   await factCheckContent(env, enriched);
   await validateEyewitnessQuote(env, enriched);
   const pillars = await classifyPillars(env, enriched);
+  await chk("post-factcheck");
 
   const workingImage = await resolveWorkingImageForContent(enriched);
-  if (workingImage) enriched.imageUrl = workingImage;
+  enriched.imageUrl = workingImage || "";
 
   const [personImages, eventImages, bookCoverUrl] = await Promise.all([
     fetchKeyPersonImages(env, enriched.keyTerms).catch(() => []),
     enriched.wikiUrl
-      ? fetchEventImages(enriched.wikiUrl, enriched.imageUrl, 3).catch(() => [])
+      ? fetchEventImages(enriched.wikiUrl, enriched.imageUrl, 3, enriched.eventTitle).catch(() => [])
       : Promise.resolve([]),
     fetchBookCover(enriched.bookSearchQuery).catch(() => null),
   ]);
+  await chk("post-images");
 
   // If the primary image check failed, fall back to the first event figure already
   // embedded in the article rather than publishing with a broken featured image.
-  if (!workingImage && eventImages?.length > 0) {
+  if (
+    !workingImage &&
+    eventImages?.length > 0 &&
+    isProxyableArticleImageUrl(eventImages[0].imageUrl)
+  ) {
     enriched.imageUrl = eventImages[0].imageUrl;
     console.log(`Blog: featured image fallback → event figure "${eventImages[0].imageUrl}" for ${slug}`);
   }
 
   await generateEditorialNote(env, enriched, date);
+  await chk("post-editorial-note");
+
   const editorialQualityIssues = scanArticleQuality(enriched);
   if (editorialQualityIssues.length > 0) {
     enriched = await improveArticleQuality(env, enriched, editorialQualityIssues);
@@ -5048,6 +5218,8 @@ async function enrichPublishedPost(env, slug) {
     throw new Error(`Refusing to enrich ${slug}: ${dateValidation.reason}`);
   }
   normalizeContentMetadata(enriched);
+
+  await chk("pre-entities");
   // Skip AI card generation here — saves ~2 subrequests per entity (up to ~18 total)
   // and keeps the enrichment invocation well under the 50-subrequest budget.
   // Entities are flagged needsWikiRefresh so the cron entity-refresh loop
@@ -5056,6 +5228,8 @@ async function enrichPublishedPost(env, slug) {
     console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
     return [];
   });
+
+  await chk("pre-save");
   await savePublishedPost(env, {
     slug,
     date,
@@ -5067,8 +5241,11 @@ async function enrichPublishedPost(env, slug) {
     eventImages,
     entityMeta,
   });
+  await chk("saved");
+
   await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`).catch(() => {});
   await runPostPublishExtras(env, slug, enriched, { scheduleEnrichment: false });
+  await chk("done");
 }
 
 function entitySlug(value) {
@@ -5875,12 +6052,19 @@ function buildArticleEntityStrip(entityMeta) {
   const people = entityMeta.filter((e) => e.type === "person" && e.slug && e.name && !e.skipStrip);
   if (people.length === 0) return "";
 
-  const chips = people.map((e) =>
-    `<a href="${esc(e.url)}" class="person-pill">` +
-    `<span class="person-circle">${e.imageUrl ? `<img src="/image-proxy?src=${encodeURIComponent(e.imageUrl)}&w=120&h=120&fit=cover&q=80" alt="${esc(e.name)}" loading="lazy">` : `<span class="person-circle-fallback" aria-hidden="true">${esc(String(e.name).slice(0, 1).toUpperCase())}</span>`}</span>` +
-    `<span class="person-pill-name">${esc(e.name)}</span>` +
-    `</a>`,
-  ).join("");
+  const chips = people.map((e) => {
+    // Circle always shows — real image only when wikiUrl is present (prevents wrong image fetches).
+    // Link to internal entity page only when backed by a Wikipedia URL.
+    const inner =
+      `<span class="person-circle">${e.imageUrl
+        ? `<img src="/image-proxy?src=${encodeURIComponent(e.imageUrl)}&w=120&h=120&fit=cover&q=80" alt="${esc(e.name)}" loading="lazy">`
+        : `<span class="person-circle-fallback" aria-hidden="true">${esc(String(e.name).slice(0, 1).toUpperCase())}</span>`
+      }</span>` +
+      `<span class="person-pill-name">${esc(e.name)}</span>`;
+    return e.wikiUrl
+      ? `<a href="${esc(e.url)}" class="person-pill">${inner}</a>`
+      : `<span class="person-pill">${inner}</span>`;
+  }).join("");
 
   const css = `<style>.entity-strip{margin:0 0 1.25rem}.entity-strip-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted,#5c7a65);margin-bottom:.65rem}.entity-person-chips{display:flex;flex-wrap:wrap;gap:1rem}.person-pill{display:inline-flex;align-items:center;gap:.55rem;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:14px;font-weight:600}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
 
@@ -5941,6 +6125,41 @@ function amazonTracksNeedCoverBackfill(html) {
   });
 }
 
+function assertRequiredContentBlocks(content) {
+  const quickFacts = (Array.isArray(content.quickFacts) ? content.quickFacts : []).filter(
+    (fact) =>
+      fact &&
+      typeof fact === "object" &&
+      String(fact.label || "").trim() &&
+      String(fact.value || "").trim(),
+  );
+  const didYouKnowFacts = (Array.isArray(content.didYouKnowFacts) ? content.didYouKnowFacts : [])
+    .filter((fact) => typeof fact === "string" && fact.trim());
+  const namedPeople = (Array.isArray(content.keyTerms) ? content.keyTerms : []).filter(
+    (term) =>
+      term &&
+      String(term.type || "").toLowerCase() === "person" &&
+      String(term.term || "").trim(),
+  );
+  const analysisCount = (items) =>
+    (Array.isArray(items) ? items : []).filter(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        String(item.title || "").trim() &&
+        String(item.detail || "").trim(),
+    ).length;
+  const missing = [];
+  if (quickFacts.length < 6) missing.push("six populated quick facts");
+  if (didYouKnowFacts.length < 3) missing.push("three did-you-know facts");
+  if (namedPeople.length < 1) missing.push("one named person for the people strip");
+  if (analysisCount(content.analysisGood) < 3) missing.push("three positive analysis items");
+  if (analysisCount(content.analysisBad) < 3) missing.push("three critical analysis items");
+  if (missing.length > 0) {
+    throw new Error(`Article content check failed: missing ${missing.join(", ")}`);
+  }
+}
+
 /**
  * Tier 1 — hard structural check. Throws if any required element generated
  * entirely from local draft content is missing. These never depend on external
@@ -5948,16 +6167,26 @@ function amazonTracksNeedCoverBackfill(html) {
  */
 function assertArticleStructure(html) {
   const source = String(html || "");
+  const quickFactCount = countHtmlMatches(source, /<div class="ai-answer-item"><strong>[^<\s][^<]*<\/strong><span>[^<\s][^<]*<\/span><\/div>/gi);
+  const didYouKnowCount = countHtmlMatches(source, /class="dyn-fact">[^<\s][^<]*<\/p>/gi);
+  const analysisItemCount = countHtmlMatches(source, /<li class="mb-2"><strong>[^<:\s][^<]*:<\/strong>\s*[^<\s]/gi);
   const checks = [
     ["article shell", /<article\b/i],
     ["hero image area", /article-hero-wrap/i],
     ["short answer card", /ai-answer-card/i],
+    ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
+    ["analysis section", /<h2 class="h3">Our Take:/i],
+    ["people entity strip", /data-entity-strip="1"/i],
+    ["people entity card", /class="person-pill"/i],
     ["related Amazon block", /class="amazon-related/i],
     ["Amazon recommendation cards", /amazon-product-card/i],
   ];
   const missing = checks
     .filter(([, pattern]) => !pattern.test(source))
     .map(([label]) => label);
+  if (quickFactCount < 6) missing.push("six rendered key facts");
+  if (didYouKnowCount < 5) missing.push("five rendered did-you-know cards");
+  if (analysisItemCount < 6) missing.push("six rendered analysis items");
   if (missing.length > 0) {
     throw new Error(`Article structure check failed: missing ${missing.join(", ")}`);
   }
@@ -6052,20 +6281,27 @@ async function hydrateArticleEntityImages(env, entityMeta) {
         delete next.skipStrip;
         changed = true;
       } else {
-        // No image in entity-v1 or post-entities — try Wikipedia steps 1+2 only (no Commons text search).
-        const imageUrl = await fetchWikipediaImage(next.name, record?.wikiUrl || next.wikiUrl || "", { skipCommonsSearch: true });
-        if (imageUrl) {
-          next.imageUrl = imageUrl;
-          delete next.skipStrip;
-          changed = true;
-          if (record) {
-            record.imageUrl = imageUrl;
-            env.BLOG_AI_KV.put(key, JSON.stringify(record)).catch(() => {});
+        // Only search Wikipedia when we have an anchored wikiUrl — name-only
+        // searches return wrong images for obscure people.
+        const anchoredWikiUrl = record?.wikiUrl || next.wikiUrl || "";
+        if (anchoredWikiUrl) {
+          const imageUrl = await fetchWikipediaImage(next.name, anchoredWikiUrl, { skipCommonsSearch: true });
+          if (imageUrl) {
+            next.imageUrl = imageUrl;
+            delete next.skipStrip;
+            changed = true;
+            if (record) {
+              record.imageUrl = imageUrl;
+              env.BLOG_AI_KV.put(key, JSON.stringify(record)).catch(() => {});
+            }
+          } else {
+            // Wikipedia URL known but no image — show with initial fallback.
+            if (next.skipStrip) { delete next.skipStrip; changed = true; }
           }
         } else {
-          // No Wikipedia image found → not enough content to show in strip.
-          next.skipStrip = true;
-          changed = true;
+          // No wikiUrl — show name as text only (no link, no image).
+          // Do NOT skipStrip: the person is still mentioned for context.
+          if (next.skipStrip) { delete next.skipStrip; changed = true; }
         }
       }
     }
@@ -6429,6 +6665,8 @@ ${eventSelection}
 ${avoidSection}
 The article must be substantial — at least 1,500 words of body content across all paragraph fields combined. Every paragraph must earn its place with real historical depth, not filler.
 
+HARD RULE — COMPLETE EVERY FIELD: You have enough token budget to finish the entire response. Every paragraph must be a complete thought ending with terminal punctuation (period, exclamation mark, or question mark). Never end a paragraph or field mid-sentence. If you are running out of content ideas, write a shorter but fully complete paragraph rather than cutting off mid-sentence. An incomplete sentence anywhere in the JSON is a critical error.
+
 VOICE AND PERSONALITY — this is the most important instruction:
 Write like a passionate history obsessive who has spent weeks researching this event and genuinely cannot believe more people do not know about it. You have opinions. You find things surprising, tragic, infuriating, or inspiring, and you say so. You are not a textbook. You are not a Wikipedia summary. You are a storyteller who happens to know an enormous amount of history.
 Write as a passionate, opinionated history narrator — serious and authoritative, never casual or colloquial. Do not write like you are texting or chatting. Assume the reader is intelligent but has never heard of this event. Explain every proper noun on its first mention with one short inline phrase — enough to orient the reader without a digression.
@@ -6478,9 +6716,10 @@ DO NOT open consecutive paragraphs with the same word or conjunction. Each parag
 
 Title rules:
 - The "title" field is the public card headline and MUST follow exactly this format: "[CTA headline with a strong verb] — ${monthName} ${day}, Year"
-- The first part must make someone want to click while staying factual. Use active, specific verbs such as "Kills", "Strikes Down", "Declares", "Crashes", "Falls", "Opens", "Lands", "Ratifies", "Publishes", "Honors", "Begins", "Ends", "Surrenders", "Departs", or "Launches".
+- HARD RULE — TITLE MUST CONTAIN A FINITE VERB: Both "title" and "eventTitle" MUST include at least one finite verb that describes the action — not a gerund, not a noun, a conjugated verb. "China Airlines Flight 611 Disintegrates" is correct (finite verb: disintegrates). "China Airlines Flight 611 Crash" is wrong (noun only). "China Airlines Flight 611 Crashing" is wrong (gerund). There must be a clear subject + verb structure.
+- The first part must make someone want to click while staying factual. Use active, specific verbs such as "Kills", "Strikes Down", "Declares", "Crashes", "Falls", "Opens", "Lands", "Ratifies", "Publishes", "Honors", "Begins", "Ends", "Surrenders", "Departs", "Disintegrates", "Collapses", "Explodes", "Sinks", "Erupts", "Ignites", "Vanishes", "Escapes", or "Launches".
 - Avoid lazy suffix titles. Do NOT append "Founding", "Creation", "Launch", "Opening", "Completion", or "Presentation" just to make a noun sound like an event. Use them only if the source event is literally a founding/opening/launch and no more specific verb is available. Prefer "Rosenborg BK Founded" over "Rosenborg BK Founding"; prefer "First Oscars Honor Wings" over "The First Oscars Founding"; prefer "Brown v. Board Strikes Down School Segregation" over "Brown v. Board of Education Founding"; prefer "Israel Declares Independence" over "Israeli Independence".
-- The "eventTitle" field should be the concise canonical event name. It may be simpler than the title, but it still needs to name the action or event clearly. Good: "Iran Helicopter Crash Kills President Raisi". Bad: "Ebrahim Raisi" or "Iran".
+- The "eventTitle" field should be a descriptive canonical event name with a clear action — include what happened AND a key detail (who, where, or result). It MUST contain a verb. Good: "Iran Helicopter Crash Kills President Raisi" or "China Airlines Flight 611 Disintegrates Over Taiwan Strait". Bad: "Ebrahim Raisi" or "Flight 611 Disintegrates" (too short, missing context) or "Flight 611 Crash" (noun only).
 - Do NOT use colloquial date names or phrases like "Ides of March", "D-Day", or "Black Tuesday" as the title — use the actual event name instead.
 - The separator between event name and date MUST be " — " (space, em dash, space).
 
@@ -6488,7 +6727,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
 
 {
   "title": "CTA headline with a strong verb — ${monthName} ${day}, Year",
-  "eventTitle": "Concise event name with action",
+  "eventTitle": "Concise event name with a finite verb (e.g. 'Flight 611 Disintegrates', not 'Flight 611 Crash')",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
   "historicalDateISO": "YYYY-MM-DD",
@@ -6566,13 +6805,16 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "contentRationale": "Minimum 40 words. Answer this specific question: what does a reader find in this article that Wikipedia's entry on the same event does not already give them? Name the specific angle, the particular framing, the overlooked detail, or the editorial judgement that makes this article worth reading over the Wikipedia source. Do not be vague. Do not say 'deeper context' or 'engaging narrative'."
 }`;
 
+  // 4096 tokens is sufficient for llama-3.3-70b-versatile to produce a
+  // complete article JSON. NVIDIA NIM always uses Math.max(maxTokens, 8192)
+  // so the fallback chain also has ample headroom.
   const rawValue = await callAI(
     env,
     [
       {
         role: "system",
         content:
-          "You are a historical content writer. Always respond with valid JSON only, no markdown, no extra text.",
+          "You are a historical content writer. Always respond with valid JSON only, no markdown, no extra text. You MUST complete every field fully — every paragraph must end with a complete sentence and a closing punctuation mark. Never truncate mid-sentence.",
       },
       { role: "user", content: prompt },
     ],
@@ -6591,18 +6833,70 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     .replace(/\s*```\s*$/, "")
     .trim();
 
-  // Extract the first {...} block in case the model adds surrounding text
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch)
-    throw new Error(`No JSON found in model output: ${rawValue.slice(0, 200)}`);
+  // Extract the first complete {...} block. If the model returned prose (no {),
+  // retry once with an ultra-explicit JSON-only prompt before giving up.
+  let jsonStart = cleaned.indexOf("{");
+  let jsonCandidate;
+  if (jsonStart === -1) {
+    console.warn(`Blog: AI returned prose instead of JSON (${rawValue.length} chars). Retrying with explicit JSON instruction...`);
+    const retryRaw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content:
+            "You are a JSON API. Your response MUST start with '{' and end with '}'. Output ONLY valid JSON, absolutely nothing else.",
+        },
+        {
+          role: "user",
+          content:
+            `${prompt}\n\nIMPORTANT: Start your response immediately with the character { and end with }. Do not write any prose or explanation. Begin with { right now.`,
+        },
+      ],
+      { maxTokens: 4096, timeoutMs: 60_000, cfModel: model },
+    );
+    const retryStart = String(retryRaw || "").trim().indexOf("{");
+    if (retryStart === -1)
+      throw new Error(`No JSON found in model output after retry: ${rawValue.slice(0, 200)}`);
+    jsonCandidate = String(retryRaw).trim().slice(retryStart);
+  } else {
+    jsonCandidate = cleaned.slice(jsonStart);
+  }
 
+  // Try clean parse first
   let parsed;
   try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    throw new Error(
-      `JSON parse failed: ${e.message} — Raw: ${rawValue.slice(0, 300)}`,
-    );
+    parsed = JSON.parse(jsonCandidate);
+  } catch (_firstErr) {
+    // Attempt basic truncation repair: close any open string and unclosed brackets.
+    // This recovers articles where the last field was cut mid-value.
+    let repaired = jsonCandidate;
+    // Count unclosed braces/brackets
+    let braces = 0, brackets = 0, inString = false, escaped = false;
+    for (let i = 0; i < repaired.length; i++) {
+      const ch = repaired[i];
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === "{") braces++;
+      else if (ch === "}") braces--;
+      else if (ch === "[") brackets++;
+      else if (ch === "]") brackets--;
+    }
+    // Close open string if needed
+    if (inString) repaired += '"';
+    // Close open arrays/objects
+    while (brackets-- > 0) repaired += "]";
+    while (braces-- > 0) repaired += "}";
+    try {
+      parsed = JSON.parse(repaired);
+      console.warn(`Blog: article JSON was truncated and repaired for ${date.toISOString().slice(0, 10)}`);
+    } catch (e) {
+      throw new Error(
+        `JSON parse failed (even after repair): ${e.message} — Raw: ${rawValue.slice(0, 300)}`,
+      );
+    }
   }
 
   // Enforce that the title always follows the format "Event Name — Month Day, Year".
@@ -6622,7 +6916,27 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     );
   }
 
+  // Normalise fields that must be strings — the model occasionally returns arrays.
+  if (Array.isArray(parsed.keywords)) parsed.keywords = parsed.keywords.join(", ");
+  if (Array.isArray(parsed.amazonProductIdeas)) {
+    // already expected as array — leave it
+  }
+  if (typeof parsed.keywords !== "string") parsed.keywords = String(parsed.keywords || "");
+
   enforceAnswerFirstSections(parsed);
+
+  // Truncation audit: check that key paragraph arrays end with complete sentences.
+  // This runs silently — a truncated paragraph is kept as-is (better than nothing)
+  // but a warning is logged so we can spot if 8000 tokens is still not enough.
+  const PARA_FIELDS = ["overviewParagraphs", "eyewitnessOrChronicle", "aftermathParagraphs", "conclusionParagraphs"];
+  for (const field of PARA_FIELDS) {
+    const arr = parsed[field];
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+    const last = String(arr[arr.length - 1] || "").trimEnd();
+    if (last && !/[.!?'"»]$/.test(last)) {
+      console.warn(`Blog: paragraph truncation detected in ${field} for ${date.toISOString().slice(0, 10)} — last char: "${last.slice(-20)}"`);
+    }
+  }
 
   return parsed;
 }
@@ -8082,24 +8396,44 @@ async function hydrateAmazonBlocksInHtml(html) {
  * @param {number} limit
  * @returns {Promise<{name:string,imageUrl:string,wikiUrl:string}[]>}
  */
-async function fetchEventImages(wikiUrl, coverUrl, limit = 2) {
+async function fetchEventImages(wikiUrl, coverUrl, limit = 2, fallbackTitle = "") {
   if (!wikiUrl) return [];
   const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
-  const BAD = /\b(icon|logo|flag|map|seal|stub|arrow|bullet|blank|placeholder)\b/i;
+  // Skip icons, diagrams, and non-photographic images that look bad when floated inline.
+  const BAD = /\b(icon|logo|flag|map|seal|stub|arrow|bullet|blank|placeholder|seating|seat|chart|diagram|schematic|layout|floor.?plan|plan|technical|drawing|cross.?section|cross.section|infographic)\b/i;
   try {
-    const title = decodeURIComponent((wikiUrl.split("/wiki/")[1] ?? "").split("#")[0]);
+    let title = decodeURIComponent((wikiUrl.split("/wiki/")[1] ?? "").split("#")[0]);
     if (!title) return [];
+    let resolvedWikiUrl = wikiUrl;
 
-    const listRes = await fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=images&imlimit=30&format=json`,
-      { headers: ua },
-    );
-    if (!listRes.ok) return [];
-    const listData = await listRes.json();
-    const page = Object.values(listData?.query?.pages ?? {})[0];
-    const candidates = (page?.images ?? [])
-      .map((i) => i.title)
-      .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !BAD.test(t));
+    const getCandidates = async (pageTitle) => {
+      const listRes = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(pageTitle)}&prop=images&imlimit=30&format=json`,
+        { headers: ua },
+      );
+      if (!listRes.ok) return [];
+      const listData = await listRes.json();
+      const page = Object.values(listData?.query?.pages ?? {})[0];
+      return (page?.images ?? [])
+        .map((i) => i.title)
+        .filter((candidate) => /\.(jpe?g|png|webp)$/i.test(candidate) && !BAD.test(candidate));
+    };
+
+    let candidates = await getCandidates(title);
+    if (!candidates.length && fallbackTitle) {
+      const searchRes = await fetch(
+        `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(fallbackTitle)}&srnamespace=0&srlimit=1&format=json`,
+        { headers: ua },
+      );
+      const searchData = searchRes.ok ? await searchRes.json() : null;
+      const matchedTitle = searchData?.query?.search?.[0]?.title || "";
+      if (matchedTitle && matchedTitle.toLowerCase() !== title.toLowerCase()) {
+        title = matchedTitle;
+        resolvedWikiUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(matchedTitle.replace(/\s+/g, "_"))}`;
+        candidates = await getCandidates(title);
+      }
+    }
+
     if (!candidates.length) return [];
 
     const piped = candidates.slice(0, 15).join("|");
@@ -8110,8 +8444,8 @@ async function fetchEventImages(wikiUrl, coverUrl, limit = 2) {
     if (!infoRes.ok) return [];
     const infoData = await infoRes.json();
 
-    const coverFile = coverUrl ? coverUrl.split("/").pop().split("?")[0].toLowerCase() : "";
-    return Object.values(infoData?.query?.pages ?? {})
+    const coverFile = wikimediaImageFileKey(coverUrl);
+    const eligible = Object.values(infoData?.query?.pages ?? {})
       .map((p) => ({
         url: p?.imageinfo?.[0]?.url ?? null,
         px: (p?.imageinfo?.[0]?.width ?? 0) * (p?.imageinfo?.[0]?.height ?? 0),
@@ -8120,11 +8454,17 @@ async function fetchEventImages(wikiUrl, coverUrl, limit = 2) {
       }))
       .filter(({ url, w, h }) => {
         if (!url || w < 300 || h < 200) return false;
-        return url.split("/").pop().split("?")[0].toLowerCase() !== coverFile;
-      })
+        // Skip images with extreme aspect ratios — very tall (seating charts, diagrams)
+        // or very wide (panoramas) both break inline float layouts.
+        if (w > 0 && h / w > 2.0) return false;   // taller than 2:1 → skip
+        if (h > 0 && w / h > 4.0) return false;   // wider than 4:1 → skip
+        return wikimediaImageFileKey(url) !== coverFile;
+      });
+    const photographic = eligible.filter(({ url }) => /\.(?:jpe?g|webp)(?:$|[?#])/i.test(url));
+    return (photographic.length > 0 ? photographic : eligible)
       .sort((a, b) => b.px - a.px)
       .slice(0, limit)
-      .map(({ url }) => ({ name: "via Wikimedia", imageUrl: url, wikiUrl }));
+      .map(({ url }) => ({ name: "via Wikimedia", imageUrl: url, wikiUrl: resolvedWikiUrl }));
   } catch {
     return [];
   }
@@ -8146,11 +8486,11 @@ function injectEventImages(html, eventImages) {
     const margin = float === "right"
       ? "0 0 1.2rem 1.5rem"
       : "0 1.5rem 1.2rem 0";
-    return `<figure style="float:${float};margin:${margin};max-width:min(200px,40%);clear:${float};">` +
+    return `<figure style="float:${float};margin:${margin};max-width:min(200px,40%);clear:${float};overflow:hidden;">` +
       `<a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">` +
       `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=200&q=80"` +
       ` alt="${esc(name)}" loading="lazy" class="img-fluid rounded"` +
-      ` style="display:block;width:100%;height:auto;">` +
+      ` style="display:block;width:100%;height:auto;max-height:180px;object-fit:cover;">` +
       `</a>` +
       `<figcaption class="article-meta mt-1" style="font-size:0.72rem;text-align:center;">` +
       `<a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">via Wikimedia</a>` +
@@ -8259,11 +8599,11 @@ function injectPersonImages(html, personImages) {
 
   // Build portrait HTML for a given person
   const figHtml = ({ name, imageUrl, wikiUrl }) =>
-    `<figure style="float:right;margin:0 0 1.2rem 1.5rem;max-width:min(150px,35%);clear:right;">` +
+    `<figure style="float:right;margin:0 0 1.2rem 1.5rem;max-width:min(150px,35%);clear:right;overflow:hidden;">` +
     `<a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">` +
     `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=200&q=80"` +
     ` alt="${esc(name)}" loading="lazy" class="img-fluid rounded"` +
-    ` style="display:block;width:100%;height:auto;">` +
+    ` style="display:block;width:100%;height:auto;max-height:160px;object-fit:cover;object-position:top;">` +
     `</a>` +
     `<figcaption class="article-meta mt-1" style="font-size:0.72rem;text-align:center;">` +
     `${esc(name)}<br><a href="${esc(wikiUrl)}" target="_blank" rel="noopener noreferrer">via Wikimedia</a>` +
@@ -8664,6 +9004,9 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
   const publishYear = date.getFullYear();
   const canonicalUrl = `https://thisday.info/blog/${slug}/`;
   const publishedStr = `${monthName} ${day}, ${publishYear}`;
+  const keywords = Array.isArray(c.keywords)
+    ? c.keywords.map((keyword) => String(keyword).trim()).filter(Boolean).join(", ")
+    : String(c.keywords || "");
 
   const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || []);
   const sectionHeadings = buildArticleSectionHeadings(c, currentPillars);
@@ -8699,14 +9042,22 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
 
-  const analysisGoodItems = (c.analysisGood || [])
+  const renderableAnalysisItems = (items) =>
+    (Array.isArray(items) ? items : []).filter(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        String(item.title || "").trim() &&
+        String(item.detail || "").trim(),
+    );
+  const analysisGoodItems = renderableAnalysisItems(c.analysisGood)
     .map(
       (item) =>
         `                    <li class="mb-2"><strong>${esc(item.title)}:</strong> ${esc(item.detail)}</li>`,
     )
     .join("\n");
 
-  const analysisBadItems = (c.analysisBad || [])
+  const analysisBadItems = renderableAnalysisItems(c.analysisBad)
     .map(
       (item) =>
         `                    <li class="mb-2"><strong>${esc(item.title)}:</strong> ${esc(item.detail)}</li>`,
@@ -8724,7 +9075,8 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
     : "";
 
   const publishedDateISO = date.toISOString().split("T")[0];
-  const previewImageUrl = buildSocialPreviewImageUrl(c.imageUrl);
+  const featuredImageUrl = isProxyableArticleImageUrl(c.imageUrl) ? c.imageUrl : "";
+  const previewImageUrl = buildSocialPreviewImageUrl(featuredImageUrl);
   const jsonLd = JSON.stringify(
     {
       "@context": "https://schema.org",
@@ -8847,7 +9199,7 @@ ${currentPillars
     <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="author" content="thisDay. Editorial" />
     <meta name="description" content="${esc(c.description)}" />
-    <meta name="keywords" content="${esc(c.keywords)}" />
+    <meta name="keywords" content="${esc(keywords)}" />
 
     <!-- Open Graph -->
     <meta property="og:title" content="${esc(c.title)}" />
@@ -8864,7 +9216,7 @@ ${currentPillars
     <meta property="article:modified_time" content="${date.toISOString()}" />
     <meta property="article:section" content="History" />
     <meta property="article:author" content="https://thisday.info/" />
-    ${(c.keywords || "")
+    ${keywords
       .split(",")
       .map((k) => k.trim())
       .filter(Boolean)
@@ -9127,16 +9479,16 @@ ${JSON.stringify({
               </p>
               ${pillarPills}
             </header>
-            ${c.imageUrl ? `<figure class="text-center mb-4 article-hero-fig">
+            ${featuredImageUrl ? `<figure class="text-center mb-4 article-hero-fig">
               <img
-                src="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800&q=85"
-                srcset="/image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=400 400w, /image-proxy?src=${encodeURIComponent(c.imageUrl)}&w=800 800w"
+                src="/image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=800&q=85"
+                srcset="/image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=800 800w"
                 sizes="(max-width:640px) 100vw, 800px"
                 class="img-fluid rounded"
                 alt="${esc(c.imageAlt)}"
                 style="max-height: 400px; object-fit: cover; object-position: center; width: 100%"
                 loading="eager"
-                onerror="this.onerror=null;this.removeAttribute('srcset');this.src='${esc(c.imageUrl)}';"
+                onerror="this.onerror=null;this.removeAttribute('srcset');this.src='${esc(featuredImageUrl)}';"
               />
               <figcaption class="article-meta mt-2">
                 <small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small>
@@ -9293,8 +9645,9 @@ ${analysisBadItems}
             if (related.length === 0) return "";
             const cards = related
               .map((p) => {
-                const thumb = p.imageUrl
-                  ? `<img src="/image-proxy?src=${encodeURIComponent(p.imageUrl)}&w=80&q=75" alt="${esc(p.title)}" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
+                const relatedImageUrl = isProxyableArticleImageUrl(p.imageUrl) ? p.imageUrl : "";
+                const thumb = relatedImageUrl
+                  ? `<img src="/image-proxy?src=${encodeURIComponent(relatedImageUrl)}&w=80&q=75" alt="${esc(p.title)}" width="56" height="56" style="width:56px;height:56px;object-fit:cover;border-radius:8px;flex-shrink:0" loading="lazy"/>`
                   : `<div style="width:56px;height:56px;border-radius:8px;flex-shrink:0;background:var(--border,#cfe0cf);display:flex;align-items:center;justify-content:center"><i class="bi bi-clock-history" style="color:var(--text-muted,#5c7a65);font-size:1.2rem"></i></div>`;
                 return `
               <div class="col-12 col-md-4">
@@ -10156,7 +10509,7 @@ function todayDateString() {
 function renderBlogPostListItem(entry) {
   const date = new Date(entry.publishedAt);
   const dateStr = `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
-  const rawImg = entry.imageUrl || "";
+  const rawImg = isProxyableArticleImageUrl(entry.imageUrl) ? entry.imageUrl : "";
   const proxiedImg = rawImg
     ? `/image-proxy?src=${encodeURIComponent(rawImg)}&w=240&q=80`
     : "";
@@ -10372,7 +10725,7 @@ function normalizeSearchPreviewHtml(html) {
         const proxiedSrc = parsed.searchParams.get("src");
         if (proxiedSrc) return buildSocialPreviewImageUrl(proxiedSrc);
       }
-      if (parsed.hostname.endsWith("wikimedia.org")) {
+      if (isProxyableArticleImageUrl(decoded)) {
         return buildSocialPreviewImageUrl(decoded);
       }
     } catch (_) {

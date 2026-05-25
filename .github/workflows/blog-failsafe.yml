@@ -5,9 +5,9 @@ name: Blog Post Failsafe
 # failed all 3 internal retries), this workflow triggers one more attempt
 # via POST /blog/publish.
 #
-# After triggering, it waits up to 10 minutes for the async enrichment to
-# complete and verifies the post actually landed in KV before declaring
-# success. This converts silent enrichment failures into visible CI failures.
+# After triggering, synchronous enrichment must finish before /blog/publish
+# returns success. It still polls KV for up to 10 minutes as a replication/race
+# safety check before declaring success.
 #
 # Required GitHub secrets:
 #   CF_ACCOUNT_ID        — Cloudflare account ID
@@ -63,11 +63,12 @@ jobs:
             exit 1
           fi
 
-          # ── Phase 3: Wait for async enrichment to land in KV ─────────────
-          # /blog/publish returns 200 after saving the draft but BEFORE the
-          # async enrichment completes. Poll KV for up to 10 minutes so that
-          # silent enrichment failures are caught here rather than hidden.
-          echo "Publish accepted — waiting up to 10 min for enrichment to write post:${SLUG} to KV..."
+          # ── Phase 3: Verify post landed in KV ────────────────────────────
+          # /blog/publish awaits enrichment synchronously (null ctx path).
+          # A 200 response means the worker already wrote the post, but we
+          # poll for up to 10 minutes as a safety net for edge-case races
+          # or transient KV replication lag.
+          echo "Publish accepted — verifying post:${SLUG} is in KV (up to 10 min)..."
           POST_FOUND=false
           for WAIT_MIN in 1 2 3 4 5 6 7 8 9 10; do
             sleep 60

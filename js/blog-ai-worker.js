@@ -1510,13 +1510,17 @@ export default {
       if (!slug) {
         return jsonResponse({ status: "error", message: "Provide ?slug=X" }, 400);
       }
-      try {
-        await enrichPublishedPost(env, slug);
-        return jsonResponse({ status: "ok", slug, message: "Post enriched." });
-      } catch (err) {
-        console.error(`Blog AI: /blog/enrich failed for ${slug} — ${err.message}`);
-        return jsonResponse({ status: "error", slug, message: err.message }, 500);
-      }
+      // Return 200 immediately so the HTTP response is not held open for the
+      // duration of enrichment (which can take several minutes across many AI
+      // calls). The actual work runs in ctx.waitUntil, which gets the full
+      // 15-minute Unbound budget regardless of response time.
+      // Callers verify success by checking for post:${slug} in KV afterward.
+      ctx.waitUntil(
+        enrichPublishedPost(env, slug).catch((err) => {
+          console.error(`Blog AI: enrichment failed for ${slug} — ${err.message}`);
+        }),
+      );
+      return jsonResponse({ status: "ok", slug, message: "Enrichment started." });
     }
 
     if (path === "/blog/backfill-entities" && request.method === "POST") {

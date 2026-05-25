@@ -20,6 +20,12 @@
   "compatibility_date": "2026-03-14",
   "main": "js/blog-ai-worker.js",
 
+  // Unbound usage model: HTTP handlers and ctx.waitUntil get up to 15 minutes
+  // (vs 30 seconds on Bundled). Required because enrichPublishedPost makes
+  // 10+ AI API calls that together take several minutes of wall-clock time.
+  // Also raises the subrequest limit from 50 → 1000 per invocation.
+  "usage_model": "unbound",
+
   "vars": {
     // Temporary write pause while today's free KV write quota recovers.
     // Cloudflare KV free limits reset at 00:00 UTC.

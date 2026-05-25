@@ -99,20 +99,29 @@ async function clearRepairAttempt(env, slug, type) {
  * in a brand-new Worker invocation with its own fresh subrequest budget.
  * Best-effort — logs status but never throws.
  */
-async function selfEnrichFetch(env, slug) {
-  try {
-    const base = String(env?.WORKER_BASE_URL || "https://thisday.info").replace(/\/$/, "");
-    const url = `${base}/blog/enrich?slug=${encodeURIComponent(slug)}`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: env.PUBLISH_SECRET
-        ? { Authorization: `Bearer ${env.PUBLISH_SECRET}` }
-        : {},
-    });
-    console.log(`Blog: self-enrich for ${slug} → HTTP ${res.status}`);
-  } catch (err) {
-    console.error(`Blog: self-enrich fetch failed for ${slug}: ${err.message}`);
+async function selfEnrichFetch(env, slug, { maxAttempts = 3 } = {}) {
+  const base = String(env?.WORKER_BASE_URL || "https://thisday.info").replace(/\/$/, "");
+  const url = `${base}/blog/enrich?slug=${encodeURIComponent(slug)}`;
+  const headers = env.PUBLISH_SECRET ? { Authorization: `Bearer ${env.PUBLISH_SECRET}` } : {};
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, { method: "POST", headers });
+      console.log(`Blog: self-enrich for ${slug} → HTTP ${res.status} (attempt ${attempt}/${maxAttempts})`);
+      if (res.ok) return true;
+      // Non-2xx response — log body for diagnostics then retry.
+      const body = await res.text().catch(() => "");
+      console.error(`Blog: self-enrich non-ok for ${slug} (attempt ${attempt}/${maxAttempts}): ${body.slice(0, 200)}`);
+    } catch (err) {
+      console.error(`Blog: self-enrich fetch failed for ${slug} (attempt ${attempt}/${maxAttempts}): ${err.message}`);
+    }
+    if (attempt < maxAttempts) {
+      // Exponential back-off: 30 s, 60 s between attempts.
+      await new Promise((r) => setTimeout(r, 30_000 * attempt));
+    }
   }
+  console.error(`Blog: self-enrich failed all ${maxAttempts} attempts for ${slug}`);
+  return false;
 }
 
 async function getPipelineState(env) {
@@ -3562,14 +3571,16 @@ async function maybeGenerateBlogPost(env, ctx) {
     }
 
     if (!postRaw || !inIndex) {
-      try {
-        await enrichPublishedPost(env, draftSlug);
+      // Use selfEnrichFetch (separate Worker invocation) so the enrichment gets
+      // its own fresh 50-subrequest budget and doesn't eat into this cron's budget.
+      // maxAttempts=1: no retry here — today's generation must still run after.
+      console.log(`Blog AI: recovering draft for /blog/${draftSlug}/ via self-enrich...`);
+      const recovered = await selfEnrichFetch(env, draftSlug, { maxAttempts: 1 });
+      if (recovered) {
         console.log(`Blog AI: recovered draft and published /blog/${draftSlug}/.`);
         if (draftSlug === todaySlug) return;
-      } catch (err) {
-        console.error(
-          `Blog AI: draft recovery failed for ${draftSlug} — ${err.message}`,
-        );
+      } else {
+        console.error(`Blog AI: draft recovery failed for ${draftSlug} — selfEnrichFetch returned non-ok`);
       }
     }
   }
@@ -5033,7 +5044,11 @@ async function enrichPublishedPost(env, slug) {
     throw new Error(`Refusing to enrich ${slug}: ${dateValidation.reason}`);
   }
   normalizeContentMetadata(enriched);
-  const entityMeta = await upsertEntitiesForContent(env, enriched, slug, date, pillars).catch((err) => {
+  // Skip AI card generation here — saves ~2 subrequests per entity (up to ~18 total)
+  // and keeps the enrichment invocation well under the 50-subrequest budget.
+  // Entities are flagged needsWikiRefresh so the cron entity-refresh loop
+  // generates their AI overview cards within 1–3 days.
+  const entityMeta = await upsertEntitiesForContent(env, enriched, slug, date, pillars, { skipAiGeneration: true }).catch((err) => {
     console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
     return [];
   });
@@ -5763,7 +5778,7 @@ async function upsertEntityIndex(env, entities) {
   );
 }
 
-async function upsertEntitiesForContent(env, content, slug, date, pillars) {
+async function upsertEntitiesForContent(env, content, slug, date, pillars, { skipAiGeneration = false } = {}) {
   const rawTerms = Array.isArray(content.keyTerms) ? content.keyTerms : [];
   const mainEvent = {
     term: content.eventTitle || content.title,
@@ -5816,13 +5831,22 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars) {
       relatedPosts: [slug],
       firstSeenAt: new Date().toISOString(),
       ...(wikiEmpty && term.wikiUrl ? { needsWikiRefresh: true } : {}),
+      // Mark new entities for AI card generation on next cron refresh when
+      // skipping inline AI calls (subrequest budget preservation).
+      ...(skipAiGeneration ? { needsWikiRefresh: true } : {}),
     };
     const fallbackCards = type === "person"
       ? buildPersonOverviewCards(entity)
       : buildEventOverviewCards(entity, content);
-    entity.overviewCards = await generateEntityOverviewCards(env, entity, content, fallbackCards);
+    // Skip AI-generated cards when caller opts out (saves ~2 subrequests/entity).
+    // Entities are refreshed by the cron's entity-refresh loop within 1–3 days.
+    entity.overviewCards = skipAiGeneration
+      ? fallbackCards
+      : await generateEntityOverviewCards(env, entity, content, fallbackCards);
     const fallbackSections = buildFallbackEntityBodySections(entity, content);
-    entity.bodySections = await generateEntityBodySections(env, entity, content, fallbackSections);
+    entity.bodySections = skipAiGeneration
+      ? fallbackSections
+      : await generateEntityBodySections(env, entity, content, fallbackSections);
     saved.push(await upsertEntityRecord(env, entity));
   }
   await upsertEntityIndex(env, saved);

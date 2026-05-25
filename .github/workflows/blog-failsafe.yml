@@ -5,6 +5,10 @@ name: Blog Post Failsafe
 # failed all 3 internal retries), this workflow triggers one more attempt
 # via POST /blog/publish.
 #
+# After triggering, it waits up to 10 minutes for the async enrichment to
+# complete and verifies the post actually landed in KV before declaring
+# success. This converts silent enrichment failures into visible CI failures.
+#
 # Required GitHub secrets:
 #   CF_ACCOUNT_ID        — Cloudflare account ID
 #   CF_API_TOKEN         — Cloudflare API token (KV read permission)
@@ -33,8 +37,9 @@ jobs:
           SLUG="${DAY}-${MONTH}-${YEAR}"
           echo "Today's expected slug: post:${SLUG}"
 
-          # Check if the post key exists in KV (200 = exists, 404 = missing)
           KV_URL="https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/post:${SLUG}"
+
+          # ── Phase 1: Check if post already exists ────────────────────────
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
             "$KV_URL")
@@ -42,16 +47,42 @@ jobs:
 
           if [ "$STATUS" = "200" ]; then
             echo "Post for ${SLUG} already exists — nothing to do."
-          else
-            echo "Post for ${SLUG} is missing — triggering blog worker..."
-            RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-              -X POST https://thisday.info/blog/publish \
-              -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
-            BODY=$(echo "$RESULT" | head -n -1)
-            HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
-            echo "Blog worker response (HTTP $HTTP_STATUS): $BODY"
-            if [ "$HTTP_STATUS" != "200" ]; then
-              echo "::error::Blog post trigger failed with HTTP status $HTTP_STATUS"
-              exit 1
+            exit 0
+          fi
+
+          # ── Phase 2: Post missing — trigger blog worker ──────────────────
+          echo "Post for ${SLUG} is missing — triggering blog worker..."
+          RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+            -X POST https://thisday.info/blog/publish \
+            -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
+          BODY=$(echo "$RESULT" | head -n -1)
+          HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
+          echo "Blog worker response (HTTP $HTTP_STATUS): $BODY"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "::error::Blog post trigger failed with HTTP status $HTTP_STATUS"
+            exit 1
+          fi
+
+          # ── Phase 3: Wait for async enrichment to land in KV ─────────────
+          # /blog/publish returns 200 after saving the draft but BEFORE the
+          # async enrichment completes. Poll KV for up to 10 minutes so that
+          # silent enrichment failures are caught here rather than hidden.
+          echo "Publish accepted — waiting up to 10 min for enrichment to write post:${SLUG} to KV..."
+          POST_FOUND=false
+          for WAIT_MIN in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 60
+            CHECK=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+              "$KV_URL")
+            echo "Minute ${WAIT_MIN}: KV check → HTTP $CHECK"
+            if [ "$CHECK" = "200" ]; then
+              echo "post:${SLUG} appeared in KV after ${WAIT_MIN} minute(s) — success."
+              POST_FOUND=true
+              break
             fi
+          done
+
+          if [ "$POST_FOUND" != "true" ]; then
+            echo "::error::post:${SLUG} still missing in KV after 10 minutes. Enrichment likely failed — check Worker logs."
+            exit 1
           fi

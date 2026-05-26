@@ -88,7 +88,11 @@ function toHashtag(value) {
     .split(/\s+/)
     .map((word) => word.replace(/[^a-zA-Z0-9]/g, ""))
     .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => {
+      // All-uppercase word (≥ 2 chars) — acronym like VTA, USA, FBI, NASA: preserve as-is
+      if (word.length >= 2 && /^[A-Z0-9]+$/.test(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
     .join("");
   return compact ? `#${compact.slice(0, 40)}` : null;
 }

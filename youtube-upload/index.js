@@ -463,7 +463,7 @@ async function main() {
         const metaOk = await postToMeta(videoPath, post, youtubeId);
         const tiktokOk = await postToTikTok(videoPath, post, youtubeId);
         await markSocialPosted(post.slug, { meta: metaOk, tiktok: tiktokOk });
-        await notifyUpload(post, youtubeId);
+        await notifyUpload(post, youtubeId, videoPath);
         await recordPipelineSuccess("youtube");
       } catch (err) {
         if (err.message?.startsWith("IMAGE_UNAVAILABLE")) {

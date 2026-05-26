@@ -178,6 +178,52 @@ const KV_ENTITY_PREFIX = "entity-v1:";
 const KV_ENTITY_INDEX_KEY = "entity-index-v1";
 const KV_PERSON_IMAGE_PREFIX = "person-image:";
 const KV_PERSON_IMAGE_TTL = 60 * 60 * 24 * 30; // 30 days
+const PERSON_ENTITY_MIN_SOURCE_WORDS = 45;
+const PERSON_ENTITY_MIN_SOURCE_SENTENCES = 2;
+const EVENT_FAMILY_REPEAT_WINDOW_DAYS = 7;
+const EVENT_FAMILY_RULES = [
+  {
+    name: "shooting",
+    pattern: /\b(shooting|shootings|shootout|gunman|gunmen|opened fire)\b/,
+  },
+  {
+    name: "bombing",
+    pattern: /\b(bombing|bombings|bomb attack|bomb blast|suicide bomb(?:er|ing)?|car bomb)\b/,
+  },
+  {
+    name: "aviation crash",
+    pattern:
+      /\b(aircraft|airliner|airplane|aeroplane|helicopter|flight|plane)\b.{0,48}\b(crash|crashes|crashed|breaks apart)\b|\b(crash|crashes|crashed|breaks apart)\b.{0,48}\b(aircraft|airliner|airplane|aeroplane|helicopter|flight|plane)\b/,
+  },
+  {
+    name: "earthquake or tsunami",
+    pattern: /\b(earthquake|tsunami|seismic)\b/,
+  },
+  {
+    name: "flood",
+    pattern: /\b(flood|floods|flooding)\b/,
+  },
+  {
+    name: "assassination",
+    pattern: /\b(assassination|assassinated)\b/,
+  },
+  {
+    name: "battle or siege",
+    pattern: /\b(battle|siege)\b/,
+  },
+  {
+    name: "coup",
+    pattern: /\b(coup|military takeover)\b/,
+  },
+  {
+    name: "treaty",
+    pattern: /\btreaty\b/,
+  },
+  {
+    name: "independence",
+    pattern: /\bindependence\b/,
+  },
+];
 const EVERY_OTHER_DAYS = 1; // Generate every N days
 const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const BLOG_NAV_WIDTH_FIX_CSS =
@@ -881,10 +927,27 @@ function isWeakCtaTitleLead(value) {
     /\b(details of|story behind|history of|what happened)\b/i.test(lead);
 }
 
+function sourceEventHeadline(eventText, maxLength = 96) {
+  const firstSentence = String(eventText || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/(?<=[.!?])\s+/)[0]
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/[.!?]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return firstSentence && firstSentence.length <= maxLength
+    ? firstSentence
+    : "";
+}
+
 function eventTitleFromCandidate(parsedTitle, candidate) {
   const aiTitle = String(parsedTitle || "").replace(/\s+[-—]\s+.*$/, "").trim();
   const pageTitle = String(candidate?.pageTitle || "").trim();
   const eventText = String(candidate?.text || "").replace(/\s+/g, " ").trim();
+  const sourceHeadline = sourceEventHeadline(eventText);
+  if (sourceHeadline) return sourceHeadline;
+
   const evidenceTitle = deriveCtaEventTitle(pageTitle || aiTitle, eventText);
   if (evidenceTitle && evidenceTitle !== pageTitle) {
     return evidenceTitle.length > 96
@@ -906,6 +969,7 @@ function eventTitleFromCandidate(parsedTitle, candidate) {
   const firstSentence = eventText
     .split(/(?<=[.!?])\s+/)[0]
     .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/[.!?]+$/, "")
     .replace(/\s+/g, " ")
     .trim();
   if (!firstSentence) return aiTitle || pageTitle;
@@ -914,6 +978,23 @@ function eventTitleFromCandidate(parsedTitle, candidate) {
   return firstSentence.length > maxLength
     ? `${firstSentence.slice(0, maxLength).trim()}...`
     : firstSentence;
+}
+
+function restoreSourceEventHeadline(content) {
+  const sourceHeadline = getTitleLead(content?.sourceEventHeadline);
+  if (!sourceHeadline) return false;
+
+  content.eventTitle = sourceHeadline;
+  content.title = buildCanonicalTitle(sourceHeadline, content.historicalDate);
+  content.jsonLdName = sourceHeadline;
+  if (Array.isArray(content.quickFacts)) {
+    content.quickFacts = content.quickFacts.map((fact) =>
+      fact && /^Event$/i.test(fact.label || "")
+        ? { ...fact, value: sourceHeadline }
+        : fact,
+    );
+  }
+  return true;
 }
 
 function alignContentDateFields(content, canonical = {}) {
@@ -994,25 +1075,33 @@ function enforceSelectedEventDate(content, selectedEvent) {
     title: content.title,
   };
 
-  content.eventTitle = String(content.eventTitle || selectedEvent.eventTitle || "")
-    .replace(/\s+[-—]\s+.*$/, "")
-    .trim();
+  if (selectedEvent.sourceEventHeadline) {
+    content.sourceEventHeadline = selectedEvent.sourceEventHeadline;
+  }
+  content.eventTitle = String(
+    content.sourceEventHeadline ||
+    content.eventTitle ||
+    selectedEvent.eventTitle ||
+    "",
+  ).replace(/\s+[-—]\s+.*$/, "").trim();
   content.historicalDate = dateText;
   content.historicalYear = year;
   content.historicalDateISO = isoText;
-  content.title = buildDisplayTitle(
-    content.title,
-    content.eventTitle || selectedEvent.eventTitle,
-    dateText,
-  );
+  content.title = content.sourceEventHeadline
+    ? buildCanonicalTitle(content.eventTitle, dateText)
+    : buildDisplayTitle(content.title, content.eventTitle || selectedEvent.eventTitle, dateText);
   if (content.eventTitle) content.jsonLdName = content.eventTitle;
 
   if (Array.isArray(content.quickFacts)) {
-    content.quickFacts = content.quickFacts.map((fact) =>
-      fact && /^Date$/i.test(fact.label || "")
+    content.quickFacts = content.quickFacts.map((fact) => {
+      if (!fact) return fact;
+      if (/^Event$/i.test(fact.label || "") && content.sourceEventHeadline) {
+        return { ...fact, value: content.eventTitle };
+      }
+      return /^Date$/i.test(fact.label || "")
         ? { ...fact, value: dateText }
-        : fact,
-    );
+        : fact;
+    });
   }
 
   const changed = JSON.stringify(previous) !== JSON.stringify({
@@ -1049,6 +1138,64 @@ function isGenericEventPageTitle(pageTitle) {
     "space shuttle program",
   ]);
   return genericTitles.has(normalized);
+}
+
+function eventFamiliesFromText(...values) {
+  const haystack = normalizeTopicMatchText(values.filter(Boolean).join(" "));
+  if (!haystack) return [];
+  return EVENT_FAMILY_RULES
+    .filter((rule) => rule.pattern.test(haystack))
+    .map((rule) => rule.name);
+}
+
+function eventFamiliesForCandidate(event) {
+  return eventFamiliesFromText(event?.pageTitle, event?.text);
+}
+
+function collectRecentEventFamilies(index, targetDate, days = EVENT_FAMILY_REPEAT_WINDOW_DAYS) {
+  const targetMs =
+    targetDate && typeof targetDate.getTime === "function"
+      ? targetDate.getTime()
+      : Date.parse(String(targetDate || ""));
+  if (!Array.isArray(index) || !Number.isFinite(targetMs)) return [];
+  const cutoffMs = targetMs - days * 24 * 60 * 60 * 1000;
+  return [
+    ...new Set(
+      index
+        .filter((entry) => {
+          const publishedMs = Date.parse(entry?.publishedAt || "");
+          return Number.isFinite(publishedMs) && publishedMs < targetMs && publishedMs >= cutoffMs;
+        })
+        .flatMap((entry) => eventFamiliesFromText(entry.eventTitle, entry.title)),
+    ),
+  ];
+}
+
+function filterRecentEventFamilyRepeats(events, recentFamilies) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return { candidates: [], suppressed: [], fallbackUsed: false };
+  }
+  const recent = new Set(Array.isArray(recentFamilies) ? recentFamilies : []);
+  if (recent.size === 0) {
+    return { candidates: events, suppressed: [], fallbackUsed: false };
+  }
+
+  const annotated = events.map((event) => ({
+    ...event,
+    eventFamilies: eventFamiliesForCandidate(event),
+  }));
+  const suppressed = annotated.filter((event) =>
+    event.eventFamilies.some((family) => recent.has(family)),
+  );
+  const candidates = annotated.filter((event) =>
+    event.eventFamilies.every((family) => !recent.has(family)),
+  );
+
+  // Keep publication possible on unusually narrow dates where every usable
+  // event repeats a recent family; otherwise the cooldown is a hard filter.
+  return candidates.length > 0
+    ? { candidates, suppressed, fallbackUsed: false }
+    : { candidates: annotated, suppressed, fallbackUsed: suppressed.length > 0 };
 }
 
 function scoreBlogEventCandidate(event) {
@@ -1166,6 +1313,7 @@ async function chooseEventForDate(
   takenAllTime = [],
   preferredPillars = [],
   recentPillars = [],
+  recentEventFamilies = [],
 ) {
   const monthName = MONTH_NAMES[date.getUTCMonth()];
   const day = date.getUTCDate();
@@ -1243,6 +1391,17 @@ async function chooseEventForDate(
           haystack.includes(String(taken || "").toLowerCase()),
         );
       });
+    const familyGuard = filterRecentEventFamilyRepeats(candidateEvents, recentEventFamilies);
+    if (familyGuard.suppressed.length > 0 && !familyGuard.fallbackUsed) {
+      console.log(
+        `Event selector: removed ${familyGuard.suppressed.length} candidate(s) repeating recent event families: ${recentEventFamilies.join(", ")}.`,
+      );
+    } else if (familyGuard.fallbackUsed) {
+      console.warn(
+        `Event selector: every qualified candidate repeats a recent event family; allowing fallback selection from ${recentEventFamilies.join(", ")}.`,
+      );
+    }
+    candidateEvents = familyGuard.candidates;
     candidateEvents = rankBlogEventCandidates(candidateEvents);
   } catch (err) {
     console.warn(`Event selector candidate load failed: ${err.message}`);
@@ -1352,6 +1511,10 @@ async function chooseEventForDate(
     }
     matchedCandidate = applyMajorEventGuard(matchedCandidate, candidateEvents);
     parsed.eventTitle = eventTitleFromCandidate(parsed.eventTitle, matchedCandidate);
+    const canonicalSourceHeadline = sourceEventHeadline(matchedCandidate.text);
+    if (canonicalSourceHeadline && parsed.eventTitle === canonicalSourceHeadline) {
+      parsed.sourceEventHeadline = canonicalSourceHeadline;
+    }
     parsed.historicalYear = Number.parseInt(matchedCandidate.year, 10);
     parsed.historicalDate = `${monthName} ${day}, ${matchedCandidate.year}`;
     parsed.historicalDateISO = `${String(matchedCandidate.year).padStart(4, "0")}-${mPad}-${dPad}`;
@@ -3071,12 +3234,14 @@ export default {
         // hydrate + inject only when the stored article is missing cached data.
         const entityStripKnownEmpty = String(articleEntitiesRaw || "").trim() === "[]";
         const entityStripNeedsImageRepair = articleEntityStripNeedsImageRepair(patchedHtml);
+        const entityStripNeedsProfileValidation =
+          articleEntityStripNeedsProfileValidation(patchedHtml, articleEntitiesRaw);
         if (
           ctx?.waitUntil &&
           allowArticleKvBackgroundWrites &&
           !entityStripKnownEmpty &&
-          (!patchedHtml.includes(ENTITY_STRIP_BACKFILL_MARKER) || entityStripNeedsImageRepair) &&
-          (!patchedHtml.includes('data-entity-strip="1"') || !articleEntitiesRaw || entityStripNeedsImageRepair)
+          (!patchedHtml.includes(ENTITY_STRIP_BACKFILL_MARKER) || entityStripNeedsImageRepair || entityStripNeedsProfileValidation) &&
+          (!patchedHtml.includes('data-entity-strip="1"') || !articleEntitiesRaw || entityStripNeedsImageRepair || entityStripNeedsProfileValidation)
         ) {
           const htmlSnapshot = patchedHtml;
           ctx.waitUntil((async () => {
@@ -3624,12 +3789,29 @@ async function maybeGenerateBlogPost(env, ctx) {
             const entity = JSON.parse(entityRaw);
             const freshWiki = await fetchWikipediaEntityData({ wikiUrl: entity.wikiUrl, term: entity.name, type: entity.type }).catch(() => ({}));
             if (!freshWiki.intro && !freshWiki.summary) continue;
+            if (
+              entity.type === "person" &&
+              !hasRichWikipediaPersonProfile({ ...entity, ...freshWiki })
+            ) {
+              entity.profileLinkEligible = false;
+              entity.profileSubjectVerified = false;
+              entity.needsWikiRefresh = true;
+              entity.updatedAt = new Date().toISOString();
+              await env.BLOG_AI_KV.put(kvKey, JSON.stringify(entity));
+              console.warn(`Blog AI: kept entity ${kvKey} unlinked because Wikipedia lacks a substantive biography page.`);
+              continue;
+            }
             entity.summary = freshWiki.summary || "";
             entity.intro = freshWiki.intro || freshWiki.summary || "";
             entity.description = freshWiki.description || entity.description || "";
             entity.imageUrl = freshWiki.imageUrl || entity.imageUrl || "";
+            entity.resolvedPageTitle = freshWiki.resolvedPageTitle || entity.resolvedPageTitle || "";
             if (freshWiki.birthDate) entity.birthDate = freshWiki.birthDate;
             if (freshWiki.deathDate) entity.deathDate = freshWiki.deathDate;
+            if (entity.type === "person") {
+              entity.profileLinkEligible = true;
+              entity.profileSubjectVerified = true;
+            }
             delete entity.needsWikiRefresh;
             entity.updatedAt = new Date().toISOString();
             const sourceIdx = postIndex.find((e) => e.slug === entity.sourcePostSlug) || {};
@@ -3722,7 +3904,7 @@ async function fetchWikipediaImage(
     );
     if (summaryRes.ok) {
       const d = await summaryRes.json();
-      const img = d.thumbnail?.source ?? d.originalimage?.source ?? null;
+      const img = d.originalimage?.source ?? d.thumbnail?.source ?? null;
       if (img) return img;
     }
 
@@ -4367,15 +4549,18 @@ async function generateAndStore(
           ),
     );
 
-  // Pillar weekly rotation: ensure each day uses a different pillar.
+  // Rotation signals: topic-family repeats are enforced before candidate
+  // ranking; pillar preferences remain editorial guidance.
   // - recentPillars: primary pillars of the last 7 published posts (explicit avoid list)
   // - preferredPillars: least-covered pillars from last 30 posts (positive signal)
   let preferredPillars = [];
   let recentPillars = [];
+  let recentEventFamilies = [];
   if (!forcedEvent) {
     const sorted = existingIndex
       .slice()
       .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+    recentEventFamilies = collectRecentEventFamilies(existingIndex, now);
 
     // Last 7 posts → pillars to avoid repeating this week
     recentPillars = [
@@ -4415,6 +4600,11 @@ async function generateAndStore(
         `Blog AI: depth rotation — preferred pillars: [${preferredPillars.join(", ")}], avoid: [${recentPillars.join(", ")}]`,
       );
     }
+    if (recentEventFamilies.length > 0) {
+      console.log(
+        `Blog AI: seven-day event-family cooldown — suppressing repeats of [${recentEventFamilies.join(", ")}] when alternatives exist.`,
+      );
+    }
   }
 
   let selectedForcedEvent = forcedEvent;
@@ -4426,6 +4616,7 @@ async function generateAndStore(
       takenAllTime,
       preferredPillars,
       recentPillars,
+      recentEventFamilies,
     );
     selectedForcedEvent = selectedEvent.eventTitle;
     console.log(
@@ -4638,7 +4829,8 @@ async function generateAndStore(
     const bookCoverUrl = await fetchBookCover(content.bookSearchQuery).catch(() => null);
     const entityMeta = await upsertEntitiesForContent(env, content, slug, now, pillars).catch((err) => {
       console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
-      return [];
+      suppressPersonProfileLink(content);
+      return unlinkedArticlePeople(content);
     });
 
     await savePublishedPost(env, {
@@ -4818,6 +5010,7 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
 
 function normalizeContentMetadata(content) {
   normalizeEventTitleAction(content);
+  restoreSourceEventHeadline(content);
   if (isWeakCtaTitleLead(getTitleLead(content.title))) {
     content.title = buildDisplayTitle(
       content.eventTitle,
@@ -5056,7 +5249,7 @@ async function savePublishedPost(
   { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [], eventImages = [], entityMeta = [] },
 ) {
   const safePillars = Array.isArray(pillars) ? pillars : [];
-  const safePersonImages = Array.isArray(personImages) ? personImages : [];
+  let safePersonImages = Array.isArray(personImages) ? personImages : [];
   const safeEventImages = Array.isArray(eventImages) ? eventImages : [];
   let safeEntityMeta = Array.isArray(entityMeta) ? entityMeta : [];
 
@@ -5072,6 +5265,18 @@ async function savePublishedPost(
     console.warn(`Article entity image hydration failed for ${slug}: ${err.message}`);
     return safeEntityMeta;
   });
+  const linkedPeople = new Set(
+    safeEntityMeta
+      .filter((entity) =>
+        entity?.type === "person" &&
+        entity.profileLinkEligible === true &&
+        entity.profileSubjectVerified === true,
+      )
+      .map((entity) => normalizeTopicMatchText(entity.name)),
+  );
+  safePersonImages = safePersonImages.filter((image) =>
+    linkedPeople.has(normalizeTopicMatchText(image?.name)),
+  );
 
   assertRequiredContentBlocks(content);
   const rawHtml = buildPostHTML(content, date, slug, existingIndex, safePillars, bookCoverUrl);
@@ -5102,6 +5307,11 @@ async function savePublishedPost(
       imageUrl: e.imageUrl || "",
       url: e.url,
       wikiUrl: e.wikiUrl || "",
+      ...(e.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
+      ...(e.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
+      ...(e.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
+      ...(e.profileSubjectVerified === false ? { profileSubjectVerified: false } : {}),
+      ...(e.skipImageRepair ? { skipImageRepair: true } : {}),
       ...(e.skipStrip ? { skipStrip: true } : {}),
     }));
     await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(lightweightEntities)).catch(() => {});
@@ -5226,7 +5436,8 @@ async function enrichPublishedPost(env, slug) {
   // generates their AI overview cards within 1–3 days.
   const entityMeta = await upsertEntitiesForContent(env, enriched, slug, date, pillars, { skipAiGeneration: true }).catch((err) => {
     console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
-    return [];
+    suppressPersonProfileLink(enriched);
+    return unlinkedArticlePeople(enriched);
   });
 
   await chk("pre-save");
@@ -5323,7 +5534,7 @@ async function fetchWikipediaEntityData(term, { retryOnEmpty = true } = {}) {
     "https://en.wikipedia.org/api/rest_v1/page/summary/" +
     encodeURIComponent(pageTitle);
   const introUrl =
-    "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&exintro=1&explaintext=1&format=json&origin=*&titles=" +
+    "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts|pageprops&ppprop=disambiguation&exintro=1&explaintext=1&format=json&origin=*&titles=" +
     encodeURIComponent(pageTitle);
   const [summaryRes, introRes, lifeDates] = await Promise.all([
     fetch(summaryUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } }).catch(() => null),
@@ -5335,17 +5546,25 @@ async function fetchWikipediaEntityData(term, { retryOnEmpty = true } = {}) {
   let summary = {};
   if (summaryRes?.ok) summary = await summaryRes.json();
   let intro = "";
+  let resolvedPageTitle = String(summary.title || "").trim();
+  let isDisambiguation = summary.type === "disambiguation";
   if (introRes?.ok) {
     const introData = await introRes.json();
     const introPage = Object.values(introData?.query?.pages || {})[0];
     intro = introPage?.extract || "";
+    resolvedPageTitle = resolvedPageTitle || String(introPage?.title || "").trim();
+    isDisambiguation =
+      isDisambiguation ||
+      Object.prototype.hasOwnProperty.call(introPage?.pageprops || {}, "disambiguation");
   }
   const result = {
     summary: summary.extract || "",
     intro: intro || summary.extract || "",
     description: summary.description || "",
-    imageUrl: summary.thumbnail?.source || summary.originalimage?.source || "",
+    imageUrl: summary.originalimage?.source || summary.thumbnail?.source || "",
     pageTitle,
+    resolvedPageTitle: resolvedPageTitle || pageTitle,
+    isDisambiguation,
     ...lifeDates,
   };
   // Retry once when both summary and intro came back empty — transient Wikipedia timeout
@@ -5378,6 +5597,73 @@ function entityFactSentences(...values) {
       seen.add(key);
       return true;
     });
+}
+
+function hasRichWikipediaPersonProfile(entity) {
+  if (normalizeEntityType(entity?.type) !== "person" || !entity?.wikiUrl || entity?.isDisambiguation) {
+    return false;
+  }
+  const personTokens = normalizeTopicMatchText(entity.name || entity.term)
+    .split(" ")
+    .filter((token) => token.length > 1);
+  const resolvedTokens = new Set(
+    normalizeTopicMatchText(entity.resolvedPageTitle)
+      .split(" ")
+      .filter(Boolean),
+  );
+  if (
+    personTokens.length < 2 ||
+    !personTokens.every((token) => resolvedTokens.has(token))
+  ) {
+    return false;
+  }
+  const sourceText = String(entity.intro || entity.summary || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const wordCount = sourceText.split(/\s+/).filter(Boolean).length;
+  const sentenceCount = entityFactSentences(sourceText).length;
+  return (
+    wordCount >= PERSON_ENTITY_MIN_SOURCE_WORDS &&
+    sentenceCount >= PERSON_ENTITY_MIN_SOURCE_SENTENCES
+  );
+}
+
+function unlinkedArticlePerson(term) {
+  const name = String(term?.term || term?.name || "").trim();
+  const slug = entitySlug(name);
+  return {
+    type: "person",
+    slug,
+    name,
+    imageUrl: "",
+    url: "",
+    wikiUrl: "",
+    profileLinkEligible: false,
+    profileSubjectVerified: false,
+    skipImageRepair: true,
+  };
+}
+
+function suppressPersonProfileLink(content, personName = "") {
+  const target = normalizeTopicMatchText(personName);
+  if (!Array.isArray(content?.keyTerms)) return;
+  content.keyTerms = content.keyTerms.map((term) => {
+    if (normalizeEntityType(term?.type) !== "person") return term;
+    if (target && normalizeTopicMatchText(term.term) !== target) return term;
+    return {
+      ...term,
+      wikiUrl: "",
+      profileLinkEligible: false,
+      profileSubjectVerified: false,
+    };
+  });
+}
+
+function unlinkedArticlePeople(content) {
+  return (Array.isArray(content?.keyTerms) ? content.keyTerms : [])
+    .filter((term) => normalizeEntityType(term?.type) === "person" && term?.term)
+    .map(unlinkedArticlePerson)
+    .filter((person) => person.slug && person.name);
 }
 
 function findEntityFact(sentences, patterns, fallback = "") {
@@ -5980,11 +6266,18 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
   const terms = [...termsById.values()];
 
   const saved = [];
+  const articleEntities = [];
   for (const term of terms) {
     const type = normalizeEntityType(term.type);
     const slugPart = entitySlug(term.term);
     if (!type || !slugPart) continue;
     const wikiData = term.wikiUrl ? await fetchWikipediaEntityData(term).catch(() => ({})) : {};
+    if (type === "person" && !hasRichWikipediaPersonProfile({ ...term, ...wikiData, type })) {
+      suppressPersonProfileLink(content, term.term);
+      articleEntities.push(unlinkedArticlePerson(term));
+      console.warn(`Entity graph: showing "${term.term}" without a profile link because its Wikipedia source is missing, thin, disambiguated, or not a biography of that person.`);
+      continue;
+    }
     const wikiEmpty = !wikiData.intro && !wikiData.summary;
     const entityImageUrl = wikiData.imageUrl || (
       type === "person" && term.wikiUrl
@@ -6006,11 +6299,15 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       summary: wikiData.summary || "",
       intro: wikiData.intro || wikiData.summary || "",
       description: wikiData.description || "",
+      resolvedPageTitle: wikiData.resolvedPageTitle || "",
       birthDate: wikiData.birthDate || "",
       deathDate: wikiData.deathDate || "",
       relatedTopics: Array.isArray(pillars) ? pillars : [],
       relatedPosts: [slug],
       firstSeenAt: new Date().toISOString(),
+      ...(type === "person"
+        ? { profileLinkEligible: true, profileSubjectVerified: true }
+        : {}),
       ...(wikiEmpty && term.wikiUrl ? { needsWikiRefresh: true } : {}),
       // Mark new entities for AI card generation on next cron refresh when
       // skipping inline AI calls (subrequest budget preservation).
@@ -6028,23 +6325,31 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
     entity.bodySections = skipAiGeneration
       ? fallbackSections
       : await generateEntityBodySections(env, entity, content, fallbackSections);
-    saved.push(await upsertEntityRecord(env, entity));
+    const savedEntity = await upsertEntityRecord(env, entity);
+    saved.push(savedEntity);
+    articleEntities.push(savedEntity);
   }
   await upsertEntityIndex(env, saved);
-  if (saved.length > 0) {
-    const lightweight = saved.map((e) => ({
+  if (articleEntities.length > 0) {
+    const lightweight = articleEntities.map((e) => ({
       type: e.type,
       slug: e.slug,
       name: e.name,
       imageUrl: e.imageUrl || "",
       url: e.url,
+      wikiUrl: e.wikiUrl || "",
+      ...(e.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
+      ...(e.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
+      ...(e.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
+      ...(e.profileSubjectVerified === false ? { profileSubjectVerified: false } : {}),
+      ...(e.skipImageRepair ? { skipImageRepair: true } : {}),
     }));
     await env.BLOG_AI_KV.put(
       `post-entities:${slug}`,
       JSON.stringify(lightweight),
     ).catch(() => {});
   }
-  return saved;
+  return articleEntities;
 }
 
 function buildArticleEntityStrip(entityMeta) {
@@ -6053,15 +6358,14 @@ function buildArticleEntityStrip(entityMeta) {
   if (people.length === 0) return "";
 
   const chips = people.map((e) => {
-    // Circle always shows — real image only when wikiUrl is present (prevents wrong image fetches).
-    // Link to internal entity page only when backed by a Wikipedia URL.
+    // A name can be shown for context, but links require a verified substantive profile.
     const inner =
       `<span class="person-circle">${e.imageUrl
         ? `<img src="/image-proxy?src=${encodeURIComponent(e.imageUrl)}&w=120&h=120&fit=cover&q=80" alt="${esc(e.name)}" loading="lazy">`
         : `<span class="person-circle-fallback" aria-hidden="true">${esc(String(e.name).slice(0, 1).toUpperCase())}</span>`
       }</span>` +
       `<span class="person-pill-name">${esc(e.name)}</span>`;
-    return e.wikiUrl
+    return e.profileLinkEligible === true && e.profileSubjectVerified === true && e.url
       ? `<a href="${esc(e.url)}" class="person-pill">${inner}</a>`
       : `<span class="person-pill">${inner}</span>`;
   }).join("");
@@ -6107,11 +6411,25 @@ function extractArticleEntityStripHtml(html) {
 function articleEntityStripNeedsImageRepair(html) {
   const strip = extractArticleEntityStripHtml(html);
   if (!strip) return false;
-  const personCards = countHtmlMatches(strip, /class="person-pill"/gi);
-  if (personCards === 0) return false;
-  const personImages = countHtmlMatches(strip, /class="person-circle"><img\b/gi);
-  const fallbacks = countHtmlMatches(strip, /person-circle-fallback/gi);
-  return fallbacks > 0 || personImages < personCards;
+  const linkedCards = [...strip.matchAll(/<a\b[^>]*class="person-pill"[\s\S]*?<\/a>/gi)]
+    .map((match) => match[0]);
+  return linkedCards.some((card) =>
+    /person-circle-fallback/i.test(card) || !/class="person-circle"><img\b/i.test(card),
+  );
+}
+
+function articleEntityStripNeedsProfileValidation(html, entityMetaRaw) {
+  const strip = extractArticleEntityStripHtml(html);
+  if (!/<a\b[^>]*class="person-pill"/i.test(strip)) return false;
+  if (!entityMetaRaw) return true;
+  try {
+    return JSON.parse(entityMetaRaw).some((entity) =>
+      entity?.type === "person" &&
+      (entity?.profileLinkEligible !== true || entity?.profileSubjectVerified !== true),
+    );
+  } catch {
+    return true;
+  }
 }
 
 function amazonTracksNeedCoverBackfill(html) {
@@ -6213,13 +6531,14 @@ function softCheckArticleAssets(html, content) {
   } else if (hasPersonTerms) {
     const strip = extractArticleEntityStripHtml(source);
     if (strip) {
-      const personCards = countHtmlMatches(strip, /class="person-pill"/gi);
-      const personImages = countHtmlMatches(strip, /class="person-circle"><img\b/gi);
-      const fallbacks = countHtmlMatches(strip, /person-circle-fallback/gi);
-      if (personCards > 0 && fallbacks > 0) {
-        issues.push(`people entity strip has ${fallbacks} fallback avatar(s) (will repair)`);
-      } else if (personCards > 0 && personImages < personCards) {
-        issues.push(`people entity strip has ${personImages}/${personCards} real image(s) (will repair)`);
+      const linkedCards = [...strip.matchAll(/<a\b[^>]*class="person-pill"[\s\S]*?<\/a>/gi)]
+        .map((match) => match[0]);
+      const fallbackCount = linkedCards.filter((card) => /person-circle-fallback/i.test(card)).length;
+      const imageCount = linkedCards.filter((card) => /class="person-circle"><img\b/i.test(card)).length;
+      if (linkedCards.length > 0 && fallbackCount > 0) {
+        issues.push(`linked people entity strip has ${fallbackCount} fallback avatar(s) (will repair)`);
+      } else if (linkedCards.length > 0 && imageCount < linkedCards.length) {
+        issues.push(`linked people entity strip has ${imageCount}/${linkedCards.length} real image(s) (will repair)`);
       }
     }
   }
@@ -6273,35 +6592,72 @@ async function hydrateArticleEntityImages(env, entityMeta) {
 
   for (const item of entityMeta) {
     const next = { ...item };
-    if (next.type === "person" && next.slug && next.name && !next.imageUrl) {
+    if (next.type === "person" && next.slug && next.name) {
       const key = `${KV_ENTITY_PREFIX}person:${next.slug}`;
       const record = await env.BLOG_AI_KV.get(key, { type: "json" }).catch(() => null);
-      if (record?.imageUrl) {
-        next.imageUrl = record.imageUrl;
+      const anchoredWikiUrl = record?.wikiUrl || next.wikiUrl || "";
+      let profile = (
+        record?.profileLinkEligible === true &&
+        record?.profileSubjectVerified === true &&
+        hasRichWikipediaPersonProfile(record)
+      ) ? record : null;
+
+      // Legacy records did not store eligibility, so revalidate their source once.
+      if (!profile && anchoredWikiUrl) {
+        const freshWiki = await fetchWikipediaEntityData({
+          wikiUrl: anchoredWikiUrl,
+          term: next.name,
+          type: "person",
+        }).catch(() => ({}));
+        const candidate = {
+          ...(record || {}),
+          ...next,
+          ...freshWiki,
+          type: "person",
+          wikiUrl: anchoredWikiUrl,
+        };
+        if (hasRichWikipediaPersonProfile(candidate)) {
+          profile = {
+            ...candidate,
+            profileLinkEligible: true,
+            profileSubjectVerified: true,
+          };
+          env.BLOG_AI_KV.put(key, JSON.stringify(profile)).catch(() => {});
+        }
+      }
+
+      if (!profile) {
+        const displayOnly = unlinkedArticlePerson(next);
+        if (JSON.stringify(next) !== JSON.stringify(displayOnly)) changed = true;
+        hydrated.push(displayOnly);
+        continue;
+      }
+
+      if (
+        next.profileLinkEligible !== true ||
+        next.profileSubjectVerified !== true ||
+        next.wikiUrl !== profile.wikiUrl ||
+        !next.url
+      ) {
+        next.profileLinkEligible = true;
+        next.profileSubjectVerified = true;
+        next.wikiUrl = profile.wikiUrl;
+        next.url = profile.url || `/people/${next.slug}/`;
+        delete next.skipImageRepair;
         delete next.skipStrip;
         changed = true;
-      } else {
-        // Only search Wikipedia when we have an anchored wikiUrl — name-only
-        // searches return wrong images for obscure people.
-        const anchoredWikiUrl = record?.wikiUrl || next.wikiUrl || "";
-        if (anchoredWikiUrl) {
-          const imageUrl = await fetchWikipediaImage(next.name, anchoredWikiUrl, { skipCommonsSearch: true });
-          if (imageUrl) {
-            next.imageUrl = imageUrl;
-            delete next.skipStrip;
-            changed = true;
-            if (record) {
-              record.imageUrl = imageUrl;
-              env.BLOG_AI_KV.put(key, JSON.stringify(record)).catch(() => {});
-            }
-          } else {
-            // Wikipedia URL known but no image — show with initial fallback.
-            if (next.skipStrip) { delete next.skipStrip; changed = true; }
-          }
-        } else {
-          // No wikiUrl — show name as text only (no link, no image).
-          // Do NOT skipStrip: the person is still mentioned for context.
-          if (next.skipStrip) { delete next.skipStrip; changed = true; }
+      }
+      if (profile.imageUrl && next.imageUrl !== profile.imageUrl) {
+        next.imageUrl = profile.imageUrl;
+        changed = true;
+      }
+      if (!next.imageUrl && next.wikiUrl) {
+        const imageUrl = await fetchWikipediaImage(next.name, next.wikiUrl, { skipCommonsSearch: true });
+        if (imageUrl) {
+          next.imageUrl = imageUrl;
+          changed = true;
+          profile.imageUrl = imageUrl;
+          env.BLOG_AI_KV.put(key, JSON.stringify(profile)).catch(() => {});
         }
       }
     }

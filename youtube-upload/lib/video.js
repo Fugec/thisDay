@@ -166,7 +166,7 @@ async function fetchWikipediaImage(title) {
     );
     if (summaryRes.ok) {
       const d = await summaryRes.json();
-      const img = d.thumbnail?.source ?? d.originalimage?.source ?? null;
+      const img = d.originalimage?.source ?? d.thumbnail?.source ?? null;
       if (img) return img;
     }
 
@@ -715,16 +715,17 @@ async function prepareSingleSceneFullBleed(buffer, year = null, qualityHint = nu
   const TARGET_H = Math.round(H * IMAGE_HEADROOM);
   const tuning = getQualityTuning(qualityHint);
 
-  // Slightly enhance the image but keep it natural — no blur, no card crop.
-  let img = sharp(buffer)
-    .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre" })
+  const rawBg = await sharp(buffer)
+    .resize(TARGET_W, TARGET_H, { fit: "cover", position: "centre", kernel: "lanczos3", fastShrinkOnLoad: false })
+    .toBuffer();
+
+  let img = sharp(rawBg)
     .sharpen({ sigma: tuning.cardSharpenSigma })
     .modulate({ brightness: tuning.cardBrightness, saturation: tuning.cardSaturation })
     .linear(tuning.cardLinearA, tuning.cardLinearB);
   img = applyEraGrading(img, year);
   const bgBuf = await img.png().toBuffer();
 
-  // Transparent overlay canvas — the caller composites buildSVG() text on top.
   const cardLayerBuf = await sharp({
     create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
   })

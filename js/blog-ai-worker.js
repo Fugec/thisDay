@@ -905,17 +905,59 @@ function buildCanonicalTitle(eventTitle, historicalDate) {
   return historicalDate ? `${baseTitle} — ${historicalDate}` : baseTitle;
 }
 
+const HEADLINE_ACTION_VERB_PATTERN =
+  "founds?|founded|forms?|formed|creates?|created|establishes?|established|" +
+  "launches?|launched|opens?|opened|holds?|held|honors?|honored|honours?|honoured|" +
+  "signs?|signed|adopts?|adopted|ratifies|ratified|declares?|declared|" +
+  "begins?|began|ends?|ended|falls?|fell|rises?|rose|kills?|killed|dies?|died|" +
+  "assassinates?|assassinated|elects?|elected|discovers?|discovered|invents?|invented|" +
+  "publishes?|published|lands?|landed|strikes?|struck|meets?|met|negotiates?|negotiated|" +
+  "agrees?|agreed|accepts?|accepted|announces?|announced|passes?|passed|approves?|approved|" +
+  "rejects?|rejected|orders?|ordered|visits?|visited|rules?|ruled|crashes?|crashed|" +
+  "explodes?|exploded|sinks?|sank|sunk|shoots?|shot|surrenders?|surrendered|defeats?|defeated|" +
+  "deports?|deported|fires?|fired|collapses?|collapsed|destroys?|destroyed|" +
+  "burns?|burned|vanishes?|vanished|disappears?|disappeared|ignites?|ignited|" +
+  "erupts?|erupted|plunges?|plunged|escapes?|escaped|acquits?|acquitted|" +
+  "convicts?|convicted|executes?|executed|rescues?|rescued|detains?|detained|" +
+  "arrests?|arrested|resigns?|resigned|appoints?|appointed|invades?|invaded|" +
+  "withdraws?|withdrew|survives?|survived|captures?|captured|liberates?|liberated|" +
+  "frees?|freed|imprisons?|imprisoned|flees?|fled|disintegrates?|disintegrated";
+const HEADLINE_ACTION_VERB_RE = new RegExp(`\\b(?:${HEADLINE_ACTION_VERB_PATTERN})\\b`, "i");
+const HEADLINE_ACTION_VERB_ONLY_RE = new RegExp(`^(?:${HEADLINE_ACTION_VERB_PATTERN})$`, "i");
+const HEADLINE_STRUCTURAL_PRESENT_RE =
+  /\b\w{6,}(?:ates|ites|etes|odes|ides|ades|izes|ises|aves|ives|oves|apes|anes|ines|ones|enes)\b/i;
+const HEADLINE_STRUCTURAL_ES_RE =
+  /\b\w{5,}(?:ashes|ishes|ushes|aches|arches|atches|etches|itches|ches|shes)\b/i;
+const HEADLINE_STRUCTURAL_PAST_RE =
+  /\b\w{7,}(?:ated|ited|eted|oded|ided|aded|ized|ised|aved|ived|oved|aped)\b/i;
+
+function hasFiniteHeadlineVerb(value) {
+  const s = String(value || "");
+  return HEADLINE_ACTION_VERB_RE.test(s) ||
+    HEADLINE_STRUCTURAL_PRESENT_RE.test(s) ||
+    HEADLINE_STRUCTURAL_ES_RE.test(s) ||
+    HEADLINE_STRUCTURAL_PAST_RE.test(s);
+}
+
 function getTitleLead(title) {
   return String(title || "")
     .replace(/\s+[-—]\s+.*$/, "")
     .trim();
 }
 
+function repairStackedTitleLead(value) {
+  const lead = String(value || "").replace(/\s+/g, " ").trim();
+  const match = lead.match(/\s+(Kills|Crashes|Dies|Declares Independence|Rules Unconstitutional|Ratified|Signed|Opens|Launches|Founded|Established)$/i);
+  if (!match) return lead;
+  const before = lead.slice(0, -match[0].length).trim();
+  return before && hasFiniteHeadlineVerb(before) ? before : lead;
+}
+
 function buildDisplayTitle(currentTitle, eventTitle, historicalDate) {
-  const currentLead = getTitleLead(currentTitle);
+  const currentLead = repairStackedTitleLead(getTitleLead(currentTitle));
   const lead =
-    (currentLead && !isWeakCtaTitleLead(currentLead) ? currentLead : "") ||
-    getTitleLead(eventTitle) ||
+    (currentLead && hasFiniteHeadlineVerb(currentLead) && !isWeakCtaTitleLead(currentLead) ? currentLead : "") ||
+    repairStackedTitleLead(getTitleLead(eventTitle)) ||
     "Historical Event";
   return historicalDate ? `${lead} — ${historicalDate}` : lead;
 }
@@ -936,9 +978,47 @@ function sourceEventHeadline(eventText, maxLength = 96) {
     .replace(/[.!?]+$/, "")
     .replace(/\s+/g, " ")
     .trim();
-  return firstSentence && firstSentence.length <= maxLength
-    ? firstSentence
-    : "";
+  if (!firstSentence) return "";
+  if (firstSentence.length <= maxLength) return firstSentence;
+
+  // Strategy 1: split on coordinating conjunction (and/but/while/after/before)
+  const firstClause = firstSentence
+    .split(/\s+(?:and|but|while|after|before)\s+/i)[0]
+    .replace(/[,;:]$/, "")
+    .trim();
+  if (
+    firstClause.length >= 35 &&
+    firstClause.length <= maxLength &&
+    hasFiniteHeadlineVerb(firstClause)
+  ) {
+    return firstClause;
+  }
+
+  // Strategy 2: accumulate comma-separated parts until we exceed maxLength,
+  // keeping the longest prefix that has a verb and meets the minimum length.
+  // Handles "Subject verb object, location, additional context..." — the
+  // longest valid prefix is usually the most descriptive headline.
+  const commaParts = firstSentence.split(/,\s+/);
+  let commaBuilder = "";
+  let bestCommaClause = "";
+  for (const part of commaParts) {
+    const candidate = commaBuilder ? `${commaBuilder}, ${part}` : part;
+    if (candidate.length > maxLength) break;
+    if (candidate.length >= 35 && hasFiniteHeadlineVerb(candidate)) {
+      bestCommaClause = candidate;
+    }
+    commaBuilder = candidate;
+  }
+  if (bestCommaClause) return bestCommaClause;
+
+  // Strategy 3: word-boundary truncation — find the last complete word that
+  // fits within maxLength and still contains a headline verb.
+  const truncated = firstSentence.slice(0, maxLength).replace(/\s+\S*$/, "").trim();
+  if (truncated.length >= 35 && hasFiniteHeadlineVerb(truncated)) {
+    return truncated;
+  }
+
+  return "";
 }
 
 function eventTitleFromCandidate(parsedTitle, candidate) {
@@ -5009,6 +5089,28 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
 }
 
 function normalizeContentMetadata(content) {
+  const originalEventTitle = content.eventTitle;
+  const repairedEventTitle = repairStackedTitleLead(content.eventTitle);
+  if (repairedEventTitle && repairedEventTitle !== content.eventTitle) {
+    content.eventTitle = repairedEventTitle;
+    content.jsonLdName = repairedEventTitle;
+    if (Array.isArray(content.quickFacts)) {
+      content.quickFacts = content.quickFacts.map((fact) =>
+        String(fact?.label || "").toLowerCase() === "event" &&
+        (!fact.value || fact.value === originalEventTitle)
+          ? { ...fact, value: repairedEventTitle }
+          : fact,
+      );
+    }
+  }
+  const repairedTitleLead = repairStackedTitleLead(getTitleLead(content.title));
+  if (repairedTitleLead && repairedTitleLead !== getTitleLead(content.title)) {
+    content.title = buildDisplayTitle(
+      repairedTitleLead,
+      repairedEventTitle || content.eventTitle,
+      content.historicalDate,
+    );
+  }
   normalizeEventTitleAction(content);
   restoreSourceEventHeadline(content);
   if (isWeakCtaTitleLead(getTitleLead(content.title))) {
@@ -5088,32 +5190,7 @@ function hasStrongTitleAction(value) {
   // 1. Event nouns that already describe an action without needing a separate verb
   if (/\b(battle|siege|revolt|revolution|war|attack|bombing|raid|massacre|trial|coronation|independence|crash|assassination|execution)\b/i.test(s)) return true;
 
-  // 2. High-frequency headline verbs (fast exact match)
-  if (/\b(founded?|forms?|created?|established?|launches?|launched|opens?|opened|held?|honors?|honoured?|signs?|signed|adopts?|adopted|ratifi(?:es|ed)|declar(?:es|ed)|begins?|began|ends?|fell|ris(?:es)|rose|kills?|killed|d(?:ie|ied|ies)|assassinat(?:es|ed)|elects?|elected|discover(?:s|ed)|invent(?:s|ed)|publish(?:es|ed)|lands?|landed|strikes?|struck|rules?|ruled|crashes?|explod(?:es|ed)|sinks?|sank|surrenders?|defeats?|deports?|fires?|collaps(?:es|ed)|destroys?|destroyed|burns?|burned|vanish(?:es|ed)|disappear(?:s|ed)|ignit(?:es|ed)|erupts?|plunges?|escapes?|acquit(?:ted)?|convict(?:ed)?|execut(?:es|ed)|rescu(?:es|ed)|detains?|arrests?|resign(?:s|ed)|appoints?|invad(?:es|ed)|withdraws?|surviv(?:es|ed)|captur(?:es|ed)|liber(?:ates|ated)|freed?|imprison(?:s|ed)|fl(?:ees|ed)|disintegrat(?:es|ed))\b/i.test(s)) return true;
-
-  // 3. Structural suffix detection — English present-tense 3rd-person singular verbs
-  //    almost always end in one of these patterns when the stem ends in a vowel+consonant+e.
-  //    Word must be ≥7 chars total to avoid false matches on short nouns.
-  //    -ates (disintegrates, accelerates, evacuates, decimates)
-  //    -ites (ignites, unites, excites, incites)
-  //    -odes (explodes, erodes)
-  //    -ides (guides, collides, divides, presides)
-  //    -ades (invades, blockades, serenades)
-  //    -izes/-ises (nationalizes, organizes, privatizes)
-  //    -aves (saves, behaves, engraves)
-  //    -ives (survives, arrives, derives)
-  //    -oves (improves, removes, approves)
-  //    -apes (escapes)
-  //    -ashes/-ishes/-ushes (crashes, vanishes, ambushes)
-  //    -aches/-atches/-etches (detaches, dispatches)
-  //    -ches/-shes (launches, crashes — redundant safety net)
-  if (/\b\w{6,}(?:ates|ites|odes|ides|ades|izes|ises|aves|ives|oves|apes)\b/i.test(s)) return true;
-  if (/\b\w{5,}(?:ashes|ishes|ushes|aches|atches|etches|itches)\b/i.test(s)) return true;
-
-  // 4. Past-tense forms of the same verb families (ended, invaded, collapsed, …)
-  if (/\b\w{7,}(?:ated|ited|oded|ided|aded|ized|ised|aved|ived|oved|aped)\b/i.test(s)) return true;
-
-  return false;
+  return hasFiniteHeadlineVerb(s);
 }
 
 function stripLazyTitleSuffix(value) {
@@ -5151,7 +5228,7 @@ function titleEndsWithVerb(s) {
   // Layer A: known verb forms only (intentionally excludes event nouns like "crash",
   // "independence", "battle" from hasStrongTitleAction layer 1 — those are nouns,
   // not evidence that the title has a verb).
-  if (/^(founded?|forms?|created?|established?|launches?|launched|opens?|opened|held?|honors?|honoured?|signs?|signed|adopts?|adopted|ratifi(?:es|ed)|declar(?:es|ed)|begins?|began|ends?|fell|ris(?:es)|rose|kills?|killed|d(?:ie|ied|ies)|assassinat(?:es|ed)|elects?|elected|discover(?:s|ed)|invent(?:s|ed)|publish(?:es|ed)|lands?|landed|strikes?|struck|rules?|ruled|crashes?|explod(?:es|ed)|sinks?|sank|surrenders?|defeats?|deports?|fires?|collaps(?:es|ed)|destroys?|destroyed|burns?|burned|vanish(?:es|ed)|disappear(?:s|ed)|ignit(?:es|ed)|erupts?|plunges?|escapes?|acquit(?:ted)?|convict(?:ed)?|execut(?:es|ed)|rescu(?:es|ed)|detains?|arrests?|resign(?:s|ed)|appoints?|invad(?:es|ed)|withdraws?|surviv(?:es|ed)|captur(?:es|ed)|liber(?:ates|ated)|freed?|imprison(?:s|ed)|fl(?:ees|ed)|disintegrat(?:es|ed))$/i.test(lastWord)) return true;
+  if (HEADLINE_ACTION_VERB_ONLY_RE.test(lastWord)) return true;
   // Layer B: structural suffix catch-all — virtually all regular English present-tense
   // verbs ending in a vowel+consonant+e pattern (≥5 chars to avoid short nouns).
   return lastWord.length >= 5 &&
@@ -5167,7 +5244,7 @@ function deriveCtaEventTitle(currentEvent, evidence) {
   // list-free check that prevents "X Disintegrates Crashes"-style stacking.
   if (titleEndsWithVerb(base)) return currentEvent;
 
-  const baseHasStrongAction = hasStrongTitleAction(base);
+  const baseHasFiniteVerb = hasFiniteHeadlineVerb(base);
 
   if (/helicopter crash in iran|president ebrahim raisi|varzaqan helicopter/i.test(text)) {
     return "Iran Helicopter Crash Kills President Raisi";
@@ -5194,16 +5271,16 @@ function deriveCtaEventTitle(currentEvent, evidence) {
     return "Prince Harry and Meghan Markle Marry at Windsor";
   }
 
-  if (!baseHasStrongAction && /\bcrashes?\b/i.test(text) && !/\bcrashes?\b/i.test(base)) return `${base} Crashes`;
-  if (!baseHasStrongAction && /\bkills?\b|\bdead\b|\bdies\b/i.test(text) && !/\bkills?|dies|death\b/i.test(base)) return `${base} Kills`;
-  if (!baseHasStrongAction && /\bdeclares? independence\b/i.test(text) && !/\bdeclares?\b/i.test(base)) return `${base} Declares Independence`;
-  if (!baseHasStrongAction && /\brules?\b.*\bunconstitutional\b/i.test(text) && !/\brules?\b/i.test(base)) return `${base} Rules Unconstitutional`;
-  if (!baseHasStrongAction && /\bratifies?\b/i.test(text) && !/\bratifies?\b/i.test(base)) return `${base} Ratified`;
-  if (!baseHasStrongAction && /\bsigns?\b|\bsigned\b/i.test(text) && !/\bsigns?|signed\b/i.test(base)) return `${base} Signed`;
-  if (!baseHasStrongAction && /\bopens?\b|\bopened\b|\binaugurated\b/i.test(text) && !/\bopens?|opened|inaugurated\b/i.test(base)) return `${base} Opens`;
-  if (!baseHasStrongAction && /\blaunched|launches\b/i.test(text) && !/\blaunch/i.test(base)) return `${base} Launches`;
-  if (!baseHasStrongAction && /\bfounded|founds|is founded|was founded\b/i.test(text) && !/\bfounded\b/i.test(base)) return `${base} Founded`;
-  if (!baseHasStrongAction && /\bestablished|establishes\b/i.test(text) && !/\bestablished\b/i.test(base)) return `${base} Established`;
+  if (!baseHasFiniteVerb && /\bcrashes?\b/i.test(text) && !/\bcrashes?\b/i.test(base)) return `${base} Crashes`;
+  if (!baseHasFiniteVerb && /\bkills?\b|\bdead\b|\bdies\b/i.test(text) && !/\bkills?|dies|death\b/i.test(base)) return `${base} Kills`;
+  if (!baseHasFiniteVerb && /\bdeclares? independence\b/i.test(text) && !/\bdeclares?\b/i.test(base)) return `${base} Declares Independence`;
+  if (!baseHasFiniteVerb && /\brules?\b.*\bunconstitutional\b/i.test(text) && !/\brules?\b/i.test(base)) return `${base} Rules Unconstitutional`;
+  if (!baseHasFiniteVerb && /\bratifies?\b/i.test(text) && !/\bratifies?\b/i.test(base)) return `${base} Ratified`;
+  if (!baseHasFiniteVerb && /\bsigns?\b|\bsigned\b/i.test(text) && !/\bsigns?|signed\b/i.test(base)) return `${base} Signed`;
+  if (!baseHasFiniteVerb && /\bopens?\b|\bopened\b|\binaugurated\b/i.test(text) && !/\bopens?|opened|inaugurated\b/i.test(base)) return `${base} Opens`;
+  if (!baseHasFiniteVerb && /\blaunched|launches\b/i.test(text) && !/\blaunch/i.test(base)) return `${base} Launches`;
+  if (!baseHasFiniteVerb && /\bfounded|founds|is founded|was founded\b/i.test(text) && !/\bfounded\b/i.test(base)) return `${base} Founded`;
+  if (!baseHasFiniteVerb && /\bestablished|establishes\b/i.test(text) && !/\bestablished\b/i.test(base)) return `${base} Established`;
 
   return currentEvent;
 }
@@ -5219,7 +5296,8 @@ function normalizeEventTitleAction(content) {
   const lazySuffix = /\b(Founding|Creation|Launch|Opening|Completion|Presentation)\b$/i;
   const genericNounTitle = /\b(Independence|Ruling|Decision|Ceremony)\b$/i;
   const needsRepair =
-    !hasStrongTitleAction(currentEvent) ||
+    !hasFiniteHeadlineVerb(currentEvent) ||
+    (titleLead && !hasFiniteHeadlineVerb(titleLead)) ||
     lazySuffix.test(currentEvent) ||
     lazySuffix.test(titleLead) ||
     genericNounTitle.test(currentEvent) ||
@@ -6271,8 +6349,21 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
     const type = normalizeEntityType(term.type);
     const slugPart = entitySlug(term.term);
     if (!type || !slugPart) continue;
-    const wikiData = term.wikiUrl ? await fetchWikipediaEntityData(term).catch(() => ({})) : {};
-    if (type === "person" && !hasRichWikipediaPersonProfile({ ...term, ...wikiData, type })) {
+    // For persons: always attempt a Wikipedia fetch even when the AI omitted the URL —
+    // fetchWikipediaEntityData already falls back to term.term for the name lookup.
+    // For non-person entities without a URL, skip the fetch to avoid unnecessary calls.
+    const wikiData = (term.wikiUrl || type === "person")
+      ? await fetchWikipediaEntityData(term).catch(() => ({}))
+      : {};
+    // When the AI omitted the wikiUrl for a person but the name-based lookup returned a
+    // non-disambiguation standard biography, derive the canonical URL from the resolved
+    // page title so the profile check and all downstream steps (image, person page) work.
+    const resolvedWikiUrl =
+      type === "person" && !term.wikiUrl && wikiData.resolvedPageTitle && !wikiData.isDisambiguation
+        ? `https://en.wikipedia.org/wiki/${encodeURIComponent(wikiData.resolvedPageTitle.replace(/ /g, "_"))}`
+        : term.wikiUrl;
+    const resolvedTerm = resolvedWikiUrl !== term.wikiUrl ? { ...term, wikiUrl: resolvedWikiUrl } : term;
+    if (type === "person" && !hasRichWikipediaPersonProfile({ ...resolvedTerm, ...wikiData, type })) {
       suppressPersonProfileLink(content, term.term);
       articleEntities.push(unlinkedArticlePerson(term));
       console.warn(`Entity graph: showing "${term.term}" without a profile link because its Wikipedia source is missing, thin, disambiguated, or not a biography of that person.`);
@@ -6280,17 +6371,17 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
     }
     const wikiEmpty = !wikiData.intro && !wikiData.summary;
     const entityImageUrl = wikiData.imageUrl || (
-      type === "person" && term.wikiUrl
-        ? await fetchWikipediaImage(term.term, term.wikiUrl, { skipCommonsSearch: true }).catch(() => "")
+      type === "person" && resolvedTerm.wikiUrl
+        ? await fetchWikipediaImage(resolvedTerm.term, resolvedTerm.wikiUrl, { skipCommonsSearch: true }).catch(() => "")
         : ""
     );
     const url = type === "person" ? `/people/${slugPart}/` : `/history/${slugPart}/`;
     const entity = {
       type,
       slug: slugPart,
-      name: term.term,
+      name: resolvedTerm.term,
       url,
-      wikiUrl: term.wikiUrl || "",
+      wikiUrl: resolvedTerm.wikiUrl || "",
       sourcePostSlug: slug,
       sourcePostTitle: content.title || "",
       sourcePostUrl: `/blog/${slug}/`,
@@ -6308,7 +6399,7 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       ...(type === "person"
         ? { profileLinkEligible: true, profileSubjectVerified: true }
         : {}),
-      ...(wikiEmpty && term.wikiUrl ? { needsWikiRefresh: true } : {}),
+      ...(wikiEmpty && resolvedTerm.wikiUrl ? { needsWikiRefresh: true } : {}),
       // Mark new entities for AI card generation on next cron refresh when
       // skipping inline AI calls (subrequest budget preservation).
       ...(skipAiGeneration ? { needsWikiRefresh: true } : {}),
@@ -7073,7 +7164,7 @@ DO NOT open consecutive paragraphs with the same word or conjunction. Each parag
 Title rules:
 - The "title" field is the public card headline and MUST follow exactly this format: "[CTA headline with a strong verb] — ${monthName} ${day}, Year"
 - HARD RULE — TITLE MUST CONTAIN A FINITE VERB: Both "title" and "eventTitle" MUST include at least one finite verb that describes the action — not a gerund, not a noun, a conjugated verb. "China Airlines Flight 611 Disintegrates" is correct (finite verb: disintegrates). "China Airlines Flight 611 Crash" is wrong (noun only). "China Airlines Flight 611 Crashing" is wrong (gerund). There must be a clear subject + verb structure.
-- The first part must make someone want to click while staying factual. Use active, specific verbs such as "Kills", "Strikes Down", "Declares", "Crashes", "Falls", "Opens", "Lands", "Ratifies", "Publishes", "Honors", "Begins", "Ends", "Surrenders", "Departs", "Disintegrates", "Collapses", "Explodes", "Sinks", "Erupts", "Ignites", "Vanishes", "Escapes", or "Launches".
+- The first part must make someone want to click while staying factual. The headline MUST be a complete grammatical clause: a real subject PLUS a finite verb. For transitive actions, include the object too. CORRECT: "Gunman Kills Ten at VTA Rail Yard in San Jose", "Royal Navy Sinks German Battleship Bismarck", "Parliament Ratifies Treaty of Versailles", "China Airlines Flight 611 Disintegrates Over Taiwan Strait". WRONG: "VTA Rail Yard Shooting Kills" (no subject for "Kills" — who kills?), "Bismarck Sinking Sinks" (redundant verb appended to noun phrase), "Flight 611 Crash" (noun only). Never take a Wikipedia event page title (which is a noun phrase) and just append a bare verb — always build a proper subject-verb clause from the event description.
 - Avoid lazy suffix titles. Do NOT append "Founding", "Creation", "Launch", "Opening", "Completion", or "Presentation" just to make a noun sound like an event. Use them only if the source event is literally a founding/opening/launch and no more specific verb is available. Prefer "Rosenborg BK Founded" over "Rosenborg BK Founding"; prefer "First Oscars Honor Wings" over "The First Oscars Founding"; prefer "Brown v. Board Strikes Down School Segregation" over "Brown v. Board of Education Founding"; prefer "Israel Declares Independence" over "Israeli Independence".
 - The "eventTitle" field should be a descriptive canonical event name with a clear action — include what happened AND a key detail (who, where, or result). It MUST contain a verb. Good: "Iran Helicopter Crash Kills President Raisi" or "China Airlines Flight 611 Disintegrates Over Taiwan Strait". Bad: "Ebrahim Raisi" or "Flight 611 Disintegrates" (too short, missing context) or "Flight 611 Crash" (noun only).
 - Do NOT use colloquial date names or phrases like "Ides of March", "D-Day", or "Black Tuesday" as the title — use the actual event name instead.
@@ -11123,6 +11214,36 @@ function normalizeImageAltHtml(html) {
   );
 }
 
+function normalizeStackedTitleHtml(html) {
+  const source = String(html || "");
+  const titleMatch =
+    source.match(/<h1[^>]*>([^<]+)<\/h1>/i) ||
+    source.match(/<title>([^<]+?)\s+\|\s+thisDay\.<\/title>/i) ||
+    source.match(/<meta property="og:title" content="([^"]+)"/i);
+  const currentTitle = unesc(titleMatch?.[1] || "");
+  const currentLead = getTitleLead(currentTitle);
+  const repairedLead = repairStackedTitleLead(currentLead);
+  if (!currentLead || repairedLead === currentLead) return source;
+
+  const dateSuffix = currentTitle.includes(" — ")
+    ? currentTitle.split(" — ").slice(1).join(" — ")
+    : "";
+  const repairedTitle = dateSuffix
+    ? buildCanonicalTitle(repairedLead, dateSuffix)
+    : repairedLead;
+
+  let updated = source;
+  for (const [before, after] of [
+    [currentTitle, repairedTitle],
+    [currentLead, repairedLead],
+  ]) {
+    if (!before || !after || before === after) continue;
+    updated = updated.split(esc(before)).join(esc(after));
+    updated = updated.split(before).join(after);
+  }
+  return updated;
+}
+
 function stripDynSliderFiguresHtml(html) {
   // Replace figures only within dyn-slide article elements, not outside them.
   // The old approach used a greedy cross-element regex that accidentally removed
@@ -11297,13 +11418,15 @@ function normalizeAiAnswerCardHtml(body) {
 }
 
 function prepareHtmlResponse(body) {
-  return normalizeImageAltHtml(
-    normalizeCrawlableLinksHtml(
-      normalizeSearchPreviewHtml(
-        normalizeHeadingAuditHtml(
-          normalizeAiAnswerCardHtml(
-            normalizeArticleLayoutHtml(
-              stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+  return normalizeStackedTitleHtml(
+    normalizeImageAltHtml(
+      normalizeCrawlableLinksHtml(
+        normalizeSearchPreviewHtml(
+          normalizeHeadingAuditHtml(
+            normalizeAiAnswerCardHtml(
+              normalizeArticleLayoutHtml(
+                stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+              ),
             ),
           ),
         ),

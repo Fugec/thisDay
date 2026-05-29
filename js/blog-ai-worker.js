@@ -1012,8 +1012,14 @@ function sourceEventHeadline(eventText, maxLength = 96) {
   if (bestCommaClause) return bestCommaClause;
 
   // Strategy 3: word-boundary truncation — find the last complete word that
-  // fits within maxLength and still contains a headline verb.
-  const truncated = firstSentence.slice(0, maxLength).replace(/\s+\S*$/, "").trim();
+  // fits within maxLength and still contains a headline verb. Strip any
+  // trailing preposition/article/conjunction that leaves a dangling phrase
+  // (e.g. "…assassinated in Belgrade by" → "…assassinated in Belgrade").
+  const TRAILING_FUNCTION_WORD_RE = /\s+(?:by|of|in|to|for|from|with|on|at|about|as|into|over|after|before|against|between|during|under|within|without|upon|onto|the|a|an|and|but|or|nor)$/i;
+  let truncated = firstSentence.slice(0, maxLength).replace(/\s+\S*$/, "").trim();
+  while (TRAILING_FUNCTION_WORD_RE.test(truncated)) {
+    truncated = truncated.replace(TRAILING_FUNCTION_WORD_RE, "").trim();
+  }
   if (truncated.length >= 35 && hasFiniteHeadlineVerb(truncated)) {
     return truncated;
   }
@@ -4892,7 +4898,9 @@ async function generateAndStore(
 
   // Persist canonical date fields in lightweight drafts even when the AI
   // supplied the date only in its title; later SEO edits may rewrite titles.
-  alignContentDateFields(content);
+  // Pass the publication date as canonical month/day so dual-calendar events
+  // (e.g. Julian May 29 = Gregorian June 11) are always pinned to the feed date.
+  alignContentDateFields(content, { historicalDateISO: now.toISOString().slice(0, 10) });
   normalizeContentMetadata(content);
 
   const slug = buildSlug(now);
@@ -5331,7 +5339,7 @@ async function savePublishedPost(
   const safeEventImages = Array.isArray(eventImages) ? eventImages : [];
   let safeEntityMeta = Array.isArray(entityMeta) ? entityMeta : [];
 
-  alignContentDateFields(content);
+  alignContentDateFields(content, { historicalDateISO: date.toISOString().slice(0, 10) });
   const dateValidation = validateContentDateForPublish(content, date);
   if (!dateValidation.ok) {
     throw new Error(`Refusing to publish ${slug}: ${dateValidation.reason}`);
@@ -5434,9 +5442,10 @@ async function enrichPublishedPost(env, slug) {
   if (!content || !publishedAt) throw new Error(`Draft payload invalid for ${slug}`);
 
   // Recover older drafts that used a dated title as their only date source
-  // before any enrichment rewrite can remove that title suffix.
-  alignContentDateFields(content);
+  // before any enrichment rewrite can remove that title suffix. Pass the
+  // publication date as canonical month/day to pin dual-calendar events.
   const date = new Date(publishedAt);
+  alignContentDateFields(content, { historicalDateISO: date.toISOString().slice(0, 10) });
   const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
   const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
 
@@ -5500,7 +5509,7 @@ async function enrichPublishedPost(env, slug) {
     enriched = await improveArticleQuality(env, enriched, editorialQualityIssues);
   }
   enriched = enforceEditorialNoteQuality(enriched);
-  alignContentDateFields(enriched);
+  alignContentDateFields(enriched, { historicalDateISO: date.toISOString().slice(0, 10) });
   const dateValidation = validateContentDateForPublish(enriched, date);
   if (!dateValidation.ok) {
     throw new Error(`Refusing to enrich ${slug}: ${dateValidation.reason}`);

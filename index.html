@@ -7,22 +7,24 @@
 
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>thisDay. | What Happened on This Day? | Historical Events</title>
+    <title>
+      This Day in History | Historical Events & Milestones | thisDay.
+    </title>
     <link rel="canonical" href="https://thisday.info/" />
     <meta name="robots" content="index, follow" />
     <meta name="color-scheme" content="light dark" />
     <meta
       name="keywords"
-      content="thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history"
+      content="this day in history, on this day in history, today in history, what happened on this day, historical events, historical events calendar, history by date, daily history facts, on this day facts, famous birthdays today, historical anniversaries, notable deaths in history, events in history, historical milestones, famous events in history, what happened today, world history, on this day trivia"
     />
     <meta
       name="description"
-      content="Explore historical events, milestones, and notable figures from past and present. Discover what happened today in history."
+      content="Explore this day in history — discover wars declared, inventions patented, and notable births on any calendar date, spanning thousands of years of recorded history."
     />
-    <meta property="og:title" content="thisDay. | Historical Events" />
+    <meta property="og:title" content="This Day in History | thisDay." />
     <meta
       property="og:description"
-      content="Uncover the most fascinating historical events and milestones from any date."
+      content="Discover this day in history — from ancient battles to modern milestones. Explore historical events and notable figures on any calendar date."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://thisday.info/" />
@@ -32,11 +34,11 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta
       name="twitter:title"
-      content="What Happened on This Day? | Historical Events"
+      content="This Day in History | Historical Events | thisDay."
     />
     <meta
       name="twitter:description"
-      content="Discover what happened today in history."
+      content="Explore this day in history — wars, inventions, births, and deaths on any calendar date."
     />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
     <meta name="twitter:creator" content="@thisday_info" />
@@ -49,7 +51,7 @@
           "@type": "WebSite",
           "name": "thisDay.",
           "url": "https://thisday.info/",
-          "description": "Explore historical events, milestones, and notable figures from past and present.",
+          "description": "Explore this day in history — discover what happened on any calendar date, from famous birthdays and historical anniversaries to wars, inventions, and world-changing events.",
           "potentialAction": {
             "@type": "SearchAction",
             "target": "https://thisday.info/?date={date}",
@@ -154,8 +156,8 @@
 
     <!-- Hero -->
     <section class="hero">
-      <p class="eyebrow">On This Day</p>
-      <h1 id="dynamicTitle">What Happened in History?</h1>
+      <p class="eyebrow">On This Day in History</p>
+      <h1 id="dynamicTitle">Today in History</h1>
       <script>
         (function () {
           var now = new Date(),
@@ -164,17 +166,18 @@
             el = document.getElementById("dynamicTitle");
           if (el)
             el.innerHTML =
-              'What happened on<span class="mobile-date-break"></span> <span class="hero-title-tail"><span class="hero-title-date">' +
+              '<span class="hero-title-tail"><span class="hero-title-date">' +
               m +
-              ", " +
+              " " +
               d +
-              "</span> in History?</span>";
+              "</span></span>" +
+              " in History";
         })();
       </script>
       <p>
-        Every date hides a story. Here you can explore the wars declared,
-        inventions patented, leaders born, and empires fallen on this exact
-        calendar day, across thousands of years of recorded human history.
+        Explore historical events, famous birthdays, and milestones from any
+        date in history. From ancient wars and groundbreaking discoveries to
+        world-changing moments, every day holds a story worth knowing.
       </p>
       <div class="hero-meta">
         <span><i class="bi bi-calendar3"></i> Any date, any year</span>
@@ -182,7 +185,7 @@
         <span><i class="bi bi-person-heart"></i> Births &amp; deaths</span>
       </div>
       <a href="https://thisday.info/events/today/" class="btn" id="todayBtn">
-        What happened today <i class="bi bi-arrow-right"></i>
+        What happened on this day <i class="bi bi-arrow-right"></i>
       </a>
     </section>
 
@@ -219,20 +222,20 @@
     </section>
 
     <!-- Blog Posts Section -->
-    <h2 class="homepage-section-title">Latest History Articles</h2>
+    <h2 class="homepage-section-title">This Day in History — Latest Articles</h2>
     <section class="blog-section">
       <div class="blog-grid" id="blogGrid">
         <!-- Populated by JavaScript -->
       </div>
       <div class="blog-cta-col">
         <p>Our blog</p>
-        <h3>Want to read more? Check out our blog</h3>
+        <h3>Explore more this day in history articles on our blog</h3>
         <a href="/blog/" class="btn">Visit the Blog</a>
       </div>
     </section>
 
     <!-- Event Section (replaces Quiz) -->
-    <h2 class="homepage-section-title">Start Exploring Today</h2>
+    <h2 class="homepage-section-title">What Happened on This Day?</h2>
     <section class="event-section">
       <div class="event-wrap">
         <div class="quiz-card" id="todayEventCard">
@@ -245,9 +248,9 @@
           />
           <div class="quiz-card-body">
             <h3 id="todayEventTitle">Today's Events</h3>
-            <p id="todayEventDesc">All historical events from today.</p>
+            <p id="todayEventDesc">Historical events that happened on this day.</p>
             <a id="todayEventBtn" href="/events/today/" class="btn"
-              >See All Events <i class="bi bi-arrow-right"></i
+              >See All Historical Events <i class="bi bi-arrow-right"></i
             ></a>
           </div>
         </div>
@@ -319,7 +322,7 @@
     </script>
 
     <!-- Featured Videos Section -->
-    <h2 class="homepage-section-title">History Videos</h2>
+    <h2 class="homepage-section-title">This Day in History Videos</h2>
     <section class="blog-section video-section">
       <div class="blog-grid video-grid" id="videoGrid">
         <!-- Populated by JavaScript -->

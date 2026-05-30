@@ -1855,6 +1855,15 @@ export default {
           const date = new Date(entry.publishedAt || Date.now());
           const content = { ...entry, historicalDate: inferHistoricalDateFromEntry(entry) };
           const entities = await upsertEntitiesForContent(env, content, entry.slug, date, entry.pillars || []);
+          // Immediately patch the stored article HTML with the rebuilt people strip so
+          // portraits and profile links appear without waiting for serve-time repair.
+          const postHtml = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${entry.slug}`).catch(() => null);
+          if (postHtml && entities.length > 0) {
+            const updatedHtml = injectArticleEntityStrip(postHtml, entities);
+            if (updatedHtml !== postHtml) {
+              await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${entry.slug}`, updatedHtml).catch(() => {});
+            }
+          }
           results.push({ slug: entry.slug, status: "ok", entities: entities.length });
         } catch (err) {
           results.push({ slug: entry.slug, status: "error", error: err.message });

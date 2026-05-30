@@ -939,6 +939,15 @@ function hasFiniteHeadlineVerb(value) {
     HEADLINE_STRUCTURAL_PAST_RE.test(s);
 }
 
+// Like hasFiniteHeadlineVerb but strips participial modifier clauses first.
+// A participial adjective (", killed in action", ", born in London") modifies
+// the preceding noun and is not the sentence's finite predicate. Accepting it
+// produces headless noun phrases like "servicemen, killed in action" as titles.
+function hasMainClauseVerb(s) {
+  const stripped = String(s || "").replace(/,\s+\w+(?:ed|en)\b.*/i, "").trim();
+  return hasFiniteHeadlineVerb(stripped);
+}
+
 function getTitleLead(title) {
   return String(title || "")
     .replace(/\s+[-—]\s+.*$/, "")
@@ -989,7 +998,7 @@ function sourceEventHeadline(eventText, maxLength = 96) {
   if (
     firstClause.length >= 35 &&
     firstClause.length <= maxLength &&
-    hasFiniteHeadlineVerb(firstClause)
+    hasMainClauseVerb(firstClause)
   ) {
     return firstClause;
   }
@@ -1004,7 +1013,7 @@ function sourceEventHeadline(eventText, maxLength = 96) {
   for (const part of commaParts) {
     const candidate = commaBuilder ? `${commaBuilder}, ${part}` : part;
     if (candidate.length > maxLength) break;
-    if (candidate.length >= 35 && hasFiniteHeadlineVerb(candidate)) {
+    if (candidate.length >= 35 && hasMainClauseVerb(candidate)) {
       bestCommaClause = candidate;
     }
     commaBuilder = candidate;
@@ -1020,7 +1029,7 @@ function sourceEventHeadline(eventText, maxLength = 96) {
   while (TRAILING_FUNCTION_WORD_RE.test(truncated)) {
     truncated = truncated.replace(TRAILING_FUNCTION_WORD_RE, "").trim();
   }
-  if (truncated.length >= 35 && hasFiniteHeadlineVerb(truncated)) {
+  if (truncated.length >= 35 && hasMainClauseVerb(truncated)) {
     return truncated;
   }
 
@@ -7173,7 +7182,9 @@ DO NOT open consecutive paragraphs with the same word or conjunction. Each parag
 Title rules:
 - The "title" field is the public card headline and MUST follow exactly this format: "[CTA headline with a strong verb] — ${monthName} ${day}, Year"
 - HARD RULE — TITLE MUST CONTAIN A FINITE VERB: Both "title" and "eventTitle" MUST include at least one finite verb that describes the action — not a gerund, not a noun, a conjugated verb. "China Airlines Flight 611 Disintegrates" is correct (finite verb: disintegrates). "China Airlines Flight 611 Crash" is wrong (noun only). "China Airlines Flight 611 Crashing" is wrong (gerund). There must be a clear subject + verb structure.
-- The first part must make someone want to click while staying factual. The headline MUST be a complete grammatical clause: a real subject PLUS a finite verb. For transitive actions, include the object too. CORRECT: "Gunman Kills Ten at VTA Rail Yard in San Jose", "Royal Navy Sinks German Battleship Bismarck", "Parliament Ratifies Treaty of Versailles", "China Airlines Flight 611 Disintegrates Over Taiwan Strait". WRONG: "VTA Rail Yard Shooting Kills" (no subject for "Kills" — who kills?), "Bismarck Sinking Sinks" (redundant verb appended to noun phrase), "Flight 611 Crash" (noun only). Never take a Wikipedia event page title (which is a noun phrase) and just append a bare verb — always build a proper subject-verb clause from the event description.
+- The first part must make someone want to click while staying factual. The headline MUST be a complete grammatical clause: a real subject PLUS a finite verb. For transitive actions, include the object too. CORRECT: "President Eisenhower Honors Two Unknown Soldiers at Arlington on Memorial Day 1958", "Royal Navy Sinks German Battleship Bismarck", "Parliament Ratifies Treaty of Versailles", "China Airlines Flight 611 Disintegrates Over Taiwan Strait". WRONG: "VTA Rail Yard Shooting Kills" (no subject for "Kills" — who kills?), "Bismarck Sinking Sinks" (redundant verb appended to noun phrase), "Flight 611 Crash" (noun only). Never take a Wikipedia event page title (which is a noun phrase) and just append a bare verb — always build a proper subject-verb clause from the event description.
+- Use the most specific named subject available: prefer a person's title and name ("President Eisenhower", "General MacArthur", "Prime Minister Churchill") or a specific named entity ("Royal Navy", "U.S. Congress", "Apollo 11 Crew") over generic terms ("A leader", "Officials", "The government", "Gunman"). If no named actor is known, name the event's primary subject instead ("Two Unidentified Servicemen", "Ten Workers").
+- Embed the historical year inside the headline when the event is tied to a recurring occasion (Memorial Day, the Olympics, an annual treaty deadline, etc.) so the reader knows which one: "President Eisenhower Honors Two Unknown Soldiers at Arlington on Memorial Day 1958" not "…on Memorial Day". Omit the year when the headline is already unambiguous without it.
 - Avoid lazy suffix titles. Do NOT append "Founding", "Creation", "Launch", "Opening", "Completion", or "Presentation" just to make a noun sound like an event. Use them only if the source event is literally a founding/opening/launch and no more specific verb is available. Prefer "Rosenborg BK Founded" over "Rosenborg BK Founding"; prefer "First Oscars Honor Wings" over "The First Oscars Founding"; prefer "Brown v. Board Strikes Down School Segregation" over "Brown v. Board of Education Founding"; prefer "Israel Declares Independence" over "Israeli Independence".
 - The "eventTitle" field should be a descriptive canonical event name with a clear action — include what happened AND a key detail (who, where, or result). It MUST contain a verb. Good: "Iran Helicopter Crash Kills President Raisi" or "China Airlines Flight 611 Disintegrates Over Taiwan Strait". Bad: "Ebrahim Raisi" or "Flight 611 Disintegrates" (too short, missing context) or "Flight 611 Crash" (noun only).
 - Do NOT use colloquial date names or phrases like "Ides of March", "D-Day", or "Black Tuesday" as the title — use the actual event name instead.

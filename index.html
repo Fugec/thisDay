@@ -265,7 +265,7 @@
           />
           <div class="quiz-card-body">
             <h3 id="latest-article-title">Loading...</h3>
-            <p>Read it. Quiz yourself at the end.</p>
+            <p id="latest-article-desc">Read it. Quiz yourself at the end.</p>
             <a id="blog-quiz-btn" href="/blog/" class="btn"
               >Read &amp; Quiz <i class="bi bi-arrow-right"></i
             ></a>
@@ -292,6 +292,7 @@
         var btn = document.getElementById("blog-quiz-btn");
         var imgEl = document.getElementById("latest-article-img");
         var titleEl = document.getElementById("latest-article-title");
+        var descEl = document.getElementById("latest-article-desc");
 
         fetch("/blog/index.json")
           .then(function (r) {
@@ -309,11 +310,10 @@
                 imgEl.alt = latest.title || "Latest Article";
               }
               if (titleEl && latest.title) {
-                var shortTitle =
-                  latest.title.length > 40
-                    ? latest.title.substring(0, 40) + "..."
-                    : latest.title;
-                titleEl.textContent = shortTitle;
+                titleEl.textContent = latest.title;
+              }
+              if (descEl && latest.description) {
+                descEl.textContent = latest.description;
               }
             }
           })

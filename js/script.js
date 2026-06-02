@@ -1153,10 +1153,7 @@ async function populateTodayEventCard() {
   titleEl.textContent = randomEvent.title || "Today's Event";
   if (descEl)
     descEl.textContent =
-      (randomEvent.description || "Explore this historical event.").slice(
-        0,
-        100,
-      ) + "...";
+      randomEvent.description || "Explore this historical event.";
   btnEl.href = "/events/today/";
   btnEl.innerHTML = 'See all events <i class="bi bi-arrow-right"></i>';
 

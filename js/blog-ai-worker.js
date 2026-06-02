@@ -180,6 +180,16 @@ const KV_PERSON_IMAGE_PREFIX = "person-image:";
 const KV_PERSON_IMAGE_TTL = 60 * 60 * 24 * 30; // 30 days
 const PERSON_ENTITY_MIN_SOURCE_WORDS = 45;
 const PERSON_ENTITY_MIN_SOURCE_SENTENCES = 2;
+// Leading honorific/title tokens dropped before matching a person's name against the
+// resolved Wikipedia page title. Regnal/titled names ("Queen Elizabeth II") resolve to
+// a page that omits the honorific ("Elizabeth II"), so the raw name would never match.
+const PERSON_NAME_HONORIFIC_TOKENS = new Set([
+  "sir", "dame", "lord", "lady", "dr", "doctor", "prof", "professor", "rev", "reverend",
+  "st", "saint", "queen", "king", "prince", "princess", "emperor", "empress", "tsar",
+  "czar", "kaiser", "sultan", "pope", "president", "chancellor", "premier", "captain",
+  "colonel", "general", "admiral", "major", "sergeant", "mahatma", "sheikh", "imam",
+  "rabbi", "baron", "baroness", "count", "countess", "duke", "duchess", "earl", "viscount",
+]);
 const EVENT_FAMILY_REPEAT_WINDOW_DAYS = 7;
 const EVENT_FAMILY_RULES = [
   {
@@ -225,6 +235,9 @@ const EVENT_FAMILY_RULES = [
   },
 ];
 const EVERY_OTHER_DAYS = 1; // Generate every N days
+// Cron string (must match a trigger in wrangler-blog.jsonc) for the dedicated
+// entity-recovery pass that re-links people strips with a fresh subrequest budget.
+const ENTITY_RECOVERY_CRON = "50 0 * * *";
 const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
@@ -1101,9 +1114,19 @@ function alignContentDateFields(content, canonical = {}) {
     extractMonthDayCandidate(safeContent?.historicalDate) ||
     extractMonthDayCandidate(safeContent?.title);
 
+  // The canonical argument carries the publication/feed date solely to pin the
+  // month/day (dual-calendar events, AI date drift). Its YEAR is the current
+  // publication year, which is NEVER a valid historical year for an "On This
+  // Day" article — the event always happened in an earlier year. We therefore
+  // derive the historical year only from the content (or an explicit
+  // canonical.historicalYear override that callers may set). We deliberately do
+  // NOT fall back to deriveHistoricalYear(canonical): doing so would stamp the
+  // publication year (2026, 2027, …) onto the article every year. If the
+  // content has no derivable year, the date fields are left untouched and the
+  // downstream date validation rejects the post rather than publishing a
+  // future-dated "historical" event.
   const year =
     Number.parseInt(canonical?.historicalYear, 10) ||
-    deriveHistoricalYear(canonical) ||
     deriveHistoricalYear(safeContent);
 
   if (targetMonthDay && Number.isInteger(year) && year > 0) {
@@ -1656,9 +1679,19 @@ export default {
   /**
    * Cron trigger — runs daily and publishes the current UTC day's post.
    */
-  async scheduled(_event, env, ctx) {
+  async scheduled(event, env, ctx) {
+    const cron = event?.cron || "";
     ctx.waitUntil(
       (async () => {
+        // Dedicated entity-recovery cron: its own invocation has a fresh subrequest
+        // budget, so it can re-resolve people strips that the budget-starved generation
+        // cron left unlinked. Runs after the 00:05 generation and 00:35 failsafe.
+        if (cron === ENTITY_RECOVERY_CRON) {
+          await recoverRecentEntityStrips(env).catch((err) =>
+            console.warn(`Blog AI: entity recovery pass failed — ${err.message}`),
+          );
+          return;
+        }
         await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
         await maybeGenerateBlogPost(env, ctx);
       })(),
@@ -1852,18 +1885,7 @@ export default {
       const results = [];
       for (const entry of targets) {
         try {
-          const date = new Date(entry.publishedAt || Date.now());
-          const content = { ...entry, historicalDate: inferHistoricalDateFromEntry(entry) };
-          const entities = await upsertEntitiesForContent(env, content, entry.slug, date, entry.pillars || []);
-          // Immediately patch the stored article HTML with the rebuilt people strip so
-          // portraits and profile links appear without waiting for serve-time repair.
-          const postHtml = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${entry.slug}`).catch(() => null);
-          if (postHtml && entities.length > 0) {
-            const updatedHtml = injectArticleEntityStrip(postHtml, entities);
-            if (updatedHtml !== postHtml) {
-              await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${entry.slug}`, updatedHtml).catch(() => {});
-            }
-          }
+          const entities = await backfillEntitiesForEntry(env, entry);
           results.push({ slug: entry.slug, status: "ok", entities: entities.length });
         } catch (err) {
           results.push({ slug: entry.slug, status: "error", error: err.message });
@@ -5711,6 +5733,13 @@ function hasRichWikipediaPersonProfile(entity) {
   const personTokens = normalizeTopicMatchText(entity.name || entity.term)
     .split(" ")
     .filter((token) => token.length > 1);
+  // Strip leading honorific/title tokens so a regnal or titled name still matches the
+  // canonical biography page that omits the honorific (e.g. "Queen Elizabeth II" → the
+  // Wikipedia page "Elizabeth II"). Keep at least one distinctive token.
+  const coreTokens = [...personTokens];
+  while (coreTokens.length > 1 && PERSON_NAME_HONORIFIC_TOKENS.has(coreTokens[0])) {
+    coreTokens.shift();
+  }
   const resolvedTokens = new Set(
     normalizeTopicMatchText(entity.resolvedPageTitle)
       .split(" ")
@@ -5718,7 +5747,7 @@ function hasRichWikipediaPersonProfile(entity) {
   );
   if (
     personTokens.length < 2 ||
-    !personTokens.every((token) => resolvedTokens.has(token))
+    !coreTokens.every((token) => resolvedTokens.has(token))
   ) {
     return false;
   }
@@ -6468,6 +6497,61 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
     ).catch(() => {});
   }
   return articleEntities;
+}
+
+// Re-run entity resolution for one published post (from its index entry) and patch the
+// rebuilt people strip into the stored article HTML. This is the proven path used by both
+// the /blog/backfill-entities admin route and the nightly entity-recovery cron.
+async function backfillEntitiesForEntry(env, entry) {
+  const date = new Date(entry.publishedAt || Date.now());
+  const content = { ...entry, historicalDate: inferHistoricalDateFromEntry(entry) };
+  const entities = await upsertEntitiesForContent(env, content, entry.slug, date, entry.pillars || []);
+  const postHtml = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${entry.slug}`).catch(() => null);
+  if (postHtml && entities.length > 0) {
+    const updatedHtml = injectArticleEntityStrip(postHtml, entities);
+    if (updatedHtml !== postHtml) {
+      await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${entry.slug}`, updatedHtml).catch(() => {});
+    }
+  }
+  return entities;
+}
+
+// Daily self-healing pass (own cron invocation = fresh subrequest budget). The 00:05
+// generation cron exhausts its subrequest budget on the AI/enrichment pipeline before
+// upsertEntitiesForContent runs, so person Wikipedia fetches come back empty and people
+// render as unlinked, portrait-less labels. A separate later invocation has full budget,
+// so it re-resolves recent posts whose stored people strip still has an unlinked or
+// portrait-less person, exactly like a manual backfill.
+async function recoverRecentEntityStrips(env, { maxPosts = 3, lookbackDays = 3 } = {}) {
+  const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+  const index = indexRaw ? JSON.parse(indexRaw) : [];
+  const cutoff = Date.now() - lookbackDays * 86_400_000;
+  const recent = [...index]
+    .filter((e) => e.slug && e.publishedAt && new Date(e.publishedAt).getTime() >= cutoff)
+    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  let repaired = 0;
+  for (const entry of recent) {
+    if (repaired >= maxPosts) break;
+    const peRaw = await env.BLOG_AI_KV.get(`post-entities:${entry.slug}`).catch(() => null);
+    if (!peRaw) continue;
+    let people;
+    try {
+      people = JSON.parse(peRaw).filter((e) => e && e.type === "person");
+    } catch {
+      continue;
+    }
+    if (people.length === 0) continue;
+    const needsRepair = people.some((p) => p.profileLinkEligible !== true || !p.imageUrl);
+    if (!needsRepair) continue;
+    try {
+      await backfillEntitiesForEntry(env, entry);
+      repaired += 1;
+      console.log(`Blog AI: entity recovery re-resolved people strip for /blog/${entry.slug}/`);
+    } catch (err) {
+      console.warn(`Blog AI: entity recovery failed for ${entry.slug} — ${err.message}`);
+    }
+  }
+  return repaired;
 }
 
 function buildArticleEntityStrip(entityMeta) {
@@ -7377,7 +7461,18 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
 
   // Enforce that the title always follows the format "Event Name — Month Day, Year".
   // The AI sometimes omits the date, uses wrong format, or uses colloquial date names.
-  const year = parsed.historicalYear ?? date.getFullYear();
+  // Derive the historical year from the content (historicalYear → ISO → date →
+  // title). Never silently default to date.getFullYear(): the publication year is
+  // not the event's year, and doing so re-stamps the current year every year. Only
+  // fall back when the model returned no year anywhere, and warn loudly so the
+  // degenerate output is visible.
+  let year = deriveHistoricalYear(parsed);
+  if (!Number.isInteger(year)) {
+    year = date.getFullYear();
+    console.warn(
+      `Blog: no historical year in AI output for ${date.toISOString().slice(0, 10)} — falling back to publication year ${year}`,
+    );
+  }
   const expectedDateSuffix = `${monthName} ${day}, ${year}`;
   const hasSeparator = parsed.title && parsed.title.includes(" — ");
   if (

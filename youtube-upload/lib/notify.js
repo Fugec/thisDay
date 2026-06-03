@@ -13,48 +13,32 @@ import { statSync, readFileSync } from "fs";
  *   SLACK_WEBHOOK_URL     e.g. https://hooks.slack.com/services/...
  *
  * If neither is set this function is a silent no-op — safe to call always.
+ *
+ * Video delivery chain (all full-resolution, link only — no file attachment):
+ *   1. catbox.moe  — permanent, 200 MB cap; 403s from CI IPs intermittently
+ *   2. 0x0.st      — permanent (~1 yr for ~15 MB), works from CI IPs
+ *   3. transfer.sh — auto-deletes after 24 h (Max-Days: 1), designed for CI
  */
 
-/**
- * Sends an upload notification to Discord and/or Slack.
- * When videoPath is provided and ≤ 25 MB, attaches the MP4 to the Discord message.
- *
- * @param {{ slug: string, title: string }} post
- * @param {string} youtubeId
- * @param {string|null} [videoPath]  Path to the generated MP4 (optional)
- */
 // catbox/litterbox sit behind Cloudflare and 403 requests that don't look like a
-// browser. These headers are REQUIRED — without them the upload is blocked. (The
-// temporary litterbox host stays 403 from CI IPs even with them, so we use the
-// permanent catbox.moe endpoint, which works; files can be deleted manually.)
+// browser. These headers are REQUIRED — without them the upload is blocked.
+const BROWSER_UA =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
 const CATBOX_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+  "User-Agent": BROWSER_UA,
   Accept: "*/*",
   "Accept-Language": "en-US,en;q=0.9",
   Origin: "https://catbox.moe",
   Referer: "https://catbox.moe/",
 };
 
-/**
- * Uploads the MP4 to catbox.moe and returns a direct download URL, or null on
- * failure. Discord rejects direct attachments above ~10 MB on non-boosted
- * servers, so we share a link instead. catbox accepts files up to 200 MB.
- *
- * @param {string} videoPath
- * @param {{ slug: string }} post
- * @returns {Promise<string|null>}
- */
 async function uploadToCatbox(videoPath, post) {
   const { size } = statSync(videoPath);
-  const MAX_BYTES = 200 * 1024 * 1024; // catbox 200 MB cap
-  if (size > MAX_BYTES) {
-    console.warn(
-      `  ⚠ Video too large for catbox (${(size / 1048576).toFixed(1)} MB > 200 MB) — no download link`,
-    );
+  if (size > 200 * 1024 * 1024) {
+    console.warn(`  ⚠ catbox: file too large (${(size / 1048576).toFixed(1)} MB > 200 MB)`);
     return null;
   }
-
   const form = new FormData();
   form.append("reqtype", "fileupload");
   form.append(
@@ -62,38 +46,67 @@ async function uploadToCatbox(videoPath, post) {
     new Blob([readFileSync(videoPath)], { type: "video/mp4" }),
     `${post.slug}.mp4`,
   );
-
   const r = await fetch("https://catbox.moe/user/api.php", {
     method: "POST",
     headers: CATBOX_HEADERS,
     body: form,
   });
-  if (!r.ok) {
-    console.warn(`  ⚠ catbox upload failed: HTTP ${r.status}`);
-    return null;
-  }
+  if (!r.ok) { console.warn(`  ⚠ catbox failed: HTTP ${r.status}`); return null; }
   const url = (await r.text()).trim();
-  if (!/^https?:\/\/\S+$/.test(url)) {
-    console.warn(`  ⚠ catbox unexpected response: ${url.slice(0, 100)}`);
-    return null;
-  }
-  console.log(`  ✓ MP4 uploaded to catbox: ${url}`);
+  if (!/^https?:\/\/\S+$/.test(url)) { console.warn(`  ⚠ catbox bad response: ${url.slice(0, 80)}`); return null; }
+  console.log(`  ✓ catbox: ${url}`);
   return url;
 }
 
+/**
+ * Fallback host: uguu.se — anonymous upload, no auth, direct MP4 link (no
+ * login page), works from CI IPs. Files auto-delete after 24 hours.
+ */
+async function uploadToUguu(videoPath, post) {
+  const form = new FormData();
+  form.append(
+    "files[]",
+    new Blob([readFileSync(videoPath)], { type: "video/mp4" }),
+    `${post.slug}.mp4`,
+  );
+  const r = await fetch("https://uguu.se/upload", {
+    method: "POST",
+    headers: { "User-Agent": BROWSER_UA },
+    body: form,
+  });
+  if (!r.ok) { console.warn(`  ⚠ uguu.se upload failed: HTTP ${r.status}`); return null; }
+  const result = await r.json();
+  const url = result?.files?.[0]?.url;
+  if (!url) { console.warn("  ⚠ uguu.se: no url in response"); return null; }
+  console.log(`  ✓ uguu.se (24 h): ${url}`);
+  return url;
+}
+
+async function getDownloadUrl(videoPath, post) {
+  return (
+    (await uploadToCatbox(videoPath, post).catch((e) => { console.warn(`  ⚠ catbox error: ${e.message}`); return null; })) ??
+    (await uploadToUguu(videoPath, post).catch((e) => { console.warn(`  ⚠ uguu.se error: ${e.message}`); return null; }))
+  );
+}
+
+/**
+ * Sends an upload notification to Discord and/or Slack.
+ *
+ * @param {{ slug: string, title: string }} post
+ * @param {string} youtubeId
+ * @param {string|null} [videoPath]  Path to the generated MP4 (optional)
+ */
 export async function notifyUpload(post, youtubeId, videoPath = null) {
   const discord = process.env.DISCORD_WEBHOOK_URL;
   const slack = process.env.SLACK_WEBHOOK_URL;
   if (!discord && !slack) return;
 
-  // Upload to litterbox first so the notification can carry a downloadable MP4
-  // link (Discord attachments fail for our ~12-18 MB videos on a non-boosted server).
   let downloadUrl = null;
   if (videoPath) {
-    downloadUrl = await uploadToCatbox(videoPath, post).catch((e) => {
-      console.warn(`  ⚠ catbox upload error: ${e.message}`);
-      return null;
-    });
+    downloadUrl = await getDownloadUrl(videoPath, post);
+    if (!downloadUrl) {
+      console.warn("  ⚠ All upload hosts failed — Discord notification will have no video link");
+    }
   }
 
   const message =
@@ -114,10 +127,7 @@ export async function notifyUpload(post, youtubeId, videoPath = null) {
       })
         .then((r) => {
           if (!r.ok) console.warn(`  ⚠ Discord notify failed: ${r.status}`);
-          else
-            console.log(
-              `  ✓ Discord notified${downloadUrl ? " (with MP4 link)" : ""}`,
-            );
+          else console.log(`  ✓ Discord notified${downloadUrl ? " (with MP4 link)" : " (text-only)"}`);
         })
         .catch((e) => console.warn(`  ⚠ Discord notify error: ${e.message}`)),
     );
@@ -150,9 +160,7 @@ export async function notifyPipelineIssue(issue) {
   const discord = process.env.DISCORD_WEBHOOK_URL;
   if (!discord) return;
 
-  const streakLine = issue.streak
-    ? `\n📈 Consecutive days: ${issue.streak}`
-    : "";
+  const streakLine = issue.streak ? `\n📈 Consecutive days: ${issue.streak}` : "";
   const message =
     `⚠️ **Pipeline issue detected**\n` +
     `Step: ${issue.step}\n` +

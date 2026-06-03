@@ -1049,6 +1049,33 @@ function sourceEventHeadline(eventText, maxLength = 96) {
   return "";
 }
 
+/**
+ * Trims text to a maximum length for use as a meta description / social snippet.
+ * Cuts on a word boundary, strips any trailing dangling function word
+ * (preposition/article/conjunction) and trailing punctuation, then appends a
+ * single ellipsis only when the text was actually shortened. Prevents the
+ * "…a historic first televised event with…" mid-clause cut that reads as broken
+ * in a Google result and suppresses click-through.
+ */
+function truncateForMeta(text, maxLength) {
+  const clean = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (clean.length <= maxLength) return clean;
+  // Reserve one character for the trailing ellipsis.
+  let out = clean
+    .slice(0, maxLength - 1)
+    .replace(/\s+\S*$/, "")
+    .trim();
+  const TRAILING_FUNCTION_WORD_RE =
+    /[\s,;:]+(?:by|of|in|to|for|from|with|on|at|about|as|into|over|after|before|against|between|during|under|within|without|upon|onto|the|a|an|and|but|or|nor)$/i;
+  while (TRAILING_FUNCTION_WORD_RE.test(out)) {
+    out = out.replace(TRAILING_FUNCTION_WORD_RE, "").trim();
+  }
+  out = out.replace(/[\s,;:.!?]+$/, "");
+  return out ? `${out}…` : clean.slice(0, maxLength);
+}
+
 function eventTitleFromCandidate(parsedTitle, candidate) {
   const aiTitle = String(parsedTitle || "").replace(/\s+[-—]\s+.*$/, "").trim();
   const pageTitle = String(candidate?.pageTitle || "").trim();
@@ -5189,29 +5216,25 @@ function normalizeContentMetadata(content) {
       .replace(/\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc)\./gi, (m) => m.slice(0, -1) + "\x01");
     const firstSentence = (overviewLead.split(/(?<=[.!?])\s+/)[0] || "").replace(/\x01/g, ".");
     if (firstSentence.length >= 60) {
-      content.description = firstSentence.length > 155
-        ? firstSentence.substring(0, 152).trimEnd() + "..."
-        : firstSentence;
+      content.description = truncateForMeta(firstSentence, 155);
     } else {
       const sig = (content.quickFacts || []).find((f) => /significance|legacy|impact/i.test(f.label))?.value || "";
       const loc = content.location ? `, ${content.location}` : "";
-      content.description = `${content.eventTitle} (${content.historicalDate}${loc})${sig ? `: ${sig}.` : "."}`.substring(0, 155);
+      content.description = truncateForMeta(`${content.eventTitle} (${content.historicalDate}${loc})${sig ? `: ${sig}.` : "."}`, 155);
     }
   }
   if (content.description.length > 155) {
-    content.description = content.description.substring(0, 152).trimEnd() + "...";
+    content.description = truncateForMeta(content.description, 155);
   }
   if (!content.ogDescription || content.ogDescription.length < 80) {
-    content.ogDescription = content.description.substring(0, 130);
-  }
-  if (content.ogDescription.length > 130) {
-    content.ogDescription = content.ogDescription.substring(0, 127).trimEnd() + "...";
+    content.ogDescription = truncateForMeta(content.description, 130);
+  } else if (content.ogDescription.length > 130) {
+    content.ogDescription = truncateForMeta(content.ogDescription, 130);
   }
   if (!content.twitterDescription || content.twitterDescription.length < 60) {
-    content.twitterDescription = content.description.substring(0, 120);
-  }
-  if (content.twitterDescription.length > 120) {
-    content.twitterDescription = content.twitterDescription.substring(0, 117).trimEnd() + "...";
+    content.twitterDescription = truncateForMeta(content.description, 120);
+  } else if (content.twitterDescription.length > 120) {
+    content.twitterDescription = truncateForMeta(content.twitterDescription, 120);
   }
 }
 
@@ -7902,7 +7925,7 @@ async function validateEyewitnessQuote(env, content) {
 async function patchSEOMeta(html, _slug, env) {
   const getMeta = (re) => (html.match(re) || [])[1] || "";
 
-  const currentTitle = getMeta(/<title>([^<]+) \| thisDay\.<\/title>/);
+  const currentTitle = getMeta(/<title>([^<]+?)(?: \| thisDay\.)?<\/title>/);
   const currentDesc = getMeta(
     /<meta name="description" content="([^"]*?)"\s*\/>/,
   );
@@ -7950,6 +7973,14 @@ async function patchSEOMeta(html, _slug, env) {
   };
 
   const improved = await reviewSEOMetaOnly(minContent, env);
+
+  // Enforce hard length caps regardless of what the AI returned.
+  if (improved.description)
+    improved.description = truncateForMeta(improved.description, 155);
+  if (improved.ogDescription)
+    improved.ogDescription = truncateForMeta(improved.ogDescription, 130);
+  if (improved.twitterDescription)
+    improved.twitterDescription = truncateForMeta(improved.twitterDescription, 120);
 
   let updatedHtml = html;
   const changed = [];
@@ -8317,7 +8348,7 @@ async function reviewSEOMetaOnly(content, env) {
 
   const systemPrompt =
     "You are a senior SEO editor. Improve only these 5 fields for a historical blog post:\n" +
-    "- description: 120–155 chars, start with year + event name, include location, specific hook, and at least one hard fact such as a number, named figure, or institutional consequence\n" +
+    "- description: 120–155 chars, open with a specific, curiosity-driven hook (a striking number, named figure, or consequence) — do NOT start with a bare year; weave the year and location in naturally; end on a complete clause, never a dangling preposition or mid-phrase '...'\n" +
     "- ogDescription: 100–130 chars, curiosity-driven, makes people click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
     "- keywords: 5–8 comma-separated, specific — year, location, person names, historical context\n" +
@@ -8486,7 +8517,7 @@ async function reviewContentWithSEOExpert(content, env) {
   // --- PASS 2: SEO meta fields only (no paragraphs) ---
   const seoSystemPrompt =
     "You are a senior SEO editor for a historical blog. Improve only these meta fields:\n" +
-    "- description: 120–155 chars, open with year and event, include location and a specific hook, and mention one concrete fact such as a death toll, office, ship name, law, military result, or named figure\n" +
+    "- description: 120–155 chars, lead with a concrete hook (death toll, office, ship name, law, military result, or named figure) — do NOT start with a bare year; include location and weave the year in naturally; end on a complete clause, never a dangling preposition or mid-phrase '...'\n" +
     "- ogDescription: 100–130 chars, curiosity-driven, give readers a reason to click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
     "- keywords: 5–8 specific terms including year, location, key people, historical context\n" +
@@ -9765,7 +9796,7 @@ ${currentPillars
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="X-UA-Compatible" content="ie=edge" />
-    <title>${esc(c.title)} | thisDay.</title>
+    <title>${esc(c.title)}</title>
     <link rel="canonical" href="${canonicalUrl}" />
     <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="author" content="thisDay. Editorial" />

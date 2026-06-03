@@ -5,3 +5,5 @@ assets/*
 !assets/text-bg.png
 .env
 client_secret*.json
+adsense-auth.mjs
+adsense-report.mjs

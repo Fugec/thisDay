@@ -3,6 +3,9 @@
 .env
 .env.*
 *.env
+client_secret*.json
+*credentials*.json
+*.token.json
 
 # Local documentation — personal notes, not for the repo
 documentation/

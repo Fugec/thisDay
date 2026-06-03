@@ -10121,8 +10121,7 @@ ${overviewParas}
           <!-- Eyewitness / Chronicle Accounts -->
           ${
             eyewitnessParas
-              ? `<div class="ad-unit-container my-4"><span class="ad-unit-label">Advertisement</span><ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891" data-ad-format="auto" data-full-width-responsive="true"></ins></div>
-          <section class="mt-5">
+              ? `<section class="mt-5">
             <h2 class="h3">${esc(sectionHeadings.eyewitness)}</h2>
 ${eyewitnessParas}
 ${eyewitnessQuoteBlock}

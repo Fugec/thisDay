@@ -61,8 +61,12 @@ const SPECULATION_RULES_JSON = JSON.stringify({
   ],
 });
 
-// T5: Edge HTML cache. Short initial TTL; raise after confirming correctness.
-const EDGE_HTML_CACHE_TTL = 300; // seconds — raise to 3600+ after monitoring
+// T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
+// and the quiz exclusion on the 300s rollout. Safe because the underlying
+// date-page KV caches (gen-post-v45/born-v26) already tolerate up to a 7-day
+// staleness window (publish busts quiz-page-v30 only, not these), so a 1h edge
+// TTL never makes a page staler than it already is.
+const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
 // Routes eligible for CF Cache API storage. Quiz pages are excluded because
 // the blog worker busts their KV key (quiz-page-v30) on publish; the CF Cache
 // has no hook into that invalidation path.

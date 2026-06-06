@@ -249,7 +249,7 @@
             style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
-            <h2 class="homepage-section-title" id="todayEventTitle">Today's Events</h2>
+            <h2 class="homepage-section-title-box" id="todayEventTitle">Today's Events</h2>
             <p id="todayEventDesc">Historical events that happened on this day.</p>
             <a id="todayEventBtn" href="/events/today/" class="btn"
               >See All Historical Events <i class="bi bi-arrow-right"></i
@@ -266,7 +266,7 @@
             style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
-            <h2 class="homepage-section-title" id="latest-article-title">Loading...</h2>
+            <h2 class="homepage-section-title-box" id="latest-article-title">Loading...</h2>
             <p id="latest-article-desc">Read it. Quiz yourself at the end.</p>
             <a id="blog-quiz-btn" href="/blog/" class="btn"
               >Read &amp; Quiz <i class="bi bi-arrow-right"></i
@@ -386,7 +386,7 @@
                 "</div>" +
                 '<div class="blog-card-body">' +
                 '<div class="blog-card-date">YouTube Shorts</div>' +
-                '<h2 class="homepage-section-title">' +
+                '<h2 class="homepage-section-title homepage-section-title-box">' +
                 escHtml(shortTitle) +
                 "</h2>" +
                 (shortDesc ? "<p>" + escHtml(shortDesc) + "</p>" : "") +
@@ -699,7 +699,7 @@
                 (dateLabel
                   ? '<div class="blog-card-date">' + dateLabel + "</div>"
                   : "") +
-                '<h2 class="homepage-section-title">' +
+                '<h2 class="homepage-section-title homepage-section-title-box">' +
                 title +
                 "</h2>" +
                 (excerpt ? "<p>" + excerpt + "</p>" : "") +
@@ -777,7 +777,7 @@
                 (yearLabel
                   ? '<div class="blog-card-date">' + yearLabel + "</div>"
                   : "") +
-                '<h2 class="homepage-section-title">' +
+                '<h2 class="homepage-section-title homepage-section-title-box">' +
                 title +
                 "</h2>" +
                 (excerpt ? "<p>" + excerpt + "</p>" : "") +

@@ -231,6 +231,9 @@ img {
   font-weight: 700;
   line-height: 1.25;
 }
+.homepage-section-title-box {
+  padding: 0;
+}
 .homepage-section-title-inner {
   max-width: 1920px;
   margin: 0 auto;
@@ -699,7 +702,6 @@ img {
   margin: 0;
 }
 .blog-cta-col h2 {
-  padding: 0;
   color: #fff;
   margin: 0;
 }
@@ -749,8 +751,7 @@ img {
   margin-bottom: 0.5rem;
 }
 .blog-card-body h2 {
-  padding: 0 0 0.6rem;
-  margin: 0;
+  margin: 0 0 0.6rem;
 }
 .blog-card-body p {
   font-size: 0.875rem;
@@ -989,8 +990,7 @@ img {
   text-align: center;
 }
 .quiz-card-body h2 {
-  padding: 0 0 0.5rem;
-  margin: 0;
+  margin: 0 0 0.5rem;
 }
 .quiz-card-body p {
   color: var(--text-muted);

@@ -1454,7 +1454,25 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
 async function handleEntityPage(request, env, url, type, slug, ctx) {
   const raw = await env.BLOG_AI_KV?.get(entityKey(type, slug)).catch(() => null);
   if (!raw) {
-    return fetch(request);
+    const section = type === "person" ? "People" : "History";
+    const sectionPath = type === "person" ? "/people/" : "/history/";
+    return new Response(
+      `<!doctype html><html lang="en"><head><meta charset="UTF-8">` +
+      `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<meta name="robots" content="noindex,follow">` +
+      `<title>Page Not Found | thisDay.</title>` +
+      `<link rel="stylesheet" href="/css/custom.css"></head>` +
+      `<body><div style="max-width:640px;margin:4rem auto;padding:0 1.5rem;text-align:center">` +
+      `<h1 style="font-size:1.35rem;font-weight:700">Page Not Found</h1>` +
+      `<p>This ${type} page doesn&rsquo;t exist yet. It may have been removed or never created.</p>` +
+      `<a href="${sectionPath}" style="margin-right:1rem">&larr; Browse ${section}</a>` +
+      `<a href="/">Home</a>` +
+      `</div></body></html>`,
+      {
+        status: 404,
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      }
+    );
   }
   let entity = JSON.parse(raw);
   const posts = await getBlogIndexEntries(env);
@@ -5916,6 +5934,30 @@ async function handleFetchRequest(request, env, ctx) {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
         "X-Robots-Tag": "noindex",
+      },
+    });
+  }
+
+  // Entity sitemap — /people/{slug}/ and /history/{slug}/ URLs for indexable entities
+  if (url.pathname === "/sitemap-entities.xml") {
+    const raw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
+    const index = raw ? JSON.parse(raw) : [];
+    const urls = index
+      .filter((e) => e?.slug && e?.type && e.indexable === true)
+      .map((e) => {
+        const path = e.type === "person" ? `/people/${e.slug}/` : `/history/${e.slug}/`;
+        const lastmod = (e.updatedAt || new Date().toISOString()).slice(0, 10);
+        return `<url><loc>https://thisday.info${path}</loc>` +
+          `<lastmod>${lastmod}</lastmod>` +
+          `<changefreq>weekly</changefreq>` +
+          `<priority>0.5</priority></url>`;
+      });
+    const body = `<?xml version="1.0" encoding="UTF-8"?>` +
+      `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join("")}</urlset>`;
+    return new Response(body, {
+      headers: {
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "public, max-age=3600, s-maxage=86400",
       },
     });
   }

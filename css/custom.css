@@ -23,7 +23,7 @@ html {
 
 body {
   font-family: "Lora", Georgia, serif;
-  font-size: 1.05rem;
+  font-size: 16px;
   line-height: 1.7;
   color: var(--text) !important;
   background: var(--bg);
@@ -46,9 +46,6 @@ a:hover {
 img {
   max-width: 100%;
   height: auto;
-}
-h3 {
-  font-size: 17.6px !important;
 }
 
 /* Nav */
@@ -243,6 +240,53 @@ h3 {
 .homepage-section-title-date {
   padding: 0px 10px 40px 0px;
 }
+/* FAQ */
+.faq-section {
+  max-width: 960px;
+  padding: 0 1.5rem 3rem;
+}
+.faq-list {
+  border-top: 1px solid var(--border);
+}
+.faq-item {
+  border-bottom: 1px solid var(--border);
+}
+.faq-q {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 1.1rem 0;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  gap: 1rem;
+}
+.faq-q:hover {
+  color: var(--btn-bg);
+}
+.faq-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: transform 0.2s;
+}
+.faq-q[aria-expanded="true"] .faq-icon {
+  transform: rotate(45deg);
+}
+.faq-a {
+  padding: 0 0 1.1rem;
+  line-height: 1.7;
+}
+.faq-a p {
+  margin: 0;
+}
+
 .people-strip {
   border-bottom: 1px solid var(--border);
   padding: 1rem 1.5rem;
@@ -454,7 +498,6 @@ h3 {
   white-space: nowrap;
 }
 .hero p {
-  font-size: 1.1rem;
   color: #4a4a4a;
   max-width: 640px;
   margin: 0 auto 1rem;
@@ -515,7 +558,7 @@ h3 {
   color: var(--text-muted);
   margin-bottom: 0.5rem;
 }
-.events-featured-body h3 {
+.events-featured-body h2 {
   font-size: 1.25rem;
   font-weight: 600;
   margin: 0 0 0.75rem;
@@ -650,14 +693,11 @@ h3 {
   gap: 1rem;
 }
 .blog-cta-col p {
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--accent);
+  line-height: 1.75;
+  color: #fff;
   margin: 0;
 }
-.blog-cta-col h3 {
+.blog-cta-col h2 {
   font-size: 1.15rem;
   font-weight: 700;
   color: #fff;
@@ -709,7 +749,7 @@ h3 {
   color: var(--accent);
   margin-bottom: 0.5rem;
 }
-.blog-card-body h3 {
+.blog-card-body h2 {
   font-size: 1rem;
   font-weight: 700;
   margin: 0 0 0.6rem;
@@ -911,7 +951,7 @@ h3 {
   color: var(--accent);
   margin: 0;
 }
-.event-card-preview h3 {
+.event-card-preview h2 {
   font-size: 1.25rem;
   font-weight: 700;
   color: #fff;
@@ -951,13 +991,13 @@ h3 {
   padding: 1.75rem 2rem;
   text-align: center;
 }
-.quiz-card-body h3 {
-  font-size: 1.1rem;
-  font-weight: 600;
+.quiz-card-body h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.25;
   margin: 0 0 0.5rem;
 }
 .quiz-card-body p {
-  font-size: 0.9rem;
   color: var(--text-muted);
   margin: 0 0 1.25rem;
   line-height: 1.5;
@@ -1018,7 +1058,7 @@ h3 {
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);
 }
-.month-nav h3 {
+.month-nav h2 {
   font-size: 1.5rem;
   font-weight: 700;
   margin: 0;
@@ -1686,7 +1726,7 @@ h3 {
   .caption-text {
     font-size: 1rem;
   }
-  .month-nav h3 {
+  .month-nav h2 {
     font-size: 1.5rem;
     font-weight: 600;
   }

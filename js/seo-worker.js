@@ -34,6 +34,33 @@ const WIKIMEDIA_THUMBNAIL_STEPS = [
   20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840,
 ];
 
+// Speculation Rules: prefetch same-origin pages at moderate eagerness; skip
+// API, sitemap, feed, and image-proxy routes that should never be navigated.
+const SPECULATION_RULES_JSON = JSON.stringify({
+  prefetch: [
+    {
+      source: "document",
+      where: {
+        and: [
+          { href_matches: "/*" },
+          {
+            not: {
+              href_matches: [
+                "/api/*",
+                "/sitemap*.xml",
+                "/rss.xml",
+                "/og-image*",
+                "/image-proxy*",
+              ],
+            },
+          },
+        ],
+      },
+      eagerness: "moderate",
+    },
+  ],
+});
+
 // --- Helper function to fetch daily events from Wikipedia API ---
 async function fetchDailyEvents(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -1593,6 +1620,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     ${NAV_CSS}
     ${FOOTER_CSS}
   </style>
+  <script type="speculationrules">${SPECULATION_RULES_JSON}</script>
 </head>
 <body>
 ${siteNav()}
@@ -1727,6 +1755,7 @@ ${marqueeScript()}
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      "Link": "</css/custom.css>; rel=preload; as=style",
     },
   });
 }
@@ -3748,6 +3777,7 @@ ${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <link rel="stylesheet" href="/css/custom.css"/>
 <style>${getSharedPageStyles()}</style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
+<script type="speculationrules">${SPECULATION_RULES_JSON}</script>
 </head>
 <body>
 <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
@@ -4919,11 +4949,13 @@ async function handleBornPage(request, env, ctx, url) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
         const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
-        return new Response(patched, {
+        const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
+        return new Response(withSpec, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
             "X-Cache": "HIT",
+            "Link": "</css/custom.css>; rel=preload; as=style",
           },
         });
       }
@@ -5011,11 +5043,13 @@ async function handleDiedPage(request, env, ctx, url) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
         const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
-        return new Response(patched, {
+        const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
+        return new Response(withSpec, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
             "X-Cache": "HIT",
+            "Link": "</css/custom.css>; rel=preload; as=style",
           },
         });
       }
@@ -5251,11 +5285,13 @@ async function handleEventsDatePage(_request, env, ctx, url) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
         const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
-        return new Response(patched, {
+        const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
+        return new Response(withSpec, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
             "X-Cache": "HIT",
+            "Link": "</css/custom.css>; rel=preload; as=style",
           },
         });
       }
@@ -5429,6 +5465,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
         ? "no-store, no-cache"
         : "public, max-age=3600, s-maxage=604800",
       "X-Cache": bypassCache ? "BYPASS" : "MISS",
+      "Link": "</css/custom.css>; rel=preload; as=style",
     },
   });
 }
@@ -6651,6 +6688,17 @@ async function handleFetchRequest(request, env, ctx) {
     },
   });
 
+  // --- Speculation Rules ---------------------------------------------------
+  // Prefetch same-origin navigations at moderate eagerness; skip utility routes.
+  rewriter.on("head", {
+    element(element) {
+      element.append(
+        `<script type="speculationrules">${SPECULATION_RULES_JSON}</script>`,
+        { html: true },
+      );
+    },
+  });
+
   // --- SSR Pre-render -------------------------------------------------------
   // Injects today's top 5 historical events as real HTML into #calendarGrid,
   // replacing the loading spinner. Crawlers that don't execute JavaScript
@@ -6762,6 +6810,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
+      "</css/custom.css?v=23>; rel=preload; as=style",
     ].join(", "),
   );
 

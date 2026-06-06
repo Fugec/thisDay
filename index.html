@@ -230,7 +230,7 @@
       </div>
       <div class="blog-cta-col">
         <p>Our blog</p>
-        <h2>Explore more this day in history articles on our blog</h2>
+        <h2 class="homepage-section-title">Explore more this day in history articles on our blog</h2>
         <a href="/blog/" class="btn">Visit the Blog</a>
       </div>
     </section>
@@ -249,7 +249,7 @@
             style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
-            <h2 id="todayEventTitle">Today's Events</h2>
+            <h2 class="homepage-section-title" id="todayEventTitle">Today's Events</h2>
             <p id="todayEventDesc">Historical events that happened on this day.</p>
             <a id="todayEventBtn" href="/events/today/" class="btn"
               >See All Historical Events <i class="bi bi-arrow-right"></i
@@ -266,7 +266,7 @@
             style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
-            <h2 id="latest-article-title">Loading...</h2>
+            <h2 class="homepage-section-title" id="latest-article-title">Loading...</h2>
             <p id="latest-article-desc">Read it. Quiz yourself at the end.</p>
             <a id="blog-quiz-btn" href="/blog/" class="btn"
               >Read &amp; Quiz <i class="bi bi-arrow-right"></i
@@ -285,7 +285,7 @@
       </div>
       <div class="blog-cta-col">
         <p>Today's events</p>
-        <h2>Explore what happened on this day in history</h2>
+        <h2 class="homepage-section-title">Explore what happened on this day in history</h2>
         <a href="/events/today/" class="btn">View All Events</a>
       </div>
     </section>
@@ -333,7 +333,7 @@
       </div>
       <div class="blog-cta-col">
         <p>Featured Videos</p>
-        <h2>Watch history come alive in 60 seconds</h2>
+        <h2 class="homepage-section-title">Watch history come alive in 60 seconds</h2>
         <a
           href="https://www.youtube.com/@thisDay_info/shorts"
           target="_blank"
@@ -386,7 +386,7 @@
                 "</div>" +
                 '<div class="blog-card-body">' +
                 '<div class="blog-card-date">YouTube Shorts</div>' +
-                "<h2>" +
+                '<h2 class="homepage-section-title">' +
                 escHtml(shortTitle) +
                 "</h2>" +
                 (shortDesc ? "<p>" + escHtml(shortDesc) + "</p>" : "") +
@@ -414,7 +414,7 @@
           <i class="bi bi-chevron-left"></i>
           <span class="d-none d-sm-inline">Prev</span>
         </button>
-        <h2 id="currentMonthYear"></h2>
+        <h2 class="homepage-section-title" id="currentMonthYear"></h2>
         <button class="btn" id="nextMonthBtn" aria-label="Next month">
           <span class="d-none d-sm-inline">Next</span>
           <i class="bi bi-chevron-right"></i>
@@ -699,7 +699,7 @@
                 (dateLabel
                   ? '<div class="blog-card-date">' + dateLabel + "</div>"
                   : "") +
-                "<h2>" +
+                '<h2 class="homepage-section-title">' +
                 title +
                 "</h2>" +
                 (excerpt ? "<p>" + excerpt + "</p>" : "") +
@@ -777,7 +777,7 @@
                 (yearLabel
                   ? '<div class="blog-card-date">' + yearLabel + "</div>"
                   : "") +
-                "<h2>" +
+                '<h2 class="homepage-section-title">' +
                 title +
                 "</h2>" +
                 (excerpt ? "<p>" + excerpt + "</p>" : "") +

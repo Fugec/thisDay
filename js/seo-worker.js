@@ -61,6 +61,32 @@ const SPECULATION_RULES_JSON = JSON.stringify({
   ],
 });
 
+// T5: Edge HTML cache. Short initial TTL; raise after confirming correctness.
+const EDGE_HTML_CACHE_TTL = 300; // seconds — raise to 3600+ after monitoring
+// Routes eligible for CF Cache API storage. Quiz pages are excluded because
+// the blog worker busts their KV key (quiz-page-v30) on publish; the CF Cache
+// has no hook into that invalidation path.
+const EDGE_CACHE_ROUTE_RE = /^\/(events|born|died|people|history|topics|years|keywords)\/./;
+function isEdgeCacheable(url, request) {
+  if (request.method !== "GET") return false;
+  const p = url.pathname;
+  if (
+    url.searchParams.has("fresh") ||
+    url.searchParams.has("nocache") ||
+    url.searchParams.has("repair")
+  ) return false;
+  if (p.startsWith("/api/") || p.startsWith("/blog/publish") || p.startsWith("/warmup")) return false;
+  if (/^\/quiz\//.test(p)) return false;
+  return EDGE_CACHE_ROUTE_RE.test(p);
+}
+// Normalize the cache key to origin+pathname. None of the edge-cacheable routes
+// vary their rendered output by query string (bypass params already excluded by
+// isEdgeCacheable), so stripping the query prevents cache fragmentation and
+// junk-param entry flooding while improving the hit rate across tracking params.
+function edgeCacheKey(url) {
+  return `${url.origin}${url.pathname}`;
+}
+
 // --- Helper function to fetch daily events from Wikipedia API ---
 async function fetchDailyEvents(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -5995,6 +6021,7 @@ async function handleFetchRequest(request, env, ctx) {
       headers: {
         "Content-Type": "application/xml; charset=utf-8",
         "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "X-Robots-Tag": "noindex",
       },
     });
   }
@@ -7957,7 +7984,35 @@ ${getSharedPageScripts({ pageType: "quiz-date", pageSlug: `${monthSlug}-${day}` 
 // --- Worker Entry Point (ES Module Format) ---
 export default {
   async fetch(request, env, ctx) {
-    return handleFetchRequest(request, env, ctx);
+    const url = new URL(request.url);
+    const edgeCacheable = isEdgeCacheable(url, request);
+    const cacheKey = edgeCacheable ? edgeCacheKey(url) : null;
+    if (cacheKey) {
+      const cached = await caches.default.match(cacheKey);
+      if (cached) {
+        const r = new Response(cached.body, {
+          status: cached.status,
+          statusText: cached.statusText,
+          headers: new Headers(cached.headers),
+        });
+        r.headers.set("X-Edge-Cache", "HIT");
+        return r;
+      }
+    }
+    const response = await handleFetchRequest(request, env, ctx);
+    if (cacheKey && response.status === 200) {
+      const toStore = new Response(response.clone().body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: new Headers(response.headers),
+      });
+      toStore.headers.set(
+        "Cache-Control",
+        `public, s-maxage=${EDGE_HTML_CACHE_TTL}, stale-while-revalidate=86400`,
+      );
+      ctx.waitUntil(caches.default.put(cacheKey, toStore));
+    }
+    return response;
   },
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(handleScheduledEvent(env));

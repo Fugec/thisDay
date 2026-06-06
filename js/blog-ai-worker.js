@@ -1399,6 +1399,9 @@ function scoreBlogEventCandidate(event) {
   if (/\b(local|regional|vocational school|municipal)\b/.test(haystack)) {
     score -= 10;
   }
+  // Natural/astronomical phenomena are not human-history events; penalise heavily so
+  // they never out-score major historical events that share a date.
+  if (/\b(asteroid|meteorite|comet|near-earth|meteor shower)\b/.test(haystack)) score -= 30;
 
   return score;
 }
@@ -5785,6 +5788,19 @@ function hasRichWikipediaPersonProfile(entity) {
   );
 }
 
+// Strip leading military/royal/academic honorific tokens from a person name so that
+// "General Dwight D. Eisenhower" becomes "Dwight D. Eisenhower" for slug/lookup purposes.
+function stripPersonHonorifics(name) {
+  const tokens = String(name || "").trim().split(/\s+/);
+  while (
+    tokens.length > 1 &&
+    PERSON_NAME_HONORIFIC_TOKENS.has(tokens[0].toLowerCase().replace(/[^a-z]/g, ""))
+  ) {
+    tokens.shift();
+  }
+  return tokens.join(" ");
+}
+
 function unlinkedArticlePerson(term) {
   const name = String(term?.term || term?.name || "").trim();
   const slug = entitySlug(name);
@@ -6426,22 +6442,28 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
   const articleEntities = [];
   for (const term of terms) {
     const type = normalizeEntityType(term.type);
-    const slugPart = entitySlug(term.term);
+    // For persons, strip leading honorifics ("General", "President", "Dr.", etc.) before
+    // computing the slug and performing the Wikipedia lookup. "General Dwight D. Eisenhower"
+    // resolves to slug "dwight-d-eisenhower" and Wikipedia finds the biography on the first
+    // try. Without stripping, the raw name fails with a 404 and the person is left unlinked.
+    const canonicalName = type === "person" ? stripPersonHonorifics(term.term) : term.term;
+    const canonicalTerm = canonicalName !== term.term ? { ...term, term: canonicalName } : term;
+    const slugPart = entitySlug(canonicalTerm.term);
     if (!type || !slugPart) continue;
     // For persons: always attempt a Wikipedia fetch even when the AI omitted the URL —
     // fetchWikipediaEntityData already falls back to term.term for the name lookup.
     // For non-person entities without a URL, skip the fetch to avoid unnecessary calls.
-    const wikiData = (term.wikiUrl || type === "person")
-      ? await fetchWikipediaEntityData(term).catch(() => ({}))
+    const wikiData = (canonicalTerm.wikiUrl || type === "person")
+      ? await fetchWikipediaEntityData(canonicalTerm).catch(() => ({}))
       : {};
     // When the AI omitted the wikiUrl for a person but the name-based lookup returned a
     // non-disambiguation standard biography, derive the canonical URL from the resolved
     // page title so the profile check and all downstream steps (image, person page) work.
     const resolvedWikiUrl =
-      type === "person" && !term.wikiUrl && wikiData.resolvedPageTitle && !wikiData.isDisambiguation
+      type === "person" && !canonicalTerm.wikiUrl && wikiData.resolvedPageTitle && !wikiData.isDisambiguation
         ? `https://en.wikipedia.org/wiki/${encodeURIComponent(wikiData.resolvedPageTitle.replace(/ /g, "_"))}`
-        : term.wikiUrl;
-    const resolvedTerm = resolvedWikiUrl !== term.wikiUrl ? { ...term, wikiUrl: resolvedWikiUrl } : term;
+        : canonicalTerm.wikiUrl;
+    const resolvedTerm = resolvedWikiUrl !== canonicalTerm.wikiUrl ? { ...canonicalTerm, wikiUrl: resolvedWikiUrl } : canonicalTerm;
     if (type === "person" && !hasRichWikipediaPersonProfile({ ...resolvedTerm, ...wikiData, type })) {
       suppressPersonProfileLink(content, term.term);
       articleEntities.push(unlinkedArticlePerson(term));

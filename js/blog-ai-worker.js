@@ -5066,6 +5066,26 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
     return;
   }
 
+  // T8: Collect URLs for IndexNow submission — blog post + entity pages + year hub.
+  // post-entities:{slug} is written by upsertEntitiesForContent before this runs.
+  const indexNowUrls = [`https://thisday.info/blog/${slug}/`];
+  try {
+    const entitiesRaw = env.BLOG_AI_KV
+      ? await env.BLOG_AI_KV.get(`post-entities:${slug}`)
+      : null;
+    if (entitiesRaw) {
+      for (const e of JSON.parse(entitiesRaw)) {
+        // Skip unlinked persons (profileLinkEligible false means no public /people/ page).
+        if (e?.url && !(e.type === "person" && e.profileLinkEligible === false)) {
+          indexNowUrls.push(`https://thisday.info${e.url}`);
+        }
+      }
+    }
+  } catch (_) {}
+  const histYear = String(content?.historicalYear || "").trim()
+    || (content?.historicalDateISO || "").slice(0, 4);
+  if (/^\d{3,4}$/.test(histYear)) indexNowUrls.push(`https://thisday.info/years/${histYear}/`);
+
   // Purge the cached sitemap and RSS feed so they reflect the new post immediately
   // (both workers cache for 1 h — without this, the new post would be invisible
   //  to crawlers until the next cache expiry).
@@ -5074,12 +5094,14 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
     cache.delete(new Request("https://thisday.info/sitemap.xml")),
     cache.delete(new Request("https://thisday.info/rss.xml")),
     cache.delete(new Request("https://thisday.info/news-sitemap.xml")),
-    // Optional: ping search engines so they discover sitemap updates faster.
+    // T8: Ping search engines with post + entity + hub URLs for fast Bing/Copilot discovery.
     fetch("https://thisday.info/search-ping", {
       method: "POST",
-      headers: env.SEARCH_PING_SECRET
-        ? { Authorization: `Bearer ${env.SEARCH_PING_SECRET}` }
-        : {},
+      headers: {
+        "Content-Type": "application/json",
+        ...(env.SEARCH_PING_SECRET ? { Authorization: `Bearer ${env.SEARCH_PING_SECRET}` } : {}),
+      },
+      body: JSON.stringify({ urls: indexNowUrls }),
     }),
   ]);
 

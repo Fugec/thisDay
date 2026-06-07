@@ -3808,6 +3808,7 @@ ${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <style>${getSharedPageStyles()}</style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
 <script type="speculationrules">${SPECULATION_RULES_JSON}</script>
+<link rel="alternate" type="text/markdown" href="/events/${monthName}/${day}.md"/>
 </head>
 <body>
 <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
@@ -5292,6 +5293,149 @@ function buildTopicFallbackFacts(
   return facts.map(normalizeDidYouKnowFact).slice(0, 5);
 }
 
+// T7: Build clean Markdown from raw events data — no AI calls, no HTML noise.
+// Used by /events/{month}/{day}.md for AI crawlers and retrieval systems.
+function buildEventsMarkdown(monthName, dayNum, eventsData) {
+  const mNum = MONTH_NUM_MAP[monthName] || 1;
+  const mDisplay = MONTH_DISPLAY_NAMES[mNum];
+  const events = (eventsData?.events || []).slice().sort((a, b) => a.year - b.year);
+  const births = (eventsData?.births || []).slice(0, 10);
+  const deaths = (eventsData?.deaths || []).slice(0, 10);
+
+  const featured = events.length
+    ? events.reduce((best, e) => wikiRichScore(e) >= wikiRichScore(best) ? e : best, events[0])
+    : null;
+
+  const fmtY = (y) => (y < 0 ? `${Math.abs(y)} BC` : String(y));
+  const allYears = events.map((e) => parseInt(e.year)).filter(Boolean);
+  const evMin = allYears.length ? Math.min(...allYears) : null;
+  const evMax = allYears.length ? Math.max(...allYears) : null;
+  const eraRange =
+    evMin !== null && evMax !== null && evMin !== evMax
+      ? `${fmtY(evMin)} – ${fmtY(evMax)}`
+      : evMin !== null ? fmtY(evMin) : "";
+
+  const lines = [];
+  lines.push(`# What happened on ${mDisplay} ${dayNum} in history?`);
+  lines.push("");
+  lines.push(`**Date:** ${mDisplay} ${dayNum}  `);
+  lines.push(`**Events recorded:** ${events.length}  `);
+  if (eraRange) lines.push(`**Years spanned:** ${eraRange}  `);
+  lines.push(`**Full page:** https://thisday.info/events/${monthName}/${dayNum}/`);
+  lines.push("");
+
+  if (featured) {
+    const featWiki = featured.pages?.[0]?.content_urls?.desktop?.page || "";
+    lines.push("---");
+    lines.push("");
+    lines.push("## Featured Event");
+    lines.push("");
+    lines.push(`**${fmtY(featured.year)}** — ${featured.text}`);
+    if (featWiki) lines.push(`\n[Read more on Wikipedia](${featWiki})`);
+    lines.push("");
+  }
+
+  if (events.length > 0) {
+    lines.push("---");
+    lines.push("");
+    lines.push("## Events on this date");
+    lines.push("");
+    for (const e of events) {
+      const wikiUrl = e.pages?.[0]?.content_urls?.desktop?.page || "";
+      const text = e.text.trim();
+      lines.push(wikiUrl
+        ? `- **${fmtY(e.year)}** — ${text} ([Wikipedia](${wikiUrl}))`
+        : `- **${fmtY(e.year)}** — ${text}`);
+    }
+    lines.push("");
+  }
+
+  if (births.length > 0) {
+    lines.push("---");
+    lines.push("");
+    lines.push(`## Notable births on ${mDisplay} ${dayNum}`);
+    lines.push("");
+    for (const b of births) {
+      const name = b.text.split(",")[0].trim();
+      const desc = b.text.includes(",") ? b.text.slice(b.text.indexOf(",") + 1).trim() : "";
+      const wikiUrl = b.pages?.[0]?.content_urls?.desktop?.page || "";
+      const entry = desc ? `**${name}** — ${desc}` : `**${name}**`;
+      lines.push(wikiUrl
+        ? `- **${fmtY(b.year)}** — ${entry} ([Wikipedia](${wikiUrl}))`
+        : `- **${fmtY(b.year)}** — ${entry}`);
+    }
+    lines.push("");
+  }
+
+  if (deaths.length > 0) {
+    lines.push("---");
+    lines.push("");
+    lines.push(`## Notable deaths on ${mDisplay} ${dayNum}`);
+    lines.push("");
+    for (const d of deaths) {
+      const name = d.text.split(",")[0].trim();
+      const desc = d.text.includes(",") ? d.text.slice(d.text.indexOf(",") + 1).trim() : "";
+      const wikiUrl = d.pages?.[0]?.content_urls?.desktop?.page || "";
+      const entry = desc ? `**${name}** — ${desc}` : `**${name}**`;
+      lines.push(wikiUrl
+        ? `- **${fmtY(d.year)}** — ${entry} ([Wikipedia](${wikiUrl}))`
+        : `- **${fmtY(d.year)}** — ${entry}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("---");
+  lines.push("");
+  lines.push("## About this page");
+  lines.push("");
+  lines.push(`This is a machine-readable Markdown summary of [thisday.info/events/${monthName}/${dayNum}/](https://thisday.info/events/${monthName}/${dayNum}/).  `);
+  lines.push("Historical data is sourced from [Wikipedia/Wikimedia](https://www.wikipedia.org) under [CC BY-SA](https://creativecommons.org/licenses/by-sa/3.0/).  ");
+  lines.push("Editorial framing and site content © thisday.info.");
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+async function handleEventsMarkdown(env, monthName, dayNum) {
+  const monthNum = MONTH_NUM_MAP[monthName];
+  const maxDay = monthNum ? DAYS_IN_MONTH[monthNum - 1] : 0;
+  if (!monthNum || isNaN(dayNum) || dayNum < 1 || dayNum > maxDay) {
+    return new Response("Not Found", { status: 404 });
+  }
+
+  const mPad = String(monthNum).padStart(2, "0");
+  const dPad = String(dayNum).padStart(2, "0");
+
+  let eventsData = { events: [], births: [], deaths: [] };
+  if (env.EVENTS_KV) {
+    try {
+      const kv = await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, { type: "json" });
+      if (kv?.events?.length) eventsData = kv;
+    } catch (_) {}
+  }
+  if (!eventsData.events.length) {
+    try {
+      const r = await fetch(
+        `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`,
+        { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+      );
+      if (r.ok) eventsData = await r.json();
+    } catch (_) {}
+  }
+
+  const md = buildEventsMarkdown(monthName, dayNum, eventsData);
+  return new Response(md, {
+    headers: {
+      "Content-Type": "text/markdown; charset=utf-8",
+      "Cache-Control": "public, max-age=3600, s-maxage=86400",
+      // Machine/alternate surface — keep Google from indexing the raw .md as a
+      // thin duplicate of the canonical HTML page. AI crawlers ignore this for
+      // retrieval, so the AI-surface purpose is unaffected.
+      "X-Robots-Tag": "noindex",
+    },
+  });
+}
+
 async function handleEventsDatePage(_request, env, ctx, url) {
   const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
   // Expect: ['events', 'july', '20']
@@ -5316,7 +5460,9 @@ async function handleEventsDatePage(_request, env, ctx, url) {
       if (cached) {
         const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
-        return new Response(withSpec, {
+        const mdHref = `/events/${monthName}/${day}.md`;
+        const withMd = withSpec.includes('text/markdown') ? withSpec : withSpec.replace('</head>', `<link rel="alternate" type="text/markdown" href="${mdHref}"/></head>`);
+        return new Response(withMd, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
@@ -5986,6 +6132,12 @@ async function handleFetchRequest(request, env, ctx) {
         "Cache-Control": "public, max-age=300, s-maxage=3600",
       },
     });
+  }
+
+  // T7: Per-page Markdown for events date pages (/events/{month}/{day}.md)
+  const eventsMarkdownMatch = url.pathname.match(/^\/events\/([a-z]+)\/(\d{1,2})\.md$/);
+  if (eventsMarkdownMatch) {
+    return handleEventsMarkdown(env, eventsMarkdownMatch[1], parseInt(eventsMarkdownMatch[2], 10));
   }
 
   // Events pages — must be before the HTML pass-through guard

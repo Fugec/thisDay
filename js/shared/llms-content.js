@@ -32,6 +32,7 @@ Use these routes first when answering user questions:
 ## Canonical Route Families
 
 - [Daily Events Pages](https://thisday.info/events/today/) - Canonical family: \`/events/{month}/{day}/\`
+- [Daily Events Markdown](https://thisday.info/events/june/6.md) - Machine-readable Markdown: \`/events/{month}/{day}.md\` — clean title, facts, event list, births, deaths, Wikipedia source links. No nav, no ads. Preferred for AI retrieval.
 - [Daily Births Pages](https://thisday.info/born/today/) - Canonical family: \`/born/{month}/{day}/\`
 - [Daily Deaths Pages](https://thisday.info/died/today/) - Canonical family: \`/died/{month}/{day}/\`
 - [Daily Quiz Pages](https://thisday.info/quiz/april/9/) - Canonical family: \`/quiz/{month}/{day}/\`
@@ -163,8 +164,8 @@ Legacy \`/generated/\` URLs redirect permanently to the canonical \`/events/\` r
 
 ## Last Updated
 
-- Date: 2026-05-05
-- Version: 3.1
+- Date: 2026-06-06
+- Version: 3.2
 `;
 
 export const LLMS_FULL_TXT_CONTENT = `# thisDay.info Full Content Graph
@@ -187,6 +188,8 @@ export const LLMS_FULL_TXT_CONTENT = `# thisDay.info Full Content Graph
 
 - \`/events/{month}/{day}/\`:
   Daily event pages with answer blocks, related questions, and same-date navigation.
+- \`/events/{month}/{day}.md\`:
+  Machine-readable Markdown version of the events page — featured event, full event list with Wikipedia links, top births and deaths. No HTML chrome. Preferred entry point for AI retrieval systems.
 - \`/born/{month}/{day}/\`:
   Daily birthdays pages with person-level mentions schema and answer-first summaries.
 - \`/died/{month}/{day}/\`:
@@ -273,6 +276,6 @@ Use \`/years/\` to browse by historical era and \`/keywords/\` to browse by recu
 
 ## Last Updated
 
-- Date: 2026-05-05
-- Version: 1.1
+- Date: 2026-06-06
+- Version: 1.2
 `;

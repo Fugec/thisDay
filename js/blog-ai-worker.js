@@ -32,6 +32,7 @@ import {
   CF_AI_MODEL,
 } from "./shared/ai-model.js";
 import { callAI, hasAnyTextAIProvider } from "./shared/ai-call.js";
+import { extractFirstSentence, truncateForMeta } from "./shared/seo-text.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -619,15 +620,9 @@ function getQuestionHeadings(eventTitle, pillars = []) {
 }
 
 function extractPlainSentence(text, maxLength = 220) {
-  // Temporarily replace periods in common abbreviations so they don't trigger sentence splits
-  const ABBREV = /\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc|e\.g|i\.e)\./gi;
-  const cleaned = String(text || "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(ABBREV, (m) => m.slice(0, -1) + "\x01");
-
-  const sentence = cleaned.split(/(?<=[.!?])\s+/)[0].replace(/\x01/g, ".");
+  // maskAbbreviationPeriods (via extractFirstSentence) keeps "U.S.", "Dr.",
+  // and single-letter initials from triggering a premature sentence split.
+  const sentence = extractFirstSentence(String(text || "").replace(/<[^>]*>/g, " "));
 
   // Reject AI-truncated text — ends with ellipsis, sentence is incomplete
   if (sentence.endsWith("…") || sentence.endsWith("...")) return "";
@@ -991,11 +986,14 @@ function isWeakCtaTitleLead(value) {
     /\b(details of|story behind|history of|what happened)\b/i.test(lead);
 }
 
+// maskAbbreviationPeriods + extractFirstSentence are imported from
+// ./shared/seo-text.js (single source of truth, also used by seo-worker).
+// They mask periods inside abbreviations ("U.S.", "Dr.") and single-letter
+// initials so a sentence split does not collapse "U.S. Congress passes…" to
+// "U.S" (the June 9, 2026 "U.S — June 9, 1938" incident).
+
 function sourceEventHeadline(eventText, maxLength = 96) {
-  const firstSentence = String(eventText || "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(/(?<=[.!?])\s+/)[0]
+  const firstSentence = extractFirstSentence(eventText)
     .replace(/\s*\([^)]*\)\s*/g, " ")
     .replace(/[.!?]+$/, "")
     .replace(/\s+/g, " ")
@@ -1049,32 +1047,8 @@ function sourceEventHeadline(eventText, maxLength = 96) {
   return "";
 }
 
-/**
- * Trims text to a maximum length for use as a meta description / social snippet.
- * Cuts on a word boundary, strips any trailing dangling function word
- * (preposition/article/conjunction) and trailing punctuation, then appends a
- * single ellipsis only when the text was actually shortened. Prevents the
- * "…a historic first televised event with…" mid-clause cut that reads as broken
- * in a Google result and suppresses click-through.
- */
-function truncateForMeta(text, maxLength) {
-  const clean = String(text || "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (clean.length <= maxLength) return clean;
-  // Reserve one character for the trailing ellipsis.
-  let out = clean
-    .slice(0, maxLength - 1)
-    .replace(/\s+\S*$/, "")
-    .trim();
-  const TRAILING_FUNCTION_WORD_RE =
-    /[\s,;:]+(?:by|of|in|to|for|from|with|on|at|about|as|into|over|after|before|against|between|during|under|within|without|upon|onto|the|a|an|and|but|or|nor)$/i;
-  while (TRAILING_FUNCTION_WORD_RE.test(out)) {
-    out = out.replace(TRAILING_FUNCTION_WORD_RE, "").trim();
-  }
-  out = out.replace(/[\s,;:.!?]+$/, "");
-  return out ? `${out}…` : clean.slice(0, maxLength);
-}
+// truncateForMeta is imported from ./shared/seo-text.js (single source of
+// truth, also used by seo-worker for date-page meta descriptions).
 
 function eventTitleFromCandidate(parsedTitle, candidate) {
   const aiTitle = String(parsedTitle || "").replace(/\s+[-—]\s+.*$/, "").trim();
@@ -1101,8 +1075,7 @@ function eventTitleFromCandidate(parsedTitle, candidate) {
 
   if (!eventText) return aiTitle || pageTitle;
 
-  const firstSentence = eventText
-    .split(/(?<=[.!?])\s+/)[0]
+  const firstSentence = extractFirstSentence(eventText)
     .replace(/\s*\([^)]*\)\s*/g, " ")
     .replace(/[.!?]+$/, "")
     .replace(/\s+/g, " ")
@@ -5236,10 +5209,8 @@ function normalizeContentMetadata(content) {
   alignJsonLdMetadata(content);
 
   if (!content.description || content.description.length < 120 || /^Discover the story of /i.test(content.description)) {
-    const overviewLead = String(content.overviewParagraphs?.[0] || "")
-      .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
-      .replace(/\b(St|Dr|Mr|Mrs|Ms|Prof|Lt|Gen|Sgt|Col|Jr|Sr|vs|etc)\./gi, (m) => m.slice(0, -1) + "\x01");
-    const firstSentence = (overviewLead.split(/(?<=[.!?])\s+/)[0] || "").replace(/\x01/g, ".");
+    const overviewLead = String(content.overviewParagraphs?.[0] || "").replace(/<[^>]+>/g, " ");
+    const firstSentence = extractFirstSentence(overviewLead);
     if (firstSentence.length >= 60) {
       content.description = truncateForMeta(firstSentence, 155);
     } else {

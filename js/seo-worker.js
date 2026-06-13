@@ -22,6 +22,11 @@ import {
   LLMS_TXT_CONTENT,
   LLMS_FULL_TXT_CONTENT,
 } from "./shared/llms-content.js";
+import {
+  extractFirstSentence,
+  truncateForMeta,
+  buildEventsDateTitle,
+} from "./shared/seo-text.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -63,7 +68,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v45/born-v26) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v46/born-v27) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v30 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
@@ -3409,13 +3414,11 @@ function generateEventsDateHTML(
   const topBirths = births.slice(0, 20);
   const topDeaths = deaths.slice(0, 20);
 
-  const pageTitle = featured
-    ? `What Happened on ${mDisplay} ${day}: ${featured.text.split(".")[0]} | thisDay.info`
-    : `What Happened on ${mDisplay} ${day} in History | thisDay.info`;
+  const pageTitle = buildEventsDateTitle({ mDisplay, day, featured });
   const rawDesc = featured
-    ? `Discover what happened on ${mDisplay} ${day} throughout history. In ${featured.year}: ${featured.text.substring(0, 115)}...`
+    ? `Discover what happened on ${mDisplay} ${day} throughout history. In ${featured.year}: ${extractFirstSentence(featured.text)}`
     : `Explore historical events, births, and deaths that occurred on ${mDisplay} ${day} throughout world history.`;
-  const pageDesc = rawDesc.substring(0, 155);
+  const pageDesc = truncateForMeta(rawDesc, 155);
   const ogImg =
     featured?.pages?.[0]?.thumbnail?.source || `${siteUrl}/images/logo.png`;
   const featImg =
@@ -4135,13 +4138,15 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   })();
   const ogImg = featImg || `${siteUrl}/images/logo.png`;
   const pageTitle = featured
-    ? `${featName} & Other Famous Birthdays on ${mDisplay} ${day} | thisDay.info`
-    : `Famous Birthdays on ${mDisplay} ${day} | thisDay.info`;
-  const pageDesc =
+    ? `${featName} & Other Famous Birthdays on ${mDisplay} ${day}`
+    : `Famous Birthdays on ${mDisplay} ${day}`;
+  const pageDesc = truncateForMeta(
     `Discover famous people born on ${mDisplay} ${day} throughout history. ${births.length} notable birthdays including ${births
       .slice(0, 3)
       .map((b) => b.text.split(",")[0])
-      .join(", ")}.`.substring(0, 155);
+      .join(", ")}.`,
+    155,
+  );
 
   const mIdx = mNum - 1;
   const prevDay = day > 1 ? day - 1 : DAYS_IN_MONTH[(mIdx - 1 + 12) % 12];
@@ -4484,13 +4489,15 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   })();
   const ogImg = featImg || `${siteUrl}/images/logo.png`;
   const pageTitle = featured
-    ? `${featName} & Others Who Died on ${mDisplay} ${day} | thisDay.info`
-    : `Notable Deaths on ${mDisplay} ${day} | thisDay.info`;
-  const pageDesc =
+    ? `${featName} & Others Who Died on ${mDisplay} ${day}`
+    : `Notable Deaths on ${mDisplay} ${day}`;
+  const pageDesc = truncateForMeta(
     `Discover notable people who died on ${mDisplay} ${day} throughout history. ${deaths.length} recorded deaths including ${deaths
       .slice(0, 3)
       .map((d) => d.text.split(",")[0])
-      .join(", ")}.`.substring(0, 155);
+      .join(", ")}.`,
+    155,
+  );
 
   const mIdx = mNum - 1;
   const prevDay = day > 1 ? day - 1 : DAYS_IN_MONTH[(mIdx - 1 + 12) % 12];
@@ -4971,7 +4978,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v26-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v27-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -5065,7 +5072,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v25-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v26-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -5450,7 +5457,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v45-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v46-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";

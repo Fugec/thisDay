@@ -71,3 +71,27 @@ export function buildEventsDateTitle({ mDisplay, day, featured }) {
   }
   return `What Happened on ${mDisplay} ${day} in History`;
 }
+
+// Splits text into sentences, abbreviation-safe (shares maskAbbreviationPeriods so
+// "U.S." / "Dr." / single-letter initials never trigger a premature split). Strips
+// any HTML tags first. `minLen` drops fragments shorter than that many characters.
+export function splitSentences(text, minLen = 1) {
+  const clean = String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  return maskAbbreviationPeriods(clean)
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.replace(/\x01/g, ".").trim())
+    .filter((s) => s.length >= minLen);
+}
+
+// Normalizes a string for duplicate detection: tags stripped, lowercased,
+// punctuation removed, whitespace collapsed. Two renderings of the same sentence
+// compare equal so the de-dup scan/guard can detect a block reprinting body text.
+export function normalizeForCompare(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}

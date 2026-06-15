@@ -32,7 +32,7 @@ import {
   CF_AI_MODEL,
 } from "./shared/ai-model.js";
 import { callAI, hasAnyTextAIProvider } from "./shared/ai-call.js";
-import { extractFirstSentence, truncateForMeta } from "./shared/seo-text.js";
+import { extractFirstSentence, truncateForMeta, splitSentences, normalizeForCompare } from "./shared/seo-text.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -322,6 +322,26 @@ function moveEntityStripOutOfArticleHero(html) {
   return withoutStrip.slice(0, newHeroEnd) + "\n" + strip + withoutStrip.slice(newHeroEnd);
 }
 
+function buildTimelineBlock(content) {
+  const items = Array.isArray(content.timeline) ? content.timeline : [];
+  if (!items.length) return "";
+  const rows = items
+    .map(
+      (e) => `        <li class="tl-entry tl-${esc(e.kind || "leadup")}">
+          <span class="tl-date">${esc(e.date || e.year || "")}</span>
+          <span class="tl-label">${esc(e.label || "")}</span>
+        </li>`,
+    )
+    .join("\n");
+  const label = eventNounLabel(content);
+  return `<section class="article-timeline mb-4" aria-label="Timeline">
+      <h2 class="h3">Timeline: the road to ${esc(label)} and its aftermath</h2>
+      <ol class="tl-list">
+${rows}
+      </ol>
+    </section>`;
+}
+
 function buildArticleAnswerBlock(content) {
   // Build grid rows from quickFacts; fall back to the four core fields when empty.
   const usableFacts = (Array.isArray(content.quickFacts) ? content.quickFacts : []).filter(
@@ -343,23 +363,44 @@ function buildArticleAnswerBlock(content) {
     .map((f) => `      <div class="ai-answer-item"><strong>${esc(f.label)}</strong><span>${esc(f.value)}</span></div>`)
     .join("\n");
 
+  const kp = content.keyProvision;
+  const provisionRow = kp && kp.plainLanguage
+    ? `
+    <div class="keyprovision-row">
+      <div class="keyprovision-kicker">${esc(kp.term ? `The provision that mattered — ${kp.term}` : "The provision that mattered")}</div>
+      ${kp.quote ? `<blockquote class="keyprovision-quote">${esc(kp.quote)}</blockquote>` : ""}
+      <p class="keyprovision-plain">${esc(kp.plainLanguage)}</p>
+    </div>`
+    : "";
   return `<section class="ai-answer-card article-body-layer mb-4" aria-label="Short answer">
     <div class="ai-answer-kicker">Short answer</div>
     <div class="ai-answer-grid" aria-label="Key facts">
 ${gridItems}
-    </div>
+    </div>${provisionRow}
   </section>`;
 }
 
 function buildDidYouKnowSlider(facts) {
+  const seen = new Set();
   const cleanedFacts = (Array.isArray(facts) ? facts : [])
     .filter((fact) => typeof fact === "string")
     .map((fact) => fact.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((fact) => {
+      const key = normalizeForCompare(fact);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   if (!cleanedFacts.length) return "";
 
-  const sliderFacts = Array.from({ length: 5 }, (_, index) => {
-    const fact = cleanedFacts[index] || cleanedFacts[index % cleanedFacts.length];
+  // The publication contract requires 5 rendered cards. Prefer the unique facts; pad by
+  // cycling ONLY as a last resort when fewer than 5 unique facts exist, so a generation
+  // shortfall never blocks daily publication (scanArticleQuality separately flags fewer
+  // than 5 distinct so enrichment backfills more before this fallback ever shows).
+  const count = Math.max(5, cleanedFacts.length);
+  const sliderFacts = Array.from({ length: count }, (_, index) => {
+    const fact = cleanedFacts[index] ?? cleanedFacts[index % cleanedFacts.length];
     return `            <article class="blog-cta-col dyn-slide" aria-label="Did you know fact ${index + 1}">
               <p>Did you know</p>
               <p class="dyn-fact">${esc(fact)}</p>
@@ -652,63 +693,97 @@ function ensureFactDenseOpening(paragraphs, leadSentence, requiredTerms = []) {
 
 function enforceAnswerFirstSections(content) {
   const locationPart = content.location ? ` in ${content.location}` : "";
+  const nounLabel = eventNounLabel(content);
   ensureFactDenseOpening(
     content.overviewParagraphs,
-    `${content.eventTitle} happened on ${content.historicalDate}${locationPart}.`,
+    `${nounLabel} happened on ${content.historicalDate}${locationPart}.`,
     [content.eventTitle, content.historicalDate, content.location],
   );
   ensureFactDenseOpening(
     content.eyewitnessParagraphs,
-    `Contemporary accounts described ${content.eventTitle} as it unfolded on ${content.historicalDate}${locationPart}.`,
+    `Contemporary accounts described ${nounLabel} as it unfolded on ${content.historicalDate}${locationPart}.`,
     [content.eventTitle, "witness", "account", content.historicalDate],
   );
   ensureFactDenseOpening(
     content.aftermathParagraphs,
-    `The immediate aftermath of ${content.eventTitle} began as soon as events on ${content.historicalDate} were over.`,
+    `The immediate aftermath of ${nounLabel} began as soon as events on ${content.historicalDate} were over.`,
     [content.eventTitle, "aftermath", "response", content.historicalDate],
   );
   ensureFactDenseOpening(
     content.conclusionParagraphs,
-    `The lasting importance of ${content.eventTitle} lies in what changed after ${content.historicalDate}.`,
+    `The lasting importance of ${nounLabel} lies in what changed after ${content.historicalDate}.`,
     [content.eventTitle, "legacy", "importance", content.historicalDate],
   );
 }
 
 function buildArticleRelatedQuestionsBlock(content, pillars = []) {
-  const overviewAnswer =
-    extractPlainSentence(content?.overviewParagraphs?.[0]) || content.description;
-  const eyewitnessAnswer =
-    extractPlainSentence(content?.eyewitnessParagraphs?.[0]) ||
-    `The article follows contemporary accounts connected to ${content.eventTitle}.`;
-  const aftermathAnswer =
-    extractPlainSentence(content?.aftermathParagraphs?.[0]) ||
-    `The aftermath section explains what changed in the days and months after ${content.eventTitle}.`;
-  const legacyAnswer =
-    extractPlainSentence(content?.conclusionParagraphs?.[0]) ||
-    ((content.quickFacts || []).find((fact) => /significance|legacy|impact/i.test(fact.label))?.value || content.description);
-  const topicLinks = getArticleTopicHubMatches(content, 3, pillars);
-  const [q1, q2, q3, q4] = getQuestionHeadings(content.eventTitle, pillars);
+  const nounLabel = eventNounLabel(content);
+  const date = content.historicalDate || "the date";
+  const loc = content.location ? ` in ${content.location}` : "";
+  const bodyNorm = normalizeForCompare(
+    [
+      ...(content.overviewParagraphs || []),
+      ...(content.eyewitnessOrChronicle || []),
+      ...(content.aftermathParagraphs || []),
+      ...(content.conclusionParagraphs || []),
+    ].join(" "),
+  );
+  const factNorms = (content.quickFacts || []).map((f) => normalizeForCompare(f?.value)).filter(Boolean);
+  const isDup = (text) => {
+    const n = normalizeForCompare(text);
+    if (!n || n.length < 25) return false;
+    if (bodyNorm.includes(n)) return true;
+    return factNorms.some((q) => q && (q.includes(n) || n.includes(q)));
+  };
+  const persons = (content.keyTerms || [])
+    .filter((t) => t && t.type === "person" && t.term)
+    .map((t) => t.term);
+  const leadup = (content.timeline || []).filter((e) => e?.kind === "leadup").map((e) => e.label);
+  const aftermathEntries = (content.timeline || []).filter((e) => e?.kind === "aftermath").map((e) => e.label);
 
-  return `<section class="mt-5 p-4 rounded border" style="background-color:rgba(0,0,0,.03);color:var(--text)">
-    <div class="ai-answer-kicker">Related questions</div>
-    <h2 class="h3 mb-3">Questions readers ask about ${esc(content.eventTitle)}</h2>
-    <div class="related-question-grid">
-      <article class="related-question-card">
-        <p class="related-question-title">${esc(q1)}</p>
-        <p>${esc(overviewAnswer)}</p>
-      </article>
-      <article class="related-question-card">
-        <p class="related-question-title">${esc(q2)}</p>
-        <p>${esc(eyewitnessAnswer)}</p>
-      </article>
-      <article class="related-question-card">
-        <p class="related-question-title">${esc(q3)}</p>
-        <p>${esc(aftermathAnswer)}</p>
-      </article>
-      <article class="related-question-card">
-        <p class="related-question-title">${esc(q4)}</p>
-        <p>${esc(legacyAnswer)}</p>
-      </article>
+  const pick = (candidates, fallback) => candidates.find((c) => c && !isDup(c)) || fallback;
+  const overviewAnswer = pick(
+    [leadup.length ? `The lead-up included ${leadup.slice(0, 3).join("; ")}.` : ""],
+    `The conditions that produced ${nounLabel} on ${date}${loc} are traced earlier in this article.`,
+  );
+  const eyewitnessAnswer = pick(
+    [persons.length ? `Key figures included ${persons.slice(0, 3).join(", ")}.` : ""],
+    `The people who shaped ${nounLabel} are profiled in the People in this story strip above.`,
+  );
+  const aftermathAnswer = pick(
+    [aftermathEntries.length ? `In the aftermath: ${aftermathEntries.slice(0, 3).join("; ")}.` : ""],
+    `What changed after ${nounLabel} is covered in the aftermath section above.`,
+  );
+  const legacyAnswer = pick(
+    [],
+    `${nounLabel} still matters for how it shaped later events; the analysis section weighs its legacy.`,
+  );
+  const topicLinks = getArticleTopicHubMatches(content, 3, pillars);
+  const [q1, q2, q3, q4] = getQuestionHeadings(nounLabel, pillars);
+
+  const faqPairs = [
+    [q1, overviewAnswer],
+    [q2, eyewitnessAnswer],
+    [q3, aftermathAnswer],
+    [q4, legacyAnswer],
+  ];
+  const faqItems = faqPairs
+    .map(
+      ([q, a], i) => `        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false" aria-controls="rq-a${i + 1}">
+            <span>${esc(q)}</span><span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a" id="rq-a${i + 1}" hidden>
+            <p>${esc(a)}</p>
+          </div>
+        </div>`,
+    )
+    .join("\n");
+
+  return `<section class="faq-section mt-5" aria-label="Related questions">
+    <h2 class="h3 mb-3">Questions readers ask about ${esc(nounLabel)}</h2>
+    <div class="faq-list">
+${faqItems}
     </div>
     ${
       topicLinks.length > 0
@@ -725,6 +800,16 @@ function buildArticleRelatedQuestionsBlock(content, pillars = []) {
     </div>`
         : ""
     }
+    <script>
+      document.querySelectorAll('.faq-q').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var open = this.getAttribute('aria-expanded') === 'true';
+          var ans = document.getElementById(this.getAttribute('aria-controls'));
+          this.setAttribute('aria-expanded', open ? 'false' : 'true');
+          ans.hidden = open;
+        });
+      });
+    </script>
   </section>`;
 }
 
@@ -960,6 +1045,27 @@ function getTitleLead(title) {
   return String(title || "")
     .replace(/\s+[-—]\s+.*$/, "")
     .trim();
+}
+
+// Derives a short NOUN-PHRASE label from a (possibly clause-style) event title for use
+// in "What led to {X}?" / answer-first sentence slots. The display <title>/<h1> are NOT
+// changed. Verb-pattern-independent (the title's verb may not be a recognized headline
+// verb, e.g. "puts"): a short title is already a noun phrase; otherwise prefer the
+// proper-noun object after a trailing preposition ("...to Magna Carta"), then the
+// trailing run of capitalized words, else a safe generic fallback.
+function eventNounLabel(content) {
+  const raw = getTitleLead(content?.eventTitle || content?.title || "").trim();
+  if (!raw) return "this event";
+  const words = raw.split(/\s+/);
+  // Already a short noun phrase (e.g. "Battle of Hastings", "Magna Carta").
+  if (words.length <= 4 && /^[A-Z]/.test(raw)) return raw;
+  // Proper-noun object after a trailing preposition ("...to Magna Carta").
+  const tail = raw.match(/\b(?:to|of|at|in|on|over|for|against)\s+([A-Z][\w''.-]*(?:\s+(?:of|the|and|de|la)?\s*[A-Z][\w''.-]*)*)\s*$/);
+  if (tail && tail[1]) return tail[1].trim();
+  // Else the trailing run of capitalized words ("...the Fair Labor Standards Act").
+  const capRun = raw.match(/([A-Z][\w''.-]*(?:\s+[A-Z][\w''.-]*)*)\s*$/);
+  if (capRun && capRun[1]) return capRun[1].trim();
+  return "this event";
 }
 
 function repairStackedTitleLead(value) {
@@ -1654,8 +1760,8 @@ async function chooseEventForDate(
 // Shared support popup (Buy Me a Coffee) — injected before </body> on all pages
 // ---------------------------------------------------------------------------
 function supportPopupSnippet() {
-  return `<style>#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}#supportPopup.show{display:flex;opacity:1}.support-popup-content{background:var(--btn-bg,#1b3a2d);color:#fff;padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid rgba(255,255,255,.15);box-shadow:0 8px 25px rgba(0,0,0,.35);position:relative;animation:popupFadeIn .35s ease}@keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}.support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:rgba(255,255,255,.7);line-height:1;padding:0}.support-close-btn:hover{color:#fff}</style>
-<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px;color:rgba(255,255,255,.85)">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:var(--btn-bg,#1b3a2d);color:var(--accent,#9dc43a);border:1.5px solid var(--accent,#9dc43a);border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
+  return `<style>#supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}#supportPopup.show{display:flex;opacity:1}.support-popup-content{background:#fff;color:#174832;padding:25px 28px;border-radius:12px;max-width:300px;width:90%;text-align:center;border:1px solid rgba(0,0,0,.12);box-shadow:0 16px 32px -8px rgba(0,0,0,.18);position:relative;animation:popupFadeIn .35s ease}@keyframes popupFadeIn{from{transform:scale(.92);opacity:0}to{transform:scale(1);opacity:1}}.support-close-btn{position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem;cursor:pointer;color:#7a8a80;line-height:1;padding:0}.support-close-btn:hover{color:#174832}</style>
+<div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px;color:#3a5a48">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:#174832;color:#fff;border:1.5px solid #174832;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
 <script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{var _t=localStorage.getItem('supportPopupClosed');if(_t&&Date.now()-Number(_t)<86400000)return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed',String(Date.now()));}catch(e){}});})();<\/script>`;
 }
 
@@ -4416,6 +4522,14 @@ function scanArticleQuality(content) {
     });
   }
 
+  if (Array.isArray(content.didYouKnowFacts)) {
+    const uniqueDyk = new Set(
+      content.didYouKnowFacts.map((f) => normalizeForCompare(f)).filter(Boolean),
+    );
+    if (uniqueDyk.size < 5) {
+      issues.push(`didYouKnowFacts has only ${uniqueDyk.size} unique facts; needs 5 distinct (slider no longer repeats).`);
+    }
+  }
   issues.push(...scanEditorialNoteQuality(content));
   if (!plainText(content.contentRationale).match(/\bWikipedia\b/i) || wordCount(content.contentRationale) < 35) {
     issues.push("contentRationale must explain the article's specific value beyond Wikipedia.");
@@ -4428,6 +4542,37 @@ function scanArticleQuality(content) {
     );
   } else {
     console.log("scanArticleQuality: clean");
+  }
+  return issues;
+}
+
+// Detects sentences (>= 45 chars) that appear in 2+ visible-text fields, the source of
+// the on-page duplicate-content audit finding. Returns human-readable issue strings that
+// improveArticleQuality can act on.
+function scanIntraPageDuplication(content) {
+  const entries = [];
+  for (const f of ["overviewParagraphs", "eyewitnessOrChronicle", "aftermathParagraphs", "conclusionParagraphs"]) {
+    (Array.isArray(content[f]) ? content[f] : []).forEach((p) => entries.push([f, p]));
+  }
+  (Array.isArray(content.didYouKnowFacts) ? content.didYouKnowFacts : []).forEach((p) => entries.push(["didYouKnowFacts", p]));
+  for (const f of ["analysisGood", "analysisBad"]) {
+    (Array.isArray(content[f]) ? content[f] : []).forEach((item) => entries.push([f, item?.detail || ""]));
+  }
+  const map = new Map();
+  for (const [field, text] of entries) {
+    for (const sentence of splitSentences(text, 45)) {
+      const key = normalizeForCompare(sentence);
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, { sentence, fields: [] });
+      map.get(key).fields.push(field);
+    }
+  }
+  const issues = [];
+  for (const { sentence, fields } of map.values()) {
+    if (fields.length > 1) {
+      const distinct = [...new Set(fields)];
+      issues.push(`Duplicate sentence across ${distinct.join(", ")}: "${sentence.slice(0, 80)}".`);
+    }
   }
   return issues;
 }
@@ -4622,6 +4767,118 @@ async function improveArticleQuality(env, content, issues) {
   const remaining = scanArticleQuality(updated);
   console.log(`improveArticleQuality: done — ${remaining.length} issue(s) still present after repair`);
   return updated;
+}
+
+async function generateLearningBlocks(env, content) {
+  const body = [
+    ...(content.overviewParagraphs || []),
+    ...(content.eyewitnessOrChronicle || []),
+    ...(content.aftermathParagraphs || []),
+    ...(content.conclusionParagraphs || []),
+  ].join("\n\n").replace(/<[^>]+>/g, " ").slice(0, 6000);
+  const extract = String(content.wikiExtract || content.sourceExtract || "").slice(0, 2000);
+  if (!body.trim()) return;
+
+  const systemPrompt =
+    "You add two factual learning aids to a finished history article. Output STRICT JSON only.\n" +
+    "1) keyProvision: the single most important clause/provision/quote of the event, explained in plain language for a curious general reader. " +
+    "Fields: term (short label), quote (the source clause/quote if any, else \"\"), plainLanguage (1-2 sentences, no jargon, do NOT restate generic significance).\n" +
+    "2) timeline: 4-7 dated entries showing lead-up, the event, and aftermath. " +
+    "Use ONLY dates that appear in the supplied article body or source extract; never invent a date. " +
+    "Each entry: {\"year\":\"1215\",\"date\":\"June 15, 1215\",\"label\":\"...\",\"kind\":\"leadup|event|aftermath\"}. " +
+    "Exactly one entry has kind \"event\" and matches the event date. No dashes or em-dashes in any text.";
+  const userMessage =
+    `Event: ${content.eventTitle}\nEvent date: ${content.historicalDate}\n\n` +
+    `ARTICLE BODY:\n${body}\n\n${extract ? `SOURCE EXTRACT:\n${extract}\n\n` : ""}` +
+    `Return ONLY JSON: {"keyProvision":{"term":"","quote":"","plainLanguage":""},"timeline":[]}`;
+
+  let raw;
+  try {
+    raw = await callAI(env, [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ], { maxTokens: 1500, timeoutMs: 40_000 });
+  } catch (err) {
+    console.warn(`generateLearningBlocks: AI call failed (${err.message}) — skipping`);
+    return;
+  }
+  const cleaned = String(raw || "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) { console.warn("generateLearningBlocks: no JSON — skipping"); return; }
+  let parsed;
+  try { parsed = JSON.parse(match[0]); } catch { console.warn("generateLearningBlocks: parse error — skipping"); return; }
+
+  if (parsed.keyProvision && typeof parsed.keyProvision === "object") {
+    content.keyProvision = {
+      term: String(parsed.keyProvision.term || "").trim(),
+      quote: String(parsed.keyProvision.quote || "").trim(),
+      plainLanguage: String(parsed.keyProvision.plainLanguage || "").trim(),
+    };
+  }
+  if (Array.isArray(parsed.timeline)) {
+    content.timeline = parsed.timeline
+      .filter((e) => e && typeof e === "object")
+      .map((e) => ({
+        year: String(e.year || "").trim(),
+        date: String(e.date || e.year || "").trim(),
+        label: String(e.label || "").trim(),
+        kind: ["leadup", "event", "aftermath"].includes(e.kind) ? e.kind : "leadup",
+      }))
+      .filter((e) => e.label && (e.year || e.date));
+  }
+}
+
+function groundLearningBlocks(content) {
+  const corpus = normalizeForCompare([
+    ...(content.overviewParagraphs || []),
+    ...(content.eyewitnessOrChronicle || []),
+    ...(content.aftermathParagraphs || []),
+    ...(content.conclusionParagraphs || []),
+    String(content.wikiExtract || content.sourceExtract || ""),
+  ].join(" "));
+  // Year = the LAST 1-4 digit run, so "June 15, 1215" yields 1215 (not the day "15").
+  const yearOf = (e) => {
+    const m = String(e.year || e.date || "").match(/(\d{1,4})\D*$/);
+    return m ? m[1] : "";
+  };
+  const yearNum = (e) => {
+    const y = yearOf(e);
+    if (!y) return 0;
+    return /\bbce?\b/i.test(`${e.year} ${e.date}`) ? -parseInt(y, 10) : parseInt(y, 10);
+  };
+
+  if (Array.isArray(content.timeline)) {
+    const em = String(content.historicalDate || "").match(/(\d{1,4})\D*$/);
+    const eventYear = em ? em[1] : "";
+    let kept = content.timeline.filter((e) => {
+      const y = yearOf(e);
+      return y && corpus.includes(y);
+    });
+    if (!kept.some((e) => e.kind === "event") && eventYear) {
+      kept.push({ year: eventYear, date: content.historicalDate, label: content.eventTitle, kind: "event" });
+    }
+    const seen = new Set();
+    kept = kept
+      .filter((e) => {
+        const k = `${yearOf(e)}|${normalizeForCompare(e.label)}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
+      .sort((a, b) => yearNum(a) - yearNum(b));
+    if (kept.length >= 3) content.timeline = kept;
+    else delete content.timeline;
+  }
+
+  if (content.keyProvision) {
+    const kp = content.keyProvision;
+    const grounded =
+      (kp.term && corpus.includes(normalizeForCompare(kp.term))) ||
+      (kp.quote && corpus.includes(normalizeForCompare(kp.quote).slice(0, 40)));
+    if (!grounded || normalizeForCompare(kp.plainLanguage).length < 40) {
+      delete content.keyProvision;
+    }
+  }
 }
 
 /**
@@ -5513,7 +5770,7 @@ async function enrichPublishedPost(env, slug) {
   const fixed = violations.length > 0
     ? await fixBannedPhrases(env, content, violations)
     : content;
-  const qualityIssues = scanArticleQuality(fixed);
+  const qualityIssues = [...scanArticleQuality(fixed), ...scanIntraPageDuplication(fixed)];
   const qualityRepaired = qualityIssues.length > 0
     ? await improveArticleQuality(env, fixed, qualityIssues)
     : fixed;
@@ -5526,7 +5783,7 @@ async function enrichPublishedPost(env, slug) {
   if (postReviewViolations.length > 0) {
     enriched = await fixBannedPhrases(env, enriched, postReviewViolations);
   }
-  const postReviewQualityIssues = scanArticleQuality(enriched);
+  const postReviewQualityIssues = [...scanArticleQuality(enriched), ...scanIntraPageDuplication(enriched)];
   if (postReviewQualityIssues.length > 0) {
     enriched = await improveArticleQuality(env, enriched, postReviewQualityIssues);
   }
@@ -5563,7 +5820,7 @@ async function enrichPublishedPost(env, slug) {
   await generateEditorialNote(env, enriched, date);
   await chk("post-editorial-note");
 
-  const editorialQualityIssues = scanArticleQuality(enriched);
+  const editorialQualityIssues = [...scanArticleQuality(enriched), ...scanIntraPageDuplication(enriched)];
   if (editorialQualityIssues.length > 0) {
     enriched = await improveArticleQuality(env, enriched, editorialQualityIssues);
   }
@@ -5573,6 +5830,17 @@ async function enrichPublishedPost(env, slug) {
   if (!dateValidation.ok) {
     throw new Error(`Refusing to enrich ${slug}: ${dateValidation.reason}`);
   }
+
+  await chk("pre-learning-blocks");
+  try {
+    await generateLearningBlocks(env, enriched);
+    groundLearningBlocks(enriched);
+  } catch (err) {
+    console.warn(`Blog: learning-blocks pass failed for ${slug}: ${err.message}`);
+    delete enriched.keyProvision;
+    delete enriched.timeline;
+  }
+
   normalizeContentMetadata(enriched);
 
   await chk("pre-entities");
@@ -7353,7 +7621,10 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "didYouKnowFacts": [
     "A genuinely surprising lesser-known fact — something most people would not expect, 2 to 3 sentences, minimum 40 words. Must include a specific name, number, or place.",
     "A detail that reframes the main story or reveals a hidden layer of complexity, 2 to 3 sentences, minimum 40 words.",
-    "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 2 to 3 sentences, minimum 40 words."
+    "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 2 to 3 sentences, minimum 40 words.",
+    "A fact about a specific person involved — their background, motive, or fate — that most accounts skip, 2 to 3 sentences, minimum 40 words.",
+    "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 2 to 3 sentences, minimum 40 words.",
+    "A fact about the long-term legacy or a surprising modern echo of the event, 2 to 3 sentences, minimum 40 words. Provide SIX facts in total and make every one distinct — never restate another."
   ],
   "overviewParagraphs": [
     "Paragraph 1 (claim + strongest evidence; ~120+ words): Open with a striking scene, a concrete detail, or a blunt declarative statement — never with a rhetorical question. State the core claim directly. Include the single strongest, attributable piece of evidence (name, year, number, or place) that supports it. No chatty openers like 'So, what happened' or 'For starters'. Start with the most important thing.",
@@ -9917,8 +10188,8 @@ ${JSON.stringify({
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/css/style.css" />
-    <link rel="stylesheet" href="/css/custom.css" />
+    <link rel="stylesheet" href="/css/style.css?v=8" />
+    <link rel="stylesheet" href="/css/custom.css?v=24" />
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
@@ -10157,6 +10428,8 @@ ${eyewitnessQuoteBlock}
               style="display:inline-block;background:#fff;color:#ff0000;font-weight:700;padding:6px 16px;border-radius:4px;text-decoration:none;font-size:0.9rem;"
             >Search Videos</a>
           </div>
+
+          ${buildTimelineBlock(c)}
 
           <!-- Aftermath -->
           ${
@@ -10745,8 +11018,8 @@ ${JSON.stringify(
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/css/style.css" />
-    <link rel="stylesheet" href="/css/custom.css" />
+    <link rel="stylesheet" href="/css/style.css?v=8" />
+    <link rel="stylesheet" href="/css/custom.css?v=24" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -11018,8 +11291,8 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/css/style.css" />
-    <link rel="stylesheet" href="/css/custom.css" />
+    <link rel="stylesheet" href="/css/style.css?v=8" />
+    <link rel="stylesheet" href="/css/custom.css?v=24" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>

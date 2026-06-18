@@ -537,8 +537,7 @@ img {
 /* Hero */
 .hero {
   text-align: center;
-  padding: 3rem 1.5rem 2rem;
-  background: #f2f7f2;
+  background: #fff;
 }
 .eyebrow {
   font-size: 0.75rem;
@@ -570,7 +569,7 @@ img {
 .hero p {
   color: #4a4a4a;
   max-width: 640px;
-  margin: 0 auto 1rem;
+  margin: 2rem auto 1rem;
   line-height: 1.75;
 }
 .hero-meta {
@@ -583,7 +582,6 @@ img {
   font-style: normal;
   color: var(--text-muted);
   font-weight: 500;
-  letter-spacing: 0.01em;
 }
 .hero-meta span {
   display: flex;
@@ -1105,6 +1103,15 @@ img {
 .btn:hover {
   background: var(--btn-hover);
   color: var(--btn-text);
+}
+
+/* Unify all page widths with the homepage: the <main> on articles and SEO
+   pages uses Bootstrap's .container (~1320px cap) — drop that cap so they fill
+   the body (capped at 1920px) just like the homepage's full-width main. Keeps
+   the container's gutter padding so Bootstrap .row gutters still align. The
+   !important overrides the few inline max-width styles on SEO page mains. */
+main.container {
+  max-width: none !important;
 }
 
 /* Calendar */
@@ -1722,6 +1729,7 @@ img {
   }
   .hero p {
     font-size: 1rem;
+    margin: 0 auto 1rem;
   }
   #historicalCarousel .carousel-item img {
     height: 320px;

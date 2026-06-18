@@ -720,44 +720,36 @@ function buildArticleRelatedQuestionsBlock(content, pillars = []) {
   const nounLabel = eventNounLabel(content);
   const date = content.historicalDate || "the date";
   const loc = content.location ? ` in ${content.location}` : "";
-  const bodyNorm = normalizeForCompare(
-    [
-      ...(content.overviewParagraphs || []),
-      ...(content.eyewitnessOrChronicle || []),
-      ...(content.aftermathParagraphs || []),
-      ...(content.conclusionParagraphs || []),
-    ].join(" "),
-  );
-  const factNorms = (content.quickFacts || []).map((f) => normalizeForCompare(f?.value)).filter(Boolean);
-  const isDup = (text) => {
-    const n = normalizeForCompare(text);
-    if (!n || n.length < 25) return false;
-    if (bodyNorm.includes(n)) return true;
-    return factNorms.some((q) => q && (q.includes(n) || n.includes(q)));
-  };
   const persons = (content.keyTerms || [])
     .filter((t) => t && t.type === "person" && t.term)
     .map((t) => t.term);
   const leadup = (content.timeline || []).filter((e) => e?.kind === "leadup").map((e) => e.label);
   const aftermathEntries = (content.timeline || []).filter((e) => e?.kind === "aftermath").map((e) => e.label);
+  const sigFact =
+    (content.quickFacts || []).find((f) => /significance|legacy|impact/i.test(f?.label || ""))?.value || "";
+  const firstOf = (arr) => extractFirstSentence((arr || [])[0] || "").trim();
 
-  const pick = (candidates, fallback) => candidates.find((c) => c && !isDup(c)) || fallback;
-  const overviewAnswer = pick(
-    [leadup.length ? `The lead-up included ${leadup.slice(0, 3).join("; ")}.` : ""],
-    `The conditions that produced ${nounLabel} on ${date}${loc} are traced earlier in this article.`,
-  );
-  const eyewitnessAnswer = pick(
-    [persons.length ? `Key figures included ${persons.slice(0, 3).join(", ")}.` : ""],
-    `The people who shaped ${nounLabel} are profiled in the People in this story strip above.`,
-  );
-  const aftermathAnswer = pick(
-    [aftermathEntries.length ? `In the aftermath: ${aftermathEntries.slice(0, 3).join("; ")}.` : ""],
-    `What changed after ${nounLabel} is covered in the aftermath section above.`,
-  );
-  const legacyAnswer = pick(
-    [],
-    `${nounLabel} still matters for how it shaped later events; the analysis section weighs its legacy.`,
-  );
+  // Each question gets a SUBSTANTIVE answer: prefer compact structured data
+  // (timeline lead-up/aftermath, key people, the Significance fact); otherwise
+  // summarize the relevant body section. We no longer emit "see the section
+  // above" pointer text — every question must actually be answered.
+  const overviewAnswer =
+    (leadup.length ? `The lead-up included ${leadup.slice(0, 3).join("; ")}.` : "") ||
+    firstOf(content.overviewParagraphs) ||
+    `${nounLabel} unfolded on ${date}${loc}.`;
+  const eyewitnessAnswer =
+    (persons.length ? `Key figures included ${persons.slice(0, 3).join(", ")}.` : "") ||
+    firstOf(content.eyewitnessOrChronicle) ||
+    firstOf(content.overviewParagraphs) ||
+    `The principal figures in ${nounLabel} are profiled above.`;
+  const aftermathAnswer =
+    (aftermathEntries.length ? `In the aftermath: ${aftermathEntries.slice(0, 3).join("; ")}.` : "") ||
+    firstOf(content.aftermathParagraphs) ||
+    `${nounLabel} reshaped what followed on and after ${date}.`;
+  const legacyAnswer =
+    sigFact ||
+    firstOf(content.conclusionParagraphs) ||
+    `${nounLabel} remains significant for how it shaped later events.`;
   const topicLinks = getArticleTopicHubMatches(content, 3, pillars);
   const [q1, q2, q3, q4] = getQuestionHeadings(nounLabel, pillars);
 
@@ -998,6 +990,21 @@ function buildCanonicalTitle(eventTitle, historicalDate) {
   return historicalDate ? `${baseTitle} — ${historicalDate}` : baseTitle;
 }
 
+// SEO budget for the headline portion of a title (everything before " — Month
+// Day, Year"). The full <title> shown in search results should stay near ~60
+// chars; the date suffix is ~14-21 chars, so the headline itself targets ~50.
+// A Wikipedia event sentence whose shortest complete clause exceeds this is
+// NOT truncated into a fragment — sourceEventHeadline returns "" and the caller
+// falls back to the AI's purpose-written concise headline instead.
+const HEADLINE_SEO_MAX = 50;
+
+// Upper bound for a complete DESCRIPTIVE source clause kept when nothing shorter
+// works. A complete, information-rich sentence (e.g. "Ten people are killed in a
+// shooting at a VTA rail yard in San Jose") is always preferred over a shorter
+// but abbreviated/incomplete label ("VTA Rail Yard Shooting Kills") — the
+// May 26, 2026 incident. We shorten only when it does not cost information.
+const HEADLINE_SOURCE_MAX = 75;
+
 const HEADLINE_ACTION_VERB_PATTERN =
   "founds?|founded|forms?|formed|creates?|created|establishes?|established|" +
   "launches?|launched|opens?|opened|holds?|held|honors?|honored|honours?|honoured|" +
@@ -1009,6 +1016,7 @@ const HEADLINE_ACTION_VERB_PATTERN =
   "rejects?|rejected|orders?|ordered|visits?|visited|rules?|ruled|crashes?|crashed|" +
   "explodes?|exploded|sinks?|sank|sunk|shoots?|shot|surrenders?|surrendered|defeats?|defeated|" +
   "deports?|deported|fires?|fired|collapses?|collapsed|destroys?|destroyed|" +
+  "bombs?|bombed|" +
   "burns?|burned|vanishes?|vanished|disappears?|disappeared|ignites?|ignited|" +
   "erupts?|erupted|plunges?|plunged|escapes?|escaped|acquits?|acquitted|" +
   "convicts?|convicted|executes?|executed|rescues?|rescued|detains?|detained|" +
@@ -1098,9 +1106,26 @@ function isWeakCtaTitleLead(value) {
 // initials so a sentence split does not collapse "U.S. Congress passes…" to
 // "U.S" (the June 9, 2026 "U.S — June 9, 1938" incident).
 
-function sourceEventHeadline(eventText, maxLength = 96) {
-  const firstSentence = extractFirstSentence(eventText)
-    .replace(/\s*\([^)]*\)\s*/g, " ")
+// Wikipedia "On This Day" entries often prepend a topic tag like
+// "Napoleonic Wars:", "World War II:", "Cold War:", "American Civil War:"
+// before the real event clause. The tag is not part of the headline and only
+// inflates its length (the June 18, 2026 "Napoleonic Wars: …by the Duke"
+// incident). Strip a leading run of 2-4 capitalized words (with small
+// connectors) ending in a colon. A single capitalized word before the colon is
+// left alone so a real subject ("Lincoln: …") is never eaten.
+function stripLeadingTopicPrefix(text) {
+  const out = String(text || "").replace(
+    /^[A-Z][\w&.'-]*(?:\s+(?:of|the|and|&|[A-Z0-9][\w&.'-]*)){1,3}\s*:\s+/,
+    "",
+  );
+  // Only accept the stripped form when a substantial clause remains.
+  return out.length >= 15 ? out : String(text || "");
+}
+
+function sourceEventHeadline(eventText, maxLength = HEADLINE_SEO_MAX) {
+  const firstSentence = stripLeadingTopicPrefix(
+    extractFirstSentence(eventText).replace(/\s*\([^)]*\)\s*/g, " "),
+  )
     .replace(/[.!?]+$/, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -1137,16 +1162,23 @@ function sourceEventHeadline(eventText, maxLength = 96) {
   }
   if (bestCommaClause) return bestCommaClause;
 
-  // Strategy 3: word-boundary truncation — find the last complete word that
-  // fits within maxLength and still contains a headline verb. Strip any
-  // trailing preposition/article/conjunction that leaves a dangling phrase
-  // (e.g. "…assassinated in Belgrade by" → "…assassinated in Belgrade").
+  // Strategy 3: word-boundary truncation — but ONLY when the cut lands on a
+  // natural clause boundary (sentence end, comma/semicolon/colon, or a
+  // coordinating conjunction). Truncating in the MIDDLE of a phrase silently
+  // drops the key object and produces a fragment ("…by the Duke" — Duke of
+  // whom?; "…results in the defeat" — of whom?). Rather than emit that, we
+  // return "" so the caller uses the AI's concise headline. We still strip a
+  // trailing function word first so the boundary check sees a clean prefix.
   const TRAILING_FUNCTION_WORD_RE = /\s+(?:by|of|in|to|for|from|with|on|at|about|as|into|over|after|before|against|between|during|under|within|without|upon|onto|the|a|an|and|but|or|nor)$/i;
   let truncated = firstSentence.slice(0, maxLength).replace(/\s+\S*$/, "").trim();
   while (TRAILING_FUNCTION_WORD_RE.test(truncated)) {
     truncated = truncated.replace(TRAILING_FUNCTION_WORD_RE, "").trim();
   }
-  if (truncated.length >= 35 && hasMainClauseVerb(truncated)) {
+  const remainder = firstSentence.slice(truncated.length);
+  const cutIsClean = /^\s*(?:$|[,;:]|\s(?:and|but|or|nor|while|after|before)\b)/i.test(
+    remainder,
+  );
+  if (cutIsClean && truncated.length >= 35 && hasMainClauseVerb(truncated)) {
     return truncated;
   }
 
@@ -1160,38 +1192,43 @@ function eventTitleFromCandidate(parsedTitle, candidate) {
   const aiTitle = String(parsedTitle || "").replace(/\s+[-—]\s+.*$/, "").trim();
   const pageTitle = String(candidate?.pageTitle || "").trim();
   const eventText = String(candidate?.text || "").replace(/\s+/g, " ").trim();
+  // Tier 1 — a complete source clause within the tight SEO budget (best case:
+  // short AND complete).
   const sourceHeadline = sourceEventHeadline(eventText);
   if (sourceHeadline) return sourceHeadline;
 
-  const evidenceTitle = deriveCtaEventTitle(pageTitle || aiTitle, eventText);
-  if (evidenceTitle && evidenceTitle !== pageTitle) {
-    return evidenceTitle.length > 96
-      ? `${evidenceTitle.slice(0, 96).trim()}...`
-      : evidenceTitle;
-  }
+  // Tier 2 — the AI's purpose-written concise headline, but only when it is a
+  // genuinely complete clause: a strong action verb that is NOT the last word
+  // (so it has an object). This rejects the May 26 stacked-label anti-pattern
+  // "VTA Rail Yard Shooting Kills" (ends on a bare verb, no object) while
+  // accepting "Battle of Waterloo Ends Napoleon's Reign".
+  const aiIsCompleteHeadline =
+    aiTitle &&
+    aiTitle.length <= HEADLINE_SEO_MAX &&
+    aiTitle.toLowerCase() !== pageTitle.toLowerCase() &&
+    hasStrongTitleAction(aiTitle) &&
+    !titleEndsWithVerb(aiTitle) &&
+    !/\b(Founding|Creation|Launch|Opening|Completion|Presentation)\b$/i.test(aiTitle);
+  if (aiIsCompleteHeadline) return aiTitle;
 
+  // Tier 3 — a longer COMPLETE descriptive source clause. A complete sentence
+  // that carries the facts beats an abbreviated label, even when it runs past
+  // the tight budget (the May 26 descriptive-over-abbreviated principle).
+  const descriptiveHeadline = sourceEventHeadline(eventText, HEADLINE_SOURCE_MAX);
+  if (descriptiveHeadline) return descriptiveHeadline;
+
+  // Tier 4 — curated/derived event title, then the AI title, then the page
+  // title. Never a "…"-truncated fragment.
+  const evidenceTitle = deriveCtaEventTitle(pageTitle || aiTitle, eventText);
+  if (evidenceTitle && evidenceTitle !== pageTitle) return evidenceTitle;
   if (
     aiTitle &&
     aiTitle.toLowerCase() !== pageTitle.toLowerCase() &&
-    hasStrongTitleAction(aiTitle) &&
-    !/\b(Founding|Creation|Launch|Opening|Completion|Presentation)\b$/i.test(aiTitle)
+    hasStrongTitleAction(aiTitle)
   ) {
     return aiTitle;
   }
-
-  if (!eventText) return aiTitle || pageTitle;
-
-  const firstSentence = extractFirstSentence(eventText)
-    .replace(/\s*\([^)]*\)\s*/g, " ")
-    .replace(/[.!?]+$/, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!firstSentence) return aiTitle || pageTitle;
-
-  const maxLength = 96;
-  return firstSentence.length > maxLength
-    ? `${firstSentence.slice(0, maxLength).trim()}...`
-    : firstSentence;
+  return aiTitle || pageTitle;
 }
 
 function restoreSourceEventHeadline(content) {
@@ -1738,7 +1775,13 @@ async function chooseEventForDate(
     }
     matchedCandidate = applyMajorEventGuard(matchedCandidate, candidateEvents);
     parsed.eventTitle = eventTitleFromCandidate(parsed.eventTitle, matchedCandidate);
-    const canonicalSourceHeadline = sourceEventHeadline(matchedCandidate.text);
+    // Lock the title against later SEO rewrites only when it is a source-derived
+    // clause (tier 1 or tier 3 of eventTitleFromCandidate). AI-derived headlines
+    // are intentionally left unlocked so the SEO pass may still refine them.
+    const canonicalSourceHeadline = sourceEventHeadline(
+      matchedCandidate.text,
+      HEADLINE_SOURCE_MAX,
+    );
     if (canonicalSourceHeadline && parsed.eventTitle === canonicalSourceHeadline) {
       parsed.sourceEventHeadline = canonicalSourceHeadline;
     }
@@ -4116,6 +4159,37 @@ async function maybeGenerateBlogPost(env, ctx) {
  * Fetches a real image URL from the Wikipedia REST API for the given event title.
  * Falls back to null if the request fails or no image is found.
  */
+// Generic tokens that do not establish topical relevance for a Commons file
+// name match. Pure-digit tokens (years like "1955") are dropped separately: a
+// shared year alone must not make an unrelated photo "relevant".
+const COMMONS_MATCH_STOPWORDS = new Set([
+  "the", "a", "an", "of", "in", "on", "at", "and", "or", "to", "for", "from",
+  "by", "with", "de", "la", "el", "los", "las", "von", "der", "di", "du",
+  "file", "jpg", "jpeg", "png", "webp", "gif", "svg", "image", "photo",
+  "portrait", "wikipedia", "commons",
+]);
+
+function commonsMatchTokens(text) {
+  return String(text || "")
+    .replace(/^File:/i, "")
+    .replace(/\.[a-z0-9]+$/i, "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((w) => w.length >= 3 && !/^\d+$/.test(w) && !COMMONS_MATCH_STOPWORDS.has(w));
+}
+
+// A Commons full-text search hit is only trusted as a featured image when its
+// file name shares a substantive token with the event topic. Without this a
+// search for a dead Wikipedia title ("1955 coup attempt in Argentina") returns
+// an unrelated file ("…1955 Military Wedding.jpg") as the hero (June 16, 2026).
+function commonsResultIsRelevant(fileTitle, ...topics) {
+  const fileTokens = new Set(commonsMatchTokens(fileTitle));
+  if (fileTokens.size === 0) return false;
+  const topicTokens = topics.flatMap(commonsMatchTokens);
+  if (topicTokens.length === 0) return false;
+  return topicTokens.some((t) => fileTokens.has(t));
+}
+
 async function fetchWikipediaImage(
   eventTitle,
   wikiUrl,
@@ -4173,9 +4247,12 @@ async function fetchWikipediaImage(
       }
     }
 
-    // Drafts occasionally contain a plausible but nonexistent Wikipedia URL.
-    // Search by the human-readable event title before falling back to Commons.
-    if (!wikiUrl && eventTitle && !skipArticleSearch) {
+    // Drafts occasionally carry a plausible but nonexistent Wikipedia URL (its
+    // REST summary 404s). Search by the human-readable event title — whether no
+    // wikiUrl was given OR the supplied one did not resolve — before falling
+    // back to Commons. (June 16, 2026: a dead wikiUrl skipped this search and
+    // dropped straight to an unrelated Commons hit.)
+    if (eventTitle && !skipArticleSearch && (!wikiUrl || !summaryRes.ok)) {
       const searchRes = await fetch(
         `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(eventTitle)}&srnamespace=0&srlimit=1&format=json`,
         { headers: ua },
@@ -4206,9 +4283,12 @@ async function fetchWikipediaImage(
       const hits = (commonsData?.query?.search ?? [])
         .map((h) => h.title)
         .filter((t) => /\.(jpe?g|png|webp)$/i.test(t) && !/icon|logo|wordmark|symbol|emblem|flag|map|seal|coa/i.test(t));
-      if (hits.length > 0) {
+      // Only trust a hit whose file name is topically relevant to the event.
+      // Guards against an unrelated full-text match becoming the hero image.
+      const relevantHit = hits.find((t) => commonsResultIsRelevant(t, eventTitle, title));
+      if (relevantHit) {
         const commonsInfoRes = await fetch(
-          `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(hits[0])}&prop=imageinfo&iiprop=url&format=json`,
+          `https://commons.wikimedia.org/w/api.php?action=query&titles=${encodeURIComponent(relevantHit)}&prop=imageinfo&iiprop=url&format=json`,
           { headers: ua },
         );
         if (commonsInfoRes.ok) {
@@ -5456,7 +5536,7 @@ function normalizeContentMetadata(content) {
     titleLead &&
     eventLead &&
     titleLead.length > eventLead.length &&
-    titleLead.length <= 96 &&
+    titleLead.length <= HEADLINE_SEO_MAX &&
     hasStrongTitleAction(titleLead) &&
     normalizeTopicMatchText(titleLead).startsWith(normalizeTopicMatchText(eventLead))
   ) {
@@ -6032,10 +6112,18 @@ function hasRichWikipediaPersonProfile(entity) {
       .split(" ")
       .filter(Boolean),
   );
-  if (
-    personTokens.length < 2 ||
-    !coreTokens.every((token) => resolvedTokens.has(token))
-  ) {
+  const coreSet = new Set(coreTokens);
+  const nameMatchesResolved =
+    // Standard case: every name token appears in the resolved page title.
+    coreTokens.every((token) => resolvedTokens.has(token)) ||
+    // Mononym canonical titles: Wikipedia stores some figures under a single
+    // distinctive name ("Napoleon" for "Napoleon Bonaparte", "Cleopatra",
+    // "Voltaire", "Galileo"). Accept when every resolved token belongs to the
+    // person's name AND the resolved title carries the person's primary token.
+    (resolvedTokens.size >= 1 &&
+      [...resolvedTokens].every((token) => coreSet.has(token)) &&
+      resolvedTokens.has(coreTokens[0]));
+  if (personTokens.length < 2 || !nameMatchesResolved) {
     return false;
   }
   const sourceText = String(entity.intro || entity.summary || "")
@@ -7580,8 +7668,9 @@ DO NOT open consecutive paragraphs with the same word or conjunction. Each parag
 
 Title rules:
 - The "title" field is the public card headline and MUST follow exactly this format: "[CTA headline with a strong verb] — ${monthName} ${day}, Year"
+- LENGTH — keep it SHORT for search results: the headline part (everything before " — ") MUST be about 50 characters or fewer (roughly 6-9 words) while still naming who + what. Drop secondary actors, lists of names, and any "Topic War:" prefix copied from the source. CORRECT (concise AND complete): "Napoleon Defeated at the Battle of Waterloo", "Royal Navy Sinks German Battleship Bismarck", "U.S. Senate Passes the Fair Labor Standards Act". WRONG (too long, lists every actor, keeps the topic tag): "Napoleonic Wars: The Battle of Waterloo results in the defeat of Napoleon Bonaparte by the Duke of Wellington and Field Marshal Blücher". Start with the real subject, not the topic tag.
 - HARD RULE — TITLE MUST CONTAIN A FINITE VERB: Both "title" and "eventTitle" MUST include at least one finite verb that describes the action — not a gerund, not a noun, a conjugated verb. "China Airlines Flight 611 Disintegrates" is correct (finite verb: disintegrates). "China Airlines Flight 611 Crash" is wrong (noun only). "China Airlines Flight 611 Crashing" is wrong (gerund). There must be a clear subject + verb structure.
-- The first part must make someone want to click while staying factual. The headline MUST be a complete grammatical clause: a real subject PLUS a finite verb. For transitive actions, include the object too. CORRECT: "President Eisenhower Honors Two Unknown Soldiers at Arlington on Memorial Day 1958", "Royal Navy Sinks German Battleship Bismarck", "Parliament Ratifies Treaty of Versailles", "China Airlines Flight 611 Disintegrates Over Taiwan Strait". WRONG: "VTA Rail Yard Shooting Kills" (no subject for "Kills" — who kills?), "Bismarck Sinking Sinks" (redundant verb appended to noun phrase), "Flight 611 Crash" (noun only). Never take a Wikipedia event page title (which is a noun phrase) and just append a bare verb — always build a proper subject-verb clause from the event description.
+- The first part must make someone want to click while staying factual. The headline MUST be a complete grammatical clause: a real subject PLUS a finite verb. For transitive actions, include the object too. CORRECT (concise — about 50 chars or fewer): "Napoleon Defeated at the Battle of Waterloo", "Royal Navy Sinks German Battleship Bismarck", "Parliament Ratifies Treaty of Versailles", "China Airlines Flight 611 Disintegrates". WRONG: "VTA Rail Yard Shooting Kills" (no subject for "Kills" — who kills?), "Bismarck Sinking Sinks" (redundant verb appended to noun phrase), "Flight 611 Crash" (noun only). Never take a Wikipedia event page title (which is a noun phrase) and just append a bare verb — always build a proper subject-verb clause from the event description.
 - Use the most specific named subject available: prefer a person's title and name ("President Eisenhower", "General MacArthur", "Prime Minister Churchill") or a specific named entity ("Royal Navy", "U.S. Congress", "Apollo 11 Crew") over generic terms ("A leader", "Officials", "The government", "Gunman"). If no named actor is known, name the event's primary subject instead ("Two Unidentified Servicemen", "Ten Workers").
 - Embed the historical year inside the headline when the event is tied to a recurring occasion (Memorial Day, the Olympics, an annual treaty deadline, etc.) so the reader knows which one: "President Eisenhower Honors Two Unknown Soldiers at Arlington on Memorial Day 1958" not "…on Memorial Day". Omit the year when the headline is already unambiguous without it.
 - Avoid lazy suffix titles. Do NOT append "Founding", "Creation", "Launch", "Opening", "Completion", or "Presentation" just to make a noun sound like an event. Use them only if the source event is literally a founding/opening/launch and no more specific verb is available. Prefer "Rosenborg BK Founded" over "Rosenborg BK Founding"; prefer "First Oscars Honor Wings" over "The First Oscars Founding"; prefer "Brown v. Board Strikes Down School Segregation" over "Brown v. Board of Education Founding"; prefer "Israel Declares Independence" over "Israeli Independence".
@@ -10133,7 +10222,7 @@ ${JSON.stringify({
   mainEntity: [
     {
       "@type": "Question",
-      name: `What was ${esc(c.eventTitle)}?`,
+      name: `What was ${esc(eventNounLabel(c))}?`,
       acceptedAnswer: {
         "@type": "Answer",
         text: esc(c.jsonLdDescription || c.description),
@@ -10141,15 +10230,15 @@ ${JSON.stringify({
     },
     {
       "@type": "Question",
-      name: `When and where did ${esc(c.eventTitle)} take place?`,
+      name: `When and where did ${esc(eventNounLabel(c))} take place?`,
       acceptedAnswer: {
         "@type": "Answer",
-        text: `${esc(c.eventTitle)} took place on ${esc(c.historicalDate)} in ${esc(c.location)}.`,
+        text: `${esc(eventNounLabel(c))} took place on ${esc(c.historicalDate)} in ${esc(c.location)}.`,
       },
     },
     {
       "@type": "Question",
-      name: `What was the historical significance of ${esc(c.eventTitle)}?`,
+      name: `What was the historical significance of ${esc(eventNounLabel(c))}?`,
       acceptedAnswer: {
         "@type": "Answer",
         text: esc(
@@ -10189,7 +10278,7 @@ ${JSON.stringify({
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=24" />
+    <link rel="stylesheet" href="/css/custom.css?v=25" />
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
@@ -11019,7 +11108,7 @@ ${JSON.stringify(
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=24" />
+    <link rel="stylesheet" href="/css/custom.css?v=25" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -11292,7 +11381,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=24" />
+    <link rel="stylesheet" href="/css/custom.css?v=25" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>

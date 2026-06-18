@@ -1968,7 +1968,7 @@ async function handleYearsIndex(env, url) {
 </head>
 <body>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -2056,7 +2056,7 @@ async function handleYearArchivePage(env, url, year) {
 </head>
 <body>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -2141,7 +2141,7 @@ async function handleKeywordsIndex(env, url) {
 </head>
 <body>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -2229,7 +2229,7 @@ async function handleKeywordArchivePage(env, url, slug) {
 </head>
 <body>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -2391,7 +2391,7 @@ async function handleTopicsIndex(env, url) {
 </head>
 <body>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -2491,7 +2491,7 @@ async function handleTopicHubPage(env, url, slug) {
 </head>
 <body>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -3280,8 +3280,8 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .tl-node-badge{display:inline-block;background:var(--btn-bg);color:#fff;font-size:13px;font-weight:400;padding:4px 9px;border-radius:20px;white-space:nowrap;font-family:Georgia,serif;letter-spacing:.01em;box-shadow:0 0 0 3px var(--bg)}
 .tl-card{border:1px solid var(--cbr);border-radius:10px;overflow:hidden;background:var(--bg);transition:box-shadow .15s;display:flex;flex-direction:column}
 .tl-card:hover{box-shadow:var(--shadow)}
-.tl-card-img{width:100%;height:200px;object-fit:cover;object-position:top;display:block}
-.tl-card-img-blank{width:100%;height:160px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:2rem;background:rgba(0,0,0,.05)}
+.tl-card-img{width:100%;aspect-ratio:1;object-fit:cover;object-position:top;display:block}
+.tl-card-img-blank{width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:2rem;background:rgba(0,0,0,.05)}
 .tl-card-body{padding:14px 16px;flex:1;display:flex;flex-direction:column}
 .tl-card-title{font-weight:700;font-size:15px;line-height:1.4;color:var(--text);margin-bottom:4px}
 .tl-card-desc{font-size:14px;color:#333;line-height:1.6;margin-bottom:6px;font-style:italic}
@@ -3816,7 +3816,7 @@ ${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <body>
 <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -4360,7 +4360,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 <body>
 <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -4711,7 +4711,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 <body>
 <div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -4929,7 +4929,7 @@ async function handleBlogIndex(env, url) {
 </head>
 <body>
 ${siteNav()}
-<main class="container my-4" style="max-width:860px">
+<main class="container my-4">
   <nav aria-label="breadcrumb" class="mb-3">
     <ol class="breadcrumb">
       <li class="breadcrumb-item"><a href="/">Home</a></li>
@@ -7000,7 +7000,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=23>; rel=preload; as=style",
+      "</css/custom.css?v=25>; rel=preload; as=style",
     ].join(", "),
   );
 

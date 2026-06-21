@@ -30,3 +30,7 @@ node_modules/.mf/
 # Ignore generated/older blog HTML files so edits don't get committed
 # Adjust this pattern if you want to keep specific posts tracked.
 /blog/**/index.html
+
+# Local Ancient Origins article workspace
+/ancient-origins-daorson/
+/scripts/humanize-article.mjs

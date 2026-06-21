@@ -191,6 +191,16 @@ const PERSON_NAME_HONORIFIC_TOKENS = new Set([
   "colonel", "general", "admiral", "major", "sergeant", "mahatma", "sheikh", "imam",
   "rabbi", "baron", "baroness", "count", "countess", "duke", "duchess", "earl", "viscount",
 ]);
+const SOURCE_EVENT_PERSON_PAGE_RE =
+  /\b(murder|assassination|killing|death|execution|shooting|kidnapping|abduction|attack|bombing|massacre|trial|case|incident|affair|crash|disaster)\b/i;
+const SOURCE_EVENT_TITLE_STOPWORDS = new Set([
+  "the", "of", "and", "in", "on", "at", "to", "for", "a", "an", "de", "la", "el",
+]);
+const SOURCE_PAGE_RELEVANCE_STOPWORDS = new Set([
+  ...SOURCE_EVENT_TITLE_STOPWORDS,
+  "was", "were", "is", "are", "be", "been", "by", "from", "with", "during", "after",
+  "before", "into", "its", "their", "his", "her", "this", "that", "united", "states",
+]);
 const EVENT_FAMILY_REPEAT_WINDOW_DAYS = 7;
 const EVENT_FAMILY_RULES = [
   {
@@ -363,20 +373,13 @@ function buildArticleAnswerBlock(content) {
     .map((f) => `      <div class="ai-answer-item"><strong>${esc(f.label)}</strong><span>${esc(f.value)}</span></div>`)
     .join("\n");
 
-  const kp = content.keyProvision;
-  const provisionRow = kp && kp.plainLanguage
-    ? `
-    <div class="keyprovision-row">
-      <div class="keyprovision-kicker">${esc(kp.term ? `The provision that mattered — ${kp.term}` : "The provision that mattered")}</div>
-      ${kp.quote ? `<blockquote class="keyprovision-quote">${esc(kp.quote)}</blockquote>` : ""}
-      <p class="keyprovision-plain">${esc(kp.plainLanguage)}</p>
-    </div>`
-    : "";
+  // The "The provision that mattered" key-provision row was removed on
+  // 2026-06-20 (redundant with the FAQ). The timeline learning block stays.
   return `<section class="ai-answer-card article-body-layer mb-4" aria-label="Short answer">
     <div class="ai-answer-kicker">Short answer</div>
     <div class="ai-answer-grid" aria-label="Key facts">
 ${gridItems}
-    </div>${provisionRow}
+    </div>
   </section>`;
 }
 
@@ -1065,15 +1068,77 @@ function eventNounLabel(content) {
   const raw = getTitleLead(content?.eventTitle || content?.title || "").trim();
   if (!raw) return "this event";
   const words = raw.split(/\s+/);
+  let label = "";
   // Already a short noun phrase (e.g. "Battle of Hastings", "Magna Carta").
-  if (words.length <= 4 && /^[A-Z]/.test(raw)) return raw;
-  // Proper-noun object after a trailing preposition ("...to Magna Carta").
-  const tail = raw.match(/\b(?:to|of|at|in|on|over|for|against)\s+([A-Z][\w''.-]*(?:\s+(?:of|the|and|de|la)?\s*[A-Z][\w''.-]*)*)\s*$/);
-  if (tail && tail[1]) return tail[1].trim();
-  // Else the trailing run of capitalized words ("...the Fair Labor Standards Act").
-  const capRun = raw.match(/([A-Z][\w''.-]*(?:\s+[A-Z][\w''.-]*)*)\s*$/);
-  if (capRun && capRun[1]) return capRun[1].trim();
-  return "this event";
+  if (words.length <= 4 && /^[A-Z]/.test(raw)) {
+    label = raw;
+  } else {
+    // Proper-noun object after a trailing preposition ("...to Magna Carta",
+    // "...of Waterloo"). A genuine object reached through a real preposition.
+    const tail = raw.match(/\b(?:to|of|at|in|on|over|for|against)\s+([A-Z][\w''.-]*(?:\s+(?:of|the|and|de|la)?\s*[A-Z][\w''.-]*)*)\s*$/);
+    if (tail && tail[1]) {
+      label = tail[1].trim();
+    } else {
+      // Clause-style sentence-cased title ("Pan Am Flight 121 crashes in the
+      // Syrian Desert near Mayadin, Syria"): the SUBJECT is the topic, not a
+      // trailing location. Take the leading proper-noun run up to the first
+      // lowercase word (the verb). The old code grabbed the trailing capitalized
+      // run instead and produced "Syria" (June 19, 2026 "What caused Syria?").
+      const subject = raw.match(
+        /^([A-Z][\w''.-]*(?:\s+(?:[A-Z][\w''.-]*|\d{1,4}|of|the|and|de|la))*?)\s+[a-z]/,
+      );
+      label = subject && subject[1] ? subject[1].trim() : "";
+    }
+  }
+  // Sanity guard: a usable label is a NOUN phrase, not a clause. A Title-Cased
+  // clause has no lowercase verb boundary, so the extraction above can return the
+  // whole thing or a long fragment that still carries a finite verb — yielding
+  // broken questions like "What caused ABC News Abruptly Cuts Broadcast Kills?"
+  // (June 20, 2026). Reject any label that is empty, runs long, or still ends on
+  // / contains an action verb, and fall back to the generic label.
+  if (
+    !label ||
+    label.split(/\s+/).length > 6 ||
+    titleEndsWithVerb(label) ||
+    hasFiniteHeadlineVerb(label)
+  ) {
+    return "this event";
+  }
+  return label;
+}
+
+function sourcePageRelevanceTokens(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 3 && !SOURCE_PAGE_RELEVANCE_STOPWORDS.has(word));
+}
+
+function selectPrimarySourcePage(eventText, pages) {
+  const normalizedPages = normalizeSourcePages(pages);
+  if (normalizedPages.length <= 1) return normalizedPages[0] || null;
+  const eventTokens = new Set(sourcePageRelevanceTokens(eventText));
+  const eventNormalized = normalizeForCompare(eventText);
+  let best = normalizedPages[0];
+  let bestScore = -1;
+  for (const page of normalizedPages) {
+    const titleTokens = sourcePageRelevanceTokens(page.pageTitle);
+    const extractTokens = new Set(sourcePageRelevanceTokens(page.extract));
+    const titleOverlap = titleTokens.filter((word) => eventTokens.has(word)).length;
+    let extractOverlap = 0;
+    for (const word of eventTokens) if (extractTokens.has(word)) extractOverlap++;
+    const extractCoverage = eventTokens.size > 0 ? extractOverlap / eventTokens.size : 0;
+    const normalizedTitle = normalizeForCompare(page.pageTitle);
+    const exactTitleBonus = normalizedTitle && eventNormalized.includes(normalizedTitle) ? 12 : 0;
+    const eventPageBonus = SOURCE_EVENT_PERSON_PAGE_RE.test(page.pageTitle) ? 8 : 0;
+    const score = titleOverlap * 18 + extractCoverage * 100 + exactTitleBonus + eventPageBonus;
+    if (score > bestScore) {
+      best = page;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
 function repairStackedTitleLead(value) {
@@ -1626,23 +1691,20 @@ async function chooseEventForDate(
 
     allEvents = (eventsData?.events || [])
       .map((event) => {
-        const firstPage = event?.pages?.[0] || {};
-        const pageTitle =
-          firstPage?.titles?.normalized ||
-          firstPage?.normalizedtitle ||
-          firstPage?.title ||
-          "";
-        const pageUrl =
-          firstPage?.content_urls?.desktop?.page ||
-          firstPage?.content_urls?.mobile?.page ||
-          "";
+        const sourcePages = normalizeSourcePages(event?.pages || []);
+        const firstPage = selectPrimarySourcePage(event?.text, sourcePages) || {};
         return {
           year: event?.year,
           text: String(event?.text || "").replace(/\s+/g, " ").trim(),
-          pageTitle: String(pageTitle).trim(),
-          pageUrl: String(pageUrl).trim(),
-          hasThumbnail: !!firstPage?.thumbnail?.source,
-          extractLength: String(firstPage?.extract || "").length,
+          pageTitle: String(firstPage.pageTitle || "").trim(),
+          pageUrl: String(firstPage.pageUrl || "").trim(),
+          hasThumbnail: !!firstPage.imageUrl,
+          // Keep the Wikipedia intro extract (not just its length): it grounds the
+          // body generation and the credibility gate (2026-06-20). The feed
+          // already provides this; no extra fetch needed.
+          extract: String(firstPage.extract || "").replace(/\s+/g, " ").trim(),
+          extractLength: String(firstPage.extract || "").length,
+          sourcePages,
         };
       })
       .filter((event) => event.year && event.text && event.pageTitle);
@@ -1789,6 +1851,11 @@ async function chooseEventForDate(
     parsed.historicalDate = `${monthName} ${day}, ${matchedCandidate.year}`;
     parsed.historicalDateISO = `${String(matchedCandidate.year).padStart(4, "0")}-${mPad}-${dPad}`;
     if (matchedCandidate.pageUrl) parsed.wikiUrl = matchedCandidate.pageUrl;
+    // Authoritative source for grounded generation + the credibility gate.
+    parsed.sourcePageTitle = matchedCandidate.pageTitle;
+    parsed.sourceText = matchedCandidate.text;
+    parsed.sourceExtract = matchedCandidate.extract || "";
+    parsed.sourcePages = matchedCandidate.sourcePages || [];
   }
 
   const validation = validateContentDateForPublish(parsed, date);
@@ -4349,17 +4416,34 @@ async function isWorkingImageUrl(url) {
 }
 
 async function resolveWorkingImageForContent(content) {
-  const candidates = [];
+  const checked = new Set();
+  const firstWorking = async (candidates) => {
+    for (const candidate of candidates) {
+      if (!candidate || checked.has(candidate)) continue;
+      checked.add(candidate);
+      if (
+        !isLowValueFeaturedImage(candidate) &&
+        isProxyableArticleImageUrl(candidate) &&
+        await isWorkingImageUrl(candidate)
+      ) {
+        return candidate;
+      }
+    }
+    return null;
+  };
 
-  if (content?.imageUrl && !isLowValueFeaturedImage(content.imageUrl)) {
-    candidates.push(content.imageUrl);
-  }
+  // Prefer already-selected assets. Source-page thumbnails come from the
+  // authoritative Wikipedia event feed and give enrichment a network-light
+  // fallback when the model omits imageUrl or a later Wikipedia API call fails.
+  const storedImage = await firstWorking([
+    content?.imageUrl,
+    ...sourcePagesFromContent(content).map((page) => page.imageUrl),
+  ]);
+  if (storedImage) return storedImage;
 
-  const wikiImage = await fetchWikipediaImage(
-    content?.eventTitle,
-    content?.wikiUrl,
-  );
-  if (wikiImage) candidates.push(wikiImage);
+  const wikiImage = await fetchWikipediaImage(content?.eventTitle, content?.wikiUrl);
+  const workingWikiImage = await firstWorking([wikiImage]);
+  if (workingWikiImage) return workingWikiImage;
 
   // Try wikipedia URL title variant as a backup (decoded slug can differ from eventTitle).
   if (content?.wikiUrl) {
@@ -4372,18 +4456,11 @@ async function resolveWorkingImageForContent(content) {
           " ",
         );
         const slugImage = await fetchWikipediaImage(slugTitle, null);
-        if (slugImage) candidates.push(slugImage);
+        const workingSlugImage = await firstWorking([slugImage]);
+        if (workingSlugImage) return workingSlugImage;
       }
     } catch {
       // ignore malformed URL
-    }
-  }
-
-  const uniqueCandidates = [...new Set(candidates.filter(Boolean))];
-
-  for (const candidate of uniqueCandidates) {
-    if (isProxyableArticleImageUrl(candidate) && await isWorkingImageUrl(candidate)) {
-      return candidate;
     }
   }
 
@@ -4860,17 +4937,15 @@ async function generateLearningBlocks(env, content) {
   if (!body.trim()) return;
 
   const systemPrompt =
-    "You add two factual learning aids to a finished history article. Output STRICT JSON only.\n" +
-    "1) keyProvision: the single most important clause/provision/quote of the event, explained in plain language for a curious general reader. " +
-    "Fields: term (short label), quote (the source clause/quote if any, else \"\"), plainLanguage (1-2 sentences, no jargon, do NOT restate generic significance).\n" +
-    "2) timeline: 4-7 dated entries showing lead-up, the event, and aftermath. " +
+    "You add a factual timeline to a finished history article. Output STRICT JSON only.\n" +
+    "timeline: 4-7 dated entries showing lead-up, the event, and aftermath. " +
     "Use ONLY dates that appear in the supplied article body or source extract; never invent a date. " +
     "Each entry: {\"year\":\"1215\",\"date\":\"June 15, 1215\",\"label\":\"...\",\"kind\":\"leadup|event|aftermath\"}. " +
     "Exactly one entry has kind \"event\" and matches the event date. No dashes or em-dashes in any text.";
   const userMessage =
     `Event: ${content.eventTitle}\nEvent date: ${content.historicalDate}\n\n` +
     `ARTICLE BODY:\n${body}\n\n${extract ? `SOURCE EXTRACT:\n${extract}\n\n` : ""}` +
-    `Return ONLY JSON: {"keyProvision":{"term":"","quote":"","plainLanguage":""},"timeline":[]}`;
+    `Return ONLY JSON: {"timeline":[]}`;
 
   let raw;
   try {
@@ -4888,13 +4963,6 @@ async function generateLearningBlocks(env, content) {
   let parsed;
   try { parsed = JSON.parse(match[0]); } catch { console.warn("generateLearningBlocks: parse error — skipping"); return; }
 
-  if (parsed.keyProvision && typeof parsed.keyProvision === "object") {
-    content.keyProvision = {
-      term: String(parsed.keyProvision.term || "").trim(),
-      quote: String(parsed.keyProvision.quote || "").trim(),
-      plainLanguage: String(parsed.keyProvision.plainLanguage || "").trim(),
-    };
-  }
   if (Array.isArray(parsed.timeline)) {
     content.timeline = parsed.timeline
       .filter((e) => e && typeof e === "object")
@@ -4948,16 +5016,6 @@ function groundLearningBlocks(content) {
       .sort((a, b) => yearNum(a) - yearNum(b));
     if (kept.length >= 3) content.timeline = kept;
     else delete content.timeline;
-  }
-
-  if (content.keyProvision) {
-    const kp = content.keyProvision;
-    const grounded =
-      (kp.term && corpus.includes(normalizeForCompare(kp.term))) ||
-      (kp.quote && corpus.includes(normalizeForCompare(kp.quote).slice(0, 40)));
-    if (!grounded || normalizeForCompare(kp.plainLanguage).length < 40) {
-      delete content.keyProvision;
-    }
   }
 }
 
@@ -5098,6 +5156,20 @@ async function generateAndStore(
     ? null
     : await fetchContextHook(env, now, selectedForcedEvent);
 
+  // Authoritative source for grounded generation + the credibility gate
+  // (2026-06-20). Only available when an event was selected from the vetted
+  // Wikipedia candidate list; a manually forced event has no source → the gate
+  // no-ops and generation falls back to the prior from-knowledge behavior.
+  const groundingSource = selectedEvent
+    ? {
+        pageTitle: selectedEvent.sourcePageTitle || "",
+        text: selectedEvent.sourceText || "",
+        sourceExtract: selectedEvent.sourceExtract || "",
+        sourcePages: selectedEvent.sourcePages || [],
+      }
+    : null;
+  const sourceMaterial = sourceMaterialForGrounding(groundingSource) || null;
+
   let content = null;
   let pillars = [];
   let personImages = [];
@@ -5115,10 +5187,12 @@ async function generateAndStore(
             preferredPillars,
             contextHook,
             recentPillars,
+            sourceMaterial,
           )
         : content;
 
     if (selectedEvent) {
+      attachSelectedEventSourcePages(content, selectedEvent);
       enforceSelectedEventDate(content, selectedEvent);
     }
 
@@ -5138,6 +5212,7 @@ async function generateAndStore(
           preferredPillars,
           contextHook,
           recentPillars,
+          sourceMaterial,
         );
         continue;
       }
@@ -5162,10 +5237,45 @@ async function generateAndStore(
           preferredPillars,
           contextHook,
           recentPillars,
+          sourceMaterial,
         );
         continue;
       }
       throw err;
+    }
+
+    // Credibility gate (2026-06-20): the article must be grounded in the selected
+    // event's authoritative Wikipedia source — no fabricated event, no casualty
+    // numbers that contradict the source. Runs before the expensive humanize/SEO
+    // passes so a fabricated draft fails fast. On failure: regenerate with
+    // stricter grounding; if the final attempt still fails, throw so the
+    // fabricated article is NEVER published (cron/failsafe logs the failure).
+    if (groundingSource) {
+      const grounding = verifyArticleGrounding(content, groundingSource);
+      if (!grounding.ok) {
+        if (attempt < MAX_CONTENT_ATTEMPTS) {
+          const avoid = [...takenAllTime, content?.title].filter(Boolean);
+          console.warn(
+            `Blog AI: grounding gate failed for "${content?.title || "untitled"}" — ${grounding.reasons.join("; ")}. Regenerating with stricter grounding (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+          );
+          content = await callWorkersAI(
+            env,
+            now,
+            avoid,
+            activeModel,
+            selectedForcedEvent,
+            preferredPillars,
+            contextHook,
+            recentPillars,
+            sourceMaterial,
+            true,
+          );
+          continue;
+        }
+        throw new Error(
+          `Article failed source-grounding credibility check: ${grounding.reasons.join("; ")}`,
+        );
+      }
     }
 
     // Post-generation banned phrase scan + targeted fix pass.
@@ -5192,7 +5302,7 @@ async function generateAndStore(
         content = await improveArticleQuality(env, content, postReviewQualityIssues);
       }
 
-      await factCheckContent(env, content);
+      await factCheckContent(env, content, groundingSource);
       if (selectedEvent) enforceSelectedEventDate(content, selectedEvent);
       await validateEyewitnessQuote(env, content);
       pillars = await classifyPillars(env, content);
@@ -5213,6 +5323,7 @@ async function generateAndStore(
             preferredPillars,
             contextHook,
             recentPillars,
+            sourceMaterial,
           );
           continue;
         }
@@ -5245,6 +5356,7 @@ async function generateAndStore(
             preferredPillars,
             contextHook,
             recentPillars,
+            sourceMaterial,
           );
           continue;
         }
@@ -5282,6 +5394,9 @@ async function generateAndStore(
   // (e.g. Julian May 29 = Gregorian June 11) are always pinned to the feed date.
   alignContentDateFields(content, { historicalDateISO: now.toISOString().slice(0, 10) });
   normalizeContentMetadata(content);
+  if (selectedEvent) {
+    attachSelectedEventSourcePages(content, selectedEvent);
+  }
 
   const slug = buildSlug(now);
   if (lightweightPublish) {
@@ -5294,6 +5409,32 @@ async function generateAndStore(
       { expirationTtl: 3 * 86_400 },
     );
   } else {
+    if (groundingSource) {
+      const finalGrounding = await verifyFinalArticleGrounding(env, content, groundingSource);
+      if (!finalGrounding.ok) {
+        throw new Error(
+          `Refusing to publish ${slug}: final source-grounding check failed — ${finalGrounding.reasons.join("; ")}`,
+        );
+      }
+    }
+    const quizParagraphs = [
+      ...(content.overviewParagraphs || []),
+      ...(content.eyewitnessOrChronicle || []),
+      ...(content.aftermathParagraphs || []),
+      ...(content.conclusionParagraphs || []),
+    ];
+    const quiz = await generateBlogQuiz(env, {
+      ...content,
+      keyFacts: quizParagraphs
+        .filter((paragraph) => paragraph && paragraph.length > 40 && paragraph.length < 750)
+        .slice(0, 15),
+    }, slug);
+    if (!quiz || !validateQuizQuestions(quiz.questions)) {
+      throw new Error(`Refusing to publish ${slug}: grounded five-question quiz generation failed`);
+    }
+    await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {
+      expirationTtl: 90 * 86_400,
+    });
     const bookCoverUrl = await fetchBookCover(content.bookSearchQuery).catch(() => null);
     const entityMeta = await upsertEntitiesForContent(env, content, slug, now, pillars).catch((err) => {
       console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
@@ -5422,25 +5563,29 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
   }
 
   try {
-    const allParas = [
-      ...(content.overviewParagraphs || []),
-      ...(content.eyewitnessOrChronicle || []),
-      ...(content.aftermathParagraphs || []),
-      ...(content.conclusionParagraphs || []),
-    ];
-    const enrichedContent = {
-      ...content,
-      keyFacts: allParas
-        .filter((p) => p && p.length > 40 && p.length < 400)
-        .slice(0, 12),
-      description:
-        content.description || allParas.slice(0, 3).join(" ").substring(0, 800),
-    };
-    const quiz = await generateBlogQuiz(env, enrichedContent, slug);
-    if (quiz) {
-      await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {
-        expirationTtl: 90 * 86_400,
-      });
+    const quizKey = `quiz-v3:blog:${slug}`;
+    const existingQuiz = await env.BLOG_AI_KV.get(quizKey);
+    if (!existingQuiz) {
+      const allParas = [
+        ...(content.overviewParagraphs || []),
+        ...(content.eyewitnessOrChronicle || []),
+        ...(content.aftermathParagraphs || []),
+        ...(content.conclusionParagraphs || []),
+      ];
+      const enrichedContent = {
+        ...content,
+        keyFacts: allParas
+          .filter((p) => p && p.length > 40 && p.length < 750)
+          .slice(0, 15),
+        description:
+          content.description || allParas.slice(0, 3).join(" ").substring(0, 800),
+      };
+      const quiz = await generateBlogQuiz(env, enrichedContent, slug);
+      if (quiz) {
+        await env.BLOG_AI_KV.put(quizKey, JSON.stringify(quiz), {
+          expirationTtl: 90 * 86_400,
+        });
+      }
     }
   } catch (e) {
     console.error("Blog quiz generation failed:", e);
@@ -5675,17 +5820,15 @@ function deriveCtaEventTitle(currentEvent, evidence) {
     return "Prince Harry and Meghan Markle Marry at Windsor";
   }
 
-  if (!baseHasFiniteVerb && /\bcrashes?\b/i.test(text) && !/\bcrashes?\b/i.test(base)) return `${base} Crashes`;
-  if (!baseHasFiniteVerb && /\bkills?\b|\bdead\b|\bdies\b/i.test(text) && !/\bkills?|dies|death\b/i.test(base)) return `${base} Kills`;
-  if (!baseHasFiniteVerb && /\bdeclares? independence\b/i.test(text) && !/\bdeclares?\b/i.test(base)) return `${base} Declares Independence`;
-  if (!baseHasFiniteVerb && /\brules?\b.*\bunconstitutional\b/i.test(text) && !/\brules?\b/i.test(base)) return `${base} Rules Unconstitutional`;
-  if (!baseHasFiniteVerb && /\bratifies?\b/i.test(text) && !/\bratifies?\b/i.test(base)) return `${base} Ratified`;
-  if (!baseHasFiniteVerb && /\bsigns?\b|\bsigned\b/i.test(text) && !/\bsigns?|signed\b/i.test(base)) return `${base} Signed`;
-  if (!baseHasFiniteVerb && /\bopens?\b|\bopened\b|\binaugurated\b/i.test(text) && !/\bopens?|opened|inaugurated\b/i.test(base)) return `${base} Opens`;
-  if (!baseHasFiniteVerb && /\blaunched|launches\b/i.test(text) && !/\blaunch/i.test(base)) return `${base} Launches`;
-  if (!baseHasFiniteVerb && /\bfounded|founds|is founded|was founded\b/i.test(text) && !/\bfounded\b/i.test(base)) return `${base} Founded`;
-  if (!baseHasFiniteVerb && /\bestablished|establishes\b/i.test(text) && !/\bestablished\b/i.test(base)) return `${base} Established`;
-
+  // DELIBERATELY no generic "append a bare verb to the noun phrase" fallbacks
+  // here. Appending a lone verb to whatever string is in `base` produces
+  // ungrammatical stacked titles whenever `base` is not a clean subject — e.g.
+  // an AI noun phrase that already contains an (unrecognized) verb. On
+  // 2026-06-20 this path turned "ABC News Abruptly Cuts Broadcast" into
+  // "ABC News Abruptly Cuts Broadcast Kills" (evidence mentioned a death). The
+  // title contract is explicit: never take a noun phrase and just append a bare
+  // verb — always build a proper subject-verb clause. When no curated complete
+  // clause matches, leave the title unchanged rather than fabricate one.
   return currentEvent;
 }
 
@@ -5740,6 +5883,14 @@ async function savePublishedPost(
   if (!dateValidation.ok) {
     throw new Error(`Refusing to publish ${slug}: ${dateValidation.reason}`);
   }
+  // Final publication gate: enrichment is allowed to retry transient image
+  // failures, but public HTML must never be written without a working Wikimedia
+  // hero. This also protects callers that bypass the normal generation path.
+  const finalFeaturedImage = await resolveWorkingImageForContent(content);
+  if (!finalFeaturedImage) {
+    throw new Error(`Refusing to publish ${slug}: no working featured image`);
+  }
+  content.imageUrl = finalFeaturedImage;
   await hydrateContentAssetsForPublish(content, safePillars).catch((err) => {
     console.warn(`Article asset hydration failed for ${slug}: ${err.message}`);
   });
@@ -5806,10 +5957,14 @@ async function savePublishedPost(
     description: content.description,
     imageUrl: content.imageUrl,
     publishedAt: date.toISOString(),
+    ...(content.wikiUrl ? { wikiUrl: content.wikiUrl } : {}),
+    ...(content.jsonLdUrl ? { jsonLdUrl: content.jsonLdUrl } : {}),
     ...(content.keywords ? { keywords: content.keywords } : {}),
     ...(content.eventTitle ? { eventTitle: content.eventTitle } : {}),
     ...(Number.isInteger(content.historicalYear) ? { historicalYear: content.historicalYear } : {}),
     ...(Array.isArray(content.keyTerms) && content.keyTerms.length > 0 ? { keyTerms: content.keyTerms } : {}),
+    ...(compactSourcePagesForIndex(content).length > 0 ? { sourcePages: compactSourcePagesForIndex(content) } : {}),
+    ...(content.sourcePageTitle ? { sourcePageTitle: content.sourcePageTitle } : {}),
     ...(safePillars.length > 0 ? { pillars: safePillars } : {}),
     ...(content.contentRationale ? { contentRationale: content.contentRationale } : {}),
   };
@@ -5836,6 +5991,7 @@ async function enrichPublishedPost(env, slug) {
   const content = draft?.content;
   const publishedAt = draft?.publishedAt;
   if (!content || !publishedAt) throw new Error(`Draft payload invalid for ${slug}`);
+  const groundingSource = groundingSourceFromContent(content);
 
   // Recover older drafts that used a dated title as their only date source
   // before any enrichment rewrite can remove that title suffix. Pass the
@@ -5869,7 +6025,7 @@ async function enrichPublishedPost(env, slug) {
   }
 
   await chk("pre-factcheck");
-  await factCheckContent(env, enriched);
+  await factCheckContent(env, enriched, groundingSource);
   await validateEyewitnessQuote(env, enriched);
   const pillars = await classifyPillars(env, enriched);
   await chk("post-factcheck");
@@ -5917,11 +6073,41 @@ async function enrichPublishedPost(env, slug) {
     groundLearningBlocks(enriched);
   } catch (err) {
     console.warn(`Blog: learning-blocks pass failed for ${slug}: ${err.message}`);
-    delete enriched.keyProvision;
     delete enriched.timeline;
   }
 
   normalizeContentMetadata(enriched);
+
+  if (groundingSource) {
+    await chk("pre-final-grounding");
+    const finalGrounding = await verifyFinalArticleGrounding(env, enriched, groundingSource);
+    if (!finalGrounding.ok) {
+      throw new Error(
+        `Refusing to publish ${slug}: final source-grounding check failed — ${finalGrounding.reasons.join("; ")}`,
+      );
+    }
+    await chk("post-final-grounding");
+  }
+
+  const quizParagraphs = [
+    ...(enriched.overviewParagraphs || []),
+    ...(enriched.eyewitnessOrChronicle || []),
+    ...(enriched.aftermathParagraphs || []),
+    ...(enriched.conclusionParagraphs || []),
+  ];
+  const quizContent = {
+    ...enriched,
+    keyFacts: quizParagraphs
+      .filter((paragraph) => paragraph && paragraph.length > 40 && paragraph.length < 750)
+      .slice(0, 15),
+  };
+  const quiz = await generateBlogQuiz(env, quizContent, slug);
+  if (!quiz || !Array.isArray(quiz.questions) || quiz.questions.length !== 5) {
+    throw new Error(`Refusing to publish ${slug}: grounded five-question quiz generation failed`);
+  }
+  await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {
+    expirationTtl: 90 * 86_400,
+  });
 
   await chk("pre-entities");
   // Skip AI card generation here — saves ~2 subrequests per entity (up to ~18 total)
@@ -5978,6 +6164,197 @@ function wikiTitleFromUrl(wikiUrl) {
   }
 }
 
+function wikiUrlFromTitle(pageTitle) {
+  const title = String(pageTitle || "").replace(/\s+/g, " ").trim();
+  return title
+    ? `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`
+    : "";
+}
+
+function normalizeSourcePage(page) {
+  if (!page || typeof page !== "object") return null;
+  const rawUrl =
+    page.pageUrl ||
+    page.url ||
+    page.wikiUrl ||
+    page.content_urls?.desktop?.page ||
+    page.content_urls?.mobile?.page ||
+    "";
+  const rawTitle =
+    page.pageTitle ||
+    page.titles?.normalized ||
+    page.normalizedtitle ||
+    page.title ||
+    page.titles?.canonical ||
+    wikiTitleFromUrl(rawUrl) ||
+    "";
+  const pageTitle = String(rawTitle || "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const pageUrl = String(rawUrl || wikiUrlFromTitle(pageTitle)).trim();
+  if (!pageTitle && !pageUrl) return null;
+  const extract = String(page.extract || page.sourceExtract || page.summary || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const text = String(page.text || page.sourceText || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const description = String(page.description || "").replace(/\s+/g, " ").trim();
+  const imageUrl = String(
+    page.imageUrl ||
+    page.originalimage?.source ||
+    page.thumbnail?.source ||
+    "",
+  ).trim();
+  return {
+    pageTitle: pageTitle || wikiTitleFromUrl(pageUrl),
+    pageUrl,
+    ...(extract ? { extract } : {}),
+    ...(text ? { text } : {}),
+    ...(description ? { description } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
+  };
+}
+
+function normalizeSourcePages(pages) {
+  const normalized = [];
+  const seen = new Set();
+  for (const page of Array.isArray(pages) ? pages : []) {
+    const sourcePage = normalizeSourcePage(page);
+    if (!sourcePage) continue;
+    const key = normalizeTopicMatchText(sourcePage.pageUrl || sourcePage.pageTitle);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(sourcePage);
+  }
+  return normalized;
+}
+
+function sourcePagesFromContent(content) {
+  const pages = [];
+  if (Array.isArray(content?.sourcePages)) pages.push(...content.sourcePages);
+  if (content?.sourcePageTitle || content?.sourceText || content?.sourceExtract) {
+    pages.push({
+      pageTitle: content.sourcePageTitle,
+      pageUrl: content.wikiUrl || content.jsonLdUrl || "",
+      text: content.sourceText || "",
+      extract: content.sourceExtract || content.wikiExtract || "",
+    });
+  }
+  if (content?.wikiUrl || content?.jsonLdUrl) {
+    pages.push({
+      pageTitle: wikiTitleFromUrl(content.wikiUrl || content.jsonLdUrl),
+      pageUrl: content.wikiUrl || content.jsonLdUrl,
+    });
+  }
+  return normalizeSourcePages(pages);
+}
+
+function attachSelectedEventSourcePages(content, selectedEvent) {
+  if (!content || !selectedEvent) return content;
+  const sourcePages = normalizeSourcePages(
+    selectedEvent.sourcePages?.length
+      ? selectedEvent.sourcePages
+      : [{
+          pageTitle: selectedEvent.sourcePageTitle,
+          pageUrl: selectedEvent.wikiUrl,
+          text: selectedEvent.sourceText,
+          extract: selectedEvent.sourceExtract,
+        }],
+  );
+  if (sourcePages.length > 0) content.sourcePages = sourcePages;
+  if (selectedEvent.sourcePageTitle) content.sourcePageTitle = selectedEvent.sourcePageTitle;
+  if (selectedEvent.sourceText) content.sourceText = selectedEvent.sourceText;
+  if (selectedEvent.sourceExtract) content.sourceExtract = selectedEvent.sourceExtract;
+  if (selectedEvent.wikiUrl && !content.wikiUrl) content.wikiUrl = selectedEvent.wikiUrl;
+  return content;
+}
+
+function compactSourcePagesForIndex(content) {
+  return sourcePagesFromContent(content)
+    .slice(0, 6)
+    .map((page) => ({
+      pageTitle: page.pageTitle,
+      pageUrl: page.pageUrl,
+    }))
+    .filter((page) => page.pageTitle || page.pageUrl);
+}
+
+function extractSourcePagesFromHtml(html) {
+  const source = String(html || "");
+  const pages = [];
+  const urlRe = /https:(?:\\\/\\\/|\/\/)en\.wikipedia\.org(?:\\\/|\/)wiki(?:\\\/|\/)[^"'<>\s)]+/g;
+  let match;
+  while ((match = urlRe.exec(source)) !== null) {
+    const pageUrl = String(match[0] || "")
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/g, "&");
+    pages.push({ pageUrl, pageTitle: wikiTitleFromUrl(pageUrl) });
+  }
+  return normalizeSourcePages(pages);
+}
+
+function sourceEventPageMatchesPerson(term, page) {
+  const personName = stripPersonHonorifics(term?.term || term?.name || "");
+  const nameTokens = normalizeTopicMatchText(personName)
+    .split(" ")
+    .filter((token) => token.length > 1 && !PERSON_NAME_HONORIFIC_TOKENS.has(token));
+  if (nameTokens.length < 2) return false;
+
+  const pageTitle = String(page?.pageTitle || wikiTitleFromUrl(page?.pageUrl) || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const normalizedTitle = normalizeTopicMatchText(pageTitle);
+  if (!normalizedTitle) return false;
+  const titleTokens = normalizedTitle.split(" ").filter(Boolean);
+  if (!nameTokens.every((token) => titleTokens.includes(token))) return false;
+
+  // A plain page titled exactly "Bill Stewart" is the disambiguation problem, not
+  // the fallback. The fallback must be a real source-event page such as
+  // "Murder of Bill Stewart" with an event noun around the person's full name.
+  const extraTokens = titleTokens.filter(
+    (token) => !nameTokens.includes(token) && !SOURCE_EVENT_TITLE_STOPWORDS.has(token),
+  );
+  if (extraTokens.length === 0) return false;
+  if (!SOURCE_EVENT_PERSON_PAGE_RE.test(pageTitle)) return false;
+
+  const corpus = normalizeTopicMatchText(
+    `${pageTitle} ${page?.text || ""} ${page?.extract || ""}`,
+  );
+  return nameTokens.every((token) => corpus.includes(token));
+}
+
+async function fetchSourceEventPageEntityFallback(term, sourcePages) {
+  if (normalizeEntityType(term?.type) !== "person") return null;
+  const pages = normalizeSourcePages(sourcePages);
+  for (const page of pages) {
+    if (!sourceEventPageMatchesPerson(term, page)) continue;
+    const pageUrl = page.pageUrl || wikiUrlFromTitle(page.pageTitle);
+    const wikiData = await fetchWikipediaEntityData(
+      { ...term, term: page.pageTitle || term.term, wikiUrl: pageUrl },
+      { retryOnEmpty: false, sourcePages: [] },
+    ).catch(() => ({}));
+    if (wikiData.isDisambiguation) continue;
+    const intro = wikiData.intro || wikiData.summary || page.extract || page.text || "";
+    const summary = wikiData.summary || page.extract || page.text || "";
+    if (!intro && !summary && !wikiData.imageUrl && !page.imageUrl) continue;
+    return {
+      ...wikiData,
+      intro,
+      summary,
+      description: wikiData.description || page.description || "",
+      imageUrl: wikiData.imageUrl || page.imageUrl || "",
+      pageTitle: wikiData.pageTitle || page.pageTitle,
+      resolvedPageTitle: wikiData.resolvedPageTitle || page.pageTitle || wikiTitleFromUrl(pageUrl),
+      wikiUrl: wikiData.wikiUrl || pageUrl,
+      isDisambiguation: false,
+      sourceEventPageFallback: true,
+    };
+  }
+  return null;
+}
+
 function formatWikiDate(claim) {
   const raw = claim?.mainsnak?.datavalue?.value?.time;
   if (!raw) return "";
@@ -6021,7 +6398,7 @@ async function fetchWikidataLifeDates(pageTitle) {
   };
 }
 
-async function fetchWikipediaEntityData(term, { retryOnEmpty = true } = {}) {
+async function fetchWikipediaEntityData(term, { retryOnEmpty = true, sourcePages = [] } = {}) {
   const pageTitle = wikiTitleFromUrl(term.wikiUrl) || term.term;
   if (!pageTitle) return {};
   const summaryUrl =
@@ -6056,15 +6433,20 @@ async function fetchWikipediaEntityData(term, { retryOnEmpty = true } = {}) {
     intro: intro || summary.extract || "",
     description: summary.description || "",
     imageUrl: summary.originalimage?.source || summary.thumbnail?.source || "",
+    wikiUrl: summary.content_urls?.desktop?.page || summary.content_urls?.mobile?.page || "",
     pageTitle,
     resolvedPageTitle: resolvedPageTitle || pageTitle,
     isDisambiguation,
     ...lifeDates,
   };
+  if (normalizeEntityType(term.type) === "person" && result.isDisambiguation) {
+    const sourceFallback = await fetchSourceEventPageEntityFallback(term, sourcePages);
+    if (sourceFallback) return sourceFallback;
+  }
   // Retry once when both summary and intro came back empty — transient Wikipedia timeout
   if (retryOnEmpty && !result.intro && !result.summary) {
     await new Promise((r) => setTimeout(r, 1500));
-    return fetchWikipediaEntityData(term, { retryOnEmpty: false });
+    return fetchWikipediaEntityData(term, { retryOnEmpty: false, sourcePages });
   }
   return result;
 }
@@ -6769,6 +7151,7 @@ async function upsertEntityIndex(env, entities) {
 
 async function upsertEntitiesForContent(env, content, slug, date, pillars, { skipAiGeneration = false } = {}) {
   const rawTerms = Array.isArray(content.keyTerms) ? content.keyTerms : [];
+  const sourcePages = sourcePagesFromContent(content);
   const mainEvent = {
     term: content.eventTitle || content.title,
     wikiUrl: content.wikiUrl || content.jsonLdUrl || "",
@@ -6803,15 +7186,17 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
     // fetchWikipediaEntityData already falls back to term.term for the name lookup.
     // For non-person entities without a URL, skip the fetch to avoid unnecessary calls.
     const wikiData = (canonicalTerm.wikiUrl || type === "person")
-      ? await fetchWikipediaEntityData(canonicalTerm).catch(() => ({}))
+      ? await fetchWikipediaEntityData(canonicalTerm, { sourcePages }).catch(() => ({}))
       : {};
     // When the AI omitted the wikiUrl for a person but the name-based lookup returned a
     // non-disambiguation standard biography, derive the canonical URL from the resolved
     // page title so the profile check and all downstream steps (image, person page) work.
     const resolvedWikiUrl =
-      type === "person" && !canonicalTerm.wikiUrl && wikiData.resolvedPageTitle && !wikiData.isDisambiguation
-        ? `https://en.wikipedia.org/wiki/${encodeURIComponent(wikiData.resolvedPageTitle.replace(/ /g, "_"))}`
-        : canonicalTerm.wikiUrl;
+      type === "person" && wikiData.sourceEventPageFallback && (wikiData.wikiUrl || wikiData.resolvedPageTitle)
+        ? wikiData.wikiUrl || wikiUrlFromTitle(wikiData.resolvedPageTitle)
+        : type === "person" && !canonicalTerm.wikiUrl && wikiData.resolvedPageTitle && !wikiData.isDisambiguation
+          ? wikiData.wikiUrl || wikiUrlFromTitle(wikiData.resolvedPageTitle)
+          : canonicalTerm.wikiUrl;
     const resolvedTerm = resolvedWikiUrl !== canonicalTerm.wikiUrl ? { ...canonicalTerm, wikiUrl: resolvedWikiUrl } : canonicalTerm;
     if (type === "person" && !hasRichWikipediaPersonProfile({ ...resolvedTerm, ...wikiData, type })) {
       suppressPersonProfileLink(content, term.term);
@@ -6849,6 +7234,7 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       ...(type === "person"
         ? { profileLinkEligible: true, profileSubjectVerified: true }
         : {}),
+      ...(wikiData.sourceEventPageFallback ? { sourceEventPageFallback: true } : {}),
       ...(wikiEmpty && resolvedTerm.wikiUrl ? { needsWikiRefresh: true } : {}),
       // Mark new entities for AI card generation on next cron refresh when
       // skipping inline AI calls (subrequest budget preservation).
@@ -6898,9 +7284,23 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
 // the /blog/backfill-entities admin route and the nightly entity-recovery cron.
 async function backfillEntitiesForEntry(env, entry) {
   const date = new Date(entry.publishedAt || Date.now());
-  const content = { ...entry, historicalDate: inferHistoricalDateFromEntry(entry) };
-  const entities = await upsertEntitiesForContent(env, content, entry.slug, date, entry.pillars || []);
   const postHtml = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${entry.slug}`).catch(() => null);
+  const htmlSourcePages = extractSourcePagesFromHtml(postHtml);
+  const sourcePages = normalizeSourcePages([
+    ...(Array.isArray(entry.sourcePages) ? entry.sourcePages : []),
+    ...htmlSourcePages,
+    {
+      pageTitle: entry.sourcePageTitle,
+      pageUrl: entry.wikiUrl || entry.jsonLdUrl || "",
+    },
+  ]);
+  const content = {
+    ...entry,
+    historicalDate: inferHistoricalDateFromEntry(entry),
+    ...(sourcePages.length > 0 ? { sourcePages } : {}),
+    ...(!entry.wikiUrl && sourcePages[0]?.pageUrl ? { wikiUrl: sourcePages[0].pageUrl } : {}),
+  };
+  const entities = await upsertEntitiesForContent(env, content, entry.slug, date, entry.pillars || []);
   if (postHtml && entities.length > 0) {
     const updatedHtml = injectArticleEntityStrip(postHtml, entities);
     if (updatedHtml !== postHtml) {
@@ -7087,6 +7487,7 @@ function assertArticleStructure(html) {
   const checks = [
     ["article shell", /<article\b/i],
     ["hero image area", /article-hero-wrap/i],
+    ["featured hero image", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\bsrc="\/image-proxy\?src=/i],
     ["short answer card", /ai-answer-card/i],
     ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
     ["analysis section", /<h2 class="h3">Our Take:/i],
@@ -7289,9 +7690,11 @@ async function hydrateArticleEntityImages(env, entityMeta) {
 async function reviewQuizWithExpert(questions, content, env) {
   if (!hasAnyTextAIProvider(env)) return questions;
 
+  const sourceMaterial = sourceMaterialForGrounding(groundingSourceFromContent(content));
   const contextLines = [
     `Title: ${content.title}`,
     content.historicalDate ? `Date: ${content.historicalDate}` : "",
+    sourceMaterial ? `Authoritative source material:\n${sourceMaterial}` : "",
     ...(content.keyFacts || []).slice(0, 12).map((f) => `Fact: ${f}`),
   ]
     .filter(Boolean)
@@ -7309,6 +7712,8 @@ async function reviewQuizWithExpert(questions, content, env) {
     "- Wrong options must be plausible: same era, same country, same field — not obviously wrong\n" +
     "- At least 3 questions should require knowing a non-obvious fact, not just re-reading the title\n" +
     "- Never trick or mislead — every correct answer must be clearly supported by the facts provided\n" +
+    "- Never merge distinct actions, dates, or places. Recognition in one town and arrest in another must remain separate\n" +
+    "- The authoritative source material wins over article prose when they conflict\n" +
     "- Update the explanation to match any changes\n" +
     '- Output ONLY valid JSON, no markdown: {"questions":[...]}';
 
@@ -7360,29 +7765,110 @@ async function reviewQuizWithExpert(questions, content, env) {
   }
 
   const improved = parsed?.questions;
-  if (
-    !Array.isArray(improved) ||
-    improved.length !== questions.length ||
-    !improved.every(
-      (q) =>
-        typeof q.q === "string" &&
-        q.q.trim().length > 10 &&
-        Array.isArray(q.options) &&
-        q.options.length === 4 &&
-        q.options.every((o) => typeof o === "string" && o.trim().length > 2) &&
-        Number.isInteger(q.answer) &&
-        q.answer >= 0 &&
-        q.answer <= 3 &&
-        typeof q.explanation === "string" &&
-        q.explanation.trim().length > 8,
-    )
-  ) {
+  if (!validateQuizQuestions(improved, questions.length)) {
     console.warn("Quiz expert: validation failed — using original questions");
     return questions;
   }
 
   console.log("Quiz expert: questions reviewed and sharpened");
   return improved;
+}
+
+function validateQuizQuestions(questions, expectedLength = 5) {
+  return Array.isArray(questions) &&
+    questions.length === expectedLength &&
+    questions.every(
+      (q) =>
+        typeof q?.q === "string" &&
+        q.q.trim().length > 10 &&
+        Array.isArray(q.options) &&
+        q.options.length === 4 &&
+        q.options.every((option) => typeof option === "string" && option.trim().length > 2) &&
+        Number.isInteger(q.answer) &&
+        q.answer >= 0 &&
+        q.answer <= 3 &&
+        typeof q.explanation === "string" &&
+        q.explanation.trim().length > 8,
+    );
+}
+
+async function verifyQuizGrounding(env, questions, content) {
+  const sourceMaterial = sourceMaterialForGrounding(groundingSourceFromContent(content));
+  if (!sourceMaterial) return { ok: true, reasons: [] };
+  const articleFacts = [
+    content?.description,
+    ...(content?.keyFacts || []),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 9000);
+  try {
+    const raw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content:
+            "You are a fail-closed history quiz fact checker. Check every correct answer and explanation against the source and article facts. Reply with JSON only.",
+        },
+        {
+          role: "user",
+          content:
+            `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
+            `ARTICLE FACTS:\n${articleFacts}\n\n` +
+            `QUIZ:\n${JSON.stringify({ questions })}\n\n` +
+            "Reject any wrong answer index, factual contradiction, unsupported precise claim, or conflation of distinct people, dates, or places. " +
+            "Pay special attention to recognition versus arrest locations. Return exactly " +
+            '{"passed":true,"issues":[]} or {"passed":false,"issues":["question 4: specific issue"]}.',
+        },
+      ],
+      { maxTokens: 600, timeoutMs: 20_000 },
+    );
+    const match = raw?.match(/\{[\s\S]*\}/);
+    if (!match) return { ok: false, reasons: ["quiz grounding verifier returned no JSON"] };
+    const result = JSON.parse(match[0]);
+    const issues = Array.isArray(result.issues)
+      ? result.issues.map((issue) => String(issue).trim()).filter(Boolean)
+      : [];
+    return result.passed === true && issues.length === 0
+      ? { ok: true, reasons: [] }
+      : { ok: false, reasons: issues.length ? issues : ["quiz grounding verifier rejected the quiz"] };
+  } catch (err) {
+    return { ok: false, reasons: [`quiz grounding verifier unavailable: ${err.message}`] };
+  }
+}
+
+async function repairQuizGrounding(env, questions, content, reasons) {
+  const sourceMaterial = sourceMaterialForGrounding(groundingSourceFromContent(content));
+  if (!sourceMaterial) return null;
+  try {
+    const raw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content:
+            "You repair factual errors in history quizzes. Preserve exactly five questions and the {q,options,answer,explanation} schema. Reply with JSON only.",
+        },
+        {
+          role: "user",
+          content:
+            `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
+            `FACT-CHECK ISSUES:\n${reasons.join("\n")}\n\n` +
+            `QUIZ TO REPAIR:\n${JSON.stringify({ questions })}\n\n` +
+            "Correct every issue. Each question must have four options and one 0-based answer index. Do not introduce facts absent from the source material. Return {\"questions\":[...] }.",
+        },
+      ],
+      { maxTokens: 1800, timeoutMs: 25_000 },
+    );
+    const match = raw?.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]);
+    return validateQuizQuestions(parsed?.questions) ? parsed.questions : null;
+  } catch (err) {
+    console.warn(`Quiz grounding repair failed: ${err.message}`);
+    return null;
+  }
 }
 
 // Fetch a blog post's HTML and extract rich context for quiz generation
@@ -7474,9 +7960,11 @@ async function buildRichContent(entry, slug) {
 async function generateBlogQuiz(env, content, _slug) {
   if (!hasAnyTextAIProvider(env)) return null;
 
+  const quizSourceMaterial = sourceMaterialForGrounding(groundingSourceFromContent(content));
   const contextLines = [
     `Title: ${content.title}`,
     `Event: ${content.eventTitle} on ${content.historicalDate}`,
+    quizSourceMaterial ? `Authoritative source material: ${quizSourceMaterial}` : "",
     content.location || content.country
       ? `Location: ${[content.location, content.country].filter(Boolean).join(", ")}`
       : "",
@@ -7509,7 +7997,7 @@ async function generateBlogQuiz(env, content, _slug) {
         },
         {
           role: "user",
-          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, no more no less\n- Each question has exactly 4 options (never fewer, never more)\n- Exactly one correct answer per question (0-based index in "answer", must be 0, 1, 2, or 3)\n- Question types must vary: include at least one each of Who, What, Why/How, When/Where\n- Questions must progress: 1 easy recall, 2 medium analysis, 2 challenging synthesis\n- Draw from ALL Fact lines — do not repeat the same topic twice\n- Wrong options must be plausible but clearly incorrect; no trick questions\n- Each question must include a short "explanation" field (1-2 sentences) explaining why the answer is correct\n- All strings must be non-empty and longer than 5 characters\n- Output ONLY valid JSON, no markdown:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
+          content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, no more no less\n- Each question has exactly 4 options (never fewer, never more)\n- Exactly one correct answer per question (0-based index in "answer", must be 0, 1, 2, or 3)\n- Question types must vary: include at least one each of Who, What, Why/How, When/Where\n- Questions must progress: 1 easy recall, 2 medium analysis, 2 challenging synthesis\n- Draw from ALL Fact lines — do not repeat the same topic twice\n- The authoritative source material wins over the article summary or facts if they conflict\n- Keep recognition, arrest, capture, departure, arrival, and death locations and dates distinct\n- Wrong options must be plausible but clearly incorrect; no trick questions\n- Each question must include a short "explanation" field (1-2 sentences) explaining why the answer is correct\n- All strings must be non-empty and longer than 5 characters\n- Output ONLY valid JSON, no markdown:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
         },
       ],
       { maxTokens: 1500, timeoutMs: 25_000 },
@@ -7533,24 +8021,19 @@ async function generateBlogQuiz(env, content, _slug) {
   }
   if (!Array.isArray(parsed?.questions) || parsed.questions.length !== 5)
     return null;
-  const valid = parsed.questions.filter(
-    (q) =>
-      q.q &&
-      typeof q.q === "string" &&
-      q.q.trim().length > 10 &&
-      Array.isArray(q.options) &&
-      q.options.length === 4 &&
-      q.options.every((o) => typeof o === "string" && o.trim().length > 2) &&
-      Number.isInteger(q.answer) &&
-      q.answer >= 0 &&
-      q.answer <= 3 &&
-      q.explanation &&
-      typeof q.explanation === "string" &&
-      q.explanation.trim().length > 8,
-  );
-  if (valid.length !== 5) return null;
-  const sharpened = await reviewQuizWithExpert(valid, content, env);
-  return { ...parsed, questions: sharpened };
+  if (!validateQuizQuestions(parsed.questions)) return null;
+  const sharpened = await reviewQuizWithExpert(parsed.questions, content, env);
+  let grounding = await verifyQuizGrounding(env, sharpened, content);
+  if (grounding.ok) return { ...parsed, questions: sharpened };
+  console.warn(`Quiz grounding check failed: ${grounding.reasons.join("; ")}`);
+  const repaired = await repairQuizGrounding(env, sharpened, content, grounding.reasons);
+  if (!repaired) return null;
+  grounding = await verifyQuizGrounding(env, repaired, content);
+  if (!grounding.ok) {
+    console.warn(`Quiz grounding recheck failed: ${grounding.reasons.join("; ")}`);
+    return null;
+  }
+  return { ...parsed, questions: repaired };
 }
 
 // ---------------------------------------------------------------------------
@@ -7566,6 +8049,8 @@ async function callWorkersAI(
   preferredPillars = [],
   contextHook = null,
   recentPillars = [],
+  sourceMaterial = null,
+  stricterGrounding = false,
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -7609,8 +8094,26 @@ Prefer events that are likely to be image-rich on Wikipedia, meaning a real arti
 
 Choose the single event from this date that a curious 25-year-old would most likely stop scrolling to watch a 45-second video about, and that is most likely to pass a 3-image Wikipedia coverage check.`;
 
+  // Authoritative source material for the selected event. When present, the body
+  // MUST be grounded in it — this is the cure for from-memory fabrication (the
+  // 2026-06-20 incidents: a fabricated June 20 event and an invented June 19
+  // death toll). See architecture/2026-06-20-source-grounded-generation-design.md.
+  const sourceMaterialSection = sourceMaterial
+    ? `\nSOURCE MATERIAL (authoritative — your single source of truth for this event):\n"""\n${String(sourceMaterial).slice(0, 8000)}\n"""\n` +
+      `GROUNDING RULES (mandatory):\n` +
+      `- Write ONLY about the exact event described in the SOURCE MATERIAL above. Do not substitute a different event, even one with a similar name.\n` +
+      `- Base every factual claim on the SOURCE MATERIAL and on well-established history that is consistent with it.\n` +
+      `- NEVER invent specifics. Do not state a casualty count, death toll, number of survivors, named person, exact date, or place unless it is supported by the source. If the source does not give a number, do not give one; describe it qualitatively instead.\n` +
+      `- NEVER invent a named memoir, newspaper report, government record, decree, quotation, archival reference, publication date, or historian. Name a source only when that exact source appears in the SOURCE MATERIAL. Otherwise attribute the point generally to the supplied Wikipedia sources or omit the attribution.\n` +
+      `- Keep distinct actions distinct. Do not merge recognition, arrest, death, departure, arrival, or capture into one place or date when the source assigns them to different places or dates.\n` +
+      `- If the source and your own memory disagree, the source wins.\n` +
+      (stricterGrounding
+        ? `- A previous draft was REJECTED for containing claims not supported by the source (a wrong event or an invented number). Be conservative: omit any specific you cannot tie to the source above.\n`
+        : "")
+    : "";
+
   const prompt = `You are a historical content writer for "thisDay.info", a website about historical events.
-${contextHookSection}
+${contextHookSection}${sourceMaterialSection}
 STRICT DATE REQUIREMENT: You MUST write about an event that occurred on ${monthName} ${day} ONLY. The event must have taken place in the month of ${monthName} on day ${day}. Events from ANY other month or day are strictly forbidden. Before choosing an event, verify it happened on ${monthName} ${day}. If you are not certain an event occurred on ${monthName} ${day}, choose a different event you are confident about.
 
 ${eventSelection}
@@ -7640,7 +8143,7 @@ Sentence and paragraph rules:
 - VARY SENTENCE FORMS, not just lengths. If one sentence is conditional ("If X, then Y"), the next should be a short declarative. Follow that with a cause-and-effect. Never write three consecutive sentences with the same grammatical structure — structural repetition kills energy even when length varies.
 - Target an average of 18-22 words per sentence across each paragraph. This creates readable depth without choppiness.
 - Every paragraph must contain at least one specific, verifiable fact: a real name, an exact year or number, a specific place, or a direct quote. No paragraph may consist entirely of vague generalizations.
-- SOURCE ANCHOR RULE: In every major section, at least one paragraph must name the source of its claim, whether that is a memoir, a trial record, a newspaper, a historian, a government decree, or a specific witness.
+- SOURCE ANCHOR RULE: In every major section, attribute at least one claim. ${sourceMaterial ? "Use only a source explicitly named in SOURCE MATERIAL; if none is named, attribute the claim generally to the supplied Wikipedia source. Never invent a memoir, trial record, newspaper, historian, decree, archive, or witness." : "Use a real memoir, trial record, newspaper, historian, government decree, or specific witness, and omit the attribution if you cannot verify it."}
 - FACT FIRST IN EVERY SECTION: The first sentence of Overview, Eyewitness Accounts, Aftermath, and Legacy must state the key fact before any scene-setting. Answer the implied reader question immediately, then expand.
 - AFTERMATH MUST CASH OUT: The aftermath paragraphs must name specific actions taken in the days, weeks, or years after the event, including who acted, where, and what changed. Do not hide behind phrases like "it reshaped politics" unless you name the office, law, institution, or military result that changed.
 - NO REPETITION ACROSS SECTIONS: Each paragraph must introduce new information. Never restate a point, conclusion, or fact already made in a previous section. Do not name the same person, institution, or concept more than three times in the full article — use pronouns or contextual references after the first mention.
@@ -8060,11 +8563,253 @@ async function generateEditorialNote(env, content, date) {
  * @param {object} env
  * @param {object} content  Parsed content object — mutated directly on correction.
  */
-async function factCheckContent(env, content) {
+// ---------------------------------------------------------------------------
+// Source grounding — credibility gate (2026-06-20)
+// The body generator is grounded in the selected event's Wikipedia source (see
+// callWorkersAI `sourceMaterial`). These deterministic checks are the hard gate
+// that stops a fabricated or contradicted draft from being published:
+//   - wrong-event fabrication  (June 20, 2026: invented "ABC News broadcast
+//     glitch" instead of the real Bill Stewart murder)
+//   - wrong-fact fabrication   (June 19, 2026: invented "46 deaths"; real 15)
+// ---------------------------------------------------------------------------
+
+// Casualty/death-toll numbers stated in a piece of text. Only numbers adjacent
+// to a death word are captured, so "46 families" / "7 crew" are ignored while
+// "loss of all 46 lives" / "killing 15" are caught.
+const DEATH_TOLL_PATTERNS = [
+  /\bloss of (?:all |about |around |over |nearly )?(\d[\d,]*)\s+(?:lives|people|souls)\b/gi,
+  /\b(\d[\d,]*)\s+(?:lives|people|passengers|crew|soldiers|civilians|victims)?\s*(?:were|was|are|is)?\s*(?:killed|died|dead|perished|massacred|murdered|executed|slain)\b/gi,
+  /\bkill(?:ed|ing|s)?\s+(?:about |around |over |nearly |at least )?(\d[\d,]*)\b/gi,
+  /\b(\d[\d,]*)\s+(?:deaths|fatalities|casualties)\b/gi,
+  /\b(\d[\d,]*)\s+lives?\s+(?:were\s+)?lost\b/gi,
+];
+
+function extractDeathTolls(text) {
+  const s = String(text || "");
+  const found = new Set();
+  for (const re of DEATH_TOLL_PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const n = parseInt(String(m[1]).replace(/,/g, ""), 10);
+      if (Number.isFinite(n) && n > 0) found.add(n);
+    }
+  }
+  return [...found];
+}
+
+// Significant subject tokens of the canonical source page (its Wikipedia title).
+// Parentheticals/disambiguators are dropped. The article must name at least one
+// of these. We use ONLY the canonical page title — not the one-line feed text —
+// so words the fabricated and real stories happen to share ("ABC News") do not
+// mask a wrong-event article.
+const SUBJECT_STOPWORDS = new Set([
+  "the", "of", "and", "in", "on", "at", "to", "for", "a", "an", "de", "la", "el",
+  "battle", "war", "flight", "event", "crash", "incident", "attack", "disaster",
+]);
+
+function sourceSubjectTokens(source) {
+  const tokens = new Set();
+  // From the canonical page title: proper nouns / years (len >= 3).
+  const title = String(source?.pageTitle || "").replace(/\([^)]*\)/g, " ");
+  for (const raw of title.split(/[\s,]+/)) {
+    const w = raw.trim();
+    if (!w) continue;
+    const isProper = /^[A-Z]/.test(w) && w.length >= 3;
+    const isNumber = /^\d{2,4}$/.test(w);
+    if ((isProper || isNumber) && !SUBJECT_STOPWORDS.has(w.toLowerCase())) {
+      tokens.add(w);
+    }
+  }
+  // From the feed text + extract: add only DISTINCTIVE proper-case nouns
+  // (len >= 5, "Capital + lowercase"). This lets a synonym of the page title
+  // (e.g. "Normandy"/"Overlord") satisfy the check, while short or all-caps
+  // shared words ("ABC", "News") can never mask a wrong-event article.
+  const corpus = `${source?.text || ""} ${source?.sourceExtract || ""}`;
+  for (const raw of corpus.split(/[\s,.;:"'()]+/)) {
+    const w = raw.trim();
+    if (w.length >= 5 && /^[A-Z][a-z]+$/.test(w) && !SUBJECT_STOPWORDS.has(w.toLowerCase())) {
+      tokens.add(w);
+    }
+  }
+  return [...tokens];
+}
+
+function groundingSourceFromContent(content) {
+  if (!content) return null;
+  const sourcePages = sourcePagesFromContent(content);
+  const source = {
+    pageTitle: content.sourcePageTitle || sourcePages[0]?.pageTitle || "",
+    text: content.sourceText || "",
+    sourceExtract: content.sourceExtract || sourcePages[0]?.extract || "",
+    sourcePages,
+  };
+  return source.pageTitle || source.text || source.sourceExtract || sourcePages.length > 0
+    ? source
+    : null;
+}
+
+function sourceMaterialForGrounding(source) {
+  if (!source) return "";
+  const sections = [];
+  if (source.text) sections.push(`Event listing: ${String(source.text).trim()}`);
+  if (source.sourceExtract) {
+    sections.push(`Primary source extract: ${String(source.sourceExtract).trim()}`);
+  }
+  for (const page of normalizeSourcePages(source.sourcePages || []).slice(0, 4)) {
+    if (!page.extract) continue;
+    sections.push(`${page.pageTitle || "Wikipedia source"}: ${page.extract}`);
+  }
+  const seen = new Set();
+  return sections
+    .map((section) => section.replace(/\s+/g, " ").trim())
+    .filter((section) => {
+      const key = normalizeForCompare(section);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join("\n\n")
+    .slice(0, 8000);
+}
+
+function collectGroundingStrings(value, out = []) {
+  if (typeof value === "string") {
+    const text = value.replace(/\s+/g, " ").trim();
+    if (text) out.push(text);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectGroundingStrings(item, out);
+    return out;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (/url|image|searchquery|type/i.test(key)) continue;
+      collectGroundingStrings(item, out);
+    }
+  }
+  return out;
+}
+
+function articleGroundingText(content) {
+  const groundedFields = {
+    title: content?.title,
+    eventTitle: content?.eventTitle,
+    description: content?.description,
+    quickFacts: content?.quickFacts,
+    didYouKnowFacts: content?.didYouKnowFacts,
+    overviewParagraphs: content?.overviewParagraphs,
+    eyewitnessOrChronicle: content?.eyewitnessOrChronicle,
+    eyewitnessQuote: content?.eyewitnessQuote,
+    eyewitnessQuoteSource: content?.eyewitnessQuoteSource,
+    aftermathParagraphs: content?.aftermathParagraphs,
+    conclusionParagraphs: content?.conclusionParagraphs,
+    analysisGood: content?.analysisGood,
+    analysisBad: content?.analysisBad,
+    editorialNote: content?.editorialNote,
+    timeline: content?.timeline,
+  };
+  return collectGroundingStrings(groundedFields).join("\n");
+}
+
+/**
+ * Deterministic grounding gate. Returns { ok, reasons[] }. A no-op (ok:true)
+ * when no source is available (e.g. a manually forced event), so admin force
+ * paths are never blocked.
+ */
+function verifyArticleGrounding(content, source) {
+  const reasons = [];
+  if (!source || (!source.pageTitle && !source.text && !source.sourceExtract)) {
+    return { ok: true, reasons };
+  }
+  const articleText = articleGroundingText(content);
+  const articleLower = articleText.toLowerCase();
+
+  // 1) Subject match — the article must name the source's canonical subject.
+  const subjectTokens = sourceSubjectTokens(source);
+  if (
+    subjectTokens.length > 0 &&
+    !subjectTokens.some((t) => articleLower.includes(t.toLowerCase()))
+  ) {
+    reasons.push(
+      `subject mismatch: article never names the source subject (${subjectTokens.join(", ")})`,
+    );
+  }
+
+  // 2) Numeric contradiction — only when BOTH sides state a death toll and they
+  // are disjoint. Absence is never a contradiction (keeps false positives low).
+  const articleTolls = extractDeathTolls(articleText);
+  const sourceTolls = extractDeathTolls(
+    `${source.text || ""} ${source.sourceExtract || ""}`,
+  );
+  if (
+    articleTolls.length > 0 &&
+    sourceTolls.length > 0 &&
+    !articleTolls.some((n) => sourceTolls.includes(n))
+  ) {
+    reasons.push(
+      `casualty number contradiction: article says ${articleTolls.join("/")} but source says ${sourceTolls.join("/")}`,
+    );
+  }
+
+  return { ok: reasons.length === 0, reasons };
+}
+
+async function verifyFinalArticleGrounding(env, content, source) {
+  const deterministic = verifyArticleGrounding(content, source);
+  if (!deterministic.ok) return deterministic;
+  const sourceMaterial = sourceMaterialForGrounding(source);
+  if (!sourceMaterial) return deterministic;
+  const articleText = articleGroundingText(content).slice(0, 14000);
+  try {
+    const raw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content:
+            "You are a fail-closed historical fact checker. Compare the article with the supplied authoritative source material. Reply with JSON only.",
+        },
+        {
+          role: "user",
+          content:
+            `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
+            `FINAL ARTICLE:\n${articleText}\n\n` +
+            "Reject only clear factual contradictions, conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
+            "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +
+            "Do not reject ordinary interpretation or clearly labeled opinion. Return exactly one JSON object: " +
+            '{"passed":true,"issues":[]} or {"passed":false,"issues":["specific issue"]}.',
+        },
+      ],
+      { maxTokens: 700, timeoutMs: 25_000 },
+    );
+    const match = raw?.match(/\{[\s\S]*\}/);
+    if (!match) return { ok: false, reasons: ["final grounding verifier returned no JSON"] };
+    const result = JSON.parse(match[0]);
+    const issues = Array.isArray(result.issues)
+      ? result.issues.map((issue) => String(issue).trim()).filter(Boolean)
+      : [];
+    if (result.passed === true && issues.length === 0) return { ok: true, reasons: [] };
+    return {
+      ok: false,
+      reasons: issues.length > 0 ? issues : ["final grounding verifier rejected the article"],
+    };
+  } catch (err) {
+    return { ok: false, reasons: [`final grounding verifier unavailable: ${err.message}`] };
+  }
+}
+
+async function factCheckContent(env, content, source = null) {
+  const sourceBlock =
+    source && (source.sourceExtract || source.text)
+      ? `AUTHORITATIVE SOURCE (verify against this, not only your memory):\n"""\n${String(source.sourceExtract || source.text).slice(0, 1200)}\n"""\n\n`
+      : "";
   const prompt =
     `You are a strict historical fact-checker. Given the article data below, identify any clear factual errors.\n` +
     `Focus ONLY on: whether the event date/year matches the event name, and whether the location is correct.\n` +
-    `Do NOT invent errors. Only flag what you are confident is wrong based on well-established historical fact.\n\n` +
+    `Do NOT invent errors. Only flag what you are confident is wrong based on well-established historical fact${source ? " and the AUTHORITATIVE SOURCE above" : ""}.\n\n` +
+    sourceBlock +
     `Event: ${content.eventTitle}\n` +
     `Historical date: ${content.historicalDate}\n` +
     `Year: ${content.historicalYear}\n` +
@@ -12013,3 +12758,9 @@ function injectBlogNavWidthFix(html) {
     `<style>${BLOG_NAV_WIDTH_FIX_CSS}</style></head>`,
   );
 }
+
+export const __entityResolutionTestHooks = {
+  sourceEventPageMatchesPerson,
+  extractSourcePagesFromHtml,
+  compactSourcePagesForIndex,
+};

@@ -44,6 +44,33 @@ const ANTHROPIC_MODEL = "claude-3-5-haiku-latest";
 let _groqModelCache = { model: null, at: 0 };
 let _cerebrasModelCache = { model: null, at: 0 };
 const _MODEL_CACHE_TTL_MS = 3_600_000; // 1 hour
+const _providerKeyCooldowns = new Map();
+const _DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+
+function providerKeyCooldownId(provider, key) {
+  return `${provider}:${key}`;
+}
+
+function isProviderKeyCoolingDown(provider, key) {
+  const id = providerKeyCooldownId(provider, key);
+  const until = _providerKeyCooldowns.get(id) || 0;
+  if (until <= Date.now()) {
+    _providerKeyCooldowns.delete(id);
+    return false;
+  }
+  return true;
+}
+
+function markProviderKeyRateLimited(provider, key, response) {
+  const retryAfterSeconds = Number(response?.headers?.get?.("retry-after"));
+  const cooldownMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+    ? Math.min(retryAfterSeconds * 1000, _MODEL_CACHE_TTL_MS)
+    : _DEFAULT_RATE_LIMIT_COOLDOWN_MS;
+  _providerKeyCooldowns.set(
+    providerKeyCooldownId(provider, key),
+    Date.now() + cooldownMs,
+  );
+}
 
 /**
  * Scores a model ID for suitability as a text-generation model for article creation.
@@ -263,6 +290,43 @@ function guardProviderAttempt(providerAttempts, providerAttemptLimit, failureRea
 }
 
 /**
+ * Calls the bound Cloudflare Workers AI service directly.
+ *
+ * Use this for late publication gates after external provider calls have used
+ * most of the Free-plan 50-fetch allowance. Workers AI is an internal service
+ * binding and has a separate internal-subrequest budget.
+ */
+export async function callWorkersAIDirect(
+  env,
+  messages,
+  { maxTokens = 1024, timeoutMs = 12_000, cfModel, temperature = 0.3 } = {},
+) {
+  if (!env?.AI) throw new Error("Workers AI binding missing");
+  const model = cfModel ?? (await resolveAiModel(env.BLOG_AI_KV).catch(() => null));
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("Workers AI timeout")), timeoutMs);
+  });
+  let result;
+  try {
+    result = await Promise.race([
+      env.AI.run(model, {
+        messages,
+        max_tokens: maxTokens,
+        temperature,
+      }),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  const rawValue = result?.response ?? result?.choices?.[0]?.message?.content ?? "";
+  const text = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
+  if (!text) throw new Error("Workers AI returned empty response");
+  return text;
+}
+
+/**
  * Calls AI with a Workers AI → Groq fallback chain.
  * Always resolves to the raw text string from the model.
  * Throws only if both providers are unavailable.
@@ -282,9 +346,24 @@ function guardProviderAttempt(providerAttempts, providerAttemptLimit, failureRea
  * @param {string}   [opts.cfModel]      Override CF model; if omitted resolves from KV
  * @returns {Promise<string>}  Raw text from the model
  */
-export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_000, cfModel, temperature = 0.3 } = {}) {
+export async function callAI(
+  env,
+  messages,
+  {
+    maxTokens = 1024,
+    timeoutMs = 12_000,
+    cfModel,
+    temperature = 0.3,
+    skipWorkersAI = false,
+    providerAttemptLimit: providerAttemptLimitOverride,
+  } = {},
+) {
   const failureReasons = [];
-  const providerAttemptLimit = getProviderAttemptLimit(env);
+  const parsedProviderAttemptLimit = Number(providerAttemptLimitOverride);
+  const providerAttemptLimit =
+    Number.isFinite(parsedProviderAttemptLimit) && parsedProviderAttemptLimit > 0
+      ? Math.floor(parsedProviderAttemptLimit)
+      : getProviderAttemptLimit(env);
   let providerAttempts = 0;
 
   // Resolve key arrays up front so model resolution can use the first available key.
@@ -305,6 +384,10 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
     failureReasons.push("No Groq API keys configured");
   }
   for (const key of groqKeys) {
+    if (isProviderKeyCoolingDown("groq", key)) {
+      failureReasons.push("Groq key temporarily skipped after rate limit");
+      continue;
+    }
     try {
       guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
       providerAttempts += 1;
@@ -330,6 +413,7 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
         failureReasons.push("Groq returned empty response");
       }
       const errBody = await res.text().catch(() => "");
+      if (res.status === 429) markProviderKeyRateLimited("groq", key, res);
       console.warn(`Groq error ${res.status}: ${errBody.slice(0, 120)}`);
       failureReasons.push(`Groq error ${res.status}: ${errBody.slice(0, 120)}`);
     } catch (err) {
@@ -537,23 +621,16 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
   }
 
   // 6. Workers AI — built-in fallback when external providers are unavailable
-  if (env.AI) {
+  if (env.AI && !skipWorkersAI) {
     try {
       guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
       providerAttempts += 1;
-      const model = cfModel ?? (await resolveAiModel(env.BLOG_AI_KV).catch(() => null));
-      const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Workers AI timeout")), timeoutMs),
-      );
-      const result = await Promise.race([
-        env.AI.run(model, { messages, max_tokens: maxTokens }),
-        timeout,
-      ]);
-      const rawValue = result?.response ?? result?.choices?.[0]?.message?.content ?? "";
-      const text = (typeof rawValue === "string" ? rawValue : JSON.stringify(rawValue)).trim();
-      if (text) return text;
-      console.warn("Workers AI returned empty response after Groq fallback");
-      failureReasons.push("Workers AI returned empty response");
+      return await callWorkersAIDirect(env, messages, {
+        maxTokens,
+        timeoutMs,
+        cfModel,
+        temperature,
+      });
     } catch (err) {
       console.warn(`Workers AI failed (${err.message})`);
       failureReasons.push(`Workers AI failed: ${err.message}`);
@@ -561,6 +638,8 @@ export async function callAI(env, messages, { maxTokens = 1024, timeoutMs = 12_0
         throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
       }
     }
+  } else if (skipWorkersAI) {
+    failureReasons.push("Workers AI intentionally skipped");
   } else {
     failureReasons.push("Workers AI binding missing");
   }

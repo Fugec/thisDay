@@ -19,12 +19,16 @@
   "name": "thisday-blog-ai-worker",
   "compatibility_date": "2026-03-14",
   "main": "js/blog-ai-worker.js",
+  // Keep the direct workers.dev hostname enabled for authenticated automation.
+  // Zone-level Bot Fight/WAF rules can challenge GitHub's curl requests before
+  // they reach /blog/publish or /blog/enrich on thisday.info.
+  "workers_dev": true,
 
   // NOTE: usage_model: "unbound" is deprecated and ignored by Wrangler v4+.
-  // Scheduled enrichment runs inside the cron invocation. Manual/failsafe
-  // POST /blog/publish awaits enrichment and returns an error if promotion
-  // cannot finish in its request. Self-subrequests are not used because
-  // requests to this worker route can bypass the handler and reach origin.
+  // Scheduled generation and enrichment run in separate cron invocations.
+  // Manual POST /blog/publish still awaits enrichment and returns an error if
+  // promotion cannot finish in its request. Failsafe automation uses the
+  // authenticated draft/enrich endpoints through workers.dev.
 
   "vars": {
     // Temporary write pause while today's free KV write quota recovers.
@@ -42,14 +46,15 @@
   // Cron trigger — runs every day at 00:05 UTC.
   // 5 minutes after warmup-worker (00:01) has populated the events KV cache.
   // Blog post is the source of truth for the video narration + metadata.
-  // Failsafe check follows at 00:35.
+  // 00:15 enrichment runs in a separate invocation with a fresh external
+  // subrequest budget. The GitHub failsafe check follows at 00:35.
   // 00:50 runs the dedicated entity-recovery pass (ENTITY_RECOVERY_CRON): a fresh
   // invocation with full subrequest budget re-links any people strips the budget-starved
   // 00:05 generation left unlinked. Must stay after the 00:35 failsafe.
   // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 13:00 UTC
   // (about 09:00 Eastern during daylight saving time).
   "triggers": {
-    "crons": ["5 0 * * *", "50 0 * * *"],
+    "crons": ["5 0 * * *", "15 0 * * *", "50 0 * * *"],
   },
 
   // KV namespaces — blog posts/index and shared events/quiz cache.

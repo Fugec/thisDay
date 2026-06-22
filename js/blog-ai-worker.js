@@ -31,7 +31,11 @@ import {
   checkAndUpdateAiModel,
   CF_AI_MODEL,
 } from "./shared/ai-model.js";
-import { callAI, hasAnyTextAIProvider } from "./shared/ai-call.js";
+import {
+  callAI,
+  callWorkersAIDirect,
+  hasAnyTextAIProvider,
+} from "./shared/ai-call.js";
 import { extractFirstSentence, truncateForMeta, splitSentences, normalizeForCompare } from "./shared/seo-text.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
@@ -43,6 +47,21 @@ const AMAZON_COVERS_BACKFILL_MARKER = "<!-- amazon-covers-backfill-v1 -->";
 const KV_REPAIR_ATTEMPT_PREFIX = "repair-attempt-v1:";
 const REPAIR_ATTEMPT_TTL = 60 * 60 * 24; // 1 day
 const REPAIR_ATTEMPT_LIMIT = 2; // per slug, per repair type, per TTL window
+
+async function callPublicationGateAI(env, messages, options = {}) {
+  try {
+    return await callWorkersAIDirect(env, messages, options);
+  } catch (workersError) {
+    console.warn(
+      `Publication gate: Workers AI unavailable (${workersError.message}); trying bounded external fallback.`,
+    );
+    return callAI(env, messages, {
+      ...options,
+      skipWorkersAI: true,
+      providerAttemptLimit: 8,
+    });
+  }
+}
 
 function utcDateString(value = new Date()) {
   return value.toISOString().slice(0, 10);
@@ -246,6 +265,10 @@ const EVENT_FAMILY_RULES = [
   },
 ];
 const EVERY_OTHER_DAYS = 1; // Generate every N days
+// Generation and enrichment intentionally use separate cron invocations. The
+// article pipeline can exceed the Free-plan limit of 50 external subrequests
+// when both phases share one invocation (June 22, 2026 incident).
+const DRAFT_ENRICHMENT_CRON = "15 0 * * *";
 // Cron string (must match a trigger in wrangler-blog.jsonc) for the dedicated
 // entity-recovery pass that re-links people strips with a fresh subrequest budget.
 const ENTITY_RECOVERY_CRON = "50 0 * * *";
@@ -254,7 +277,7 @@ const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
 const ARTICLE_HERO_CSS =
-  `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
+  `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
 const ENTITY_STRIP_BLOCK_RE =
   /<style>\.entity-strip\{[\s\S]*?<\/style><div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/;
 const VIDEO_THUMBNAIL_OVERRIDES = {
@@ -352,8 +375,7 @@ ${rows}
     </section>`;
 }
 
-function buildArticleAnswerBlock(content) {
-  // Build grid rows from quickFacts; fall back to the four core fields when empty.
+function articleAnswerFacts(content) {
   const usableFacts = (Array.isArray(content.quickFacts) ? content.quickFacts : []).filter(
     (fact) =>
       fact &&
@@ -361,14 +383,19 @@ function buildArticleAnswerBlock(content) {
       String(fact.label || "").trim() &&
       String(fact.value || "").trim(),
   );
-  const facts = usableFacts.length
+  return usableFacts.length
     ? usableFacts
     : [
-        { label: "Event",     value: content.eventTitle },
-        { label: "Date",      value: content.historicalDate },
-        { label: "Location",  value: content.location || content.country || "Historical location" },
+        { label: "Event", value: content.eventTitle },
+        { label: "Date", value: content.historicalDate },
+        { label: "Location", value: content.location || content.country || "" },
         { label: "Significance", value: content.description },
       ].filter((fact) => String(fact.value || "").trim());
+}
+
+function buildArticleAnswerBlock(content) {
+  const facts = articleAnswerFacts(content);
+  if (!facts.length) return "";
   const gridItems = facts
     .map((f) => `      <div class="ai-answer-item"><strong>${esc(f.label)}</strong><span>${esc(f.value)}</span></div>`)
     .join("\n");
@@ -401,7 +428,7 @@ function buildDidYouKnowSlider(facts) {
   // cycling ONLY as a last resort when fewer than 5 unique facts exist, so a generation
   // shortfall never blocks daily publication (scanArticleQuality separately flags fewer
   // than 5 distinct so enrichment backfills more before this fallback ever shows).
-  const count = Math.max(5, cleanedFacts.length);
+  const count = 5;
   const sliderFacts = Array.from({ length: count }, (_, index) => {
     const fact = cleanedFacts[index] ?? cleanedFacts[index % cleanedFacts.length];
     return `            <article class="blog-cta-col dyn-slide" aria-label="Did you know fact ${index + 1}">
@@ -1902,6 +1929,12 @@ export default {
     const cron = event?.cron || "";
     ctx.waitUntil(
       (async () => {
+        // Promote the 00:05 draft in a fresh invocation with its own external
+        // subrequest budget. Do not combine generation and enrichment here.
+        if (cron === DRAFT_ENRICHMENT_CRON) {
+          await recoverPendingBlogDraft(env);
+          return;
+        }
         // Dedicated entity-recovery cron: its own invocation has a fresh subrequest
         // budget, so it can re-resolve people strips that the budget-starved generation
         // cron left unlinked. Runs after the 00:05 generation and 00:35 failsafe.
@@ -1975,6 +2008,42 @@ export default {
       });
     }
 
+    // Failsafe phase 1: generate a lightweight draft without consuming the
+    // enrichment invocation's subrequest budget. The GitHub workflow follows
+    // this with authenticated POST /blog/enrich?slug=...&sync=true.
+    if (path === "/blog/generate-draft" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      try {
+        await generateAndStore(env, null, null, null, null, {
+          lightweightPublish: true,
+          enrichDraft: false,
+        });
+        return jsonResponse({
+          status: "ok",
+          slug: buildSlug(new Date()),
+          message: "Blog draft generated.",
+        });
+      } catch (err) {
+        const today = todayDateString();
+        console.error(`Blog AI: /blog/generate-draft failed — ${err.message}`);
+        await recordPipelineFailure(env, {
+          step: "blog",
+          slug: today,
+          message: err.message,
+          date: new Date(),
+        });
+        await env.BLOG_AI_KV.put(
+          `error:${today}`,
+          `Draft endpoint failed: ${err.message}`,
+          { expirationTtl: 7 * 86_400 },
+        );
+        return jsonResponse({ status: "error", message: err.message }, 500);
+      }
+    }
+
     // Manual trigger (POST /blog/publish)
     // Requires:  Authorization: Bearer <PUBLISH_SECRET>  (blog failsafe)
     //        or  Authorization: Bearer <YOUTUBE_REGEN_SECRET>  (YouTube regen)
@@ -2042,6 +2111,12 @@ export default {
       ).catch(() => {});
       const recordEnrichError = async (err) => {
         console.error(`Blog AI: enrichment failed for ${slug} — ${err.message}`);
+        await recordPipelineFailure(env, {
+          step: "blog",
+          slug,
+          message: err.message,
+          date: new Date(),
+        });
         await env.BLOG_AI_KV.put(
           `debug:enrich-error:${slug}`,
           JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), ts: new Date().toISOString() }),
@@ -4054,18 +4129,7 @@ export default {
  * Retry strategy: tries up to 3 times with increasing delays so transient
  * CF Workers AI timeouts don't silently skip an entire day.
  */
-async function maybeGenerateBlogPost(env, ctx) {
-  const today = todayDateString(); // "YYYY-MM-DD"
-  const todaySlug = buildSlug(new Date());
-  const lastGen = await env.BLOG_AI_KV.get(KV_LAST_GEN_KEY);
-
-  const todayPost = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${todaySlug}`);
-  let todayInIndex = false;
-  if (todayPost) {
-    const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
-    const index = indexRaw ? JSON.parse(indexRaw) : [];
-    todayInIndex = index.some((entry) => entry?.slug === todaySlug);
-  }
+async function recoverPendingBlogDraft(env) {
   for (let daysBack = 0; daysBack <= 3; daysBack++) {
     const draftDate = new Date();
     draftDate.setDate(draftDate.getDate() - daysBack);
@@ -4080,31 +4144,57 @@ async function maybeGenerateBlogPost(env, ctx) {
       const index = indexRaw ? JSON.parse(indexRaw) : [];
       inIndex = index.some((entry) => entry?.slug === draftSlug);
     }
+    if (postRaw && inIndex) continue;
 
-    if (!postRaw || !inIndex) {
-      // Run enrichPublishedPost directly (self-subrequests to our own zone hit
-      // the origin server — 405 — so selfEnrichFetch cannot be used here).
-      // On the paid plan (1000 subreqs, CPU-only limit) there is ample budget.
-      console.log(`Blog AI: recovering draft for /blog/${draftSlug}/...`);
-      let recovered = false;
-      try {
-        await enrichPublishedPost(env, draftSlug);
-        recovered = true;
-      } catch (err) {
-        console.error(`Blog AI: draft recovery failed for ${draftSlug} — ${err.message}`);
-        await env.BLOG_AI_KV.put(
-          `debug:enrich-error:${draftSlug}`,
-          JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), ts: new Date().toISOString(), source: 'draftRecovery' }),
-          { expirationTtl: 7 * 86_400 },
-        ).catch(() => {});
-      }
-      if (recovered) {
-        console.log(`Blog AI: recovered draft and published /blog/${draftSlug}/.`);
-        if (draftSlug === todaySlug) return;
-      }
+    console.log(`Blog AI: recovering draft for /blog/${draftSlug}/...`);
+    try {
+      await enrichPublishedPost(env, draftSlug);
+      console.log(`Blog AI: recovered draft and published /blog/${draftSlug}/.`);
+      return { status: "published", slug: draftSlug };
+    } catch (err) {
+      console.error(`Blog AI: draft recovery failed for ${draftSlug} — ${err.message}`);
+      await recordPipelineFailure(env, {
+        step: "blog",
+        slug: draftSlug,
+        message: err.message,
+        date: new Date(),
+      });
+      await env.BLOG_AI_KV.put(
+        `debug:enrich-error:${draftSlug}`,
+        JSON.stringify({
+          error: err.message,
+          stack: err.stack?.slice(0, 500),
+          ts: new Date().toISOString(),
+          source: "draftRecovery",
+        }),
+        { expirationTtl: 7 * 86_400 },
+      ).catch(() => {});
+      throw err;
     }
   }
+  console.log("Blog AI: no pending draft found for enrichment.");
+  return { status: "no-draft", slug: null };
+}
 
+async function maybeGenerateBlogPost(env, ctx) {
+  const today = todayDateString(); // "YYYY-MM-DD"
+  const todaySlug = buildSlug(new Date());
+  const lastGen = await env.BLOG_AI_KV.get(KV_LAST_GEN_KEY);
+
+  const todayPost = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${todaySlug}`);
+  const todayDraft = await env.BLOG_AI_KV.get(`${KV_DRAFT_PREFIX}${todaySlug}`);
+  let todayInIndex = false;
+  if (todayPost) {
+    const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+    const index = indexRaw ? JSON.parse(indexRaw) : [];
+    todayInIndex = index.some((entry) => entry?.slug === todaySlug);
+  }
+  if (todayDraft && (!todayPost || !todayInIndex)) {
+    console.log(
+      `Blog AI: draft:${todaySlug} already exists — awaiting ${DRAFT_ENRICHMENT_CRON} enrichment.`,
+    );
+    return;
+  }
   // Skip check comes BEFORE entity refresh so generation subrequests are never
   // consumed by the refresh when a new post still needs to be written today.
   if (lastGen) {
@@ -4191,9 +4281,10 @@ async function maybeGenerateBlogPost(env, ctx) {
     try {
       await generateAndStore(env, ctx, null, null, null, {
         lightweightPublish: true,
+        enrichDraft: false,
       });
       console.log(
-        `Blog AI: post generated successfully (attempt ${attempt}/3).`,
+        `Blog AI: draft generated successfully; ${DRAFT_ENRICHMENT_CRON} cron will enrich it (attempt ${attempt}/3).`,
       );
       return;
     } catch (err) {
@@ -4474,6 +4565,7 @@ const BANNED_PHRASE_LIST = [
   "significant event", "pivotal moment", "changed history", "shaped the course of",
   "left a lasting impact", "cannot be overstated", "one of the most important",
   "it is worth noting", "it is important to remember", "this was a time of great change",
+  "it is important to note", "conventionally called",
   "the importance of this", "a reminder of", "shows the importance of",
   "demonstrated the power of", "played a crucial role", "played a key role",
   "played a significant role", "played a vital role", "had a profound impact",
@@ -4489,6 +4581,7 @@ const BANNED_PHRASE_LIST = [
   "it was chaos", "it was a complex time", "dark chapter", "in the face of adversity",
   // Vague connectors and filler
   "at its core", "in many ways", "at the heart of", "in no small part",
+  "plays a role", "play a role",
   "it goes without saying", "needless to say", "the fact remains",
   "at the end of the day", "in essence", "in the grand scheme",
   "time and again", "when all is said and done",
@@ -4515,7 +4608,12 @@ const WRITING_REWRITE_RULES =
   "- Prefer plain verbs and specific nouns over polished abstraction. Replace vague authority with named source anchors or cut the claim.\n" +
   "- Develop one through-line. Do not make sections feel like interchangeable buckets or a chronological list with prettier prose.\n" +
   "- Watch regularity: repeated paragraph arcs, hidden three-part lists, identical openers, tidy concession rhythms, and ceremonial closing sentences.\n" +
-  "- Vary structure because the thought requires it, not through random sentence-length wobble or fake messiness.\n" +
+  "- Create controlled burstiness: place an occasional short declarative sentence beside a longer layered one, and never write three sentences of similar length or shape in a row. Do not use fragments as decoration.\n" +
+  "- Vary sentence openings. Do not march through a paragraph with repeated 'The...' openings, identical subjects, or the same grammatical pattern.\n" +
+  "- Reject neat balanced triads, mirrored sentence pairs, symmetrical both-sides hedging, and formulaic transition phrases. Let the evidence determine the shape of the paragraph.\n" +
+  "- Keep a serious feature-magazine register: vivid and readable, never chatty, breezy, promotional, second-person, or theatrically over-written.\n" +
+  "- Preserve paragraph-local facts. Keep every supported clause, qualifier, example, name, place, date, and number. During a rewrite, introduce no new entity, characterization, comparison, source, or cross-reference.\n" +
+  "- Prefer concrete, slightly less predictable verbs when they are exact. Do not reach for a thesaurus, purple prose, or an image the source does not support.\n" +
   "- Cut generic clauses, restatements, announcement sentences, and any phrase that could be pasted into an article about a different event.\n" +
   "- Do not invent quotes, numbers, motives, causal links, or suspiciously exact claims. If a claim is not supported, attribute it, soften it, or remove it.\n";
 
@@ -5028,7 +5126,7 @@ async function generateAndStore(
   forcedEvent = null,
   forceDate = null,
   forceImage = null,
-  { lightweightPublish = false } = {},
+  { lightweightPublish = false, enrichDraft = true } = {},
 ) {
   // Accept both ISO format ("2026-05-25") and slug format ("25-may-2026").
   // The slug format is what buildSlug() produces, but "new Date('25-may-2026T12:00:00Z')"
@@ -5146,6 +5244,7 @@ async function generateAndStore(
     console.log(
       `Blog AI: selected event "${selectedForcedEvent}" for ${selectedEvent.historicalDate || now.toISOString().slice(0, 10)}`,
     );
+    selectedEvent = await expandSelectedEventSourcePages(selectedEvent);
   }
 
   // P4a — "why now" context hook: one short AI call that grounds the article
@@ -5175,20 +5274,41 @@ async function generateAndStore(
   let personImages = [];
   let eventImages = [];
   const MAX_CONTENT_ATTEMPTS = 3;
+  const MAX_MALFORMED_RESPONSE_ATTEMPTS = 2;
+  const generateArticleContent = async (avoidTitles, stricterGrounding = false) => {
+    let lastError;
+    for (let responseAttempt = 1; responseAttempt <= MAX_MALFORMED_RESPONSE_ATTEMPTS; responseAttempt++) {
+      try {
+        return await callWorkersAI(
+          env,
+          now,
+          avoidTitles,
+          activeModel,
+          selectedForcedEvent,
+          preferredPillars,
+          contextHook,
+          recentPillars,
+          sourceMaterial,
+          stricterGrounding,
+        );
+      } catch (err) {
+        lastError = err;
+        const retryableOutputFailure =
+          /JSON parse failed|No JSON found|response too short|returned empty/i.test(err?.message || "");
+        if (!retryableOutputFailure || responseAttempt >= MAX_MALFORMED_RESPONSE_ATTEMPTS) {
+          throw err;
+        }
+        console.warn(
+          `Blog AI: malformed article response — ${err.message}. Retrying generation response (${responseAttempt + 1}/${MAX_MALFORMED_RESPONSE_ATTEMPTS}).`,
+        );
+      }
+    }
+    throw lastError;
+  };
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
     content =
       attempt === 1
-        ? await callWorkersAI(
-            env,
-            now,
-            takenAllTime,
-            activeModel,
-            selectedForcedEvent,
-            preferredPillars,
-            contextHook,
-            recentPillars,
-            sourceMaterial,
-          )
+        ? await generateArticleContent(takenAllTime)
         : content;
 
     if (selectedEvent) {
@@ -5203,17 +5323,7 @@ async function generateAndStore(
         console.warn(
           `Blog AI: date validation failed for "${content?.title || "untitled"}" — ${dateValidation.reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await callWorkersAI(
-          env,
-          now,
-          avoid,
-          activeModel,
-          selectedForcedEvent,
-          preferredPillars,
-          contextHook,
-          recentPillars,
-          sourceMaterial,
-        );
+        content = await generateArticleContent(avoid);
         continue;
       }
 
@@ -5228,17 +5338,7 @@ async function generateAndStore(
         console.warn(
           `Blog AI: incomplete generated content for "${content?.title || "untitled"}" - ${err.message}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await callWorkersAI(
-          env,
-          now,
-          avoid,
-          activeModel,
-          selectedForcedEvent,
-          preferredPillars,
-          contextHook,
-          recentPillars,
-          sourceMaterial,
-        );
+        content = await generateArticleContent(avoid);
         continue;
       }
       throw err;
@@ -5258,18 +5358,7 @@ async function generateAndStore(
           console.warn(
             `Blog AI: grounding gate failed for "${content?.title || "untitled"}" — ${grounding.reasons.join("; ")}. Regenerating with stricter grounding (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await callWorkersAI(
-            env,
-            now,
-            avoid,
-            activeModel,
-            selectedForcedEvent,
-            preferredPillars,
-            contextHook,
-            recentPillars,
-            sourceMaterial,
-            true,
-          );
+          content = await generateArticleContent(avoid, true);
           continue;
         }
         throw new Error(
@@ -5314,17 +5403,7 @@ async function generateAndStore(
           console.warn(
             `Blog AI: no valid image for "${content.title}". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await callWorkersAI(
-            env,
-            now,
-            avoid,
-            activeModel,
-            selectedForcedEvent,
-            preferredPillars,
-            contextHook,
-            recentPillars,
-            sourceMaterial,
-          );
+          content = await generateArticleContent(avoid);
           continue;
         }
 
@@ -5347,17 +5426,7 @@ async function generateAndStore(
           console.warn(
             `Blog AI: wiki image precheck failed for "${content.title}" (${wikiImageTotal}/3). Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await callWorkersAI(
-            env,
-            now,
-            avoid,
-            activeModel,
-            selectedForcedEvent,
-            preferredPillars,
-            contextHook,
-            recentPillars,
-            sourceMaterial,
-          );
+          content = await generateArticleContent(avoid);
           continue;
         }
 
@@ -5408,7 +5477,7 @@ async function generateAndStore(
       }),
       { expirationTtl: 3 * 86_400 },
     );
-  } else {
+  } else if (!lightweightPublish) {
     if (groundingSource) {
       const finalGrounding = await verifyFinalArticleGrounding(env, content, groundingSource);
       if (!finalGrounding.ok) {
@@ -5452,17 +5521,22 @@ async function generateAndStore(
       personImages,
       eventImages,
       entityMeta,
+      verifiedFeaturedImage: content.imageUrl,
     });
   }
 
-  if (lightweightPublish) {
-    // Run enrichment directly in ctx.waitUntil (same invocation, shared budget).
-    // Self-subrequests (fetch to our own zone) bypass Workers and hit the origin
-    // server — 405 — so selfEnrichFetch can't be used here. On the Workers Paid
-    // plan the subrequest budget is 1000 and CPU time is 30 s; with skipAiGeneration
-    // on entities (~15 subreqs total for enrichment) we're well within limits.
-    const enrichErr = (err) => {
+  if (lightweightPublish && enrichDraft) {
+    // Manual/default lightweight publication remains synchronous when ctx is
+    // absent. The daily cron passes enrichDraft:false and lets the dedicated
+    // 00:15 invocation promote the stored draft with a fresh request budget.
+    const enrichErr = async (err) => {
       console.error(`Blog: enrichment failed for ${slug} — ${err.message}`);
+      await recordPipelineFailure(env, {
+        step: "blog",
+        slug,
+        message: err.message,
+        date: new Date(),
+      });
       return env.BLOG_AI_KV.put(
         `debug:enrich-error:${slug}`,
         JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), ts: new Date().toISOString() }),
@@ -5479,7 +5553,7 @@ async function generateAndStore(
         throw err;
       }
     }
-  } else {
+  } else if (!lightweightPublish) {
     if (ctx?.waitUntil) {
       ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: false }));
     } else {
@@ -5489,7 +5563,7 @@ async function generateAndStore(
 
   console.log(
     lightweightPublish
-      ? `Blog: drafted post "${content.title}" → ${KV_DRAFT_PREFIX}${slug}`
+      ? `Blog: drafted post "${content.title}" → ${KV_DRAFT_PREFIX}${slug}${enrichDraft ? " (enrichment started)" : " (awaiting dedicated enrichment)"}`
       : `Blog: published post "${content.title}" → /blog/${slug}/`,
   );
 }
@@ -5871,7 +5945,18 @@ function normalizeEventTitleAction(content) {
 
 async function savePublishedPost(
   env,
-  { slug, date, content, existingIndex, pillars = [], bookCoverUrl = null, personImages = [], eventImages = [], entityMeta = [] },
+  {
+    slug,
+    date,
+    content,
+    existingIndex,
+    pillars = [],
+    bookCoverUrl = null,
+    personImages = [],
+    eventImages = [],
+    entityMeta = [],
+    verifiedFeaturedImage = null,
+  },
 ) {
   const safePillars = Array.isArray(pillars) ? pillars : [];
   let safePersonImages = Array.isArray(personImages) ? personImages : [];
@@ -5886,7 +5971,13 @@ async function savePublishedPost(
   // Final publication gate: enrichment is allowed to retry transient image
   // failures, but public HTML must never be written without a working Wikimedia
   // hero. This also protects callers that bypass the normal generation path.
-  const finalFeaturedImage = await resolveWorkingImageForContent(content);
+  const canReuseVerifiedFeaturedImage =
+    verifiedFeaturedImage === content.imageUrl &&
+    isProxyableArticleImageUrl(verifiedFeaturedImage) &&
+    !isLowValueFeaturedImage(verifiedFeaturedImage);
+  const finalFeaturedImage = canReuseVerifiedFeaturedImage
+    ? verifiedFeaturedImage
+    : await resolveWorkingImageForContent(content);
   if (!finalFeaturedImage) {
     throw new Error(`Refusing to publish ${slug}: no working featured image`);
   }
@@ -5993,6 +6084,16 @@ async function enrichPublishedPost(env, slug) {
   if (!content || !publishedAt) throw new Error(`Draft payload invalid for ${slug}`);
   const groundingSource = groundingSourceFromContent(content);
 
+  // Validate the hero while the request still has a fresh external-subrequest
+  // budget. Enrichment can exhaust that budget during later provider fallbacks;
+  // repeating the same Wikimedia HEAD check at save time then creates a false
+  // "no working featured image" failure even though the proxy serves it.
+  const verifiedFeaturedImage = await resolveWorkingImageForContent(content);
+  if (!verifiedFeaturedImage) {
+    throw new Error(`Refusing to publish ${slug}: no working featured image`);
+  }
+  content.imageUrl = verifiedFeaturedImage;
+
   // Recover older drafts that used a dated title as their only date source
   // before any enrichment rewrite can remove that title suffix. Pass the
   // publication date as canonical month/day to pin dual-calendar events.
@@ -6030,8 +6131,8 @@ async function enrichPublishedPost(env, slug) {
   const pillars = await classifyPillars(env, enriched);
   await chk("post-factcheck");
 
-  const workingImage = await resolveWorkingImageForContent(enriched);
-  enriched.imageUrl = workingImage || "";
+  const workingImage = verifiedFeaturedImage;
+  enriched.imageUrl = verifiedFeaturedImage;
 
   const [personImages, eventImages, bookCoverUrl] = await Promise.all([
     fetchKeyPersonImages(env, enriched.keyTerms).catch(() => []),
@@ -6131,6 +6232,7 @@ async function enrichPublishedPost(env, slug) {
     personImages,
     eventImages,
     entityMeta,
+    verifiedFeaturedImage,
   });
   await chk("saved");
 
@@ -6229,6 +6331,76 @@ function normalizeSourcePages(pages) {
     normalized.push(sourcePage);
   }
   return normalized;
+}
+
+function truncateSourceExtract(value, maxChars = 9000) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxChars) return text;
+  const prefix = text.slice(0, maxChars);
+  const sentenceEnd = Math.max(
+    prefix.lastIndexOf(". "),
+    prefix.lastIndexOf("? "),
+    prefix.lastIndexOf("! "),
+  );
+  return sentenceEnd >= Math.floor(maxChars * 0.65)
+    ? prefix.slice(0, sentenceEnd + 1).trim()
+    : prefix.replace(/\s+\S*$/, "").trim();
+}
+
+async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000) {
+  const normalized = normalizeSourcePage(page);
+  if (!normalized) return null;
+  const pageTitle = wikiTitleFromUrl(normalized.pageUrl) || normalized.pageTitle;
+  if (!pageTitle) return normalized;
+  const url =
+    "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exsectionformat=plain&format=json&origin=*&titles=" +
+    encodeURIComponent(pageTitle);
+  try {
+    const response = await fetch(url, {
+      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+    });
+    if (!response.ok) return normalized;
+    const data = await response.json();
+    const resultPage = Object.values(data?.query?.pages || {})[0];
+    if (!resultPage || resultPage.missing !== undefined) return normalized;
+    const expandedExtract = truncateSourceExtract(resultPage.extract, maxChars);
+    const currentWords = String(normalized.extract || "").split(/\s+/).filter(Boolean).length;
+    const expandedWords = expandedExtract.split(/\s+/).filter(Boolean).length;
+    if (expandedWords <= currentWords) return normalized;
+    const resolvedTitle = String(resultPage.title || normalized.pageTitle).trim();
+    return {
+      ...normalized,
+      pageTitle: resolvedTitle,
+      pageUrl: wikiUrlFromTitle(resolvedTitle) || normalized.pageUrl,
+      extract: expandedExtract,
+    };
+  } catch (err) {
+    console.warn(`Wikipedia source expansion failed for ${pageTitle}: ${err.message}`);
+    return normalized;
+  }
+}
+
+async function expandSelectedEventSourcePages(selectedEvent) {
+  if (!selectedEvent) return selectedEvent;
+  const sourcePages = normalizeSourcePages(selectedEvent.sourcePages || []);
+  if (!sourcePages.length) return selectedEvent;
+  const expanded = await Promise.all(
+    sourcePages.slice(0, 2).map((page) => fetchExpandedWikipediaSourcePage(page)),
+  );
+  const merged = normalizeSourcePages([
+    ...expanded.filter(Boolean),
+    ...sourcePages.slice(2),
+  ]);
+  selectedEvent.sourcePages = merged;
+  const primary =
+    selectPrimarySourcePage(selectedEvent.sourceText || selectedEvent.text, merged) ||
+    merged[0];
+  if (primary) {
+    selectedEvent.sourcePageTitle = primary.pageTitle || selectedEvent.sourcePageTitle;
+    selectedEvent.sourceExtract = primary.extract || selectedEvent.sourceExtract;
+    selectedEvent.wikiUrl = primary.pageUrl || selectedEvent.wikiUrl;
+  }
+  return selectedEvent;
 }
 
 function sourcePagesFromContent(content) {
@@ -7366,9 +7538,9 @@ function buildArticleEntityStrip(entityMeta) {
       : `<span class="person-pill">${inner}</span>`;
   }).join("");
 
-  const css = `<style>.entity-strip{margin:0 0 1.25rem}.entity-strip-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted,#5c7a65);margin-bottom:.65rem}.entity-person-chips{display:flex;flex-wrap:wrap;gap:1rem}.person-pill{display:inline-flex;align-items:center;gap:.55rem;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:14px;font-weight:600}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
+  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:14px;font-weight:600;white-space:nowrap}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
 
-  return `${css}<div class="entity-strip" data-entity-strip="1"><div class="entity-strip-label">People in this story</div><div class="entity-person-chips">${chips}</div></div>`;
+  return `${css}<div class="entity-strip" data-entity-strip="1"><h2 class="h3">People in this story</h2><div class="entity-person-chips">${chips}</div></div>`;
 }
 
 function injectArticleEntityStrip(html, entityMeta) {
@@ -7668,6 +7840,62 @@ async function hydrateArticleEntityImages(env, entityMeta) {
 // Blog quiz generation
 // ---------------------------------------------------------------------------
 
+function buildDeterministicBlogQuiz(content) {
+  const facts = (Array.isArray(content?.quickFacts) ? content.quickFacts : [])
+    .map((fact) => ({
+      label: String(fact?.label || "").trim(),
+      value: String(fact?.value || "").replace(/\s+/g, " ").trim(),
+    }))
+    .filter((fact) => fact.label && fact.value);
+  const uniqueValues = [...new Set(facts.map((fact) => fact.value))];
+  if (facts.length < 5 || uniqueValues.length < 4) return null;
+
+  const preferredLabels = ["Event", "Date", "Location", "Key Figure", "Significance", "Legacy"];
+  const selected = preferredLabels
+    .map((label) => facts.find((fact) => fact.label.toLowerCase() === label.toLowerCase()))
+    .filter(Boolean)
+    .slice(0, 5);
+  for (const fact of facts) {
+    if (selected.length >= 5) break;
+    if (!selected.includes(fact)) selected.push(fact);
+  }
+  if (selected.length !== 5) return null;
+
+  const questionFor = (fact) => {
+    const label = fact.label.toLowerCase();
+    if (label === "event") return "Which event is the article about?";
+    if (label === "date") return "On what date did the article's central event occur?";
+    if (label === "location") return "Which location does the article identify for the event?";
+    if (label === "key figure") return "Who does the article identify as the key figure?";
+    if (label === "significance") return "Which significance does the article assign to the event?";
+    if (label === "legacy") return "Which legacy does the article associate with the event?";
+    return `Which value does the article give for ${fact.label}?`;
+  };
+
+  const questions = selected.map((fact, index) => {
+    const distractors = uniqueValues
+      .filter((value) => value !== fact.value)
+      .slice(index % uniqueValues.length)
+      .concat(uniqueValues.filter((value) => value !== fact.value))
+      .filter((value, valueIndex, values) => values.indexOf(value) === valueIndex)
+      .slice(0, 3);
+    if (distractors.length !== 3) return null;
+    const answer = index % 4;
+    const options = [...distractors];
+    options.splice(answer, 0, fact.value);
+    return {
+      q: questionFor(fact),
+      options,
+      answer,
+      explanation: `The article's ${fact.label} Quick Fact gives ${fact.value}.`,
+    };
+  });
+  if (questions.some((question) => !question) || !validateQuizQuestions(questions)) {
+    return null;
+  }
+  return { questions, groundedDeterministically: true };
+}
+
 /**
  * Quiz Expert — uses Cloudflare Workers AI (same free binding as quiz generation)
  * to review and sharpen quiz questions after the initial generation pass.
@@ -7730,7 +7958,7 @@ async function reviewQuizWithExpert(questions, content, env) {
 
   let raw;
   try {
-    raw = await callAI(
+    raw = await callPublicationGateAI(
       env,
       [
         { role: "system", content: systemPrompt },
@@ -7803,7 +8031,7 @@ async function verifyQuizGrounding(env, questions, content) {
     .join("\n")
     .slice(0, 9000);
   try {
-    const raw = await callAI(
+    const raw = await callPublicationGateAI(
       env,
       [
         {
@@ -7842,7 +8070,7 @@ async function repairQuizGrounding(env, questions, content, reasons) {
   const sourceMaterial = sourceMaterialForGrounding(groundingSourceFromContent(content));
   if (!sourceMaterial) return null;
   try {
-    const raw = await callAI(
+    const raw = await callPublicationGateAI(
       env,
       [
         {
@@ -7958,7 +8186,7 @@ async function buildRichContent(entry, slug) {
 }
 
 async function generateBlogQuiz(env, content, _slug) {
-  if (!hasAnyTextAIProvider(env)) return null;
+  if (!hasAnyTextAIProvider(env)) return buildDeterministicBlogQuiz(content);
 
   const quizSourceMaterial = sourceMaterialForGrounding(groundingSourceFromContent(content));
   const contextLines = [
@@ -7982,12 +8210,12 @@ async function generateBlogQuiz(env, content, _slug) {
     console.error(
       `Blog quiz: no context for "${content.title}" — skipping AI call`,
     );
-    return null;
+    return buildDeterministicBlogQuiz(content);
   }
 
   let raw;
   try {
-    raw = await callAI(
+    raw = await callPublicationGateAI(
       env,
       [
         {
@@ -8004,34 +8232,34 @@ async function generateBlogQuiz(env, content, _slug) {
     );
   } catch (err) {
     console.error("Blog quiz: AI call failed —", err.message);
-    return null;
+    return buildDeterministicBlogQuiz(content);
   }
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
     .trim();
   const objMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!objMatch) return null;
+  if (!objMatch) return buildDeterministicBlogQuiz(content);
   let parsed;
   try {
     parsed = JSON.parse(objMatch[0]);
   } catch (parseErr) {
     console.error("Blog quiz JSON.parse failed:", parseErr);
-    return null;
+    return buildDeterministicBlogQuiz(content);
   }
   if (!Array.isArray(parsed?.questions) || parsed.questions.length !== 5)
-    return null;
-  if (!validateQuizQuestions(parsed.questions)) return null;
+    return buildDeterministicBlogQuiz(content);
+  if (!validateQuizQuestions(parsed.questions)) return buildDeterministicBlogQuiz(content);
   const sharpened = await reviewQuizWithExpert(parsed.questions, content, env);
   let grounding = await verifyQuizGrounding(env, sharpened, content);
   if (grounding.ok) return { ...parsed, questions: sharpened };
   console.warn(`Quiz grounding check failed: ${grounding.reasons.join("; ")}`);
   const repaired = await repairQuizGrounding(env, sharpened, content, grounding.reasons);
-  if (!repaired) return null;
+  if (!repaired) return buildDeterministicBlogQuiz(content);
   grounding = await verifyQuizGrounding(env, repaired, content);
   if (!grounding.ok) {
     console.warn(`Quiz grounding recheck failed: ${grounding.reasons.join("; ")}`);
-    return null;
+    return buildDeterministicBlogQuiz(content);
   }
   return { ...parsed, questions: repaired };
 }
@@ -8099,10 +8327,10 @@ Choose the single event from this date that a curious 25-year-old would most lik
   // 2026-06-20 incidents: a fabricated June 20 event and an invented June 19
   // death toll). See architecture/2026-06-20-source-grounded-generation-design.md.
   const sourceMaterialSection = sourceMaterial
-    ? `\nSOURCE MATERIAL (authoritative — your single source of truth for this event):\n"""\n${String(sourceMaterial).slice(0, 8000)}\n"""\n` +
+    ? `\nSOURCE MATERIAL (authoritative — your single source of truth for this event):\n"""\n${String(sourceMaterial).slice(0, 16000)}\n"""\n` +
       `GROUNDING RULES (mandatory):\n` +
       `- Write ONLY about the exact event described in the SOURCE MATERIAL above. Do not substitute a different event, even one with a similar name.\n` +
-      `- Base every factual claim on the SOURCE MATERIAL and on well-established history that is consistent with it.\n` +
+      `- Base every factual claim on the SOURCE MATERIAL. Do not add a person, document, quotation, number, location, motive, or consequence merely because it appears in your general knowledge.\n` +
       `- NEVER invent specifics. Do not state a casualty count, death toll, number of survivors, named person, exact date, or place unless it is supported by the source. If the source does not give a number, do not give one; describe it qualitatively instead.\n` +
       `- NEVER invent a named memoir, newspaper report, government record, decree, quotation, archival reference, publication date, or historian. Name a source only when that exact source appears in the SOURCE MATERIAL. Otherwise attribute the point generally to the supplied Wikipedia sources or omit the attribution.\n` +
       `- Keep distinct actions distinct. Do not merge recognition, arrest, death, departure, arrival, or capture into one place or date when the source assigns them to different places or dates.\n` +
@@ -8130,20 +8358,23 @@ Specific voice qualities:
 - PLAY YOUR ACE CARD FIRST: The single most surprising, counterintuitive, or little-known fact in the entire article belongs in the first two sentences. Do not save the best for the end. Most readers will not reach it.
 - FOCUS ON ONE THREAD: Do not try to cover everything about the event. Find the sharpest angle — one person, one decision, one consequence — and pull that thread through the whole article. Breadth kills impact.
 - FACTS BEFORE FEELINGS: The first paragraph must contain at least three hard facts, drawn from different categories such as one named person, one exact place, one number, one document, or one precise date. Do not open with mood words like "dramatic", "remarkable", "significant", or "unexpected" unless the very same sentence also supplies the concrete fact that earns that description.
-- MULTI-SENSORY writing: Do not describe only what something looked like. What did it sound like? What did it smell like? What did it feel like physically? Include at least one non-visual sensory detail in the Overview and one in the Eyewitness section.
+- SOURCE-BOUND SENSORY writing: Use sound, smell, weather, texture, or physical sensation only when the SOURCE MATERIAL or a named account supports it. Never manufacture atmosphere merely to make a scene vivid.
 - NEVER make a summary mood judgment. Do not write "it was a dark time", "it was a difficult period", "it was chaotic", "it was a bleak time", or any sentence that labels a mood without evidence. Describe the specific thing that is dark, difficult, or chaotic — what someone would see, hear, smell, or feel on the ground — and let the reader draw the conclusion themselves. The writer plants the evidence; the reader forms the judgment.
-- FRESH COMPARISONS ONLY: Do not use stock idioms or pre-made comparisons. "As hot as hell" is dead from overuse. Write a fresh, specific comparison that could only come from this event: "as chaotic as a harbor pilot trying to dock in a force-9 gale" is better than "utterly chaotic."
-- Have a point of view. If a leader made a cowardly decision, say so. If an act was unexpectedly brave, say so. Readers come for analysis, not neutrality.
-- Use transitions that show your thinking: "What makes this stranger still is...", "Here is what the textbooks skip over:", "The irony is remarkable:", "Most people assume X, but the reality was Y."
+- COMPARISONS ARE OPTIONAL: Prefer the source's concrete detail over a metaphor. If a comparison genuinely clarifies the event, root it in supplied evidence and do not introduce a new factual scenario, measurement, person, place, or modern parallel.
+- Have a point of view, but earn every characterization with named conduct or evidence. Do not label someone cowardly, heroic, cynical, or visionary without first showing the decision that supports the judgment.
+- Let transitions emerge from cause, contrast, chronology, or evidence. Do not recycle stock signposts such as "What makes this stranger still", "Here is what the textbooks skip", or "Most people assume" across sections.
 - Connect the past to something the reader recognizes. A parallel to a modern situation, a personality trait that feels familiar, a consequence we still live with today.
 - You are a guide traveling alongside the reader, not a sage on a podium dispensing wisdom. Share in the discovery.
 
 Sentence and paragraph rules:
-- Mix sentence lengths deliberately for rhythm. Some sentences can be 30+ words when building a complex, layered point. Use short sentences (under 10 words) for emphasis and dramatic beats. Never write five consecutive sentences of the same length.
+- Mix sentence lengths deliberately for rhythm. Some sentences can be 30+ words when building a complex, layered point. Use occasional short declarative sentences under 10 words for emphasis. Never write three consecutive sentences of similar length.
 - VARY SENTENCE FORMS, not just lengths. If one sentence is conditional ("If X, then Y"), the next should be a short declarative. Follow that with a cause-and-effect. Never write three consecutive sentences with the same grammatical structure — structural repetition kills energy even when length varies.
+- VARY SENTENCE OPENINGS: Do not begin sentence after sentence with "The", the same proper noun, or the same time marker. Change the entry point only when the paragraph's logic permits it.
+- NO TIDY AI SYMMETRY: Avoid neat three-part lists, mirrored "not only/but also" constructions, evenly balanced concessions, and a concluding sentence that merely restates the paragraph in ceremonial language.
 - Target an average of 18-22 words per sentence across each paragraph. This creates readable depth without choppiness.
 - Every paragraph must contain at least one specific, verifiable fact: a real name, an exact year or number, a specific place, or a direct quote. No paragraph may consist entirely of vague generalizations.
 - SOURCE ANCHOR RULE: In every major section, attribute at least one claim. ${sourceMaterial ? "Use only a source explicitly named in SOURCE MATERIAL; if none is named, attribute the claim generally to the supplied Wikipedia source. Never invent a memoir, trial record, newspaper, historian, decree, archive, or witness." : "Use a real memoir, trial record, newspaper, historian, government decree, or specific witness, and omit the attribution if you cannot verify it."}
+- SOURCE-BOUND ACCOUNT SECTION: If SOURCE MATERIAL names a real witness, chronicler, historian, or document, the eyewitnessOrChronicle section may analyze that account. If it names none, do not invent one. Use those two paragraphs to analyze what the supplied Wikipedia record establishes and what it does not establish, and leave eyewitnessQuote and eyewitnessQuoteSource empty.
 - FACT FIRST IN EVERY SECTION: The first sentence of Overview, Eyewitness Accounts, Aftermath, and Legacy must state the key fact before any scene-setting. Answer the implied reader question immediately, then expand.
 - AFTERMATH MUST CASH OUT: The aftermath paragraphs must name specific actions taken in the days, weeks, or years after the event, including who acted, where, and what changed. Do not hide behind phrases like "it reshaped politics" unless you name the office, law, institution, or military result that changed.
 - NO REPETITION ACROSS SECTIONS: Each paragraph must introduce new information. Never restate a point, conclusion, or fact already made in a previous section. Do not name the same person, institution, or concept more than three times in the full article — use pronouns or contextual references after the first mention.
@@ -8153,7 +8384,7 @@ Sentence and paragraph rules:
 - ABSOLUTE BAN ON DASHES: Never use "-" or "—" anywhere in the article body. Not mid-sentence, not at the end of a clause, not anywhere. Zero dashes in the entire text. Use a comma, or split into two sentences.
 - Use active voice. Say who did what.
 - Start each paragraph with a sentence that makes the reader want to keep reading.
-- Use transition phrases between paragraphs: "What followed was even more remarkable.", "But the real damage was done quietly, in the years after.", "To understand why this mattered, you have to go back further."
+- Connect paragraphs through chronology, cause, contrast, or evidence. Do not paste in reusable transition slogans.
 - When nuance or complication enters a paragraph, represent it at its strongest — give the best version of the opposing case, not the weakest. Do not signal you are doing this with phrases like "critics argue" or "some would say." Just write it directly as part of the narrative flow: "Nehru rejected the resolution not because he dismissed Muslim concerns, but because he believed division would harden them into interstate conflict." Strong nuance woven naturally is far more persuasive than a weak position you announce and dismiss.
 
 BANNED PHRASES — never write any of these:
@@ -8223,11 +8454,11 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "Paragraph 2 (nuance + synthesis; ~100 words): Introduce the strongest complication or contrary reality as part of the narrative — not as a rhetorical question or a 'But why?' setup. State the complication directly as a fact or claim, then synthesize. Do NOT begin with 'But the [topic] wasn't without...' or 'But why was it...'. End with a precise assessment that links back to the opening claim."
   ],
   "eyewitnessOrChronicle": [
-    "Paragraph 1 (vivid account + source criticism; ~100+ words): In THIRD PERSON, describe what a named contemporary witness or chronicler reported about the event — never write 'I was there' or use first-person narration. Attribute in third person: 'Student Alan Canfora later recalled that...', 'The correspondent for the New York Times reported...', 'As Sergeant X wrote in his diary...'. Then interrogate the source in third person: why was this person present, what stake did they have in how the event was remembered, what biases or blind spots might they carry (insider, foreign observer, someone currying favor or evading blame), and what does the account leave out that you would expect it to address?",
-    "Paragraph 2 (contrast + what the record reveals; ~100+ words): In THIRD PERSON, offer a contrasting account or later scholarly appraisal. Explain what the gap between the two perspectives reveals about who controlled the narrative, whose version survived, and why. A modern historian reads these sources differently than their intended audience did. End with what historians now agree on or still dispute, and why the disagreement matters."
+    "Paragraph 1 (~100+ words): If SOURCE MATERIAL names a witness, chronicler, historian, or document, describe and assess that account in THIRD PERSON. Otherwise explain exactly what the supplied Wikipedia record establishes about the event and identify a limitation in that record without inventing a missing witness or document.",
+    "Paragraph 2 (~100+ words): Contrast only accounts or facts actually present in SOURCE MATERIAL. If no contrasting named account is supplied, analyze the gap between what the record confirms and what it leaves unresolved. Do not add a historian, memoir, newspaper, decree, archive, quotation, or motive from general knowledge."
   ],
-  "eyewitnessQuote": "A direct or closely paraphrased quote from a named contemporary source, under 200 characters. Must be attributed to a real person or document.",
-  "eyewitnessQuoteSource": "Full attribution: name, role, source document, and year, plus one phrase noting the circumstances under which it was written (e.g. 'written under censorship', 'published posthumously', 'testimony given under oath'). Example: 'Ivan Turgenev, letter to a friend, March 1861, written in exile'",
+  "eyewitnessQuote": "Use a direct or closely paraphrased quote only when that quote appears in SOURCE MATERIAL; otherwise use an empty string.",
+  "eyewitnessQuoteSource": "Use the exact attribution from SOURCE MATERIAL for eyewitnessQuote; otherwise use an empty string.",
   "aftermathParagraphs": [
     "Paragraph 1 (immediate aftermath; ~120+ words): Describe the first days and weeks after the event with concrete actions, dates, and effects on people and institutions. Focus on specific, attributable changes on the ground.",
     "Paragraph 2 (medium-term + long view synthesis; ~120+ words): Combine medium-term consequences and the long historical assessment: reforms, responses, and how historians judge the legacy. Be specific and, where appropriate, opinionated."
@@ -8266,9 +8497,9 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "contentRationale": "Minimum 40 words. Answer this specific question: what does a reader find in this article that Wikipedia's entry on the same event does not already give them? Name the specific angle, the particular framing, the overlooked detail, or the editorial judgement that makes this article worth reading over the Wikipedia source. Do not be vague. Do not say 'deeper context' or 'engaging narrative'."
 }`;
 
-  // 4096 tokens is sufficient for llama-3.3-70b-versatile to produce a
-  // complete article JSON. NVIDIA NIM always uses Math.max(maxTokens, 8192)
-  // so the fallback chain also has ample headroom.
+  // The complete article schema routinely exceeds 4k completion tokens once
+  // every required analysis and enrichment field is populated. Keep enough
+  // headroom to finish valid JSON instead of accepting a truncated object.
   const rawValue = await callAI(
     env,
     [
@@ -8279,7 +8510,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
       },
       { role: "user", content: prompt },
     ],
-    { maxTokens: 4096, timeoutMs: 60_000, cfModel: model },
+    { maxTokens: 8192, timeoutMs: 90_000, cfModel: model },
   );
 
   if (!rawValue || rawValue.trim().length < 100) {
@@ -8314,7 +8545,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
             `${prompt}\n\nIMPORTANT: Start your response immediately with the character { and end with }. Do not write any prose or explanation. Begin with { right now.`,
         },
       ],
-      { maxTokens: 4096, timeoutMs: 60_000, cfModel: model },
+      { maxTokens: 8192, timeoutMs: 90_000, cfModel: model },
     );
     const retryStart = String(retryRaw || "").trim().indexOf("{");
     if (retryStart === -1)
@@ -8670,7 +8901,7 @@ function sourceMaterialForGrounding(source) {
       return true;
     })
     .join("\n\n")
-    .slice(0, 8000);
+    .slice(0, 16000);
 }
 
 function collectGroundingStrings(value, out = []) {
@@ -8763,7 +8994,7 @@ async function verifyFinalArticleGrounding(env, content, source) {
   if (!sourceMaterial) return deterministic;
   const articleText = articleGroundingText(content).slice(0, 14000);
   try {
-    const raw = await callAI(
+    const raw = await callPublicationGateAI(
       env,
       [
         {
@@ -11023,7 +11254,7 @@ ${JSON.stringify({
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=25" />
+    <link rel="stylesheet" href="/css/custom.css?v=26" />
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
@@ -11082,6 +11313,11 @@ ${JSON.stringify({
       p{font-size:15px;line-height:1.6}
       a{color:var(--btn-bg)}a:hover{color:var(--accent);text-decoration:underline}
       h1,h2,h3{color:var(--text)}
+      /* Consistent article rhythm: even gaps between top-level blocks, roomy
+         and uniform spacing between a heading and the content it introduces. */
+      .h3{margin-top:0;margin-bottom:1rem}
+      article.p-4 > * + *{margin-top:2rem!important}
+      article.p-4 > .h3 + *{margin-top:1rem!important}
       .article-meta{color:var(--text-muted);font-size:13px}
       .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px}
       .pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none;transition:background .15s ease,border-color .15s ease,color .15s ease}
@@ -11187,37 +11423,37 @@ ${JSON.stringify({
           </ol>
         </nav>
 
-        <article class="p-4 rounded border" style="background-color: var(--bg); color: var(--text)">
+        <div class="article-hero-wrap article-hero-standalone">
+          <header class="mb-4 text-center article-hero-header">
+            <h1 class="mb-2 fw-bold">${esc(c.title)}</h1>
+            <p class="article-meta mb-0">
+              <small>
+                Published: ${esc(publishedStr)} &nbsp;|&nbsp;
+                Event Date: ${esc(c.historicalDate)} &nbsp;|&nbsp;
+                By <a href="/about/editorial/" rel="author" style="color:inherit">thisDay. Editorial Team</a>${readingTime}
+              </small>
+            </p>
+            ${pillarPills}
+          </header>
+          ${featuredImageUrl ? `<figure class="text-center mb-4 article-hero-fig">
+            <img
+              src="/image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=800&q=85"
+              srcset="/image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=800 800w"
+              sizes="(max-width:640px) 100vw, 800px"
+              class="img-fluid rounded"
+              alt="${esc(c.imageAlt)}"
+              style="max-height: 400px; object-fit: cover; object-position: center; width: 100%"
+              loading="eager"
+              onerror="this.onerror=null;this.removeAttribute('srcset');this.src='${esc(featuredImageUrl)}';"
+            />
+            <figcaption class="article-meta mt-2">
+              <small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small>
+            </figcaption>
+          </figure>
+          <div class="article-hero-overlay" aria-hidden="true"></div>` : ""}
+        </div>
 
-          <div class="article-hero-wrap">
-            <header class="mb-4 text-center article-hero-header">
-              <h1 class="mb-2 fw-bold">${esc(c.title)}</h1>
-              <p class="article-meta mb-0">
-                <small>
-                  Published: ${esc(publishedStr)} &nbsp;|&nbsp;
-                  Event Date: ${esc(c.historicalDate)} &nbsp;|&nbsp;
-                  By <a href="/about/editorial/" rel="author" style="color:inherit">thisDay. Editorial Team</a>${readingTime}
-                </small>
-              </p>
-              ${pillarPills}
-            </header>
-            ${featuredImageUrl ? `<figure class="text-center mb-4 article-hero-fig">
-              <img
-                src="/image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=800&q=85"
-                srcset="/image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featuredImageUrl)}&w=800 800w"
-                sizes="(max-width:640px) 100vw, 800px"
-                class="img-fluid rounded"
-                alt="${esc(c.imageAlt)}"
-                style="max-height: 400px; object-fit: cover; object-position: center; width: 100%"
-                loading="eager"
-                onerror="this.onerror=null;this.removeAttribute('srcset');this.src='${esc(featuredImageUrl)}';"
-              />
-              <figcaption class="article-meta mt-2">
-                <small>Image courtesy of <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.</small>
-              </figcaption>
-            </figure>
-            <div class="article-hero-overlay" aria-hidden="true"></div>` : ""}
-          </div>
+        <article class="p-4 rounded border" style="background-color: var(--bg); color: var(--text)">
 
           ${buildArticleAnswerBlock(c)}
 
@@ -11233,8 +11469,6 @@ ${overviewParas}
           </section>`
               : ""
           }
-
-          ${buildAuthorityLinksBlock(c, currentPillars)}
 
           ${buildAmazonRelatedBlock(c, currentPillars)}
 
@@ -11365,7 +11599,6 @@ ${analysisBadItems}
             } else {
               related = others.slice(0, 3); // no pillar data yet — fall back to most recent
             }
-            if (related.length === 0) return "";
             const cards = related
               .map((p) => {
                 const relatedImageUrl = isProxyableArticleImageUrl(p.imageUrl) ? p.imageUrl : "";
@@ -11384,6 +11617,13 @@ ${analysisBadItems}
               </div>`;
               })
               .join("");
+            const relatedSection = related.length > 0
+              ? `<section class="mt-5">
+            <h2 class="h5 mb-3">You Might Also Like</h2>
+            <div class="row g-3">${cards}
+            </div>
+          </section>`
+              : "";
             return `<!-- Quiz CTA -->
           <div class="authority-links mt-4">
             <span class="authority-links-label">Test Your Knowledge</span>
@@ -11392,11 +11632,8 @@ ${analysisBadItems}
               <a class="authority-link" id="tdq-cta-btn" href="/quiz/" onclick="event.preventDefault();document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
           </div>
-          <section class="mt-5">
-            <h2 class="h5 mb-3">You Might Also Like</h2>
-            <div class="row g-3">${cards}
-            </div>
-          </section>`;
+          ${buildAuthorityLinksBlock(c, currentPillars)}
+          ${relatedSection}`;
           })()}
 
           ${buildArticleRelatedQuestionsBlock(c, currentPillars)}
@@ -11853,7 +12090,7 @@ ${JSON.stringify(
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=25" />
+    <link rel="stylesheet" href="/css/custom.css?v=26" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -12126,7 +12363,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=25" />
+    <link rel="stylesheet" href="/css/custom.css?v=26" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
@@ -12612,8 +12849,39 @@ function moveHtmlRangeBefore(html, range, anchorIndex) {
   return `${without.slice(0, adjustedAnchor)}${block}\n          ${without.slice(adjustedAnchor)}`;
 }
 
+function moveHeroOutsideArticleHtml(body) {
+  const html = String(body || "");
+  const heroStart = html.search(/<div\b[^>]*\bclass="[^"]*\barticle-hero-wrap\b/i);
+  if (heroStart === -1) return html;
+  const heroEnd = findArticleHeroWrapEnd(html, heroStart);
+  if (heroEnd === -1) return html;
+  const breadcrumbStart = html.search(/<nav\b[^>]*\baria-label="breadcrumb"/i);
+  if (breadcrumbStart === -1) return html;
+  const breadcrumbEnd = findElementBlockEnd(html, breadcrumbStart, "nav");
+  if (breadcrumbEnd === -1) return html;
+  const articleStart = html.search(/<article\b/i);
+
+  let heroBlock = html.slice(heroStart, heroEnd);
+  heroBlock = heroBlock.replace(/class="([^"]*)"/i, (_match, classes) => {
+    const merged = classes.split(/\s+/).filter(Boolean).concat("article-hero-standalone");
+    return `class="${[...new Set(merged)].join(" ")}"`;
+  });
+
+  // The desired document order is breadcrumb -> hero -> article. New HTML is
+  // already emitted this way; legacy stored posts keep the hero inside article.
+  if (heroStart >= breadcrumbEnd && (articleStart === -1 || heroEnd <= articleStart)) {
+    return html.slice(0, heroStart) + heroBlock + html.slice(heroEnd);
+  }
+
+  const withoutHero = html.slice(0, heroStart) + html.slice(heroEnd);
+  const adjustedBreadcrumbEnd = breadcrumbEnd > heroStart
+    ? breadcrumbEnd - (heroEnd - heroStart)
+    : breadcrumbEnd;
+  return `${withoutHero.slice(0, adjustedBreadcrumbEnd)}\n${heroBlock}\n${withoutHero.slice(adjustedBreadcrumbEnd)}`;
+}
+
 function normalizeArticleLayoutHtml(body) {
-  let html = String(body || "");
+  let html = moveHeroOutsideArticleHtml(body);
 
   if (html.includes('<section class="dyn-slider-shell') && !html.includes("<h2 class=\"h3\">Did You Know?</h2>")) {
     html = html.replace(
@@ -12643,6 +12911,23 @@ function normalizeArticleLayoutHtml(body) {
   const exploreAnchor = authorityAnchor !== -1 ? authorityAnchor : amazonAnchor;
   if (exploreRange && exploreAnchor !== -1) {
     html = moveHtmlRangeBefore(html, exploreRange, exploreAnchor);
+  }
+
+  // Keep trusted-source links at the bottom of the article, immediately after
+  // the Test Your Knowledge CTA. This also repairs older stored posts whose
+  // authority block was rendered near the overview.
+  const trustedSourcesRange = findDivBlockRangeContaining(
+    html,
+    "Learn more at trusted sources",
+    /\bclass="[^"]*\bauthority-links\b/i,
+  );
+  const quizCtaRange = findDivBlockRangeContaining(
+    html,
+    "Test Your Knowledge",
+    /\bclass="[^"]*\bauthority-links\b[^"]*\bmt-4\b/i,
+  );
+  if (trustedSourcesRange && quizCtaRange) {
+    html = moveHtmlRangeBefore(html, trustedSourcesRange, quizCtaRange.end);
   }
 
   const relatedQuestionsRange =
@@ -12686,22 +12971,38 @@ function normalizeAiAnswerCardHtml(body) {
       /\.ai-answer-card\{[^}]*padding:18px/i.test(html) ||
       /ai-card-patch-v[12]/i.test(html));
 
-  if (!needsPatch || !html.includes("</head>")) return html;
+  if (needsPatch && html.includes("</head>")) {
+    const patch =
+      "<style>/*ai-card-patch-v3*/.ai-answer-card{position:relative!important;z-index:1!important;clear:both!important;background:#fff!important;background-image:none!important;border:0!important;padding:0!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style>";
+    html = html.replace("</head>", `${patch}</head>`);
+  }
 
-  const patch =
-    "<style>/*ai-card-patch-v3*/.ai-answer-card{position:relative!important;z-index:1!important;clear:both!important;background:#fff!important;background-image:none!important;border:0!important;padding:0!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style>";
-  return html.replace("</head>", `${patch}</head>`);
+  if (!html.includes("article-layout-patch-v5") && html.includes("</head>")) {
+    const layoutPatch =
+      "<style>/*article-layout-patch-v5*/.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem!important}.h3{margin-top:0!important;margin-bottom:1rem!important}article.p-4>*+*{margin-top:2rem!important}article.p-4>.h3+*{margin-top:1rem!important}.entity-strip{margin:0 0 2rem!important}</style>";
+    html = html.replace("</head>", `${layoutPatch}</head>`);
+  }
+  return html;
+}
+
+function normalizeArticleAssetVersionsHtml(body) {
+  return String(body || "").replace(
+    /\/css\/custom\.css\?v=\d+/g,
+    "/css/custom.css?v=26",
+  );
 }
 
 function prepareHtmlResponse(body) {
-  return normalizeStackedTitleHtml(
-    normalizeImageAltHtml(
-      normalizeCrawlableLinksHtml(
-        normalizeSearchPreviewHtml(
-          normalizeHeadingAuditHtml(
-            normalizeAiAnswerCardHtml(
-              normalizeArticleLayoutHtml(
-                stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+  return normalizeArticleAssetVersionsHtml(
+    normalizeStackedTitleHtml(
+      normalizeImageAltHtml(
+        normalizeCrawlableLinksHtml(
+          normalizeSearchPreviewHtml(
+            normalizeHeadingAuditHtml(
+              normalizeAiAnswerCardHtml(
+                normalizeArticleLayoutHtml(
+                  stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+                ),
               ),
             ),
           ),

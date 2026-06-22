@@ -324,9 +324,15 @@ img {
 /* Lead-up / aftermath timeline */
 .article-timeline .tl-list {
   list-style: none;
-  margin: 0;
+  margin: 25px 0 0;
   padding: 0;
   border-left: 2px solid rgba(0, 0, 0, 0.12);
+}
+.article-timeline .timeline-quick-facts {
+  margin: 0;
+}
+.article-timeline .ai-answer-grid {
+  margin-top: 0;
 }
 .article-timeline .tl-entry {
   position: relative;

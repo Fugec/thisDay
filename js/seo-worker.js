@@ -7256,7 +7256,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=26>; rel=preload; as=style",
+      "</css/custom.css?v=27>; rel=preload; as=style",
     ].join(", "),
   );
 

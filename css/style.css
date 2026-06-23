@@ -212,33 +212,39 @@ button.btn.btn-sm.btn-outline-primary.filter-btn {
 }
 
 #eventFilterContainer {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem;
+  display: flex;
+  align-items: center;
   margin-bottom: 0.75rem;
 }
 
-/* "All" button — full width on mobile */
-#eventFilterContainer .filter-btn-all {
-  grid-column: 1 / -1;
+.event-filter-toggle {
+  max-width: 100%;
+  min-height: 38px;
+  padding: 0.5rem 0.85rem !important;
 }
 
-/* Desktop: flex-wrap row, All full width, rest 50% (2 in a row) */
-@media (min-width: 576px) {
-  #eventFilterContainer {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0;
-  }
-  #eventFilterContainer .filter-btn-all {
-    grid-column: unset;
-    width: 100%;
-  }
-  #eventFilterContainer .filter-btn:not(.filter-btn-all) {
-    flex: 0 0 calc(50% - 0.25rem);
-    max-width: calc(50% - 0.25rem);
-  }
+.event-filter-toggle-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-filter-menu {
+  min-width: min(18rem, calc(100vw - 2rem));
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+}
+
+.event-filter-option {
+  display: flex !important;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  border: 0 !important;
+  border-radius: 4px !important;
+  padding: 0.45rem 0.65rem !important;
+  text-align: left;
 }
 
 /* --- Event action buttons (Read More / Share / WhatsApp) --- */
@@ -753,13 +759,6 @@ article iframe {
 
 [data-page="v2"] .modal-body a {
   color: #fff;
-}
-
-[data-page="v2"]
-  button.btn.btn-sm.btn-outline-primary.filter-btn.filter-btn-all.active {
-  background-color: var(--btn-bg) !important;
-  border-color: var(--btn-bg) !important;
-  color: #fff !important;
 }
 
 [data-page="v2"] .day-number {

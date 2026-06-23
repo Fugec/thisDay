@@ -1079,6 +1079,52 @@ function hasMainClauseVerb(s) {
   return hasFiniteHeadlineVerb(stripped);
 }
 
+function compactPersonNameForHeadline(value) {
+  const words = String(value || "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^\w\s'.-]/g, " ")
+    .split(/\s+/)
+    .map((word) => word.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9.']+$/g, ""))
+    .filter(Boolean)
+    .filter((word) => !/^[A-Z]\.?$/i.test(word))
+    .filter((word) => !/^(the|of|de|da|del|der|van|von|bin|al)$/i.test(word));
+  return words[words.length - 1] || "";
+}
+
+function compactNamedMeetingHeadline(firstSentence, maxLength = HEADLINE_SEO_MAX) {
+  const sentence = String(firstSentence || "").replace(/\s+/g, " ").trim();
+  const role =
+    "(?:President|Premier|Prime Minister|Chancellor|Secretary|General|King|Queen|Pope|Emperor|Chairman|Chairwoman|Minister)";
+  const honorificPrefix = "(?:(?:U\\.S\\.|US|United States|Soviet|Russian|British|French|German|Chinese|Japanese|Indian|Israeli|Egyptian|American)\\s+)*";
+  const meetingRe = new RegExp(
+    `^${honorificPrefix}${role}\\s+(.+?)\\s+(meets?|met)\\s+with\\s+${honorificPrefix}${role}\\s+(.+?)(?:\\s+(?:in|at|near|during|amid|for|to)\\b|$)`,
+    "i",
+  );
+  const match = sentence.match(meetingRe);
+  if (!match) return "";
+
+  const subject = compactPersonNameForHeadline(match[1]);
+  const object = compactPersonNameForHeadline(match[3]);
+  if (!subject || !object) return "";
+
+  const verb = /^met$/i.test(match[2]) ? "Met" : "Meets";
+  let headline = `${subject} ${verb} ${object}`;
+
+  const summitMatch = sentence.match(
+    /\b([A-Z][A-Za-z0-9'.-]+(?:\s+[A-Z][A-Za-z0-9'.-]+){0,3}\s+(?:Summit|Conference|Talks|Accords|Treaty|Council))\b/,
+  );
+  if (summitMatch) {
+    const eventLabel = summitMatch[1]
+      .replace(/\bConference Conference\b/i, "Conference")
+      .replace(/\bSummit Conference\b/i, "Summit")
+      .trim();
+    const withEvent = `${headline} at ${eventLabel}`;
+    if (withEvent.length <= maxLength) headline = withEvent;
+  }
+
+  return headline.length <= maxLength && hasMainClauseVerb(headline) ? headline : "";
+}
+
 function getTitleLead(title) {
   return String(title || "")
     .replace(/\s+[-—]\s+.*$/, "")
@@ -1188,7 +1234,7 @@ function buildDisplayTitle(currentTitle, eventTitle, historicalDate) {
 function isWeakCtaTitleLead(value) {
   const lead = String(value || "").trim();
   if (!lead) return true;
-  return /^(discover|uncover|explore|learn|read|inside|remembering|a look at|the story of|what happened|why it matters)\b/i.test(lead) ||
+  return /^(discover|uncover|explore|learn|read|meet|watch|see|inside|remembering|a look at|the story of|what happened|why it matters)\b/i.test(lead) ||
     /\b(details of|story behind|history of|what happened)\b/i.test(lead);
 }
 
@@ -1223,6 +1269,9 @@ function sourceEventHeadline(eventText, maxLength = HEADLINE_SEO_MAX) {
     .trim();
   if (!firstSentence) return "";
   if (firstSentence.length <= maxLength) return firstSentence;
+
+  const compactMeetingHeadline = compactNamedMeetingHeadline(firstSentence, maxLength);
+  if (compactMeetingHeadline) return compactMeetingHeadline;
 
   // Strategy 1: split on coordinating conjunction (and/but/while/after/before)
   const firstClause = firstSentence
@@ -1298,6 +1347,7 @@ function eventTitleFromCandidate(parsedTitle, candidate) {
     aiTitle &&
     aiTitle.length <= HEADLINE_SEO_MAX &&
     aiTitle.toLowerCase() !== pageTitle.toLowerCase() &&
+    !isWeakCtaTitleLead(aiTitle) &&
     hasStrongTitleAction(aiTitle) &&
     !titleEndsWithVerb(aiTitle) &&
     !/\b(Founding|Creation|Launch|Opening|Completion|Presentation)\b$/i.test(aiTitle);
@@ -1316,11 +1366,12 @@ function eventTitleFromCandidate(parsedTitle, candidate) {
   if (
     aiTitle &&
     aiTitle.toLowerCase() !== pageTitle.toLowerCase() &&
+    !isWeakCtaTitleLead(aiTitle) &&
     hasStrongTitleAction(aiTitle)
   ) {
     return aiTitle;
   }
-  return aiTitle || pageTitle;
+  return aiTitle && !isWeakCtaTitleLead(aiTitle) ? aiTitle : pageTitle;
 }
 
 function restoreSourceEventHeadline(content) {

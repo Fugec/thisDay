@@ -182,9 +182,20 @@ function buildWikimediaFetchUrl(src, width) {
 
   // Wikimedia rejects arbitrary thumbnail widths now. Use the next supported
   // source bucket, then let Cloudflare Image Resizing deliver the requested size.
+  const step = getWikimediaThumbnailStep(width);
+  if (/\/wikipedia\/(?:commons|en)\/(?!thumb\/)/i.test(parsed.pathname)) {
+    const suffix = `${parsed.search || ""}${parsed.hash || ""}`;
+    const cleanPath = `${parsed.origin}${parsed.pathname}`;
+    const originalMatch = cleanPath.match(/^(https:\/\/[^/]+\/wikipedia\/(?:commons|en)\/)(.+\/([^/?#]+))$/i);
+    const fileName = originalMatch?.[3] || "";
+    const originalStep = Math.min(step, 960);
+    if (originalMatch && fileName && !/\.svg$/i.test(fileName)) {
+      return `${originalMatch[1]}thumb/${originalMatch[2]}/${originalStep}px-${fileName}${suffix}`;
+    }
+  }
   return normalizedSrc.replace(
     /\/\d+px-(?=[^/?#]+(?:[?#]|$))/,
-    `/${getWikimediaThumbnailStep(width)}px-`,
+    `/${step}px-`,
   );
 }
 
@@ -1063,9 +1074,11 @@ async function fetchEntityWikiHydration(entity, type) {
   const intro = cleanWikiExtract(page?.extract || summary.extract || "");
   return {
     summary: summary.extract || "",
+    summaryTitle: summary.title || page?.title || pageTitle,
+    summaryType: summary.type || "",
     intro,
     description: summary.description || "",
-    imageUrl: summary.thumbnail?.source || summary.originalimage?.source || "",
+    imageUrl: summary.originalimage?.source || summary.thumbnail?.source || "",
     ...lifeDates,
   };
 }
@@ -1513,9 +1526,253 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
   return hydrated;
 }
 
+function normalizeWikipediaPersonUrl(value) {
+  try {
+    const parsed = new URL(String(value || ""));
+    if (parsed.hostname !== "en.wikipedia.org") return "";
+    if (!parsed.pathname.startsWith("/wiki/")) return "";
+    const title = decodeURIComponent(parsed.pathname.split("/wiki/")[1] || "");
+    if (!title || title.includes(":")) return "";
+    if (/^(List of|Category:|File:|Template:|Help:|Portal:)/i.test(title.replace(/_/g, " "))) {
+      return "";
+    }
+    return `https://en.wikipedia.org/wiki/${encodeURIComponent(title).replace(/%20/g, "_")}`;
+  } catch {
+    return "";
+  }
+}
+
+function isLikelyWikipediaPersonEntity(entity) {
+  const text = [
+    entity?.name,
+    entity?.description,
+    entity?.summary,
+    entity?.intro,
+  ]
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return false;
+  if (/\b(disambiguation|may refer to|list of|category:|wikimedia list article)\b/i.test(text)) {
+    return false;
+  }
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 55) return false;
+  if (!entity?.birthDate && !entity?.deathDate) return false;
+  if (entity?.summaryType && entity.summaryType !== "standard") return false;
+  return /\b(born|died|was an?|is an?|served as|known for|best known|became|won|founded|wrote|directed|composed|played|president|minister|actor|singer|writer|scientist|athlete)\b/i.test(text);
+}
+
+function personDateFromHomepageParams(url, expectedKind) {
+  const kind = String(url.searchParams.get("kind") || "").toLowerCase();
+  if (kind !== expectedKind) return "";
+  const year = parseInt(url.searchParams.get("year") || "", 10);
+  const month = parseInt(url.searchParams.get("month") || "", 10);
+  const day = parseInt(url.searchParams.get("day") || "", 10);
+  if (!Number.isInteger(year) || year < 1 || year > 2100) return "";
+  if (!Number.isInteger(month) || month < 1 || month > 12) return "";
+  const maxDay = DAYS_IN_MONTH[month - 1];
+  if (!Number.isInteger(day) || day < 1 || day > maxDay) return "";
+  return `${MONTH_DISPLAY_NAMES[month]} ${day}, ${year}`;
+}
+
+function homepagePersonCandidateScore(person) {
+  const text = [
+    person?.title,
+    person?.pageDescription,
+    person?.pageExtract,
+    person?.description,
+  ]
+    .join(" ")
+    .toLowerCase();
+  let score = 0;
+  if (person?.originalImageUrl) score += 8;
+  if (person?.thumbnailUrl) score += 6;
+  if (person?.sourceUrl) score += 4;
+  if (person?.pageExtract) score += Math.min(person.pageExtract.length / 120, 8);
+  if (person?.pageDescription) score += 2;
+  [
+    /\b(president|prime minister|chancellor|monarch|king|queen|emperor|pope)\b/i,
+    /\b(nobel|pulitzer|academy award|oscar|grammy|emmy|booker|tony award)\b/i,
+    /\b(actor|actress|singer|musician|composer|writer|novelist|poet|artist|filmmaker|director)\b/i,
+    /\b(scientist|physicist|chemist|mathematician|inventor|astronaut|explorer|philosopher)\b/i,
+    /\b(olympic|world champion|champion|hall of fame|record holder)\b/i,
+    /\b(founder|founded|pioneer|first|best known|one of the most|widely regarded|influential)\b/i,
+  ].forEach((pattern) => {
+    if (pattern.test(text)) score += 5;
+  });
+  [
+    /\b(father|mother) of\b/i,
+    /\bhighly influential\b/i,
+    /\bwidely (?:regarded|considered) as (?:one of|the)\b/i,
+    /\bone of the greatest\b/i,
+    /\binternational [a-z\s-]*icon\b/i,
+    /\bworld-record-holding\b/i,
+    /\b(supreme court|associate justice)\b/i,
+    /\b(nobel prize|academy awards?|triple crown|ballon d'or|fifa world player|grammy award winner)\b/i,
+    /\b(computer science|turing machine|cryptanalyst|theoretical computer science)\b/i,
+  ].forEach((pattern) => {
+    if (pattern.test(text)) score += 10;
+  });
+  if (/\b(reality television|television personality|internet personality|youtuber|tiktoker)\b/i.test(text)) {
+    score -= 4;
+  }
+  return score;
+}
+
+function homepagePersonCandidateFromFeedItem(item, type) {
+  const page = Array.isArray(item?.pages) ? item.pages[0] || {} : {};
+  const text = String(item?.text || "").replace(/\s+/g, " ").trim();
+  const title = (text.split(",")[0] || page.title || "").replace(/\s+/g, " ").trim();
+  const sourceUrl = page?.content_urls?.desktop?.page || "";
+  return {
+    title,
+    type,
+    year: item?.year,
+    sourceUrl,
+    thumbnailUrl: page?.thumbnail?.source || "",
+    originalImageUrl: page?.originalimage?.source || "",
+    pageDescription: page?.description || "",
+    pageExtract: page?.extract || "",
+    description: text,
+    slug: slugifyArchiveLabel(page?.title || title || text),
+  };
+}
+
+function selectHomepagePeopleFromFeed(items, type, limit = 6) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => homepagePersonCandidateFromFeedItem(item, type))
+    .filter((person) => person.title && person.sourceUrl)
+    .filter((person) => person.thumbnailUrl || person.originalImageUrl)
+    .map((person) => ({
+      ...person,
+      thumbnailUrl: person.originalImageUrl || person.thumbnailUrl,
+      _homepageScore: homepagePersonCandidateScore(person),
+    }))
+    .sort((a, b) => {
+      if (b._homepageScore !== a._homepageScore) return b._homepageScore - a._homepageScore;
+      return String(a.title).localeCompare(String(b.title));
+    })
+    .slice(0, limit);
+}
+
+async function fetchHomepagePersonFeed(month, day) {
+  const mPad = String(month).padStart(2, "0");
+  const dPad = String(day).padStart(2, "0");
+  const apiUrl = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/${mPad}/${dPad}`;
+  const workerCache = globalThis.caches?.default;
+  const cached = workerCache ? await workerCache.match(apiUrl).catch(() => null) : null;
+  if (cached) return cached.json();
+
+  const response = await fetch(apiUrl, {
+    headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+  }).catch(() => null);
+  if (!response?.ok) return null;
+  const body = await response.text();
+  if (workerCache) {
+    const cacheResponse = new Response(body, {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "public, max-age=21600",
+      },
+    });
+    workerCache.put(apiUrl, cacheResponse).catch(() => {});
+  }
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
+}
+
+async function isAllowedHomepagePersonGenerationRequest(slug, wikiUrl, url) {
+  if (url.searchParams.get("source") !== "homepage-people-strip") return false;
+  const kind = String(url.searchParams.get("kind") || "").toLowerCase();
+  if (kind !== "birth" && kind !== "death") return false;
+  const year = parseInt(url.searchParams.get("year") || "", 10);
+  const month = parseInt(url.searchParams.get("month") || "", 10);
+  const day = parseInt(url.searchParams.get("day") || "", 10);
+  if (!Number.isInteger(year) || year < 1 || year > 2100) return false;
+  if (!Number.isInteger(month) || month < 1 || month > 12) return false;
+  if (!Number.isInteger(day) || day < 1 || day > DAYS_IN_MONTH[month - 1]) return false;
+
+  const feed = await fetchHomepagePersonFeed(month, day);
+  const group = kind === "birth" ? "births" : "deaths";
+  const selected = selectHomepagePeopleFromFeed(feed?.[group], kind, 6);
+  const targetUrl = normalizeWikipediaPersonUrl(wikiUrl);
+  const targetWikiSlug = slugifyArchiveLabel(wikiTitleFromEntityUrl(targetUrl));
+
+  return selected.some((person) => {
+    const candidateUrl = normalizeWikipediaPersonUrl(person.sourceUrl);
+    if (!candidateUrl || candidateUrl !== targetUrl) return false;
+    if (String(person.year || "") !== String(year)) return false;
+    const titleSlug = slugifyArchiveLabel(person.title);
+    return slug === person.slug || slug === titleSlug || slug === targetWikiSlug;
+  });
+}
+
+async function createPersonEntityFromWikipediaRequest(env, slug, url) {
+  if (!env?.BLOG_AI_KV || !slug || !url.searchParams.has("wiki")) return null;
+  const wikiUrl = normalizeWikipediaPersonUrl(url.searchParams.get("wiki"));
+  if (!wikiUrl) return null;
+  const allowed = await isAllowedHomepagePersonGenerationRequest(slug, wikiUrl, url);
+  if (!allowed) return null;
+
+  const wikiTitle = wikiTitleFromEntityUrl(wikiUrl);
+  const requestedName = String(url.searchParams.get("name") || wikiTitle || "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const nameSlug = slugifyArchiveLabel(requestedName);
+  const wikiSlug = slugifyArchiveLabel(wikiTitle);
+  if (slug !== nameSlug && slug !== wikiSlug) return null;
+
+  const baseEntity = {
+    type: "person",
+    slug,
+    name: requestedName || wikiTitle.replace(/_/g, " "),
+    url: `/people/${slug}/`,
+    wikiUrl,
+    sourcePostTitle: "Wikipedia On This Day",
+    sourcePostUrl: "",
+    relatedPosts: [],
+    relatedTopics: ["Famous Persons"],
+    updatedAt: new Date().toISOString(),
+    source: "homepage-on-this-day",
+  };
+  const wiki = await fetchEntityWikiHydration(baseEntity, "person").catch(() => ({}));
+  const entity = {
+    ...baseEntity,
+    summary: cleanWikiExtract(wiki.summary || ""),
+    intro: cleanWikiExtract(wiki.intro || wiki.summary || ""),
+    description: wiki.description || "",
+    imageUrl: wiki.imageUrl || "",
+    birthDate: wiki.birthDate || personDateFromHomepageParams(url, "birth"),
+    deathDate: wiki.deathDate || personDateFromHomepageParams(url, "death"),
+    summaryTitle: wiki.summaryTitle || wikiTitle,
+    summaryType: wiki.summaryType || "",
+  };
+  if (!isLikelyWikipediaPersonEntity(entity)) return null;
+
+  entity.bodySections = ensureEntityContextSections(
+    { ...entity, bodySections: rebuildPersonBodySections(entity) },
+    "person",
+  );
+  entity.relatedTopics = inferEntityTopicPillars(entity, "person");
+  await Promise.all([
+    env.BLOG_AI_KV.put(entityKey("person", slug), JSON.stringify(entity)),
+    updateEntityIndexEntry(env, entity),
+  ]);
+  return entity;
+}
+
 async function handleEntityPage(request, env, url, type, slug, ctx) {
   const raw = await env.BLOG_AI_KV?.get(entityKey(type, slug)).catch(() => null);
-  if (!raw) {
+  let entity = raw ? JSON.parse(raw) : null;
+  if (!entity && type === "person") {
+    entity = await createPersonEntityFromWikipediaRequest(env, slug, url).catch(() => null);
+  }
+  if (!entity) {
     const section = type === "person" ? "People" : "History";
     const sectionPath = type === "person" ? "/people/" : "/history/";
     return new Response(
@@ -1536,7 +1793,6 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
       }
     );
   }
-  let entity = JSON.parse(raw);
   const posts = await getBlogIndexEntries(env);
   entity = syncEntitySourcePostFromIndex(entity, posts);
   entity = await hydrateSparseEntity(env, entity, type, ctx);
@@ -1598,7 +1854,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   });
   const imageFigure = entity.imageUrl
     ? `<figure class="entity-hero-image text-center mb-4">
-        <img src="/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=900&q=85" class="img-fluid rounded" alt="${escapeHtml(entity.name)}" loading="eager" />
+        <img src="/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=500&q=82" class="img-fluid rounded" alt="${escapeHtml(entity.name)}" loading="eager" />
         <figcaption class="article-meta mt-2"><small>Image via Wikimedia Commons or Wikipedia.</small></figcaption>
       </figure>`
     : "";

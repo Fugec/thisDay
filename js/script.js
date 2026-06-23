@@ -188,6 +188,16 @@ function getOptimizedImageUrl(url, width = 1200, quality = 82) {
   return `/img?src=${encodeURIComponent(url)}&w=${width}&q=${quality}`;
 }
 
+function slugifyPersonName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
 // Converts raw Wikipedia API response into the app's internal event format
 function processRawWikipediaData(data) {
   const processedEvents = [];
@@ -228,6 +238,9 @@ function processRawWikipediaData(data) {
           description: text,
           pageDescription: pageDescription,
           pageExtract: pageExtract,
+          wikiTitle: pageTitle,
+          originalImageUrl: item.pages?.[0]?.originalimage?.source || "",
+          slug: type === "event" ? "" : slugifyPersonName(pageTitle || title || text),
           year: item.year || "Unknown",
           sourceUrl: wikipediaLink,
           thumbnailUrl: thumbnailUrl,
@@ -973,6 +986,92 @@ async function populateMarquee() {
   marqueeBar.style.display = "block";
 }
 
+function homepagePersonScore(person) {
+  const text = [
+    person?.title,
+    person?.pageDescription,
+    person?.pageExtract,
+    person?.description,
+  ]
+    .join(" ")
+    .toLowerCase();
+  let score = 0;
+  if (person?.originalImageUrl) score += 8;
+  if (person?.thumbnailUrl) score += 6;
+  if (person?.sourceUrl) score += 4;
+  if (person?.pageExtract) score += Math.min(person.pageExtract.length / 120, 8);
+  if (person?.pageDescription) score += 2;
+  const signalPatterns = [
+    /\b(president|prime minister|chancellor|monarch|king|queen|emperor|pope)\b/i,
+    /\b(nobel|pulitzer|academy award|oscar|grammy|emmy|booker|tony award)\b/i,
+    /\b(actor|actress|singer|musician|composer|writer|novelist|poet|artist|filmmaker|director)\b/i,
+    /\b(scientist|physicist|chemist|mathematician|inventor|astronaut|explorer|philosopher)\b/i,
+    /\b(olympic|world champion|champion|hall of fame|record holder)\b/i,
+    /\b(founder|founded|pioneer|first|best known|one of the most|widely regarded|influential)\b/i,
+  ];
+  signalPatterns.forEach((pattern) => {
+    if (pattern.test(text)) score += 5;
+  });
+  const iconicPatterns = [
+    /\b(father|mother) of\b/i,
+    /\bhighly influential\b/i,
+    /\bwidely (?:regarded|considered) as (?:one of|the)\b/i,
+    /\bone of the greatest\b/i,
+    /\binternational [a-z\s-]*icon\b/i,
+    /\bworld-record-holding\b/i,
+    /\b(supreme court|associate justice)\b/i,
+    /\b(nobel prize|academy awards?|triple crown|ballon d'or|fifa world player|grammy award winner)\b/i,
+    /\b(computer science|turing machine|cryptanalyst|theoretical computer science)\b/i,
+  ];
+  iconicPatterns.forEach((pattern) => {
+    if (pattern.test(text)) score += 10;
+  });
+  if (/\b(reality television|television personality|internet personality|youtuber|tiktoker)\b/i.test(text)) {
+    score -= 4;
+  }
+  return score;
+}
+
+function selectHomepagePeople(items, limit = 6) {
+  return (Array.isArray(items) ? items : [])
+    .filter((person) => person && person.title && person.sourceUrl)
+    .filter((person) => person.thumbnailUrl || person.originalImageUrl)
+    .map((person) => ({
+      ...person,
+      thumbnailUrl: person.originalImageUrl || person.thumbnailUrl,
+      slug: person.slug || slugifyPersonName(person.title),
+      _homepageScore: homepagePersonScore(person),
+    }))
+    .sort((a, b) => {
+      if (b._homepageScore !== a._homepageScore) {
+        return b._homepageScore - a._homepageScore;
+      }
+      return String(a.title).localeCompare(String(b.title));
+    })
+    .slice(0, limit);
+}
+
+function localPersonHref(person, articlePeopleBySlug = new Map(), fallbackHref = "/people/", dateContext = {}) {
+  const slug = person?.slug || slugifyPersonName(person?.title || person?.name || "");
+  if (!slug) return fallbackHref;
+  const existing = articlePeopleBySlug.get(slug);
+  if (existing?.url) return existing.url;
+  if (person?.sourceUrl && /^https:\/\/en\.wikipedia\.org\/wiki\//i.test(person.sourceUrl)) {
+    const params = new URLSearchParams({
+      wiki: person.sourceUrl,
+      name: person.title || person.name || "",
+      source: "homepage-people-strip",
+    });
+    const kind = person.type === "birth" ? "birth" : person.type === "death" ? "death" : "";
+    if (kind) params.set("kind", kind);
+    if (/^\d{1,4}$/.test(String(person.year || ""))) params.set("year", String(person.year));
+    if (dateContext.month) params.set("month", String(dateContext.month));
+    if (dateContext.day) params.set("day", String(dateContext.day));
+    return `/people/${slug}/?${params.toString()}`;
+  }
+  return `/people/${slug}/`;
+}
+
 async function populatePeopleStrip() {
   const track = document.getElementById("peopleTrack");
   const skeleton = document.getElementById("peopleSkeleton");
@@ -999,8 +1098,13 @@ async function populatePeopleStrip() {
     return;
   }
 
-  const births = (data.births || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 6);
-  const deaths = (data.deaths || []).filter(p => p && p.title && p.thumbnailUrl).slice(0, 6);
+  const articlePeopleBySlug = new Map(
+    articlePeople
+      .filter((p) => p && p.slug)
+      .map((p) => [p.slug, p]),
+  );
+  const births = selectHomepagePeople(data.births || [], 6);
+  const deaths = selectHomepagePeople(data.deaths || [], 6);
   const fromArticles = articlePeople.filter(p => p && p.name && p.slug).slice(0, 6);
 
   if (!births.length && !deaths.length && !fromArticles.length) {
@@ -1092,6 +1196,7 @@ async function populatePeopleStrip() {
     labelHtml: "Born Today",
     items: births,
     href: "/born/today/",
+    itemHref: (p) => localPersonHref(p, articlePeopleBySlug, "/born/today/", { month, day }),
     seeAllHref: "/born/today/",
   });
   if (hasGroup && deaths.length) appendDivider();
@@ -1099,6 +1204,7 @@ async function populatePeopleStrip() {
     labelHtml: "Died Today",
     items: deaths,
     href: "/died/today/",
+    itemHref: (p) => localPersonHref(p, articlePeopleBySlug, "/died/today/", { month, day }),
     seeAllHref: "/died/today/",
   }) || hasGroup;
   if (hasGroup && fromArticles.length) appendDivider();
@@ -2358,16 +2464,29 @@ async function showEventDetails(
       if (b === "Famous Persons" && a !== "Births" && a !== "Deaths") return 1;
       return a.localeCompare(b);
     });
-    // "All" button — full width on mobile, rest in 2-col grid
-    const allActive = currentActiveFilter === "all" ? "active" : "";
-    let filterButtonsHtml = `<div id="eventFilterContainer">
-      <button class="btn btn-sm btn-contrast filter-btn filter-btn-all ${allActive}" data-category="all">All</button>`;
-    sortedCategories.slice(1).forEach((category) => {
+    const escapeFilterLabel = (value) =>
+      String(value || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    const activeFilterLabel =
+      sortedCategories.find(
+        (category) => category.toLowerCase() === currentActiveFilter,
+      ) || "All";
+    let filterButtonsHtml = `<div id="eventFilterContainer" class="event-filter-dropdown dropdown">
+      <button class="btn btn-sm btn-contrast event-filter-toggle dropdown-toggle" type="button" id="eventFilterDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+        <i class="bi bi-funnel" aria-hidden="true"></i>
+        <span class="event-filter-toggle-text">Filter: ${escapeFilterLabel(activeFilterLabel)}</span>
+      </button>
+      <div class="dropdown-menu event-filter-menu" aria-labelledby="eventFilterDropdown">`;
+    sortedCategories.forEach((category) => {
       const isActive =
         category.toLowerCase() === currentActiveFilter ? "active" : "";
-      filterButtonsHtml += `<button class="btn btn-sm btn-contrast filter-btn ${isActive}" data-category="${category.toLowerCase()}">${category}</button>`;
+      filterButtonsHtml += `<button type="button" class="dropdown-item filter-btn event-filter-option ${isActive}" data-category="${escapeFilterLabel(category.toLowerCase())}" aria-pressed="${isActive ? "true" : "false"}">${escapeFilterLabel(category)}</button>`;
     });
-    filterButtonsHtml += `</div>`;
+    filterButtonsHtml += `</div></div>`;
     const totalEvents = currentDayAllItems.length;
     if (modalDateSummary) {
       const eventCount = structuredEvents.events?.length || 0;
@@ -2396,10 +2515,12 @@ async function showEventDetails(
     modalBodyContent.innerHTML = modalHtml;
     modalBodyContent.querySelectorAll(".filter-btn").forEach((button) => {
       button.addEventListener("click", (event) => {
-        const clickedCategory = event.target.dataset.category;
+        const clickedButton = event.target.closest(".filter-btn");
+        if (!clickedButton) return;
+        const clickedCategory = clickedButton.dataset.category;
         if (clickedCategory === currentActiveFilter) {
           currentActiveFilter = "all";
-          event.target.classList.remove("active");
+          clickedButton.classList.remove("active");
           const allButton = modalBodyContent.querySelector(
             '.filter-btn[data-category="all"]',
           );
@@ -2410,9 +2531,25 @@ async function showEventDetails(
           currentActiveFilter = clickedCategory;
           modalBodyContent
             .querySelectorAll(".filter-btn")
-            .forEach((btn) => btn.classList.remove("active"));
-          event.target.classList.add("active");
+            .forEach((btn) => {
+              btn.classList.remove("active");
+              btn.setAttribute("aria-pressed", "false");
+            });
+          clickedButton.classList.add("active");
         }
+        modalBodyContent.querySelectorAll(".filter-btn").forEach((btn) => {
+          btn.setAttribute(
+            "aria-pressed",
+            btn.classList.contains("active") ? "true" : "false",
+          );
+        });
+        const selectedLabel =
+          modalBodyContent.querySelector(".filter-btn.active")?.textContent?.trim() ||
+          "All";
+        const toggleText = modalBodyContent.querySelector(
+          ".event-filter-toggle-text",
+        );
+        if (toggleText) toggleText.textContent = `Filter: ${selectedLabel}`;
         applyFilter();
       });
     });

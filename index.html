@@ -114,16 +114,16 @@
       sizes="16x16"
       href="icons/favicon-16x16.png"
     />
-    <link rel="stylesheet" href="css/custom.css?v=26" />
+    <link rel="stylesheet" href="css/custom.css?v=27" />
 
     <link rel="manifest" href="/manifest.json" />
     <link
       rel="stylesheet"
-      href="css/style.css?v=8"
+      href="css/style.css?v=9"
       media="print"
       onload="this.media = 'all'"
     />
-    <noscript><link rel="stylesheet" href="css/style.css?v=8" /></noscript>
+    <noscript><link rel="stylesheet" href="css/style.css?v=9" /></noscript>
 
     <script
       async
@@ -184,8 +184,15 @@
         <span><i class="bi bi-book"></i> Sourced from Wikipedia</span>
         <span><i class="bi bi-person-heart"></i> Births &amp; deaths</span>
       </div>
-      <a href="https://thisday.info/events/today/" class="btn" id="todayBtn">
-        What happened on this day <i class="bi bi-arrow-right"></i>
+      <div class="hero-actions">
+        <a href="https://thisday.info/events/today/" class="btn" id="todayBtn">
+          What happened on this day <i class="bi bi-arrow-right"></i>
+        </a>
+        <a href="#calendarGrid" class="btn hero-secondary">Pick a date</a>
+      </div>
+      <a href="#peopleStrip" class="hero-scroll-cue" aria-label="Scroll to today's people">
+        <span>More below</span>
+        <i class="bi bi-chevron-down" aria-hidden="true"></i>
       </a>
     </section>
 
@@ -222,7 +229,7 @@
     </section>
 
     <!-- Blog Posts Section -->
-    <h2 class="homepage-section-title">This Day in History — Latest Articles</h2>
+    <h2 class="homepage-section-title">Latest Articles</h2>
     <p style="padding: 0 10px 28px 30px; line-height: 1.75; color: var(--text-muted);">A new history article is published every day covering one significant event from the past. Each post explores the causes, key figures, immediate impact, and the legacy that still resonates in the world today.</p>
     <section class="blog-section">
       <div class="blog-grid" id="blogGrid">
@@ -230,13 +237,13 @@
       </div>
       <div class="blog-cta-col">
         <p>Our blog</p>
-        <h2 class="homepage-section-title">Explore more this day in history articles on our blog</h2>
+        <h2 class="homepage-section-title">Explore the Blog</h2>
         <a href="/blog/" class="btn">Visit the Blog</a>
       </div>
     </section>
 
     <!-- Event Section (replaces Quiz) -->
-    <h2 class="homepage-section-title">What Happened on This Day?</h2>
+    <h2 class="homepage-section-title">Featured Today</h2>
     <p style="padding: 0 10px 28px 30px; line-height: 1.75; color: var(--text-muted);">Find out what happened on this day in history with today's featured event and our latest article. Each card takes you to a full read and a quiz you can take at the end.</p>
     <section class="event-section">
       <div class="event-wrap">
@@ -277,7 +284,7 @@
     </section>
 
     <!-- Today's Events Section (identical style to blog-section) -->
-    <h2 class="homepage-section-title">Historical Events on This Day</h2>
+    <h2 class="homepage-section-title">Today's Historical Events</h2>
     <p style="padding: 0 10px 28px 30px; line-height: 1.75; color: var(--text-muted);">These are real historical events sourced from Wikipedia's On This Day archive. Each one happened on this exact calendar date, across different centuries and every part of the world.</p>
     <section class="blog-section" id="todaysEventsSection">
       <div class="blog-grid" id="todaysEventsGrid">
@@ -285,7 +292,7 @@
       </div>
       <div class="blog-cta-col">
         <p>Today's events</p>
-        <h2 class="homepage-section-title">Explore what happened on this day in history</h2>
+        <h2 class="homepage-section-title">Browse All Events</h2>
         <a href="/events/today/" class="btn">View All Events</a>
       </div>
     </section>
@@ -325,7 +332,7 @@
     </script>
 
     <!-- Featured Videos Section -->
-    <h2 class="homepage-section-title">This Day in History Videos</h2>
+    <h2 class="homepage-section-title">History in 60 Seconds</h2>
     <p style="padding: 0 10px 28px 30px; line-height: 1.75; color: var(--text-muted);">Short videos covering one significant historical event each, told through archival imagery and narration. A new video goes up every day alongside the daily article.</p>
     <section class="blog-section video-section">
       <div class="blog-grid video-grid" id="videoGrid">
@@ -333,7 +340,7 @@
       </div>
       <div class="blog-cta-col">
         <p>Featured Videos</p>
-        <h2 class="homepage-section-title">Watch history come alive in 60 seconds</h2>
+        <h2 class="homepage-section-title">Watch Short History Videos</h2>
         <a
           href="https://www.youtube.com/@thisDay_info/shorts"
           target="_blank"
@@ -656,7 +663,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="js/script.js?v=13"></script>
+    <script src="js/script.js?v=14"></script>
     <script src="/js/chatbot.js?v=5"></script>
 
     <script>

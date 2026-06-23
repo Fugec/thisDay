@@ -189,9 +189,15 @@
         <a href="https://thisday.info/events/today/" class="btn" id="todayBtn">
           What happened on this day <i class="bi bi-arrow-right"></i>
         </a>
-        <a href="#calendarGrid" class="btn hero-secondary">Pick a date</a>
+        <a href="/blog/" class="btn hero-secondary" id="heroQuizBtn"
+          >Take Today's History Quiz <i class="bi bi-arrow-right"></i
+        ></a>
       </div>
-      <a href="#peopleStrip" class="hero-scroll-cue" aria-label="Scroll to today's people">
+      <a
+        href="#peopleStrip"
+        class="hero-scroll-cue"
+        aria-label="Scroll to today's people"
+      >
         <span>More below</span>
         <i class="bi bi-chevron-down" aria-hidden="true"></i>
       </a>
@@ -231,7 +237,17 @@
 
     <!-- Blog Posts Section -->
     <h2 class="homepage-section-title">Latest Articles</h2>
-    <p style="padding: 0 10px 28px 30px; line-height: 1.75; color: var(--text-muted);">A new history article is published every day covering one significant event from the past. Each post explores the causes, key figures, immediate impact, and the legacy that still resonates in the world today.</p>
+    <p
+      style="
+        padding: 0 10px 28px 30px;
+        line-height: 1.75;
+        color: var(--text-muted);
+      "
+    >
+      A new history article is published every day covering one significant
+      event from the past. Each post explores the causes, key figures, immediate
+      impact, and the legacy that still resonates in the world today.
+    </p>
     <section class="blog-section">
       <div class="blog-grid" id="blogGrid">
         <!-- Populated by JavaScript -->
@@ -245,7 +261,17 @@
 
     <!-- Event Section (replaces Quiz) -->
     <h2 class="homepage-section-title">Featured Today</h2>
-    <p style="padding: 0 10px 28px 30px; line-height: 1.75; color: var(--text-muted);">Find out what happened on this day in history with today's featured event and our latest article. Each card takes you to a full read and a quiz you can take at the end.</p>
+    <p
+      style="
+        padding: 0 10px 28px 30px;
+        line-height: 1.75;
+        color: var(--text-muted);
+      "
+    >
+      Find out what happened on this day in history with today's featured event
+      and our latest article. Each card takes you to a full read and a quiz you
+      can take at the end.
+    </p>
     <section class="event-section">
       <div class="event-wrap">
         <div class="quiz-card" id="todayEventCard">
@@ -257,8 +283,12 @@
             style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
-            <h2 class="homepage-section-title-box" id="todayEventTitle">Today's Events</h2>
-            <p id="todayEventDesc">Historical events that happened on this day.</p>
+            <h2 class="homepage-section-title-box" id="todayEventTitle">
+              Today's Events
+            </h2>
+            <p id="todayEventDesc">
+              Historical events that happened on this day.
+            </p>
             <a id="todayEventBtn" href="/events/today/" class="btn"
               >See All Historical Events <i class="bi bi-arrow-right"></i
             ></a>
@@ -274,7 +304,9 @@
             style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
-            <h2 class="homepage-section-title-box" id="latest-article-title">Loading...</h2>
+            <h2 class="homepage-section-title-box" id="latest-article-title">
+              Loading...
+            </h2>
             <p id="latest-article-desc">Read it. Quiz yourself at the end.</p>
             <a id="blog-quiz-btn" href="/blog/" class="btn"
               >Read &amp; Quiz <i class="bi bi-arrow-right"></i
@@ -286,7 +318,17 @@
 
     <!-- Today's Events Section (identical style to blog-section) -->
     <h2 class="homepage-section-title">Today's Historical Events</h2>
-    <p style="padding: 0 10px 28px 30px; line-height: 1.75; color: var(--text-muted);">These are real historical events sourced from Wikipedia's On This Day archive. Each one happened on this exact calendar date, across different centuries and every part of the world.</p>
+    <p
+      style="
+        padding: 0 10px 28px 30px;
+        line-height: 1.75;
+        color: var(--text-muted);
+      "
+    >
+      These are real historical events sourced from Wikipedia's On This Day
+      archive. Each one happened on this exact calendar date, across different
+      centuries and every part of the world.
+    </p>
     <section class="blog-section" id="todaysEventsSection">
       <div class="blog-grid" id="todaysEventsGrid">
         <!-- Populated by JavaScript with today's Wikipedia events -->
@@ -301,6 +343,7 @@
     <script>
       (function () {
         var btn = document.getElementById("blog-quiz-btn");
+        var heroQuizBtn = document.getElementById("heroQuizBtn");
         var imgEl = document.getElementById("latest-article-img");
         var titleEl = document.getElementById("latest-article-title");
         var descEl = document.getElementById("latest-article-desc");
@@ -315,6 +358,9 @@
             if (latest) {
               if (btn && latest.slug) {
                 btn.href = "/blog/" + latest.slug + "/#quiz";
+              }
+              if (heroQuizBtn && latest.slug) {
+                heroQuizBtn.href = "/blog/" + latest.slug + "/#quiz";
               }
               if (imgEl && latest.imageUrl) {
                 imgEl.src = latest.imageUrl;
@@ -334,7 +380,17 @@
 
     <!-- Featured Videos Section -->
     <h2 class="homepage-section-title">History in 60 Seconds</h2>
-    <p style="padding: 0 10px 28px 30px; line-height: 1.75; color: var(--text-muted);">Short videos covering one significant historical event each, told through archival imagery and narration. A new video goes up every day alongside the daily article.</p>
+    <p
+      style="
+        padding: 0 10px 28px 30px;
+        line-height: 1.75;
+        color: var(--text-muted);
+      "
+    >
+      Short videos covering one significant historical event each, told through
+      archival imagery and narration. A new video goes up every day alongside
+      the daily article.
+    </p>
     <section class="blog-section video-section">
       <div class="blog-grid video-grid" id="videoGrid">
         <!-- Populated by JavaScript -->
@@ -416,7 +472,17 @@
       >
         Explore History by Date
       </h2>
-      <p style="padding: 0 10px 28px 0; line-height: 1.75; color: var(--text-muted);">Click any date on the calendar to browse historical events, famous birthdays, and notable deaths from that day. Move between months to explore thousands of years of recorded history.</p>
+      <p
+        style="
+          padding: 0 10px 28px 0;
+          line-height: 1.75;
+          color: var(--text-muted);
+        "
+      >
+        Click any date on the calendar to browse historical events, famous
+        birthdays, and notable deaths from that day. Move between months to
+        explore thousands of years of recorded history.
+      </p>
       <div class="month-nav">
         <button class="btn" id="prevMonthBtn" aria-label="Previous month">
           <i class="bi bi-chevron-left"></i>
@@ -442,95 +508,151 @@
     <!-- FAQ Section -->
     <section class="faq-section">
       <div class="faq-list">
-
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a1">
             <span>What is thisDay.info?</span><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a1" hidden>
-            <p>thisDay.info is a free historical events calendar where you can explore what happened on any date in history. It covers wars, discoveries, natural disasters, famous birthdays and deaths, and landmark moments in world history, all sourced from Wikipedia.</p>
+            <p>
+              thisDay.info is a free historical events calendar where you can
+              explore what happened on any date in history. It covers wars,
+              discoveries, natural disasters, famous birthdays and deaths, and
+              landmark moments in world history, all sourced from Wikipedia.
+            </p>
           </div>
         </div>
 
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a2">
-            <span>How does the daily history article work?</span><span class="faq-icon">+</span>
+            <span>How does the daily history article work?</span
+            ><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a2" hidden>
-            <p>Every day a new article is published covering one significant historical event from that calendar date. Each article includes background context, key figures, a Did You Know section, a Quick Facts block, and an analysis of the lasting impact on the world. A short quiz at the end lets you test what you have learned.</p>
+            <p>
+              Every day a new article is published covering one significant
+              historical event from that calendar date. Each article includes
+              background context, key figures, a Did You Know section, a Quick
+              Facts block, and an analysis of the lasting impact on the world. A
+              short quiz at the end lets you test what you have learned.
+            </p>
           </div>
         </div>
 
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a3">
-            <span>Where does the historical data come from?</span><span class="faq-icon">+</span>
+            <span>Where does the historical data come from?</span
+            ><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a3" hidden>
-            <p>All historical events, birthdays, and deaths are sourced from Wikipedia's On This Day archives. Wikipedia is one of the most thorough and regularly updated references for world history, covering events from ancient civilizations right through to the present day on every continent.</p>
+            <p>
+              All historical events, birthdays, and deaths are sourced from
+              Wikipedia's On This Day archives. Wikipedia is one of the most
+              thorough and regularly updated references for world history,
+              covering events from ancient civilizations right through to the
+              present day on every continent.
+            </p>
           </div>
         </div>
 
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a4">
-            <span>Can I browse history for any date?</span><span class="faq-icon">+</span>
+            <span>Can I browse history for any date?</span
+            ><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a4" hidden>
-            <p>Yes. Use the calendar on this page to go to any date of the year. Clicking a date opens a page listing everything notable that happened on that day in history, from ancient times right through to recent decades.</p>
+            <p>
+              Yes. Use the calendar on this page to go to any date of the year.
+              Clicking a date opens a page listing everything notable that
+              happened on that day in history, from ancient times right through
+              to recent decades.
+            </p>
           </div>
         </div>
 
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a5">
-            <span>What is the History in 60 Seconds video series?</span><span class="faq-icon">+</span>
+            <span>What is the History in 60 Seconds video series?</span
+            ><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a5" hidden>
-            <p>History in 60 Seconds is a short video series published on YouTube Shorts. Each video tells the story of one historical event using archival imagery and narration. A new video goes up every day so you can keep up with this day in history wherever you are.</p>
+            <p>
+              History in 60 Seconds is a short video series published on YouTube
+              Shorts. Each video tells the story of one historical event using
+              archival imagery and narration. A new video goes up every day so
+              you can keep up with this day in history wherever you are.
+            </p>
           </div>
         </div>
 
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a6">
-            <span>How often is new content published?</span><span class="faq-icon">+</span>
+            <span>How often is new content published?</span
+            ><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a6" hidden>
-            <p>A new article and a new video are published every single day. The events calendar is always current with today's On This Day data from Wikipedia. Famous birthdays and notable deaths for the current date load every time you visit the site.</p>
+            <p>
+              A new article and a new video are published every single day. The
+              events calendar is always current with today's On This Day data
+              from Wikipedia. Famous birthdays and notable deaths for the
+              current date load every time you visit the site.
+            </p>
           </div>
         </div>
 
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a7">
-            <span>Is thisDay.info free to use?</span><span class="faq-icon">+</span>
+            <span>Is thisDay.info free to use?</span
+            ><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a7" hidden>
-            <p>Yes, thisDay.info is completely free. There is no account, no subscription, and no paywall. Every article, video, event listing, and the full historical calendar are open to everyone and will stay that way.</p>
+            <p>
+              Yes, thisDay.info is completely free. There is no account, no
+              subscription, and no paywall. Every article, video, event listing,
+              and the full historical calendar are open to everyone and will
+              stay that way.
+            </p>
           </div>
         </div>
 
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a8">
-            <span>Can I look up famous birthdays and deaths?</span><span class="faq-icon">+</span>
+            <span>Can I look up famous birthdays and deaths?</span
+            ><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a8" hidden>
-            <p>Yes. Every date page includes a list of notable people born or who died on that day, with links to their Wikipedia biographies. You can also browse person pages on thisDay.info to read about the historical figures who appear in our daily articles.</p>
+            <p>
+              Yes. Every date page includes a list of notable people born or who
+              died on that day, with links to their Wikipedia biographies. You
+              can also browse person pages on thisDay.info to read about the
+              historical figures who appear in our daily articles.
+            </p>
           </div>
         </div>
 
         <div class="faq-item">
           <button class="faq-q" aria-expanded="false" aria-controls="faq-a9">
-            <span>What topics and time periods does thisDay.info cover?</span><span class="faq-icon">+</span>
+            <span>What topics and time periods does thisDay.info cover?</span
+            ><span class="faq-icon">+</span>
           </button>
           <div class="faq-a" id="faq-a9" hidden>
-            <p>thisDay.info covers all major topics in world history including wars and conflicts, political revolutions, scientific discoveries, space exploration, natural disasters, cultural milestones, and sporting achievements. Events range from ancient history through to the 21st century, covering every part of the world.</p>
+            <p>
+              thisDay.info covers all major topics in world history including
+              wars and conflicts, political revolutions, scientific discoveries,
+              space exploration, natural disasters, cultural milestones, and
+              sporting achievements. Events range from ancient history through
+              to the 21st century, covering every part of the world.
+            </p>
           </div>
         </div>
-
       </div>
       <script>
-        document.querySelectorAll('.faq-q').forEach(function(btn) {
-          btn.addEventListener('click', function() {
-            var open = this.getAttribute('aria-expanded') === 'true';
-            var ans = document.getElementById(this.getAttribute('aria-controls'));
-            this.setAttribute('aria-expanded', open ? 'false' : 'true');
+        document.querySelectorAll(".faq-q").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var open = this.getAttribute("aria-expanded") === "true";
+            var ans = document.getElementById(
+              this.getAttribute("aria-controls"),
+            );
+            this.setAttribute("aria-expanded", open ? "false" : "true");
             ans.hidden = open;
           });
         });

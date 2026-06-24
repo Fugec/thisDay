@@ -6244,13 +6244,17 @@ async function handleFetchRequest(request, env, ctx) {
     try {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        return new Response(cached, {
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=3600",
-          },
-        });
+        const parsed = JSON.parse(cached);
+        if (isUsableDateQuiz(parsed)) {
+          return new Response(cached, {
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Cache-Control": "public, max-age=3600",
+            },
+          });
+        }
+        await env.EVENTS_KV.delete(kvKey).catch(() => {});
       }
     } catch (e) {
       /* ignore */
@@ -7256,7 +7260,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=27>; rel=preload; as=style",
+      "</css/custom.css?v=28>; rel=preload; as=style",
     ].join(", "),
   );
 
@@ -7375,19 +7379,10 @@ async function generateQuizForDate(
     const cached = await env.EVENTS_KV.get(kvKey);
     if (cached) {
       const parsed = JSON.parse(cached);
-      const hasTruncatedFallbackQuestion = Array.isArray(parsed?.questions)
-        ? parsed.questions.some((q) => {
-            const text = String(q?.q || "");
-            return (
-              /^In which year did\s+"/i.test(text) &&
-              (text.includes("…") || /\.\.\./.test(text))
-            );
-          })
-        : false;
-
-      if (!hasTruncatedFallbackQuestion) {
+      if (isUsableDateQuiz(parsed)) {
         return parsed;
       }
+      await env.EVENTS_KV.delete(kvKey).catch(() => {});
     }
   } catch (e) {
     // ignore cache miss errors
@@ -7466,7 +7461,9 @@ async function generateQuizForDate(
             const hasYearQuestion = valid.some((q) =>
               yearPattern.test(String(q.q)),
             );
-            if (!hasYearQuestion) quiz = { ...parsed, questions: valid };
+            const candidate = { ...parsed, questions: valid };
+            if (!hasYearQuestion && isUsableDateQuiz(candidate, eventCount))
+              quiz = candidate;
           }
         }
       }
@@ -7475,7 +7472,10 @@ async function generateQuizForDate(
     }
   }
 
-  if (!quiz) quiz = buildFallbackQuiz(mDisplay, day, eventsData, indexedEvents);
+  if (!quiz) {
+    console.warn(`Quiz AI unavailable for ${mDisplay} ${day}; refusing fallback quiz cache`);
+    return null;
+  }
 
   try {
     await env.EVENTS_KV.put(kvKey, JSON.stringify(quiz), {
@@ -7486,6 +7486,39 @@ async function generateQuizForDate(
   }
 
   return quiz;
+}
+
+function isLowQualityDateQuizQuestion(questionText) {
+  const text = String(questionText || "").replace(/\s+/g, " ").trim().toLowerCase();
+  return [
+    /^which of the following best describes what happened on\b/,
+    /^on .+ a notable event occurred\. which description matches it\??$/,
+    /^which event took place on\b/,
+    /^historians remember .+ for which of the following\??$/,
+    /^what significant event is recorded on\b/,
+    /^in which year did\b/,
+    /^what year did\b/,
+    /^when did\b/,
+  ].some((pattern) => pattern.test(text));
+}
+
+function isUsableDateQuiz(quiz, expectedLength = 5) {
+  return Array.isArray(quiz?.questions) &&
+    quiz.questions.length === expectedLength &&
+    quiz.questions.every(
+      (q) =>
+        typeof q?.q === "string" &&
+        q.q.trim().length > 15 &&
+        !isLowQualityDateQuizQuestion(q.q) &&
+        Array.isArray(q.options) &&
+        q.options.length === 4 &&
+        q.options.every((option) => typeof option === "string" && option.trim().length > 2) &&
+        Number.isInteger(q.answer) &&
+        q.answer >= 0 &&
+        q.answer <= 3 &&
+        typeof q.explanation === "string" &&
+        q.explanation.trim().length > 8,
+    );
 }
 
 function buildFallbackQuiz(mDisplay, day, eventsData, orderedEvents = []) {

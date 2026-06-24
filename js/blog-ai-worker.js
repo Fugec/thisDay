@@ -2703,7 +2703,8 @@ export default {
           const kvKey = `quiz-v3:blog:${entry.slug}`;
           if (!force) {
             const existing = await env.BLOG_AI_KV.get(kvKey);
-            if (existing) return { slug: entry.slug, status: "skipped" };
+            if (parseValidBlogQuiz(existing)) return { slug: entry.slug, status: "skipped" };
+            if (existing) await env.BLOG_AI_KV.delete(kvKey).catch(() => {});
           }
           const content = await buildRichContent(entry, entry.slug);
           const quiz = await generateBlogQuiz(env, content, entry.slug);
@@ -2742,14 +2743,18 @@ export default {
     if (blogQuizMatch) {
       const slug = blogQuizMatch[1];
       const quizRaw = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
-      if (quizRaw) {
-        return new Response(quizRaw, {
+      const cachedQuiz = parseValidBlogQuiz(quizRaw);
+      if (cachedQuiz) {
+        return new Response(JSON.stringify(cachedQuiz), {
           headers: {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "public, max-age=86400, s-maxage=0",
           },
         });
+      }
+      if (quizRaw) {
+        await env.BLOG_AI_KV.delete(`quiz-v3:blog:${slug}`).catch(() => {});
       }
       if (blogKvBackgroundWritesPaused(env)) {
         return new Response(JSON.stringify({ error: "Quiz not found" }), {
@@ -3878,22 +3883,25 @@ export default {
         }
         // Inline quiz JSON so popup opens instantly (no fetch round-trip)
         const inlineQuizRaw = await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`);
-        if (inlineQuizRaw) {
+        const inlineQuiz = parseValidBlogQuiz(inlineQuizRaw);
+        if (inlineQuiz) {
           const bodyCloseInline = patchedHtml.includes("</body>")
             ? "</body>"
             : "</html>";
           patchedHtml = patchedHtml.replace(
             bodyCloseInline,
-            `<script>window.__tdqQuiz=${inlineQuizRaw};<\/script>\n${bodyCloseInline}`,
+            `<script>window.__tdqQuiz=${JSON.stringify(inlineQuiz)};<\/script>\n${bodyCloseInline}`,
           );
+        } else if (inlineQuizRaw && allowArticleKvBackgroundWrites) {
+          ctx.waitUntil(env.BLOG_AI_KV.delete(`quiz-v3:blog:${slug}`).catch(() => {}));
         }
         // Pre-warm quiz in background so it's ready before the user clicks "Take the Quiz"
         if (allowArticleKvBackgroundWrites) ctx.waitUntil(
           (async () => {
-            const cached =
+            const cachedRaw =
               inlineQuizRaw ||
               (await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`));
-            if (!cached && hasAnyTextAIProvider(env)) {
+            if (!parseValidBlogQuiz(cachedRaw) && hasAnyTextAIProvider(env)) {
               try {
                 const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
                 const index = indexRaw ? JSON.parse(indexRaw) : [];
@@ -5690,7 +5698,10 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
   try {
     const quizKey = `quiz-v3:blog:${slug}`;
     const existingQuiz = await env.BLOG_AI_KV.get(quizKey);
-    if (!existingQuiz) {
+    if (existingQuiz && !parseValidBlogQuiz(existingQuiz)) {
+      await env.BLOG_AI_KV.delete(quizKey).catch(() => {});
+    }
+    if (!parseValidBlogQuiz(existingQuiz)) {
       const allParas = [
         ...(content.overviewParagraphs || []),
         ...(content.eyewitnessOrChronicle || []),
@@ -7947,6 +7958,19 @@ function buildDeterministicBlogQuiz(content) {
   return { questions, groundedDeterministically: true };
 }
 
+function isLowQualityBlogQuizQuestion(questionText) {
+  const text = String(questionText || "").replace(/\s+/g, " ").trim().toLowerCase();
+  return [
+    /^which event is the article about\??$/,
+    /^on what date did the article'?s central event occur\??$/,
+    /^which location does the article identify for the event\??$/,
+    /^who does the article identify as the key figure\??$/,
+    /^which significance does the article assign to the event\??$/,
+    /^which legacy does the article associate with the event\??$/,
+    /^which value does the article give for\b/,
+  ].some((pattern) => pattern.test(text));
+}
+
 /**
  * Quiz Expert — uses Cloudflare Workers AI (same free binding as quiz generation)
  * to review and sharpen quiz questions after the initial generation pass.
@@ -8067,8 +8091,19 @@ function validateQuizQuestions(questions, expectedLength = 5) {
         q.answer >= 0 &&
         q.answer <= 3 &&
         typeof q.explanation === "string" &&
-        q.explanation.trim().length > 8,
+        q.explanation.trim().length > 8 &&
+        !isLowQualityBlogQuizQuestion(q.q),
     );
+}
+
+function parseValidBlogQuiz(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return validateQuizQuestions(parsed?.questions) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 async function verifyQuizGrounding(env, questions, content) {
@@ -8237,7 +8272,7 @@ async function buildRichContent(entry, slug) {
 }
 
 async function generateBlogQuiz(env, content, _slug) {
-  if (!hasAnyTextAIProvider(env)) return buildDeterministicBlogQuiz(content);
+  if (!hasAnyTextAIProvider(env)) return null;
 
   const quizSourceMaterial = sourceMaterialForGrounding(groundingSourceFromContent(content));
   const contextLines = [
@@ -8261,7 +8296,7 @@ async function generateBlogQuiz(env, content, _slug) {
     console.error(
       `Blog quiz: no context for "${content.title}" — skipping AI call`,
     );
-    return buildDeterministicBlogQuiz(content);
+    return null;
   }
 
   let raw;
@@ -8283,34 +8318,34 @@ async function generateBlogQuiz(env, content, _slug) {
     );
   } catch (err) {
     console.error("Blog quiz: AI call failed —", err.message);
-    return buildDeterministicBlogQuiz(content);
+    return null;
   }
   const cleaned = raw
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/, "")
     .trim();
   const objMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!objMatch) return buildDeterministicBlogQuiz(content);
+  if (!objMatch) return null;
   let parsed;
   try {
     parsed = JSON.parse(objMatch[0]);
   } catch (parseErr) {
     console.error("Blog quiz JSON.parse failed:", parseErr);
-    return buildDeterministicBlogQuiz(content);
+    return null;
   }
   if (!Array.isArray(parsed?.questions) || parsed.questions.length !== 5)
-    return buildDeterministicBlogQuiz(content);
-  if (!validateQuizQuestions(parsed.questions)) return buildDeterministicBlogQuiz(content);
+    return null;
+  if (!validateQuizQuestions(parsed.questions)) return null;
   const sharpened = await reviewQuizWithExpert(parsed.questions, content, env);
   let grounding = await verifyQuizGrounding(env, sharpened, content);
   if (grounding.ok) return { ...parsed, questions: sharpened };
   console.warn(`Quiz grounding check failed: ${grounding.reasons.join("; ")}`);
   const repaired = await repairQuizGrounding(env, sharpened, content, grounding.reasons);
-  if (!repaired) return buildDeterministicBlogQuiz(content);
+  if (!repaired) return null;
   grounding = await verifyQuizGrounding(env, repaired, content);
   if (!grounding.ok) {
     console.warn(`Quiz grounding recheck failed: ${grounding.reasons.join("; ")}`);
-    return buildDeterministicBlogQuiz(content);
+    return null;
   }
   return { ...parsed, questions: repaired };
 }
@@ -10348,6 +10383,18 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
           </section>`;
 }
 
+function buildArticleBodyAdBlock() {
+  return `<div class="ad-unit-container article-body-ad article-body-ad-v1 mt-4 mb-4">
+            <span class="ad-unit-label">Advertisement</span>
+            <ins class="adsbygoogle"
+                 style="display:block"
+                 data-ad-client="ca-pub-8565025017387209"
+                 data-ad-slot="9477779891"
+                 data-ad-format="auto"
+                 data-full-width-responsive="true"></ins>
+          </div>`;
+}
+
 function readHtmlAttr(tag, name) {
   const escapedName = String(name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = String(tag || "").match(new RegExp(`${escapedName}="([^"]*)"`, "i"));
@@ -11014,6 +11061,8 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
 
   const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || []);
   const sectionHeadings = buildArticleSectionHeadings(c, currentPillars);
+  const amazonRelatedBlock = buildAmazonRelatedBlock(c, currentPillars);
+  const articleBodyAdBlock = amazonRelatedBlock ? buildArticleBodyAdBlock() : "";
 
   const overviewParas = (c.overviewParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
@@ -11305,7 +11354,7 @@ ${JSON.stringify({
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=27" />
+    <link rel="stylesheet" href="/css/custom.css?v=28" />
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
@@ -11428,6 +11477,8 @@ ${JSON.stringify({
       .amazon-card-cover-fallback{background:linear-gradient(135deg,#f9fbf7,#e7f0e7)}
       @media(min-width:768px){.amazon-slider-btn{display:inline-flex}}
       @media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
+      .article-body-ad{margin:1.5rem 0 2rem!important}
+      .article-body-ad ins.adsbygoogle{min-height:90px}
       blockquote.historical-quote{border-left:3px solid var(--btn-bg);padding-left:1rem;margin-left:.5rem;font-style:italic}
       .border{border:1px solid var(--border)!important;box-shadow:none}
       .shadow-sm{box-shadow:none!important}
@@ -11521,7 +11572,8 @@ ${overviewParas}
               : ""
           }
 
-          ${buildAmazonRelatedBlock(c, currentPillars)}
+          ${amazonRelatedBlock}
+          ${articleBodyAdBlock}
 
           <!-- Eyewitness / Chronicle Accounts -->
           ${
@@ -12141,7 +12193,7 @@ ${JSON.stringify(
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=27" />
+    <link rel="stylesheet" href="/css/custom.css?v=28" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -12414,7 +12466,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=27" />
+    <link rel="stylesheet" href="/css/custom.css?v=28" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
@@ -12964,6 +13016,17 @@ function normalizeArticleLayoutHtml(body) {
     html = moveHtmlRangeBefore(html, exploreRange, exploreAnchor);
   }
 
+  const amazonRelatedRange = findSectionRangeContaining(
+    html,
+    "Related books",
+    /\bclass="[^"]*\bamazon-related\b/i,
+  );
+  if (amazonRelatedRange && !html.includes("article-body-ad-v1")) {
+    html = `${html.slice(0, amazonRelatedRange.end)}
+          ${buildArticleBodyAdBlock()}
+          ${html.slice(amazonRelatedRange.end)}`;
+  }
+
   // Keep trusted-source links at the bottom of the article, immediately after
   // the Test Your Knowledge CTA. This also repairs older stored posts whose
   // authority block was rendered near the overview.
@@ -13028,9 +13091,9 @@ function normalizeAiAnswerCardHtml(body) {
     html = html.replace("</head>", `${patch}</head>`);
   }
 
-  if (!html.includes("article-layout-patch-v5") && html.includes("</head>")) {
+  if (!html.includes("article-layout-patch-v6") && html.includes("</head>")) {
     const layoutPatch =
-      "<style>/*article-layout-patch-v5*/.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem!important}.h3{margin-top:0!important;margin-bottom:1rem!important}article.p-4>*+*{margin-top:2rem!important}article.p-4>.h3+*{margin-top:1rem!important}.entity-strip{margin:0 0 2rem!important}</style>";
+      "<style>/*article-layout-patch-v6*/.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem!important}.h3{margin-top:0!important;margin-bottom:1rem!important}article.p-4>*+*{margin-top:2rem!important}article.p-4>.h3+*{margin-top:1rem!important}.entity-strip{margin:0 0 2rem!important}.article-body-ad{margin:1.5rem 0 2rem!important}.article-body-ad ins.adsbygoogle{min-height:90px!important}</style>";
     html = html.replace("</head>", `${layoutPatch}</head>`);
   }
   return html;
@@ -13039,7 +13102,7 @@ function normalizeAiAnswerCardHtml(body) {
 function normalizeArticleAssetVersionsHtml(body) {
   return String(body || "").replace(
     /\/css\/custom\.css\?v=\d+/g,
-    "/css/custom.css?v=27",
+    "/css/custom.css?v=28",
   );
 }
 

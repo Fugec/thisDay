@@ -363,11 +363,23 @@ img {
   color: var(--text);
 }
 
+.article-body-ad {
+  margin: 1.5rem 0 2rem !important;
+}
+.article-body-ad ins.adsbygoogle {
+  min-height: 90px;
+}
+
 .people-strip {
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, #fff 0%, #f8fbf8 100%);
   padding: 1rem 1.5rem;
+}
+@media (min-width: 768px) {
+  body[data-page="v2"] > .people-strip {
+    margin-top: 45px;
+  }
 }
 .people-track-wrap {
   max-width: 1920px;
@@ -1786,7 +1798,7 @@ main.container {
     margin-bottom: 0.9rem;
   }
   .hero h1 {
-    font-size: 3rem;
+    font-size: 2.5rem;
     max-width: 14ch;
     margin-bottom: 1.25rem;
   }

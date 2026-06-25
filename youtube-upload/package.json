@@ -20,5 +20,9 @@
     "googleapis": "^148.0.0",
     "p-limit": "^7.3.0",
     "sharp": "^0.33.5"
+  },
+  "comment:overrides": "Pin node-fetch below 2.7.0: 2.7.0 throws ERR_STREAM_PREMATURE_CLOSE on gzipped responses (e.g. the Google OAuth token endpoint) under Node 18+, which broke YouTube uploads on 2026-06-25.",
+  "overrides": {
+    "node-fetch": "2.6.13"
   }
 }

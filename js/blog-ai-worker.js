@@ -11388,7 +11388,7 @@ ${JSON.stringify({
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=28" />
+    <link rel="stylesheet" href="/css/custom.css?v=30" />
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
@@ -12227,7 +12227,7 @@ ${JSON.stringify(
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=28" />
+    <link rel="stylesheet" href="/css/custom.css?v=30" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -12500,7 +12500,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=28" />
+    <link rel="stylesheet" href="/css/custom.css?v=30" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
@@ -13136,7 +13136,7 @@ function normalizeAiAnswerCardHtml(body) {
 function normalizeArticleAssetVersionsHtml(body) {
   return String(body || "").replace(
     /\/css\/custom\.css\?v=\d+/g,
-    "/css/custom.css?v=28",
+    "/css/custom.css?v=30",
   );
 }
 

@@ -35,6 +35,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Site-wide paragraph size: every <p> renders at 15px (overrides all
+   context-specific and worker-embedded paragraph rules). */
+p {
+  font-size: 15px !important;
+}
+
 a {
   color: var(--text);
   text-decoration: underline;

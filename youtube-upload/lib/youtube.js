@@ -8,6 +8,7 @@
  */
 
 import { google } from "googleapis";
+import { Gaxios } from "gaxios";
 import { createReadStream } from "fs";
 
 const OAUTH_REDIRECT_URI = "http://localhost:3838";
@@ -43,6 +44,18 @@ function getOAuth2Client() {
     OAUTH_REDIRECT_URI,
   );
   client.setCredentials({ refresh_token: requireEnv("YOUTUBE_REFRESH_TOKEN") });
+  // Google's OAuth token endpoint returns a gzipped body. On GitHub Actions
+  // runners that gzip stream can truncate, making node-fetch throw
+  // ERR_STREAM_PREMATURE_CLOSE from its Gunzip handler (broke uploads on
+  // 2026-06-25, and it is version-independent — pinning node-fetch did not
+  // help). Swap in a transporter that requests identity (uncompressed)
+  // encoding, so there is no gzip stream to truncate, and retry transient
+  // network closes.
+  client.transporter = new Gaxios({
+    headers: { "Accept-Encoding": "identity" },
+    retry: true,
+    retryConfig: { retry: 4, noResponseRetries: 4 },
+  });
   return client;
 }
 

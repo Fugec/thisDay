@@ -212,49 +212,75 @@ function withTimeout(promise, timeoutMs, message) {
  * @param {number[]} [cuts]   - Scene boundary timestamps for chapter markers
  * @returns {Promise<string>} YouTube video ID
  */
+// Retry only transient network/server failures — never 4xx (quota, auth, or an
+// invalid video), which will not succeed on retry and would waste API quota.
+function isRetryableUploadError(err) {
+  const status = err?.code ?? err?.response?.status ?? err?.status;
+  if (typeof status === "number") return status >= 500; // 4xx -> no retry, 5xx -> retry
+  return /premature close|ECONNRESET|ETIMEDOUT|EPIPE|socket hang up|fetch failed|network|terminated|aborted|timed out/i.test(
+    String(err?.message || ""),
+  );
+}
+
 export async function uploadToYoutube(videoPath, post, cuts = []) {
   const youtube = getYoutubeClient();
-
-  const uploadPromise = youtube.videos.insert({
-    part: ["snippet", "status"],
-    requestBody: {
-      snippet: {
-        title: buildVideoTitle(post),
-        description: buildVideoDescription(post, cuts),
-        tags: buildVideoTags(post),
-        categoryId: EDUCATION_CATEGORY_ID,
-        defaultLanguage: "en",
-        defaultAudioLanguage: "en",
-      },
-      status: {
-        privacyStatus: process.env.YOUTUBE_PRIVACY || "public",
-        selfDeclaredMadeForKids: false,
-      },
+  const requestBody = {
+    snippet: {
+      title: buildVideoTitle(post),
+      description: buildVideoDescription(post, cuts),
+      tags: buildVideoTags(post),
+      categoryId: EDUCATION_CATEGORY_ID,
+      defaultLanguage: "en",
+      defaultAudioLanguage: "en",
     },
-    media: {
-      mimeType: "video/mp4",
-      body: createReadStream(videoPath),
+    status: {
+      privacyStatus: process.env.YOUTUBE_PRIVACY || "public",
+      selfDeclaredMadeForKids: false,
     },
-  }, {
-    // Per-request options for the MEDIA UPLOAD specifically. The multipart
-    // upload does NOT inherit google.options, so force native fetch + identity
-    // encoding here too, otherwise the upload response keeps hitting the
-    // node-fetch gzip premature-close on the new runner image.
-    fetchImplementation: NATIVE_FETCH,
-    headers: { "Accept-Encoding": "identity" },
-    // undici's fetch requires duplex:"half" when the request body is a stream
-    // (the video read stream above). node-fetch never needed it, so gaxios does
-    // not set it; pass it through here.
-    duplex: "half",
-  });
+  };
 
-  const res = await withTimeout(
-    uploadPromise,
-    YOUTUBE_UPLOAD_TIMEOUT_MS,
-    "YouTube upload timed out after 5 minutes",
-  );
-
-  return res.data.id;
+  const MAX_ATTEMPTS = 3;
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const uploadPromise = youtube.videos.insert(
+        {
+          part: ["snippet", "status"],
+          requestBody,
+          // A FRESH read stream every attempt — a consumed/aborted stream
+          // cannot be replayed, so the retry must build its own.
+          media: { mimeType: "video/mp4", body: createReadStream(videoPath) },
+        },
+        {
+          // Per-request options for the MEDIA UPLOAD specifically. The multipart
+          // upload does NOT inherit google.options, so force native fetch +
+          // identity encoding + duplex here. See the NATIVE_FETCH note above.
+          fetchImplementation: NATIVE_FETCH,
+          headers: { "Accept-Encoding": "identity" },
+          // undici requires duplex:"half" when the request body is a stream.
+          duplex: "half",
+        },
+      );
+      const res = await withTimeout(
+        uploadPromise,
+        YOUTUBE_UPLOAD_TIMEOUT_MS,
+        "YouTube upload timed out after 5 minutes",
+      );
+      return res.data.id;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < MAX_ATTEMPTS && isRetryableUploadError(err)) {
+        const waitMs = 3000 * attempt;
+        console.warn(
+          `  ⚠ Upload attempt ${attempt}/${MAX_ATTEMPTS} failed (${err.message}); retrying in ${waitMs / 1000}s...`,
+        );
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 export async function verifyYoutubeAuth() {

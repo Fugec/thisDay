@@ -32,9 +32,24 @@ jobs:
         with:
           node-version: "22"
 
-      # Static ffmpeg binary — avoids apt mirror issues with libssh deps
+      # Static ffmpeg binary — avoids apt mirror issues with libssh deps.
+      # The binary download occasionally fails with a transient "fetch failed"
+      # on the runner network, so retry up to two more times before giving up.
       - uses: FedericoCarboni/setup-ffmpeg@v3
-        id: setup-ffmpeg
+        id: setup-ffmpeg-1
+        continue-on-error: true
+        with:
+          ffmpeg-version: release
+      - name: Retry ffmpeg setup (attempt 2)
+        if: steps.setup-ffmpeg-1.outcome == 'failure'
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        id: setup-ffmpeg-2
+        continue-on-error: true
+        with:
+          ffmpeg-version: release
+      - name: Retry ffmpeg setup (attempt 3)
+        if: steps.setup-ffmpeg-1.outcome == 'failure' && steps.setup-ffmpeg-2.outcome == 'failure'
+        uses: FedericoCarboni/setup-ffmpeg@v3
         with:
           ffmpeg-version: release
 

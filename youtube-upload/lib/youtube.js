@@ -242,6 +242,10 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
     // node-fetch gzip premature-close on the new runner image.
     fetchImplementation: NATIVE_FETCH,
     headers: { "Accept-Encoding": "identity" },
+    // undici's fetch requires duplex:"half" when the request body is a stream
+    // (the video read stream above). node-fetch never needed it, so gaxios does
+    // not set it; pass it through here.
+    duplex: "half",
   });
 
   const res = await withTimeout(

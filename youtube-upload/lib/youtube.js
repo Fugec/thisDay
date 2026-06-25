@@ -11,6 +11,15 @@ import { google } from "googleapis";
 import { Gaxios } from "gaxios";
 import { createReadStream } from "fs";
 
+// Disable gzip on EVERY googleapis request — both the OAuth token fetch and the
+// actual video-upload response. On GitHub Actions runners the gzip response
+// stream can truncate, making node-fetch throw ERR_STREAM_PREMATURE_CLOSE from
+// its Gunzip handler (broke uploads on 2026-06-25, on both endpoints, and it is
+// node-fetch-version-independent). Requesting identity (uncompressed) encoding
+// means there is no gzip stream to truncate. This applies globally to the core
+// googleapis client; the OAuth2 client below also gets it via its transporter.
+google.options({ headers: { "Accept-Encoding": "identity" } });
+
 const OAUTH_REDIRECT_URI = "http://localhost:3838";
 const YOUTUBE_UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
 const EDUCATION_CATEGORY_ID = "27";

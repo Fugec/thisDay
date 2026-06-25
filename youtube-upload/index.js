@@ -310,6 +310,7 @@ async function main() {
     return;
   }
 
+  let hadUploadFailure = false;
   try {
     for (let post of pending) {
       console.log(`\n→ ${post.title}`);
@@ -483,6 +484,7 @@ async function main() {
             }
           }
         } else {
+          hadUploadFailure = true;
           console.error(`  ✗ Failed: ${err.message}`);
           if (/429|rate limit|quota|too many|403/i.test(err.message)) {
             await recordQuotaSignal("youtube-upload", err.message);
@@ -514,6 +516,10 @@ async function main() {
     await releaseUploadLock(uploadLockToken);
   }
 
+  if (hadUploadFailure) {
+    process.exitCode = 1;
+    console.error("\nOne or more uploads failed — see ✗ above. Failing the run.");
+  }
   console.log("\nDone.");
 }
 

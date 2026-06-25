@@ -4664,7 +4664,7 @@ const WRITING_REWRITE_RULES =
   "- Fit the medium: this is long-form historical web writing for curious general readers, not a chatbot answer or textbook entry.\n" +
   "- Put the answer, consequence, or strongest concrete fact early. Do not warm up with generic setup.\n" +
   "- Every substantial paragraph needs a concrete anchor: a proper noun, number, place, named document, quoted source, decision, or checkable consequence.\n" +
-  "- Prefer plain verbs and specific nouns over polished abstraction. Replace vague authority with named source anchors or cut the claim.\n" +
+  "- Prefer plain verbs and specific nouns over polished abstraction. Replace vague authority with source-supported anchors or cut the claim.\n" +
   "- Develop one through-line. Do not make sections feel like interchangeable buckets or a chronological list with prettier prose.\n" +
   "- Watch regularity: repeated paragraph arcs, hidden three-part lists, identical openers, tidy concession rhythms, and ceremonial closing sentences.\n" +
   "- Create controlled burstiness: place an occasional short declarative sentence beside a longer layered one, and never write three sentences of similar length or shape in a row. Do not use fragments as decoration.\n" +
@@ -4675,6 +4675,21 @@ const WRITING_REWRITE_RULES =
   "- Prefer concrete, slightly less predictable verbs when they are exact. Do not reach for a thesaurus, purple prose, or an image the source does not support.\n" +
   "- Cut generic clauses, restatements, announcement sentences, and any phrase that could be pasted into an article about a different event.\n" +
   "- Do not invent quotes, numbers, motives, causal links, or suspiciously exact claims. If a claim is not supported, attribute it, soften it, or remove it.\n";
+
+const SOURCE_BOUND_REPAIR_RULES =
+  "SOURCE-BOUND REPAIR RULES:\n" +
+  "- When authoritative source material is supplied, every new proper noun, named institution, named document, report, quote, victim name, expert name, publication year, and exact statistic must already appear in the article fields or source material.\n" +
+  "- If a weak sentence needs an anchor but the source does not provide one, make the sentence more modest, use an existing date, place, or number, or cut the claim. Never invent a report, institution, expert, victim, study, legal filing, or source.\n" +
+  "- Never introduce, raise, or change a casualty, death, injury, or fatality count. Keep the article's existing casualty figures exactly as written. A person's age, a year, a street number, a distance, or a count of buildings is never a casualty figure. Do not convert any such number into a death or injury toll.\n";
+
+// Source-grounding context for repair/enrichment prompts. Capped well below the
+// full 16k grounding budget so the added material does not push repair requests
+// over Groq's per-request size limit (observed 413s on 2026-06-25), which forced
+// extra provider fallbacks. ~6000 chars is enough context to keep claims grounded.
+function sourceBoundRepairContext(source, maxLength = 6000) {
+  const material = sourceMaterialForGrounding(source);
+  return material ? material.slice(0, maxLength) : "";
+}
 
 /**
  * Scans generated content for banned phrases.
@@ -4898,7 +4913,8 @@ function scanIntraPageDuplication(content) {
  * Called once after scanBannedPhrases finds violations.
  * Returns updated content — falls back to original on any error.
  */
-async function fixBannedPhrases(env, content, violations) {
+async function fixBannedPhrases(env, content, violations, source = null) {
+  const sourceMaterial = sourceBoundRepairContext(source);
   const allSections = {
     overviewParagraphs: content.overviewParagraphs || [],
     eyewitnessOrChronicle: content.eyewitnessOrChronicle || [],
@@ -4921,10 +4937,12 @@ async function fixBannedPhrases(env, content, violations) {
     "If a later paragraph says the same thing as an earlier one, rewrite it to add new information not yet covered, " +
     "or advance the story to a later point in time. Each section must earn its place with information the reader has not seen yet.\n\n" +
     WRITING_REWRITE_RULES + "\n" +
+    SOURCE_BOUND_REPAIR_RULES +
     "Rules: Preserve paragraph count exactly in every array. Never use dashes (-) or em dashes. " +
     "Keep all facts accurate. Return ONLY a JSON object with the arrays that changed. Omit unchanged arrays.";
 
   const userMessage =
+    (sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : "") +
     `Banned phrases to remove: ${foundPhrases.map((p) => `"${p}"`).join(", ")}\n\n` +
     `Full article sections:\n${JSON.stringify(allSections, null, 2)}\n\n` +
     `Return ONLY JSON: {"overviewParagraphs":[...],"conclusionParagraphs":[...]} — only include arrays that changed.`;
@@ -4972,8 +4990,9 @@ async function fixBannedPhrases(env, content, violations) {
   return updated;
 }
 
-async function improveArticleQuality(env, content, issues) {
+async function improveArticleQuality(env, content, issues, source = null) {
   if (!issues.length) return content;
+  const sourceMaterial = sourceBoundRepairContext(source);
 
   const repairPayload = {
     title: content.title,
@@ -4994,7 +5013,7 @@ async function improveArticleQuality(env, content, issues) {
   const systemPrompt =
     "You are a senior history editor doing a final quality repair before publication. " +
     "Fix only the fields named by the audit issues. Keep facts accurate and do not invent quotations. " +
-    "Strengthen weak writing with concrete names, dates, institutions, source anchors, and consequences. " +
+    "Strengthen weak writing with concrete names, dates, institutions, source-supported anchors, and consequences. " +
     "Preserve array lengths exactly. Preserve the same JSON shape for analysisGood and analysisBad items. " +
     "Never use hyphens or em dashes in article body fields. Avoid generic phrases such as 'changed history', " +
     "'turning point', 'lasting impact', 'important moment', 'remarkable event', and 'still resonates today'. " +
@@ -5002,10 +5021,12 @@ async function improveArticleQuality(env, content, issues) {
     "to Ukraine, war, major world powers, global polarization, or modern crises unless the historical event is directly " +
     "about war or diplomacy. Do not use cynical abstraction such as 'manipulation', 'facade', 'illusion', 'escapism', " +
     "'spectacle', 'fantasy', 'testament to', 'lasting legacy', 'enduring impact', or 'calculated nature of power'. " +
+    SOURCE_BOUND_REPAIR_RULES +
     WRITING_REWRITE_RULES +
     "Return ONLY a JSON object containing changed fields.";
 
   const userMessage =
+    (sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : "") +
     `Audit issues:\n${issues.map((issue) => `- ${issue}`).join("\n")}\n\n` +
     `Article fields to repair:\n${JSON.stringify(repairPayload, null, 2)}\n\n` +
     "Return only changed fields. If repairing analysisGood or analysisBad, return the full corrected array for that field.";
@@ -5091,17 +5112,20 @@ async function generateLearningBlocks(env, content) {
     ...(content.conclusionParagraphs || []),
   ].join("\n\n").replace(/<[^>]+>/g, " ").slice(0, 6000);
   const extract = String(content.wikiExtract || content.sourceExtract || "").slice(0, 2000);
+  const sourceMaterial = sourceBoundRepairContext(groundingSourceFromContent(content), 4000);
   if (!body.trim()) return;
 
   const systemPrompt =
     "You add a factual timeline to a finished history article. Output STRICT JSON only.\n" +
     "timeline: 4-7 dated entries showing lead-up, the event, and aftermath. " +
-    "Use ONLY dates that appear in the supplied article body or source extract; never invent a date. " +
+    "Use ONLY dates that appear in the supplied article body or source material; never invent a date. " +
+    "Each label must describe only people, places, institutions, and events named in the article body or source material; never invent a name, institution, report, study, victim, or source. " +
     "Each entry: {\"year\":\"1215\",\"date\":\"June 15, 1215\",\"label\":\"...\",\"kind\":\"leadup|event|aftermath\"}. " +
     "Exactly one entry has kind \"event\" and matches the event date. No dashes or em-dashes in any text.";
   const userMessage =
     `Event: ${content.eventTitle}\nEvent date: ${content.historicalDate}\n\n` +
-    `ARTICLE BODY:\n${body}\n\n${extract ? `SOURCE EXTRACT:\n${extract}\n\n` : ""}` +
+    `ARTICLE BODY:\n${body}\n\n` +
+    `${sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : (extract ? `SOURCE EXTRACT:\n${extract}\n\n` : "")}` +
     `Return ONLY JSON: {"timeline":[]}`;
 
   let raw;
@@ -5432,22 +5456,22 @@ async function generateAndStore(
     if (!lightweightPublish) {
       const violations = scanBannedPhrases(content);
       if (violations.length > 0) {
-        content = await fixBannedPhrases(env, content, violations);
+        content = await fixBannedPhrases(env, content, violations, groundingSource);
       }
       const qualityIssues = scanArticleQuality(content);
       if (qualityIssues.length > 0) {
-        content = await improveArticleQuality(env, content, qualityIssues);
+        content = await improveArticleQuality(env, content, qualityIssues, groundingSource);
       }
 
-      content = await reviewContentWithSEOExpert(content, env);
+      content = await reviewContentWithSEOExpert(content, env, groundingSource);
       if (selectedEvent) enforceSelectedEventDate(content, selectedEvent);
       const postReviewViolations = scanBannedPhrases(content);
       if (postReviewViolations.length > 0) {
-        content = await fixBannedPhrases(env, content, postReviewViolations);
+        content = await fixBannedPhrases(env, content, postReviewViolations, groundingSource);
       }
       const postReviewQualityIssues = scanArticleQuality(content);
       if (postReviewQualityIssues.length > 0) {
-        content = await improveArticleQuality(env, content, postReviewQualityIssues);
+        content = await improveArticleQuality(env, content, postReviewQualityIssues, groundingSource);
       }
 
       await factCheckContent(env, content, groundingSource);
@@ -5497,7 +5521,7 @@ async function generateAndStore(
       await generateEditorialNote(env, content, now);
       const editorialQualityIssues = scanArticleQuality(content);
       if (editorialQualityIssues.length > 0) {
-        content = await improveArticleQuality(env, content, editorialQualityIssues);
+        content = await improveArticleQuality(env, content, editorialQualityIssues, groundingSource);
       }
       content = enforceEditorialNoteQuality(content);
     }
@@ -6167,24 +6191,24 @@ async function enrichPublishedPost(env, slug) {
   await chk("pre-banned-phrases");
   const violations = scanBannedPhrases(content);
   const fixed = violations.length > 0
-    ? await fixBannedPhrases(env, content, violations)
+    ? await fixBannedPhrases(env, content, violations, groundingSource)
     : content;
   const qualityIssues = [...scanArticleQuality(fixed), ...scanIntraPageDuplication(fixed)];
   const qualityRepaired = qualityIssues.length > 0
-    ? await improveArticleQuality(env, fixed, qualityIssues)
+    ? await improveArticleQuality(env, fixed, qualityIssues, groundingSource)
     : fixed;
 
   await chk("pre-seo-review");
-  let enriched = await reviewContentWithSEOExpert(qualityRepaired, env);
+  let enriched = await reviewContentWithSEOExpert(qualityRepaired, env, groundingSource);
   await chk("post-seo-review");
 
   const postReviewViolations = scanBannedPhrases(enriched);
   if (postReviewViolations.length > 0) {
-    enriched = await fixBannedPhrases(env, enriched, postReviewViolations);
+    enriched = await fixBannedPhrases(env, enriched, postReviewViolations, groundingSource);
   }
   const postReviewQualityIssues = [...scanArticleQuality(enriched), ...scanIntraPageDuplication(enriched)];
   if (postReviewQualityIssues.length > 0) {
-    enriched = await improveArticleQuality(env, enriched, postReviewQualityIssues);
+    enriched = await improveArticleQuality(env, enriched, postReviewQualityIssues, groundingSource);
   }
 
   await chk("pre-factcheck");
@@ -6221,7 +6245,7 @@ async function enrichPublishedPost(env, slug) {
 
   const editorialQualityIssues = [...scanArticleQuality(enriched), ...scanIntraPageDuplication(enriched)];
   if (editorialQualityIssues.length > 0) {
-    enriched = await improveArticleQuality(env, enriched, editorialQualityIssues);
+    enriched = await improveArticleQuality(env, enriched, editorialQualityIssues, groundingSource);
   }
   enriched = enforceEditorialNoteQuality(enriched);
   alignContentDateFields(enriched, { historicalDateISO: date.toISOString().slice(0, 10) });
@@ -7600,7 +7624,7 @@ function buildArticleEntityStrip(entityMeta) {
       : `<span class="person-pill">${inner}</span>`;
   }).join("");
 
-  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:14px;font-weight:600;white-space:nowrap}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
+  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:16px;font-weight:600;white-space:nowrap}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
 
   return `${css}<div class="entity-strip" data-entity-strip="1"><h2 class="h3">People in this story</h2><div class="entity-person-chips">${chips}</div></div>`;
 }
@@ -8820,10 +8844,12 @@ async function generateEditorialNote(env, content, date) {
       `Overview:\n${(content.overviewParagraphs || []).join("\n\n")}\n\n` +
       `Aftermath:\n${(content.aftermathParagraphs || []).join("\n\n")}\n\n` +
       `Conclusion:\n${(content.conclusionParagraphs || []).join("\n\n")}`;
+    const sourceMaterial = sourceBoundRepairContext(groundingSourceFromContent(content), 4000);
 
     const prompt =
       `You are the thisDay. editorial team writing a short opinion note to appear at the end of the article below.\n\n` +
       `ARTICLE:\n${articleSummary}\n\n` +
+      (sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : "") +
       `YOUR TASK:\n` +
       `Write a first-person-plural editorial note (100–150 words) that:\n` +
       `1. Opens with "What strikes us about this is..." or "We keep coming back to one thing:" or a similarly direct opener\n` +
@@ -8832,6 +8858,7 @@ async function generateEditorialNote(env, content, date) {
       `4. Says something the article body could not quite say — an honest opinion about what this event reveals about power, human nature, memory, media, institutions, or public ceremony\n` +
       `5. Ends with one precise, memorable sentence\n\n` +
       `ABSOLUTE RULES:\n` +
+      `- Every concrete detail you cite (name, institution, document, report, number, victim, expert, or source) must already appear in the article or source material above. Never invent one. If you need an anchor the source does not provide, stay with what is given or make the point more modestly.\n` +
       `- No hedging. No "it is important to remember". No "this serves as a reminder".\n` +
       `- No Ukraine, war, major world powers, global polarization, or modern-conflict comparisons unless the article itself is directly about war or diplomacy\n` +
       `- No cynical abstractions or generic legacy phrases: "manipulation", "facade", "façade", "illusion", "escapism", "spectacle", "fantasy", "testament to", "lasting legacy", "enduring impact", "calculated nature of power", or "harsh realities"\n` +
@@ -9872,8 +9899,9 @@ async function reviewSEOMetaOnly(content, env) {
  *
  * Returns the improved content object. Falls back to original on any error.
  */
-async function reviewContentWithSEOExpert(content, env) {
+async function reviewContentWithSEOExpert(content, env, source = null) {
   if (!hasAnyTextAIProvider(env)) return content;
+  const sourceMaterial = sourceBoundRepairContext(source, 6000);
 
   // --- PASS 1: Paragraph quality + humanization (no meta fields) ---
   const allParagraphs = {
@@ -9898,21 +9926,25 @@ async function reviewContentWithSEOExpert(content, env) {
     "- Restates a point already made in a previous paragraph\n" +
     "When rewriting: add the specific fact being avoided, replace mood labels with concrete observable detail, " +
     "open with a striking fact or consequence. Preserve paragraph count exactly.\n\n" +
-    "JOB 2 — HUMAN VOICE:\n" +
-    "Make every paragraph sound like a serious, authoritative narrator, not an AI assistant.\n" +
-    "- Use contractions naturally where they fit: 'didn't', 'wasn't', 'couldn't'\n" +
-    "- Vary sentence structure: avoid three consecutive sentences with the same grammatical opener\n" +
-    "- Delete AI connectors: 'Furthermore', 'Moreover', 'Additionally', 'In conclusion', 'Notably', 'Significantly'\n" +
-    "- Vary paragraph openers: some start with subject, some with time/place, some with consequence\n" +
+    "JOB 2 — HUMAN VOICE (model: a curious, guiding narrator, not an AI assistant):\n" +
+    "- Default to long, winding sentences built from stacked clauses and parentheticals joined by commas. Drop in a short declarative only to mark a turn or land a point. Never write a run of clipped declaratives.\n" +
+    "- A guiding first-person-plural narrator is welcome: 'we have come to call', 'what we really wonder about', 'what catches our eye'. Never address the reader as 'you'.\n" +
+    "- Hedge where the evidence is genuinely uncertain: 'may well', 'would have', 'could have been', 'seems', 'appears', 'is generally assumed', 'has been suggested'. When scholars disagree, name who argues what instead of flattening it into one tidy consensus.\n" +
+    "- Use contractions where they fit ('didn't', 'wasn't', 'it's').\n" +
+    "- Open sentences different ways: a fronted prepositional or subordinate clause, a consequence, occasionally a sentence-initial 'And', 'But', 'Yet', or 'Except that'. Do not march three sentences from the same subject or pattern.\n" +
+    "- Replace AI connectors ('Furthermore', 'Moreover', 'Additionally', 'In conclusion', 'Notably', 'Significantly') with conversational ones ('And yet', 'In other words', 'That is to say', 'After all', 'Even so', 'What matters is').\n" +
+    "- Vary paragraph length too. An occasional one-sentence paragraph can carry a turn in the argument.\n" +
     "PROHIBITIONS: No rhetorical questions to the reader. No 'Picture this', 'So,', 'You have to understand'. " +
-    "No sentence fragments as a style device. No casual speech: 'That's the thing', 'It's a shame, really', 'He saw it all'.\n\n" +
+    "No sentence fragments as decoration. No chatty filler: 'That's the thing', 'It's a shame, really', 'He saw it all'.\n\n" +
+    SOURCE_BOUND_REPAIR_RULES + "\n" +
     WRITING_REWRITE_RULES + "\n" +
-    "PUNCTUATION: Never use hyphens (-) or em dashes (—). Use a comma or split into two sentences.\n\n" +
+    "PUNCTUATION: Use only periods, commas, and question marks. Never use em dashes (—), en dashes (–), semicolons (;), colons (:), or a hyphen between words (write 'best known', not 'best-known'). Convert any such break to a period or comma with correct grammar.\n\n" +
     "Return ONLY a JSON object with the paragraph arrays that needed improvement. " +
     "Omit arrays that are already good. Preserve array lengths exactly.\n" +
     "Example: {\"overviewParagraphs\":[\"para1\",\"para2\"]}";
 
   const paraUserMessage =
+    (sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : "") +
     `Event: ${content.eventTitle} on ${content.historicalDate}\n\n` +
     `${JSON.stringify(allParagraphs, null, 2)}\n\n` +
     `Return ONLY JSON with improved paragraph arrays.`;
@@ -9961,11 +9993,13 @@ async function reviewContentWithSEOExpert(content, env) {
     "- imageAlt: vivid 8–15 word description of what is visible in the image\n" +
     "- eventTitle: concise canonical event label with an active verb when possible\n" +
     "- title: keep format 'CTA headline — Month Day, Year'. Improve dull card headlines with a specific verb and concrete hook.\n\n" +
+    SOURCE_BOUND_REPAIR_RULES +
     "Return ONLY a JSON object with fields that need improvement. Omit fields that are already good.\n" +
     "Ban vague copy such as 'dramatic and unexpected', 'significant turning point', 'remarkable', 'important moment', 'in the history of', or 'changed everything' unless a concrete fact immediately follows. " +
     "Do not use lazy suffix headlines like 'Founding', 'Creation', 'Launch', 'Opening', 'Completion', or 'Presentation' unless the event text literally says that happened.";
 
   const seoUserMessage =
+    (sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : "") +
     `Title: ${content.title}\n` +
     `Event: ${content.eventTitle} on ${content.historicalDate} in ${content.location || "unknown"}\n` +
     `description: ${content.description || ""}\n` +

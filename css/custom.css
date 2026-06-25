@@ -227,7 +227,7 @@ img {
   margin: 0;
   padding: 40px 10px 40px 30px;
   color: var(--text);
-  font-size: 1.35rem;
+  font-size: 21px;
   font-weight: 700;
   line-height: 1.25;
 }
@@ -235,7 +235,7 @@ img {
   margin: 0;
   padding: 0;
   color: var(--text);
-  font-size: 1.35rem;
+  font-size: 21px;
   font-weight: 700;
   line-height: 1.25;
 }
@@ -432,7 +432,7 @@ img {
   text-align: center;
   gap: 0.4rem;
   scroll-snap-align: start;
-  flex: 0 0 80px;
+  flex: 0 0 96px;
   cursor: pointer;
   text-decoration: none;
   color: inherit;
@@ -480,7 +480,7 @@ img {
   background: var(--bg-alt);
 }
 .person-pill-name {
-  font-size: 0.68rem;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
   line-height: 1.25;
@@ -488,10 +488,10 @@ img {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  width: 80px;
+  width: 96px;
 }
 .person-pill-year {
-  font-size: 0.62rem;
+  font-size: 16px;
   color: var(--text-muted);
 }
 /* Skeleton */
@@ -1131,7 +1131,7 @@ img {
   justify-content: center;
   gap: 0.5rem;
   font-family: "Lora", Georgia, serif;
-  font-size: 0.875rem;
+  font-size: 16px;
   font-weight: 500;
   color: var(--btn-text);
   background: var(--btn-bg);
@@ -1848,7 +1848,7 @@ main.container {
   }
   body[data-page="v2"] > .homepage-section-title {
     padding: 28px 1rem 18px;
-    font-size: 1.2rem;
+    font-size: 21px;
   }
   body[data-page="v2"] > .homepage-section-title + p {
     padding: 0 1rem 20px !important;

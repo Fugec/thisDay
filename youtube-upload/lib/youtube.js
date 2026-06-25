@@ -11,14 +11,23 @@ import { google } from "googleapis";
 import { Gaxios } from "gaxios";
 import { createReadStream } from "fs";
 
-// Disable gzip on EVERY googleapis request — both the OAuth token fetch and the
-// actual video-upload response. On GitHub Actions runners the gzip response
-// stream can truncate, making node-fetch throw ERR_STREAM_PREMATURE_CLOSE from
-// its Gunzip handler (broke uploads on 2026-06-25, on both endpoints, and it is
-// node-fetch-version-independent). Requesting identity (uncompressed) encoding
-// means there is no gzip stream to truncate. This applies globally to the core
-// googleapis client; the OAuth2 client below also gets it via its transporter.
-google.options({ headers: { "Accept-Encoding": "identity" } });
+// Root cause of the 2026-06-25 upload break: the GitHub-hosted runner image
+// updated (ubuntu24/20260615 -> 20260622) and the new environment makes Google's
+// gzipped HTTP responses end in a way that trips a bug in gaxios's bundled
+// node-fetch 2.7.0 (ERR_STREAM_PREMATURE_CLOSE from its Gunzip handler). Nothing
+// in this repo changed — node-fetch 2.7.0 had worked for months.
+//
+// gaxios picks its transport as `hasFetch() ? window.fetch : node-fetch`, so in
+// Node it ALWAYS uses node-fetch unless `fetchImplementation` is set. The fix is
+// to force Node's native fetch (undici), which does not have the bug. We set it
+// (a) globally, (b) on the OAuth2 transporter for the token call, and (c) on the
+// video-upload request itself (media uploads do not inherit the global options).
+// Identity encoding is kept as belt-and-suspenders so there is no gzip to begin with.
+const NATIVE_FETCH = globalThis.fetch;
+google.options({
+  headers: { "Accept-Encoding": "identity" },
+  fetchImplementation: NATIVE_FETCH,
+});
 
 const OAUTH_REDIRECT_URI = "http://localhost:3838";
 const YOUTUBE_UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
@@ -53,14 +62,12 @@ function getOAuth2Client() {
     OAUTH_REDIRECT_URI,
   );
   client.setCredentials({ refresh_token: requireEnv("YOUTUBE_REFRESH_TOKEN") });
-  // Google's OAuth token endpoint returns a gzipped body. On GitHub Actions
-  // runners that gzip stream can truncate, making node-fetch throw
-  // ERR_STREAM_PREMATURE_CLOSE from its Gunzip handler (broke uploads on
-  // 2026-06-25, and it is version-independent — pinning node-fetch did not
-  // help). Swap in a transporter that requests identity (uncompressed)
-  // encoding, so there is no gzip stream to truncate, and retry transient
-  // network closes.
+  // Use a transporter backed by Node's native fetch (undici) instead of gaxios's
+  // default node-fetch (which has the runner-triggered premature-close bug). See
+  // the NATIVE_FETCH note at the top of this file. Identity encoding + retries
+  // are kept as extra safety for the token call.
   client.transporter = new Gaxios({
+    fetchImplementation: NATIVE_FETCH,
     headers: { "Accept-Encoding": "identity" },
     retry: true,
     retryConfig: { retry: 4, noResponseRetries: 4 },
@@ -228,6 +235,13 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
       mimeType: "video/mp4",
       body: createReadStream(videoPath),
     },
+  }, {
+    // Per-request options for the MEDIA UPLOAD specifically. The multipart
+    // upload does NOT inherit google.options, so force native fetch + identity
+    // encoding here too, otherwise the upload response keeps hitting the
+    // node-fetch gzip premature-close on the new runner image.
+    fetchImplementation: NATIVE_FETCH,
+    headers: { "Accept-Encoding": "identity" },
   });
 
   const res = await withTimeout(

@@ -7624,7 +7624,7 @@ function buildArticleEntityStrip(entityMeta) {
       : `<span class="person-pill">${inner}</span>`;
   }).join("");
 
-  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:16px;font-weight:600;white-space:nowrap}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
+  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:15px;font-weight:600;white-space:nowrap}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
 
   return `${css}<div class="entity-strip" data-entity-strip="1"><h2 class="h3">People in this story</h2><div class="entity-person-chips">${chips}</div></div>`;
 }
@@ -11388,7 +11388,7 @@ ${JSON.stringify({
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=30" />
+    <link rel="stylesheet" href="/css/custom.css?v=31" />
 
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
@@ -12227,7 +12227,7 @@ ${JSON.stringify(
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=30" />
+    <link rel="stylesheet" href="/css/custom.css?v=31" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -12500,7 +12500,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/custom.css?v=30" />
+    <link rel="stylesheet" href="/css/custom.css?v=31" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
     <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","G-WXEZ3868VN");</script>
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script>
@@ -13136,7 +13136,7 @@ function normalizeAiAnswerCardHtml(body) {
 function normalizeArticleAssetVersionsHtml(body) {
   return String(body || "").replace(
     /\/css\/custom\.css\?v=\d+/g,
-    "/css/custom.css?v=30",
+    "/css/custom.css?v=31",
   );
 }
 

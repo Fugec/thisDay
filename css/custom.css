@@ -486,7 +486,7 @@ img {
   background: var(--bg-alt);
 }
 .person-pill-name {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text);
   line-height: 1.25;
@@ -497,7 +497,7 @@ img {
   width: 96px;
 }
 .person-pill-year {
-  font-size: 16px;
+  font-size: 15px;
   color: var(--text-muted);
 }
 /* Skeleton */
@@ -1137,7 +1137,7 @@ img {
   justify-content: center;
   gap: 0.5rem;
   font-family: "Lora", Georgia, serif;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--btn-text);
   background: var(--btn-bg);

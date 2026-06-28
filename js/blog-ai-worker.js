@@ -45,7 +45,13 @@ const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
 const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
 const AMAZON_COVERS_BACKFILL_MARKER = "<!-- amazon-covers-backfill-v1 -->";
 const KV_REPAIR_ATTEMPT_PREFIX = "repair-attempt-v1:";
-const REPAIR_ATTEMPT_TTL = 60 * 60 * 24; // 1 day
+const REPAIR_ATTEMPT_TTL = 60 * 60 * 24; // 1 day (featured-image, amazon-covers)
+// Entity-strip heal backs off WEEKLY rather than daily. For a permanently-unlinkable
+// person (a title/disambiguation page, a photo-less bio) the link never appears, so
+// retrying daily is pure write churn with no different outcome. Recovery paths
+// (manual backfill + the nightly cron) clear this counter, so a post that BECOMES
+// healable still re-links on the very next view. (2026-06-26)
+const ENTITY_STRIP_REPAIR_TTL = 60 * 60 * 24 * 7; // 7 days
 const REPAIR_ATTEMPT_LIMIT = 2; // per slug, per repair type, per TTL window
 
 async function callPublicationGateAI(env, messages, options = {}) {
@@ -93,7 +99,7 @@ function repairAttemptKey(slug, type) {
   return `${KV_REPAIR_ATTEMPT_PREFIX}${type}:${slug}`;
 }
 
-async function canRunRepairAttempt(env, slug, type, limit = REPAIR_ATTEMPT_LIMIT) {
+async function canRunRepairAttempt(env, slug, type, limit = REPAIR_ATTEMPT_LIMIT, ttl = REPAIR_ATTEMPT_TTL) {
   if (!env?.BLOG_AI_KV || !slug || !type) return false;
   try {
     const key = repairAttemptKey(slug, type);
@@ -101,7 +107,7 @@ async function canRunRepairAttempt(env, slug, type, limit = REPAIR_ATTEMPT_LIMIT
     const current = Math.max(0, Number.parseInt(raw || "0", 10) || 0);
     if (current >= limit) return false;
     await env.BLOG_AI_KV.put(key, String(current + 1), {
-      expirationTtl: REPAIR_ATTEMPT_TTL,
+      expirationTtl: ttl,
     });
     return true;
   } catch {
@@ -1612,26 +1618,60 @@ function scoreBlogEventCandidate(event) {
   // Dedicated event pages are usually a better article seed than broad country
   // or institution pages attached to an event blurb.
   if (/^\d{4}\b/.test(title)) score += 10;
+
+  // --- Editorial tone balance (2026-06-26) ----------------------------------
+  // The daily feed used to read as a relentless catalogue of tragedies: disaster
+  // and violence keywords were worth +28 with another +24 for death verbs, while
+  // discoveries, inventions, and cultural milestones were worth nothing (and
+  // foundings were actively penalised). The weights below give constructive,
+  // world-shaping events equal footing with catastrophe so the most significant
+  // event of a date wins on merit rather than on body count.
+
+  // Tragedy / violence / disaster — significant, but no longer auto-dominant.
   if (
-    /\b(crash|flight|helicopter|disaster|bombing|shooting|massacre|assassination|battle|war|invasion|coup|revolution|independence|treaty|crisis|expedition|deportation|fire|explosion)\b/.test(
+    /\b(crash|flight|helicopter|disaster|bomb\w*|shooting|massacre|assassinat\w*|deport\w*|wildfire|fire|explo\w*|earthquake|tsunami|famine|epidemic|pandemic|hijack\w*|genocide)\b/.test(
       haystack,
     )
   ) {
-    score += 28;
+    score += 14;
   }
+  // Armed conflict / political upheaval (tragedy-adjacent, kept moderate).
+  if (
+    /\b(battle|war|warfare|invasion|invades|coup|revolution|crisis|siege|uprising|rebellion|insurgency)\b/.test(
+      haystack,
+    )
+  ) {
+    score += 14;
+  }
+  // Constructive / world-shaping milestones — discoveries, inventions, science,
+  // medicine, culture, civil rights, exploration, independence, and peace. Given
+  // equal footing with catastrophe so triumphs surface as often as tragedies.
+  if (
+    /\b(discover\w*|invent\w*|breakthrough|premiere|publish\w*|founded|founding|establish\w*|independence|treaty|peace|elect(?:ed|ion|oral|s)|coronation|crown\w*|expedition|spaceflight|orbit\w*|vaccine|nobel|unveil\w*|inaugurat\w*|charter\w*|abolish\w*|suffrage)\b/.test(
+      haystack,
+    )
+  ) {
+    score += 22;
+  }
+  // Globally recognised figures — a significance and person-richness signal.
   if (
     /\b(president|prime minister|foreign minister|king|queen|emperor|pope|monarch|supreme leader|head of state|john f kennedy|martin luther king|winston churchill|napoleon|atat rk|ataturk|anne boleyn)\b/.test(
       haystack,
     )
   ) {
-    score += 28;
+    score += 20;
   }
+  // Human-loss outcomes — kept low so loss does not dominate selection by itself.
   if (
-    /\b(killed|dead|dies|death|beheaded|assassinated|all on board|crashes|explodes|surrenders|defeat|defeats|ratifies|cedes|annexes)\b/.test(
+    /\b(kill\w*|dead|dies|death|beheaded|surrenders|defeat|defeats)\b/.test(
       haystack,
     )
   ) {
-    score += 24;
+    score += 10;
+  }
+  // Neutral state-action verbs.
+  if (/\b(ratifies|cedes|annexes)\b/.test(haystack)) {
+    score += 8;
   }
   if (
     /\b(global audience|billion|world s first|first man made|first national|all on board|foreign minister|president of iran|treaty of guadalupe hidalgo|turkish war of independence|nullification crisis|battle of rocroi)\b/.test(
@@ -1652,8 +1692,11 @@ function scoreBlogEventCandidate(event) {
   ) {
     score -= 32;
   }
-  if (/\b(founded|founding|established|opens|birthday|appointed)\b/.test(haystack)) {
-    score -= 12;
+  // Founded / established / opened are no longer penalised — they are now positive
+  // signals above (a nation founded, a landmark opened). Only genuinely low-value
+  // personal/administrative items stay suppressed.
+  if (/\b(birthday|appointed)\b/.test(haystack)) {
+    score -= 8;
   }
   if (/\b(local|regional|vocational school|municipal)\b/.test(haystack)) {
     score -= 10;
@@ -1838,8 +1881,9 @@ async function chooseEventForDate(
     `Requirements:\n` +
     `- The event must actually have happened on ${monthName} ${day}\n` +
     `- Review the full event inventory first, then make the final selection from the ranked vetted list. Do not stop at the first familiar or underrepresented category.\n` +
-    `- Category rotation is only a tie-breaker. Never choose a niche sports, club, observance, or local item ahead of a major disaster, national-leader death, war, independence event, treaty, or political crisis.\n` +
-    `- Strongly prefer events with global significance: major wars and battles, landmark treaties, world-changing political milestones, famous scientific or cultural breakthroughs, events covered by every world history textbook\n` +
+    `- VARIETY MANDATE: the blog must not read as a daily catalogue of tragedies. Do NOT default to a disaster, crash, shooting, bombing, or battle. When a date also offers a globally significant constructive event — a scientific or medical breakthrough, a world-changing invention or discovery, a landmark cultural moment, a civil-rights or independence milestone, an exploration or space first, a peace treaty — prefer that event, UNLESS the tragedy is genuinely the single most globally recognised thing that happened on this date (e.g. D-Day, 9/11).\n` +
+    `- Never choose a niche sports, club, observance, or local item ahead of a globally significant event of ANY kind (constructive or tragic).\n` +
+    `- Strongly prefer events with global significance across the full range of human history: scientific and medical breakthroughs, world-changing inventions and discoveries, landmark cultural and artistic moments, civil-rights and independence milestones, exploration and space firsts, and peace treaties — as well as major wars, disasters, and political turning points. A discovery, a first, or a cultural landmark is often the better story than another catastrophe.\n` +
     `- Avoid local or regional sports disasters, niche criminal incidents, or events significant only to a single country\n` +
     `- Avoid events where the Wikipedia page title is just a country name (e.g. "Ghana", "Armenia", "Florida") — those usually mean the article is a generic country page, not a dedicated event article\n` +
     `- Do not choose an event from any other calendar day\n` +
@@ -3722,7 +3766,7 @@ export default {
           const htmlSnapshot = patchedHtml;
           ctx.waitUntil((async () => {
             try {
-              if (!(await canRunRepairAttempt(env, slug, "entity-strip"))) return;
+              if (!(await canRunRepairAttempt(env, slug, "entity-strip", REPAIR_ATTEMPT_LIMIT, ENTITY_STRIP_REPAIR_TTL))) return;
               const parsedEntityMeta = articleEntitiesRaw
                 ? JSON.parse(articleEntitiesRaw)
                 : extractArticlePeopleMetaFromHtml(htmlSnapshot);
@@ -3784,7 +3828,17 @@ export default {
                 writes.push(env.BLOG_AI_KV.put(`post-entities:${slug}`, entityMetaRaw));
               }
               await Promise.all(writes);
-              if (!articleEntityStripNeedsImageRepair(updated)) {
+              // Only reset the per-day attempt counter when the strip is fully
+              // resolved — no missing portrait AND no person still pending profile
+              // validation. A permanently-unlinkable person (a title/disambiguation
+              // page, or a too-thin bio) leaves needsProfileValidation true forever;
+              // without this guard the counter reset every serve and re-ran hydration
+              // (Wikipedia fetches) in an unbounded loop. Leaving the counter intact
+              // lets REPAIR_ATTEMPT_LIMIT (2/day) cap the retries. (2026-06-26)
+              if (
+                !articleEntityStripNeedsImageRepair(updated) &&
+                !articleEntityStripNeedsProfileValidation(updated, entityMetaRaw)
+              ) {
                 await clearRepairAttempt(env, slug, "entity-strip");
               }
             } catch {
@@ -6737,9 +6791,13 @@ function hasRichWikipediaPersonProfile(entity) {
   if (normalizeEntityType(entity?.type) !== "person" || !entity?.wikiUrl || entity?.isDisambiguation) {
     return false;
   }
+  // Keep single-letter initials (e.g. "J.K. Rowling" → j, k, rowling) so that an
+  // initialed author/person name still clears the >=2-token gate and matches the
+  // canonical page "J. K. Rowling". Dropping them collapsed the name to one token
+  // and rejected the subject outright (2026-06-26: Rowling rendered unlinked).
   const personTokens = normalizeTopicMatchText(entity.name || entity.term)
     .split(" ")
-    .filter((token) => token.length > 1);
+    .filter(Boolean);
   // Strip leading honorific/title tokens so a regnal or titled name still matches the
   // canonical biography page that omits the honorific (e.g. "Queen Elizabeth II" → the
   // Wikipedia page "Elizabeth II"). Keep at least one distinctive token.
@@ -7565,6 +7623,10 @@ async function backfillEntitiesForEntry(env, entry) {
       await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${entry.slug}`, updatedHtml).catch(() => {});
     }
   }
+  // This recovery just re-resolved the entities and rebuilt the strip. Reset the
+  // serve-time heal back-off counter so a post that only NOW became healable re-links
+  // on its next view instead of waiting out the 7-day ENTITY_STRIP_REPAIR_TTL window.
+  await clearRepairAttempt(env, entry.slug, "entity-strip").catch(() => {});
   return entities;
 }
 
@@ -7674,7 +7736,13 @@ function articleEntityStripNeedsImageRepair(html) {
 
 function articleEntityStripNeedsProfileValidation(html, entityMetaRaw) {
   const strip = extractArticleEntityStripHtml(html);
-  if (!/<a\b[^>]*class="person-pill"/i.test(strip)) return false;
+  // Trigger on ANY person pill — linked OR unlinked. A budget-starved generation
+  // often stores every person unlinked (a plain <span class="person-pill">), but a
+  // canonical entity-v1 record created later by backfill/recovery can make them
+  // eligible. Serve-time hydration reads those records and relinks + adds the
+  // portrait. The old `<a class="person-pill">`-only test froze all-unlinked strips
+  // forever (2026-06-26: Napoleon et al. stayed unlinked despite a complete record).
+  if (!/class="person-pill"/i.test(strip)) return false;
   if (!entityMetaRaw) return true;
   try {
     return JSON.parse(entityMetaRaw).some((entity) =>
@@ -8593,6 +8661,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     { "term": "Exact phrase as it appears in the article text", "wikiUrl": "https://en.wikipedia.org/wiki/Exact_Article", "type": "person" },
     { "term": "Another key person, place, or event named in the article", "wikiUrl": "https://en.wikipedia.org/wiki/Another_Article", "type": "event" },
     "provide 5 to 8 entries total — key people, battles, organizations, treaties, or places that appear verbatim in the article body; type must be one of: person, place, event, organization",
+    "MANDATORY: at least one entry MUST have type 'person' naming a real, specific individual connected to this event — for example the leader, founder, scientist, author, inventor, official, commander, pilot, investigator, survivor, victim, or eyewitness named in the source. Every historical event involves named people; if no obvious protagonist exists, name the person most directly responsible for, affected by, or associated with the event. Never return zero people.",
     "include every named person who appears at least twice in the article body, plus any person in quickFacts Key Figure or organizerName; do not omit living officials, historians, witnesses, founders, directors, or authors if their full name appears in the prose"
   ],
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",

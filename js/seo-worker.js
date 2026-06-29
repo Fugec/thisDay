@@ -1159,10 +1159,15 @@ async function updateEntityIndexEntry(env, entity) {
     ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
   };
   const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
-  byId.set(`${nextEntry.type}:${nextEntry.slug}`, {
-    ...(byId.get(`${nextEntry.type}:${nextEntry.slug}`) || {}),
-    ...nextEntry,
-  });
+  const id = `${nextEntry.type}:${nextEntry.slug}`;
+  const existing = byId.get(id);
+  const merged = { ...(existing || {}), ...nextEntry };
+  // Only write when the entry actually changed. handleEntityPage calls this on
+  // every entity page view; an unconditional put() rewrites the whole index on
+  // each crawl hit and exhausts the daily KV write limit (after which all puts
+  // fail, including new-profile creation → 404).
+  if (existing && JSON.stringify(existing) === JSON.stringify(merged)) return;
+  byId.set(id, merged);
   await env.BLOG_AI_KV.put(
     "entity-index-v1",
     JSON.stringify([...byId.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)))),
@@ -1505,7 +1510,6 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
     imageUrl: entity.imageUrl || wiki.imageUrl || "",
     birthDate: entity.birthDate || wiki.birthDate || "",
     deathDate: entity.deathDate || wiki.deathDate || "",
-    updatedAt: new Date().toISOString(),
   };
   if (bodyWords < minWords || hasWikiMarkup || hasIncompleteBody) {
     hydrated.bodySections = type === "person"
@@ -1515,6 +1519,23 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
   hydrated.bodySections = ensureEntityContextSections(hydrated, type);
   if (hydrated.intro || hydrated.summary) delete hydrated.needsWikiRefresh;
 
+  // Only persist when hydration actually improved the entity. A persistently
+  // sparse entity (e.g. a Wikipedia stub that never reaches the word threshold)
+  // stays `sparse === true` on every view; rewriting it + the ~300 KB entity
+  // index each crawl hit drained the daily KV write budget. Render the
+  // in-memory result either way, but skip the write — and the updatedAt bump —
+  // when nothing changed, so each entity writes at most until it stabilises.
+  const improved =
+    hydrated.intro !== (entity.intro || "") ||
+    hydrated.summary !== (entity.summary || "") ||
+    hydrated.description !== (entity.description || "") ||
+    hydrated.imageUrl !== (entity.imageUrl || "") ||
+    hydrated.birthDate !== (entity.birthDate || "") ||
+    hydrated.deathDate !== (entity.deathDate || "") ||
+    (!!entity.needsWikiRefresh && !hydrated.needsWikiRefresh);
+  if (!improved) return hydrated;
+
+  hydrated.updatedAt = new Date().toISOString();
   const write = env.BLOG_AI_KV
     ? Promise.all([
         env.BLOG_AI_KV.put(entityKey(type, hydrated.slug), JSON.stringify(hydrated)),
@@ -1759,10 +1780,17 @@ async function createPersonEntityFromWikipediaRequest(env, slug, url) {
     "person",
   );
   entity.relatedTopics = inferEntityTopicPillars(entity, "person");
-  await Promise.all([
-    env.BLOG_AI_KV.put(entityKey("person", slug), JSON.stringify(entity)),
-    updateEntityIndexEntry(env, entity),
-  ]);
+  // Persist best-effort. A KV write failure (e.g. the daily write limit being
+  // reached) must NOT block rendering — return the in-memory entity so the page
+  // still serves; it gets persisted on a later view once writes succeed again.
+  try {
+    await Promise.all([
+      env.BLOG_AI_KV.put(entityKey("person", slug), JSON.stringify(entity)),
+      updateEntityIndexEntry(env, entity),
+    ]);
+  } catch (err) {
+    console.error("person entity persist failed (serving unsaved):", err?.message || err);
+  }
   return entity;
 }
 
@@ -1773,6 +1801,23 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     entity = await createPersonEntityFromWikipediaRequest(env, slug, url).catch(() => null);
   }
   if (!entity) {
+    // Graceful fallback: a homepage born/died strip link whose individual
+    // profile could not be created (e.g. KV write limit reached, or the person
+    // is not eligible) redirects to the /born/ or /died/ date page that lists
+    // them, instead of a dead "Page Not Found".
+    if (type === "person") {
+      const kind = String(url.searchParams.get("kind") || "").toLowerCase();
+      const fMonth = parseInt(url.searchParams.get("month") || "", 10);
+      const fDay = parseInt(url.searchParams.get("day") || "", 10);
+      if (
+        (kind === "birth" || kind === "death") &&
+        Number.isInteger(fMonth) && fMonth >= 1 && fMonth <= 12 &&
+        Number.isInteger(fDay) && fDay >= 1 && fDay <= DAYS_IN_MONTH[fMonth - 1]
+      ) {
+        const datePath = `/${kind === "birth" ? "born" : "died"}/${MONTHS_ALL[fMonth - 1]}/${fDay}/`;
+        return Response.redirect(`${url.origin}${datePath}`, 302);
+      }
+    }
     const section = type === "person" ? "People" : "History";
     const sectionPath = type === "person" ? "/people/" : "/history/";
     return new Response(

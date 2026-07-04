@@ -17,13 +17,91 @@
 import pLimit from "p-limit";
 // import { animateImage } from "./wan-i2v.js"; // I2V disabled — re-enable to use WAN animation
 import sharp from "sharp";
-import { resolveGroqModels, resolveHFImageModels } from "./model-resolver.js";
+import { resolveGroqModels, resolveHFImageModels, resolveNvidiaVisionModel } from "./model-resolver.js";
 
 const GROQ_VISION_URL = "https://api.groq.com/openai/v1/chat/completions";
+const NVIDIA_VISION_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+
+/**
+ * Shared subject-verification question for every vision provider.
+ * @param {string} subject
+ * @returns {string}
+ */
+function subjectVerifyQuestion(subject) {
+  return `Does this image clearly and prominently depict "${subject}"?
+If it shows a person, is that specific person the identifiable main subject?
+Find any mismatch: wrong person, generic crowd, unrelated scene, or subject not visible.
+
+Respond ONLY with valid JSON, no markdown:
+{"ok": true/false, "reason": "<max 15 words>"}`;
+}
+
+/**
+ * Subject check via NVIDIA NIM vision (fallback once Groq loses its only
+ * vision model on 2026-07-17). Downscales the image with sharp first — NIM
+ * rejects large inline base64 payloads (bigger images need its assets API)
+ * and a subject check does not need full resolution.
+ *
+ * @param {Buffer} imageBuffer
+ * @param {string} subject
+ * @returns {Promise<{ ok: boolean, reason: string } | null>} null = no verdict
+ */
+async function verifySubjectViaNvidia(imageBuffer, subject) {
+  const key = process.env.NVIDIA_API_KEY;
+  if (!key) return null;
+  try {
+    const model = await resolveNvidiaVisionModel();
+    const small = await sharp(imageBuffer)
+      .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 78 })
+      .toBuffer();
+    const res = await fetch(NVIDIA_VISION_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 120,
+        temperature: 0.1,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: `data:image/jpeg;base64,${small.toString("base64")}` },
+            },
+            { type: "text", text: subjectVerifyQuestion(subject) },
+          ],
+        }],
+      }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      console.warn(`  ⚠ Subject verify (NVIDIA): HTTP ${res.status} — ${body.slice(0, 100)}`);
+      return null;
+    }
+    const data = await res.json();
+    const text = (data.choices?.[0]?.message?.content ?? "").trim();
+    const match = text.match(/\{[\s\S]*?\}/);
+    if (!match) {
+      console.warn(`  ⚠ Subject verify (NVIDIA): unparseable response — ${text.slice(0, 80)}`);
+      return null;
+    }
+    const parsed = JSON.parse(match[0]);
+    return { ok: Boolean(parsed.ok), reason: parsed.reason ?? "" };
+  } catch (err) {
+    console.warn(`  ⚠ Subject verify (NVIDIA): ${err.message}`);
+    return null;
+  }
+}
 
 /**
  * Asks Groq (Llama 4 Scout) whether an image clearly depicts the expected subject.
- * Tries all four GROQ_API_KEY slots in order; skips if none are set.
+ * Tries all four GROQ_API_KEY slots in order, then NVIDIA NIM vision
+ * (NVIDIA_API_KEY) as fallback — Groq's only vision model retires 2026-07-17.
  * Never throws — returns { ok: true } on any failure so image generation continues.
  *
  * @param {Buffer} imageBuffer  JPEG/PNG image bytes
@@ -38,69 +116,70 @@ async function verifyImageSubject(imageBuffer, subject) {
     process.env.GROQ_API_KEY_4,
   ].filter(Boolean);
 
-  if (!groqKeys.length) return { ok: true, reason: "skipped (no Groq key)" };
+  if (groqKeys.length) {
+    const { visionModel } = await resolveGroqModels();
+    if (!visionModel) {
+      console.warn("  ⚠ Subject verify (Groq): no active vision model — trying NVIDIA");
+    } else {
 
-  const { visionModel } = await resolveGroqModels();
+      const base64 = imageBuffer.toString("base64");
+      const mediaType = imageBuffer[0] === 0xff ? "image/jpeg" : "image/png";
 
-  const base64 = imageBuffer.toString("base64");
-  const mediaType = imageBuffer[0] === 0xff ? "image/jpeg" : "image/png";
+      for (const key of groqKeys) {
+        try {
+          const res = await fetch(GROQ_VISION_URL, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${key}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: visionModel,
+              max_tokens: 120,
+              temperature: 0.1,
+              messages: [{
+                role: "user",
+                content: [
+                  {
+                    type: "image_url",
+                    image_url: { url: `data:${mediaType};base64,${base64}` },
+                  },
+                  { type: "text", text: subjectVerifyQuestion(subject) },
+                ],
+              }],
+            }),
+            signal: AbortSignal.timeout(20_000),
+          });
 
-  for (const key of groqKeys) {
-    try {
-      const res = await fetch(GROQ_VISION_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${key}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: visionModel,
-          max_tokens: 120,
-          temperature: 0.1,
-          messages: [{
-            role: "user",
-            content: [
-              {
-                type: "image_url",
-                image_url: { url: `data:${mediaType};base64,${base64}` },
-              },
-              {
-                type: "text",
-                text: `Does this image clearly and prominently depict "${subject}"?
-If it shows a person, is that specific person the identifiable main subject?
-Find any mismatch: wrong person, generic crowd, unrelated scene, or subject not visible.
+          if (!res.ok) {
+            const body = await res.text();
+            console.warn(`  ⚠ Subject verify (Groq): HTTP ${res.status} — ${body.slice(0, 100)}`);
+            continue;
+          }
 
-Respond ONLY with valid JSON, no markdown:
-{"ok": true/false, "reason": "<max 15 words>"}`,
-              },
-            ],
-          }],
-        }),
-        signal: AbortSignal.timeout(20_000),
-      });
-
-      if (!res.ok) {
-        const body = await res.text();
-        console.warn(`  ⚠ Subject verify (Groq): HTTP ${res.status} — ${body.slice(0, 100)}`);
-        continue;
+          const data = await res.json();
+          const text = (data.choices?.[0]?.message?.content ?? "").trim();
+          const match = text.match(/\{[\s\S]*?\}/);
+          if (!match) {
+            console.warn(`  ⚠ Subject verify (Groq): unparseable response — ${text.slice(0, 80)}`);
+            continue;
+          }
+          const parsed = JSON.parse(match[0]);
+          return { ok: Boolean(parsed.ok), reason: parsed.reason ?? "" };
+        } catch (err) {
+          console.warn(`  ⚠ Subject verify (Groq): ${err.message}`);
+        }
       }
-
-      const data = await res.json();
-      const text = (data.choices?.[0]?.message?.content ?? "").trim();
-      const match = text.match(/\{[\s\S]*?\}/);
-      if (!match) {
-        console.warn(`  ⚠ Subject verify (Groq): unparseable response — ${text.slice(0, 80)}`);
-        continue;
-      }
-      const parsed = JSON.parse(match[0]);
-      return { ok: Boolean(parsed.ok), reason: parsed.reason ?? "" };
-    } catch (err) {
-      console.warn(`  ⚠ Subject verify (Groq): ${err.message}`);
     }
   }
 
-  // All keys failed — don't block image generation
-  return { ok: true, reason: "all Groq keys failed — skipping check" };
+  // NVIDIA NIM fallback — carries the check after Groq's only vision model
+  // (llama-4-scout) decommissions on 2026-07-17.
+  const nvidiaVerdict = await verifySubjectViaNvidia(imageBuffer, subject);
+  if (nvidiaVerdict) return nvidiaVerdict;
+
+  // No provider could answer — don't block image generation
+  return { ok: true, reason: "no vision provider verdict — skipping check" };
 }
 
 const NEGATIVE =

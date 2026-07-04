@@ -127,6 +127,7 @@ const TESTS = [
         GROQ_API_KEY: process.env.GROQ_API_KEY, GROQ_API_KEY_2: process.env.GROQ_API_KEY_2,
         GROQ_API_KEY_3: process.env.GROQ_API_KEY_3, GROQ_API_KEY_4: process.env.GROQ_API_KEY_4,
         HF_TOKEN: process.env.HF_TOKEN, HF_TOKEN_2: process.env.HF_TOKEN_2, HF_TOKEN_3: process.env.HF_TOKEN_3,
+        HF_TOKEN_4: process.env.HF_TOKEN_4,
       };
       Object.keys(saved).forEach((k) => { process.env[k] = ""; });
       let fetchCalled = false;
@@ -154,6 +155,7 @@ const TESTS = [
         GROQ_API_KEY: process.env.GROQ_API_KEY, GROQ_API_KEY_2: process.env.GROQ_API_KEY_2,
         GROQ_API_KEY_3: process.env.GROQ_API_KEY_3, GROQ_API_KEY_4: process.env.GROQ_API_KEY_4,
         HF_TOKEN: process.env.HF_TOKEN, HF_TOKEN_2: process.env.HF_TOKEN_2, HF_TOKEN_3: process.env.HF_TOKEN_3,
+        HF_TOKEN_4: process.env.HF_TOKEN_4,
       };
       Object.keys(saved).forEach((k) => { process.env[k] = "invalid_token_for_testing"; });
       try {

@@ -1,5 +1,5 @@
 import { recordQuotaSignal } from "./tracker.js";
-import { resolveGroqModels, resolveHFTextModel } from "./model-resolver.js";
+import { resolveGroqModels, resolveHFTextModel, groqReasoningParams, reasoningCompletionBudget, capGroqMaxTokens } from "./model-resolver.js";
 
 /**
  * History Expert — reviews and corrects image generation prompts for historical
@@ -9,7 +9,7 @@ import { resolveGroqModels, resolveHFTextModel } from "./model-resolver.js";
  *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: llama-3.3-70b-versatile)
  *              Keys: GROQ_API_KEY → GROQ_API_KEY_2 → GROQ_API_KEY_3 → GROQ_API_KEY_4
  *   2. HuggingFace — best free instruct model auto-resolved via resolveHFTextModel()
- *              (default: meta-llama/Llama-3.1-8B-Instruct via router.huggingface.co)
+ *              (default: meta-llama/Llama-3.3-70B-Instruct via unified router.huggingface.co/v1)
  *              Tokens: HF_TOKEN → HF_TOKEN_2 → HF_TOKEN_3 → HF_TOKEN_4
  *
  * If both providers fail the originals are returned silently — image generation
@@ -30,12 +30,17 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({
-      model,
-      messages,
-      max_tokens: 1024,
-      temperature: 0.3,
-    }),
+    body: (model, messages) => {
+      const maxTokens = capGroqMaxTokens(model, reasoningCompletionBudget(model, 1024), messages);
+      if (maxTokens == null) return null;
+      return {
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        ...groqReasoningParams(model),
+      };
+    },
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -47,12 +52,17 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({
-      model,
-      messages,
-      max_tokens: 1024,
-      temperature: 0.3,
-    }),
+    body: (model, messages) => {
+      const maxTokens = capGroqMaxTokens(model, reasoningCompletionBudget(model, 1024), messages);
+      if (maxTokens == null) return null;
+      return {
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        ...groqReasoningParams(model),
+      };
+    },
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -64,12 +74,17 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({
-      model,
-      messages,
-      max_tokens: 1024,
-      temperature: 0.3,
-    }),
+    body: (model, messages) => {
+      const maxTokens = capGroqMaxTokens(model, reasoningCompletionBudget(model, 1024), messages);
+      if (maxTokens == null) return null;
+      return {
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        ...groqReasoningParams(model),
+      };
+    },
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -81,12 +96,17 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({
-      model,
-      messages,
-      max_tokens: 1024,
-      temperature: 0.3,
-    }),
+    body: (model, messages) => {
+      const maxTokens = capGroqMaxTokens(model, reasoningCompletionBudget(model, 1024), messages);
+      if (maxTokens == null) return null;
+      return {
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        ...groqReasoningParams(model),
+      };
+    },
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -102,9 +122,10 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
     body: (model, messages) => ({
       model,
       messages,
-      max_tokens: 1024,
+      max_tokens: reasoningCompletionBudget(model, 1024),
       temperature: 0.3,
       stream: false,
+      ...groqReasoningParams(model),
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
@@ -121,9 +142,10 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
     body: (model, messages) => ({
       model,
       messages,
-      max_tokens: 1024,
+      max_tokens: reasoningCompletionBudget(model, 1024),
       temperature: 0.3,
       stream: false,
+      ...groqReasoningParams(model),
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
@@ -140,9 +162,10 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
     body: (model, messages) => ({
       model,
       messages,
-      max_tokens: 1024,
+      max_tokens: reasoningCompletionBudget(model, 1024),
       temperature: 0.3,
       stream: false,
+      ...groqReasoningParams(model),
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
@@ -159,9 +182,10 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
     body: (model, messages) => ({
       model,
       messages,
-      max_tokens: 1024,
+      max_tokens: reasoningCompletionBudget(model, 1024),
       temperature: 0.3,
       stream: false,
+      ...groqReasoningParams(model),
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
@@ -197,10 +221,14 @@ Rules:
 // ---------------------------------------------------------------------------
 
 async function callProvider(provider, apiKey, messages) {
+  const body = provider.body(provider.model, messages);
+  if (!body) {
+    throw new Error("prompt too large for configured token budget");
+  }
   const res = await fetch(provider.url, {
     method: "POST",
     headers: provider.headers(apiKey),
-    body: JSON.stringify(provider.body(provider.model, messages)),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(provider.timeout ?? TIMEOUT_MS),
   });
 

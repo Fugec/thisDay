@@ -35,6 +35,7 @@ import {
   callAI,
   callWorkersAIDirect,
   hasAnyTextAIProvider,
+  aiUsageSummary,
 } from "./shared/ai-call.js";
 import { extractFirstSentence, truncateForMeta, splitSentences, normalizeForCompare } from "./shared/seo-text.js";
 
@@ -55,6 +56,14 @@ const ENTITY_STRIP_REPAIR_TTL = 60 * 60 * 24 * 7; // 7 days
 const REPAIR_ATTEMPT_LIMIT = 2; // per slug, per repair type, per TTL window
 
 async function callPublicationGateAI(env, messages, options = {}) {
+  // Local-test guard: the Workers AI 10k-neurons/day pool is ACCOUNT-wide,
+  // shared with production. AI_GATE_PREFER_EXTERNAL=1 (dev var only, never a
+  // deployed secret) routes gates through the external chain first so local
+  // E2E runs don't drain the pool the nightly cron needs; Workers AI remains
+  // the chain's own last resort.
+  if (env.AI_GATE_PREFER_EXTERNAL) {
+    return callAI(env, messages, { ...options, providerAttemptLimit: 8 });
+  }
   try {
     return await callWorkersAIDirect(env, messages, options);
   } catch (workersError) {
@@ -1875,6 +1884,42 @@ async function chooseEventForDate(
         `\nThe list is sorted by editorial priority. Prefer the highest-ranked candidate unless it is already covered or clearly unsuitable. Do not invent a different event, year, or title.`
       : `No vetted event list is available, so be extremely conservative and choose only an event you are certain happened on ${monthName} ${day}.`;
 
+  if (candidateEvents.length > 0) {
+    const selected = applyMajorEventGuard(candidateEvents[0], candidateEvents);
+    const selectedIndex = Math.max(1, candidateEvents.indexOf(selected) + 1);
+    const eventTitle = eventTitleFromCandidate(selected.pageTitle, selected);
+    const parsed = {
+      candidateIndex: selectedIndex,
+      reviewedEventCount: allEvents.length,
+      eventTitle,
+      historicalYear: Number.parseInt(selected.year, 10),
+      historicalDate: `${monthName} ${day}, ${selected.year}`,
+      historicalDateISO: `${String(selected.year).padStart(4, "0")}-${mPad}-${dPad}`,
+      wikiUrl: selected.pageUrl || "",
+      strongestRejected: candidateEvents.find((event) => event !== selected)?.pageTitle || "",
+      why: "Deterministic top-ranked vetted candidate.",
+      sourcePageTitle: selected.pageTitle,
+      sourceText: selected.text,
+      sourceExtract: selected.extract || "",
+      sourcePages: selected.sourcePages || [],
+    };
+    const canonicalSourceHeadline = sourceEventHeadline(
+      selected.text,
+      HEADLINE_SOURCE_MAX,
+    );
+    if (canonicalSourceHeadline && parsed.eventTitle === canonicalSourceHeadline) {
+      parsed.sourceEventHeadline = canonicalSourceHeadline;
+    }
+    const validation = validateContentDateForPublish(parsed, date);
+    if (!validation.ok) {
+      throw new Error(`Event selector date mismatch. ${validation.reason}`);
+    }
+    console.log(
+      `Event selector: using deterministic vetted candidate #${selectedIndex} "${parsed.eventTitle}".`,
+    );
+    return parsed;
+  }
+
   const prompt =
     `Select a single real historical event that happened on ${monthName} ${day} in any year.\n` +
     `${avoidTitles}${avoidPillars}${preferPillars}${allEventsSection}${candidateSection}\n` +
@@ -1911,10 +1956,35 @@ async function chooseEventForDate(
     .replace(/\s*```\s*$/, "")
     .trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
+  const fallbackSelectorResult = (reason) => {
+    if (candidateEvents.length === 0) {
+      throw new Error(`${reason}: ${raw.slice(0, 160)}`);
+    }
+    const fallback = candidateEvents[0];
+    console.warn(
+      `Event selector ${reason}; using top vetted candidate "${fallback.pageTitle}".`,
+    );
+    return {
+      candidateIndex: 1,
+      reviewedEventCount: allEvents.length,
+      eventTitle: fallback.pageTitle,
+      historicalDate: `${monthName} ${day}, ${fallback.year}`,
+      historicalDateISO: `${String(fallback.year).padStart(4, "0")}-${mPad}-${dPad}`,
+      wikiUrl: fallback.pageUrl,
+      strongestRejected: candidateEvents[1]?.pageTitle || "",
+      why: "Fallback to highest ranked vetted candidate.",
+    };
+  };
+  let parsed;
   if (!match) {
-    throw new Error(`Event selector returned no JSON: ${raw.slice(0, 160)}`);
+    parsed = fallbackSelectorResult("returned no JSON");
+  } else {
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch (err) {
+      parsed = fallbackSelectorResult(`returned malformed JSON (${err.message})`);
+    }
   }
-  const parsed = JSON.parse(match[0]);
   if (!parsed?.eventTitle) {
     throw new Error("Event selector returned no eventTitle");
   }
@@ -2097,9 +2167,7 @@ export default {
         hasOpenRouter: Boolean(env.OPENROUTER_API_KEY || env.OPENRUITER_API_KEY || env.OPENNRUITER_API_KEY),
         hasOpenRouter2: Boolean(env.OPENROUTER_API_KEY_2 || env.OPENRUITER_API_KEY_2 || env.OPENNRUITER_API_KEY_2),
         hasOpenRouter3: Boolean(env.OPENROUTER_API_KEY_3 || env.OPENRUITER_API_KEY_3 || env.OPENNRUITER_API_KEY_3),
-        hasCerebras: Boolean(env.CEREBRAS_API_KEY || env.CEREBAS_API_KEY),
-        hasCerebras2: Boolean(env.CEREBRAS_API_KEY_2 || env.CEREBAS_API_KEY_2),
-        hasCerebras3: Boolean(env.CEREBRAS_API_KEY_3 || env.CEREBAS_API_KEY_3),
+        hasNvidia: Boolean(env.NVIDIA_API_KEY),
       });
     }
 
@@ -2164,11 +2232,13 @@ export default {
         await generateAndStore(env, null, forcedEvent, forceDate, forceImage, {
           lightweightPublish: true,
         });
+        console.log(`Blog AI: /blog/publish complete. ${aiUsageSummary()}`);
         return jsonResponse({ status: "ok", message: "Blog post published." });
       } catch (err) {
         console.error(
           `Blog AI: /blog/publish generation failed — ${err.message}`,
         );
+        console.log(`Blog AI: /blog/publish failed. ${aiUsageSummary()}`);
         const today = todayDateString();
         await recordPipelineFailure(env, {
           step: "blog",
@@ -4704,6 +4774,12 @@ const BANNED_PHRASE_LIST = [
   "it's a lesson", "we must not forget", "mustn't forget", "we can't forget",
   "as the world grapples", "it's a reminder", "still resonates today",
   "cannot be forgotten", "reminder of the past", "to this day",
+  // AI-giveaway and marketing-hype phrases (Writing Humanizer, 2026-07-03).
+  // Deliberately NOT banned: "revolutionary" / "groundbreaking" — legitimate
+  // words in historical prose (Revolutionary War, groundbreaking ceremony).
+  "dive into", "delve into", "deep dive", "unleash", "game-changing",
+  "game changer", "in today's fast-paced world", "fast-paced world",
+  "it's worth noting", "it's important to note",
 ];
 
 const PARA_FIELDS = [
@@ -4786,6 +4862,22 @@ function wordCount(value) {
   return words ? words.length : 0;
 }
 
+const ARTICLE_BODY_FIELDS = [
+  "overviewParagraphs",
+  "eyewitnessOrChronicle",
+  "aftermathParagraphs",
+  "conclusionParagraphs",
+];
+
+const MIN_REAL_ARTICLE_BODY_WORDS = 850;
+
+function articleBodyWordCount(content) {
+  return ARTICLE_BODY_FIELDS.reduce((total, field) => {
+    const paragraphs = Array.isArray(content?.[field]) ? content[field] : [];
+    return total + paragraphs.reduce((sum, paragraph) => sum + wordCount(paragraph), 0);
+  }, 0);
+}
+
 function hasHardFact(value) {
   const text = plainText(value);
   return (
@@ -4857,6 +4949,11 @@ function enforceEditorialNoteQuality(content) {
 
 function scanArticleQuality(content) {
   const issues = [];
+  const bodyWords = articleBodyWordCount(content);
+  if (bodyWords < MIN_REAL_ARTICLE_BODY_WORDS) {
+    issues.push(`article body is too short (${bodyWords} words, needs ${MIN_REAL_ARTICLE_BODY_WORDS}+).`);
+  }
+
   const paraMinimums = {
     overviewParagraphs: 95,
     eyewitnessOrChronicle: 90,
@@ -4932,9 +5029,48 @@ function scanArticleQuality(content) {
 // Detects sentences (>= 45 chars) that appear in 2+ visible-text fields, the source of
 // the on-page duplicate-content audit finding. Returns human-readable issue strings that
 // improveArticleQuality can act on.
+const SEMANTIC_DUPLICATE_STOPWORDS = new Set([
+  "about", "above", "after", "again", "against", "along", "also", "although",
+  "among", "another", "around", "because", "before", "being", "between",
+  "both", "could", "described", "detail", "during", "event", "every", "facts",
+  "first", "from", "general", "history", "historical", "into", "itself",
+  "later", "main", "major", "more", "most", "much", "name", "named", "only",
+  "other", "people", "place", "point", "public", "record", "same", "section",
+  "source", "specific", "still", "story", "than", "that", "their", "there",
+  "these", "thing", "this", "those", "through", "under", "until", "what",
+  "when", "where", "which", "while", "with", "within", "without", "would",
+]);
+
+function semanticDuplicateTokens(value, ignoredTokens = new Set()) {
+  const text = plainText(value)
+    .toLowerCase()
+    .replace(/[’']s\b/g, "")
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9\s]/g, " ");
+  return new Set(
+    text
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) =>
+        token.length >= 4 &&
+        !SEMANTIC_DUPLICATE_STOPWORDS.has(token) &&
+        !ignoredTokens.has(token),
+      ),
+  );
+}
+
+function semanticDuplicateScore(tokensA, tokensB) {
+  if (!tokensA.size || !tokensB.size) return { shared: 0, ratio: 0 };
+  let shared = 0;
+  for (const token of tokensA) {
+    if (tokensB.has(token)) shared += 1;
+  }
+  return { shared, ratio: shared / Math.min(tokensA.size, tokensB.size) };
+}
+
 function scanIntraPageDuplication(content) {
   const entries = [];
-  for (const f of ["overviewParagraphs", "eyewitnessOrChronicle", "aftermathParagraphs", "conclusionParagraphs"]) {
+  for (const f of ARTICLE_BODY_FIELDS) {
     (Array.isArray(content[f]) ? content[f] : []).forEach((p) => entries.push([f, p]));
   }
   (Array.isArray(content.didYouKnowFacts) ? content.didYouKnowFacts : []).forEach((p) => entries.push(["didYouKnowFacts", p]));
@@ -4957,7 +5093,83 @@ function scanIntraPageDuplication(content) {
       issues.push(`Duplicate sentence across ${distinct.join(", ")}: "${sentence.slice(0, 80)}".`);
     }
   }
+
+  const ignoredTokens = semanticDuplicateTokens(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.historicalDate,
+      content?.location,
+      content?.country,
+    ].filter(Boolean).join(" "),
+  );
+  const tokenized = entries
+    .map(([field, text], index) => ({
+      field,
+      text: plainText(text),
+      index,
+      tokens: semanticDuplicateTokens(text, ignoredTokens),
+    }))
+    .filter((entry) => entry.text.length >= 90 && entry.tokens.size >= 8);
+
+  for (let i = 0; i < tokenized.length; i += 1) {
+    for (let j = i + 1; j < tokenized.length; j += 1) {
+      const a = tokenized[i];
+      const b = tokenized[j];
+      const { shared, ratio } = semanticDuplicateScore(a.tokens, b.tokens);
+      if (shared >= 10 && ratio >= 0.62) {
+        issues.push(
+          `Semantic repetition across ${a.field} and ${b.field}: ${shared} shared detail terms; rewrite one to add new information.`,
+        );
+      }
+    }
+  }
   return issues;
+}
+
+function extractFirstJsonObject(value) {
+  const cleaned = String(value || "")
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+  const start = cleaned.indexOf("{");
+  if (start === -1) return "";
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return cleaned.slice(start, i + 1);
+    }
+  }
+  return cleaned.slice(start);
+}
+
+function parseJsonObjectFromAI(value, label) {
+  const json = extractFirstJsonObject(value);
+  if (!json) throw new Error(`${label}: no JSON object returned`);
+  try {
+    return JSON.parse(json);
+  } catch (err) {
+    throw new Error(`${label}: JSON parse failed (${err.message})`);
+  }
 }
 
 /**
@@ -5069,6 +5281,8 @@ async function improveArticleQuality(env, content, issues, source = null) {
     "Fix only the fields named by the audit issues. Keep facts accurate and do not invent quotations. " +
     "Strengthen weak writing with concrete names, dates, institutions, source-supported anchors, and consequences. " +
     "Preserve array lengths exactly. Preserve the same JSON shape for analysisGood and analysisBad items. " +
+    `The article body can be concise, but overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs must total at least ${MIN_REAL_ARTICLE_BODY_WORDS} words. ` +
+    "Do not pad. If the body is too short, add source-supported facts that have not appeared elsewhere. If an issue says semantic repetition, rewrite the repeated field so it contributes a new detail rather than the same fact in different words. " +
     "Never use hyphens or em dashes in article body fields. Avoid generic phrases such as 'changed history', " +
     "'turning point', 'lasting impact', 'important moment', 'remarkable event', and 'still resonates today'. " +
     "For editorialNote, keep the voice measured, specific, and grounded in the article. Do not make forced comparisons " +
@@ -5432,12 +5646,35 @@ async function generateAndStore(
         lastError = err;
         const retryableOutputFailure =
           /JSON parse failed|No JSON found|response too short|returned empty/i.test(err?.message || "");
-        if (!retryableOutputFailure || responseAttempt >= MAX_MALFORMED_RESPONSE_ATTEMPTS) {
-          throw err;
+        const chunkableFailure = shouldTryChunkedArticleFallback(err);
+        if (retryableOutputFailure && responseAttempt < MAX_MALFORMED_RESPONSE_ATTEMPTS) {
+          console.warn(
+            `Blog AI: malformed article response — ${err.message}. Retrying generation response (${responseAttempt + 1}/${MAX_MALFORMED_RESPONSE_ATTEMPTS}).`,
+          );
+          continue;
         }
-        console.warn(
-          `Blog AI: malformed article response — ${err.message}. Retrying generation response (${responseAttempt + 1}/${MAX_MALFORMED_RESPONSE_ATTEMPTS}).`,
-        );
+        if (chunkableFailure && chunkedArticleFallbackEnabled(env)) {
+          try {
+            return await generateArticleContentChunkedFallback(
+              env,
+              now,
+              avoidTitles,
+              activeModel,
+              selectedForcedEvent,
+              preferredPillars,
+              contextHook,
+              recentPillars,
+              sourceMaterial,
+              stricterGrounding,
+            );
+          } catch (fallbackErr) {
+            console.warn(
+              `Blog AI: chunked article fallback failed after one-shot error "${err.message}" — ${fallbackErr.message}`,
+            );
+            throw new Error(`${err.message}; chunked article fallback failed: ${fallbackErr.message}`);
+          }
+        }
+        throw err;
       }
     }
     throw lastError;
@@ -5472,6 +5709,30 @@ async function generateAndStore(
     } catch (err) {
       if (attempt < MAX_CONTENT_ATTEMPTS) {
         const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        if (isShortArticleBodyFailure(err) && chunkedArticleFallbackEnabled(env)) {
+          console.warn(
+            `Blog AI: one-shot article body too short for "${content?.title || "untitled"}" — ${err.message}. Trying chunked article fallback (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+          );
+          try {
+            content = await generateArticleContentChunkedFallback(
+              env,
+              now,
+              avoid,
+              activeModel,
+              selectedForcedEvent,
+              preferredPillars,
+              contextHook,
+              recentPillars,
+              sourceMaterial,
+              false,
+            );
+            continue;
+          } catch (fallbackErr) {
+            console.warn(
+              `Blog AI: chunked article fallback failed — ${fallbackErr.message}. Falling back to one-shot regeneration.`,
+            );
+          }
+        }
         console.warn(
           `Blog AI: incomplete generated content for "${content?.title || "untitled"}" - ${err.message}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
@@ -5747,25 +6008,33 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
   const histYear = String(content?.historicalYear || "").trim()
     || (content?.historicalDateISO || "").slice(0, 4);
   if (/^\d{3,4}$/.test(histYear)) indexNowUrls.push(`https://thisday.info/years/${histYear}/`);
+  const suppressExternalNotifications = Boolean(
+    env.SUPPRESS_POST_PUBLISH_NOTIFICATIONS || env.AI_CASSETTE,
+  );
 
   // Purge the cached sitemap and RSS feed so they reflect the new post immediately
   // (both workers cache for 1 h — without this, the new post would be invisible
   //  to crawlers until the next cache expiry).
   const cache = caches.default;
-  await Promise.allSettled([
+  const cacheAndNotifyTasks = [
     cache.delete(new Request("https://thisday.info/sitemap.xml")),
     cache.delete(new Request("https://thisday.info/rss.xml")),
     cache.delete(new Request("https://thisday.info/news-sitemap.xml")),
+  ];
+  if (suppressExternalNotifications) {
+    console.log(`Blog: post-publish notifications suppressed for ${slug}`);
+  } else {
     // T8: Ping search engines with post + entity + hub URLs for fast Bing/Copilot discovery.
-    fetch("https://thisday.info/search-ping", {
+    cacheAndNotifyTasks.push(fetch("https://thisday.info/search-ping", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(env.SEARCH_PING_SECRET ? { Authorization: `Bearer ${env.SEARCH_PING_SECRET}` } : {}),
       },
       body: JSON.stringify({ urls: indexNowUrls }),
-    }),
-  ]);
+    }));
+  }
+  await Promise.allSettled(cacheAndNotifyTasks);
 
   // Generate and store a quiz using the already-available content.
   // Skip this in lightweight publish mode — the enrichment pass will get a fresh request budget.
@@ -5821,24 +6090,26 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
   }
 
   // Ping WebSub hub so Flipboard (and other subscribers) get notified immediately
-  try {
-    const hubBody = new URLSearchParams({
-      "hub.mode": "publish",
-      "hub.url": "https://thisday.info/rss.xml",
-    });
-    await fetch("https://pubsubhubbub.appspot.com/", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: hubBody,
-    });
-    console.log("Blog: WebSub hub pinged");
-  } catch (e) {
-    console.error("Blog: WebSub ping failed:", e);
+  if (!suppressExternalNotifications) {
+    try {
+      const hubBody = new URLSearchParams({
+        "hub.mode": "publish",
+        "hub.url": "https://thisday.info/rss.xml",
+      });
+      await fetch("https://pubsubhubbub.appspot.com/", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: hubBody,
+      });
+      console.log("Blog: WebSub hub pinged");
+    } catch (e) {
+      console.error("Blog: WebSub ping failed:", e);
+    }
   }
 
   // Notify Discord that a new post has been published (silent no-op if not configured).
   // Set DISCORD_WEBHOOK_URL via:  npx wrangler secret put DISCORD_WEBHOOK_URL --config wrangler-blog.jsonc
-  if (env.DISCORD_WEBHOOK_URL) {
+  if (env.DISCORD_WEBHOOK_URL && !suppressExternalNotifications) {
     try {
       const postUrl = `https://thisday.info/blog/${slug}/`;
       const message =
@@ -6379,6 +6650,7 @@ async function enrichPublishedPost(env, slug) {
   await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`).catch(() => {});
   await runPostPublishExtras(env, slug, enriched, { scheduleEnrichment: false });
   await chk("done");
+  console.log(`Blog AI: ${slug} enrichment complete. ${aiUsageSummary()}`);
 }
 
 function entitySlug(value) {
@@ -7795,6 +8067,10 @@ function assertRequiredContentBlocks(content) {
   if (namedPeople.length < 1) missing.push("one named person for the people strip");
   if (analysisCount(content.analysisGood) < 3) missing.push("three positive analysis items");
   if (analysisCount(content.analysisBad) < 3) missing.push("three critical analysis items");
+  const bodyWords = articleBodyWordCount(content);
+  if (bodyWords < MIN_REAL_ARTICLE_BODY_WORDS) {
+    missing.push(`${MIN_REAL_ARTICLE_BODY_WORDS}+ words of article body (got ${bodyWords})`);
+  }
   if (missing.length > 0) {
     throw new Error(`Article content check failed: missing ${missing.join(", ")}`);
   }
@@ -8406,7 +8682,7 @@ async function generateBlogQuiz(env, content, _slug) {
           content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, no more no less\n- Each question has exactly 4 options (never fewer, never more)\n- Exactly one correct answer per question (0-based index in "answer", must be 0, 1, 2, or 3)\n- Question types must vary: include at least one each of Who, What, Why/How, When/Where\n- Questions must progress: 1 easy recall, 2 medium analysis, 2 challenging synthesis\n- Draw from ALL Fact lines — do not repeat the same topic twice\n- The authoritative source material wins over the article summary or facts if they conflict\n- Keep recognition, arrest, capture, departure, arrival, and death locations and dates distinct\n- Wrong options must be plausible but clearly incorrect; no trick questions\n- Each question must include a short "explanation" field (1-2 sentences) explaining why the answer is correct\n- All strings must be non-empty and longer than 5 characters\n- Output ONLY valid JSON, no markdown:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
         },
       ],
-      { maxTokens: 1500, timeoutMs: 25_000 },
+      { maxTokens: 2200, timeoutMs: 25_000 },
     );
   } catch (err) {
     console.error("Blog quiz: AI call failed —", err.message);
@@ -8445,6 +8721,477 @@ async function generateBlogQuiz(env, content, _slug) {
 // ---------------------------------------------------------------------------
 // Claude API call
 // ---------------------------------------------------------------------------
+
+function normalizeGeneratedArticleContent(parsed, date) {
+  const monthName = MONTH_NAMES[date.getMonth()];
+  const day = date.getDate();
+
+  // Enforce that the title always follows the format "Event Name — Month Day, Year".
+  // The AI sometimes omits the date, uses wrong format, or uses colloquial date names.
+  // Derive the historical year from the content (historicalYear → ISO → date →
+  // title). Never silently default to date.getFullYear(): the publication year is
+  // not the event's year, and doing so re-stamps the current year every year. Only
+  // fall back when the model returned no year anywhere, and warn loudly so the
+  // degenerate output is visible.
+  let year = deriveHistoricalYear(parsed);
+  if (!Number.isInteger(year)) {
+    year = date.getFullYear();
+    console.warn(
+      `Blog: no historical year in AI output for ${date.toISOString().slice(0, 10)} — falling back to publication year ${year}`,
+    );
+  }
+  const expectedDateSuffix = `${monthName} ${day}, ${year}`;
+  const hasSeparator = parsed.title && parsed.title.includes(" — ");
+  if (
+    !parsed.title ||
+    !parsed.title.includes(expectedDateSuffix) ||
+    !hasSeparator
+  ) {
+    parsed.title = buildDisplayTitle(
+      parsed.title,
+      parsed.eventTitle ?? "Untitled",
+      expectedDateSuffix,
+    );
+  }
+
+  // Normalise fields that must be strings — the model occasionally returns arrays.
+  if (Array.isArray(parsed.keywords)) parsed.keywords = parsed.keywords.join(", ");
+  if (typeof parsed.keywords !== "string") parsed.keywords = String(parsed.keywords || "");
+
+  enforceAnswerFirstSections(parsed);
+
+  // Truncation audit: chunked or one-shot, generated paragraph arrays must end
+  // cleanly. Validation later decides whether the article can be stored.
+  for (const field of ARTICLE_BODY_FIELDS) {
+    const arr = parsed[field];
+    if (!Array.isArray(arr) || arr.length === 0) continue;
+    const last = String(arr[arr.length - 1] || "").trimEnd();
+    if (last && !/[.!?'"»]$/.test(last)) {
+      console.warn(`Blog: paragraph truncation detected in ${field} for ${date.toISOString().slice(0, 10)} — last char: "${last.slice(-20)}"`);
+    }
+  }
+
+  return parsed;
+}
+
+function shouldTryChunkedArticleFallback(err) {
+  return /413|request too large|too large for model|context length|context window|JSON parse failed|No JSON found|response too short|returned empty|AI response too short/i.test(
+    err?.message || String(err || ""),
+  );
+}
+
+// One-shot generation at temperature/instruction level chronically undershoots
+// the 900-1250 word target (llama-3.3 observed 546-841 words across repeated
+// attempts). assertRequiredContentBlocks throws AFTER a well-formed response
+// already came back, so shouldTryChunkedArticleFallback's malformed-response
+// patterns never match this case — a plain regenerate just reruns the same
+// one-shot path and fails the same way. The chunked fallback writes body
+// paragraphs in two dedicated calls with a 105-145-word-per-paragraph floor,
+// which reliably clears the gate.
+function isShortArticleBodyFailure(err) {
+  return /\d+\+ words of article body/i.test(err?.message || String(err || ""));
+}
+
+function chunkedArticleFallbackEnabled(env) {
+  const raw = env?.BLOG_CHUNKED_ARTICLE_FALLBACK ?? env?.AI_CHUNKED_ARTICLE_FALLBACK;
+  return raw == null || !/^(0|false|off)$/i.test(String(raw).trim());
+}
+
+function compactChunkedArticleBrief(brief) {
+  return {
+    title: brief?.title || "",
+    eventTitle: brief?.eventTitle || "",
+    historicalDate: brief?.historicalDate || "",
+    historicalYear: brief?.historicalYear || "",
+    historicalDateISO: brief?.historicalDateISO || "",
+    location: brief?.location || "",
+    country: brief?.country || "",
+    organizerName: brief?.organizerName || "",
+    wikiUrl: brief?.wikiUrl || brief?.jsonLdUrl || "",
+    keyTerms: Array.isArray(brief?.keyTerms) ? brief.keyTerms.slice(0, 8) : [],
+    sourceFacts: Array.isArray(brief?.sourceFacts) ? brief.sourceFacts.slice(0, 12) : [],
+  };
+}
+
+function requireChunkArray(chunk, field, { min = 1, exact = null, label = "chunk" } = {}) {
+  const value = chunk?.[field];
+  if (!Array.isArray(value)) throw new Error(`${label}: missing ${field} array`);
+  if (exact != null && value.length !== exact) {
+    throw new Error(`${label}: ${field} must contain exactly ${exact} item(s), got ${value.length}`);
+  }
+  if (value.length < min) {
+    throw new Error(`${label}: ${field} must contain at least ${min} item(s), got ${value.length}`);
+  }
+  return value;
+}
+
+function validateChunkedArticleBodyChunk(chunk, fields, label) {
+  for (const field of fields) {
+    const paragraphs = requireChunkArray(chunk, field, { exact: 2, label });
+    if (!paragraphs.every((paragraph) => typeof paragraph === "string" && wordCount(paragraph) >= 70)) {
+      throw new Error(`${label}: ${field} contains a thin paragraph`);
+    }
+  }
+}
+
+function validateChunkedArticleSupport(merged) {
+  requireChunkArray(merged, "quickFacts", { exact: 6, label: "chunked article fallback" });
+  requireChunkArray(merged, "didYouKnowFacts", { exact: 6, label: "chunked article fallback" });
+  requireChunkArray(merged, "analysisGood", { min: 3, label: "chunked article fallback" });
+  requireChunkArray(merged, "analysisBad", { min: 3, label: "chunked article fallback" });
+  assertRequiredContentBlocks(merged);
+}
+
+function continuityTokenList(value, ignoredTokens = new Set()) {
+  return plainText(value)
+    .toLowerCase()
+    .replace(/[’']s\b/g, "")
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) =>
+      token.length >= 4 &&
+      !SEMANTIC_DUPLICATE_STOPWORDS.has(token) &&
+      !ignoredTokens.has(token),
+    );
+}
+
+function continuityTokenSet(value, ignoredTokens = new Set()) {
+  return new Set(continuityTokenList(value, ignoredTokens));
+}
+
+function sharedTokenCount(left, right) {
+  let count = 0;
+  for (const token of left) {
+    if (right.has(token)) count++;
+  }
+  return count;
+}
+
+function chunkedArticleAnchorTokens(content) {
+  const values = [
+    String(content?.title || "").replace(/\s+—\s+.*$/, ""),
+    content?.eventTitle,
+    content?.historicalDate,
+    content?.location,
+    content?.country,
+    content?.organizerName,
+    ...(Array.isArray(content?.keyTerms) ? content.keyTerms.map((term) => term?.term) : []),
+    ...(Array.isArray(content?.sourceFacts) ? content.sourceFacts : []),
+  ].filter(Boolean);
+  if (Number.isInteger(content?.historicalYear)) values.push(String(content.historicalYear));
+  return continuityTokenSet(values.join(" "));
+}
+
+function firstParagraphSentence(content, field) {
+  const paragraphs = Array.isArray(content?.[field]) ? content[field] : [];
+  const first = plainText(paragraphs[0] || "");
+  return splitSentences(first, 12)[0] || first;
+}
+
+function repeatedOpeningSignature(sentence) {
+  const tokens = continuityTokenList(sentence).slice(0, 4);
+  return tokens.length >= 3 ? tokens.join(" ") : "";
+}
+
+function startsLikeArticleReintroduction(sentence, content) {
+  const text = plainText(sentence).toLowerCase();
+  const year = Number.isInteger(content?.historicalYear) ? String(content.historicalYear) : "";
+  const monthDay = String(content?.historicalDate || "")
+    .replace(/,\s*\d{3,4}\b/, "")
+    .toLowerCase();
+  const startsWithEventDate =
+    (monthDay && text.startsWith(`on ${monthDay}`)) ||
+    (year && text.startsWith(`in ${year}`));
+  if (!startsWithEventDate) return false;
+  return /\b(event|story|began|happened|occurred|took place|was|were)\b/.test(text);
+}
+
+function auditChunkedArticleContinuity(content) {
+  const issues = [];
+  const anchors = chunkedArticleAnchorTokens(content);
+  if (anchors.size < 4) {
+    issues.push("canonical brief does not provide enough shared anchor terms");
+  }
+
+  const openingSignatures = new Map();
+  for (const field of ARTICLE_BODY_FIELDS) {
+    const sectionText = (Array.isArray(content?.[field]) ? content[field] : []).join(" ");
+    const sectionTokens = continuityTokenSet(sectionText);
+    const sharedAnchors = sharedTokenCount(anchors, sectionTokens);
+    if (sharedAnchors < 2) {
+      issues.push(`${field} is not clearly anchored to the canonical event brief`);
+    }
+
+    const firstSentence = firstParagraphSentence(content, field);
+    if (field !== "overviewParagraphs" && startsLikeArticleReintroduction(firstSentence, content)) {
+      issues.push(`${field} reintroduces the event instead of continuing the article`);
+    }
+
+    const signature = repeatedOpeningSignature(firstSentence);
+    if (signature) {
+      const previous = openingSignatures.get(signature);
+      if (previous) {
+        issues.push(`${field} repeats the opening pattern used by ${previous}`);
+      } else {
+        openingSignatures.set(signature, field);
+      }
+    }
+  }
+
+  const earlierBody = [
+    ...(content?.overviewParagraphs || []),
+    ...(content?.eyewitnessOrChronicle || []),
+    ...(content?.aftermathParagraphs || []),
+  ].join(" ");
+  const conclusionBody = (content?.conclusionParagraphs || []).join(" ");
+  const earlierDetailTokens = continuityTokenSet(earlierBody, anchors);
+  const conclusionDetailTokens = continuityTokenSet(conclusionBody, anchors);
+  if (sharedTokenCount(earlierDetailTokens, conclusionDetailTokens) < 3) {
+    issues.push("conclusion does not clearly pick up enough earlier body detail");
+  }
+
+  return { ok: issues.length === 0, issues };
+}
+
+async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens) {
+  const raw = await callAI(
+    env,
+    [
+      {
+        role: "system",
+        content:
+          "You are a source-grounded history article component writer. Return one valid JSON object only. No markdown, no prose outside JSON.",
+      },
+      { role: "user", content: userPrompt },
+    ],
+    {
+      maxTokens,
+      timeoutMs: 60_000,
+      cfModel: model,
+      temperature: 0.15,
+      providerAttemptLimit: 8,
+    },
+  );
+  return parseJsonObjectFromAI(raw, label);
+}
+
+async function generateArticleContentChunkedFallback(
+  env,
+  date,
+  takenThisMonth = [],
+  model = CF_AI_MODEL,
+  forcedEvent = null,
+  preferredPillars = [],
+  contextHook = null,
+  recentPillars = [],
+  sourceMaterial = null,
+  stricterGrounding = false,
+) {
+  const monthName = MONTH_NAMES[date.getMonth()];
+  const day = date.getDate();
+  const sourceSection = sourceMaterial
+    ? `AUTHORITATIVE SOURCE MATERIAL, the single source of truth:\n"""\n${String(sourceMaterial).slice(0, 5500)}\n"""\n`
+    : "";
+  const avoidSection = takenThisMonth.length > 0
+    ? `Avoid already-covered topics and close variants:\n${takenThisMonth.slice(0, 12).map((title) => `- ${title}`).join("\n")}\n`
+    : "";
+  const pillarSection = preferredPillars.length > 0
+    ? `Prefer one of these underrepresented categories when consistent with the selected event: ${preferredPillars.join(", ")}.\n`
+    : "";
+  const recentPillarSection = recentPillars.length > 0
+    ? `Avoid making these recent categories the primary angle when possible: ${recentPillars.join(", ")}.\n`
+    : "";
+  const contextHookSection = contextHook
+    ? `Current-world hook to weave into conclusion or editorial note, not verbatim: ${contextHook}\n`
+    : "";
+  const strictLine = stricterGrounding
+    ? "A previous draft failed grounding. Be conservative and omit any specific not supported by the source.\n"
+    : "";
+  const sharedContext = `Required event: ${forcedEvent ? `"${forcedEvent}"` : `a significant event from ${monthName} ${day}`}.
+Required date: ${monthName} ${day}. historicalDateISO month/day must match this date.
+${contextHookSection}${sourceSection}${avoidSection}${pillarSection}${recentPillarSection}${strictLine}
+Grounding rules:
+- Use only the source material for factual claims when it is supplied.
+- Do not invent a named person, quote, document, number, location, motive, casualty count, or consequence.
+- Keep recognition, arrest, death, departure, arrival, and capture dates and places distinct.
+- Do not use hyphens or em dashes in article body prose.
+- Every paragraph must end with normal terminal punctuation.`;
+
+  console.warn(`Blog: trying chunked article fallback for ${monthName} ${day}.`);
+
+  const brief = await callChunkedArticleAI(
+    env,
+    model,
+    "chunked article brief",
+    `CHUNKED ARTICLE FALLBACK - BRIEF
+${sharedContext}
+
+Return JSON only with this shape:
+{
+  "title":"... — ${monthName} ${day}, Year",
+  "eventTitle":"short subject-plus-finite-verb clause",
+  "historicalDate":"${monthName} ${day}, Year",
+  "historicalYear":1234,
+  "historicalDateISO":"YYYY-MM-DD",
+  "location":"City, Country",
+  "country":"Country",
+  "description":"120-155 chars",
+  "ogDescription":"100-130 chars",
+  "twitterDescription":"90-120 chars",
+  "keywords":"comma separated keywords",
+  "imageUrl":"",
+  "imageAlt":"specific alt text",
+  "jsonLdName":"event name",
+  "jsonLdDescription":"schema description",
+  "jsonLdUrl":"source URL",
+  "organizerName":"key person or organization",
+  "readingTimeMinutes":8,
+  "keyTerms":[{"term":"exact article phrase","wikiUrl":"https://en.wikipedia.org/wiki/...","type":"person"}],
+  "wikiUrl":"source URL",
+  "youtubeSearchQuery":"specific event year history documentary",
+  "bookSearchQuery":"3-5 word book search",
+  "amazonBookTopic":"3-7 word book topic",
+  "amazonProductIdeas":[{"label":"3-6 words","searchQuery":"specific book or item search","type":"book"}],
+  "contentRationale":"40+ words explaining specific value beyond Wikipedia",
+  "sourceFacts":["8-12 concise facts from the source to reuse without contradiction"]
+}
+
+Requirements: keyTerms must include at least one real named person connected to the event. imageUrl may be empty or a supported Wikimedia URL, never a placeholder.`,
+    1500,
+  );
+
+  const compactBrief = compactChunkedArticleBrief(brief);
+  requireChunkArray(brief, "keyTerms", { min: 1, label: "chunked article brief" });
+  if (!compactBrief.keyTerms.some((term) => String(term?.type || "").toLowerCase() === "person" && String(term?.term || "").trim())) {
+    throw new Error("chunked article brief: keyTerms must include one named person");
+  }
+
+  const bodyA = await callChunkedArticleAI(
+    env,
+    model,
+    "chunked article body A",
+    `CHUNKED ARTICLE FALLBACK - BODY A
+${sharedContext}
+
+Canonical brief:
+${JSON.stringify(compactBrief, null, 2)}
+
+Write only these body fields as JSON:
+{
+  "overviewParagraphs":["paragraph 1","paragraph 2"],
+  "eyewitnessOrChronicle":["paragraph 1","paragraph 2"]
+}
+
+Requirements:
+- Each array must contain exactly 2 paragraphs.
+- Each paragraph should be 105-145 words, source-grounded, and non-repetitive.
+- overviewParagraphs open with the strongest concrete fact.
+- eyewitnessOrChronicle must not invent a witness, memoir, newspaper, decree, archive, or quote. If the source names no account, analyze what the record confirms and leaves unresolved.`,
+    2300,
+  );
+  validateChunkedArticleBodyChunk(bodyA, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A");
+
+  const bodyB = await callChunkedArticleAI(
+    env,
+    model,
+    "chunked article body B",
+    `CHUNKED ARTICLE FALLBACK - BODY B
+${sharedContext}
+
+Canonical brief:
+${JSON.stringify(compactBrief, null, 2)}
+
+Already written body fields:
+${JSON.stringify(bodyA, null, 2)}
+
+Write only these body fields as JSON:
+{
+  "aftermathParagraphs":["paragraph 1","paragraph 2"],
+  "conclusionParagraphs":["paragraph 1","paragraph 2"]
+}
+
+Requirements:
+- Each array must contain exactly 2 paragraphs.
+- Each paragraph should be 105-145 words, source-grounded, and non-repetitive.
+- Aftermath must name specific actions, dates, people, institutions, or confirmed limits in the record.
+- Conclusion must reframe the event with a concrete fact, not a generic reflection.`,
+    2300,
+  );
+  validateChunkedArticleBodyChunk(bodyB, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B");
+
+  const facts = await callChunkedArticleAI(
+    env,
+    model,
+    "chunked article facts",
+    `CHUNKED ARTICLE FALLBACK - FACTS
+${sharedContext}
+
+Canonical brief:
+${JSON.stringify(compactBrief, null, 2)}
+
+Write only this JSON:
+{
+  "quickFacts":[{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
+  "didYouKnowFacts":["six distinct facts, 35-55 words each"]
+}
+
+Requirements:
+- quickFacts must contain exactly 6 populated label/value objects.
+- didYouKnowFacts must contain exactly 6 distinct source-grounded facts.
+- Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.`,
+    1600,
+  );
+  requireChunkArray(facts, "quickFacts", { exact: 6, label: "chunked article facts" });
+  requireChunkArray(facts, "didYouKnowFacts", { exact: 6, label: "chunked article facts" });
+
+  const analysis = await callChunkedArticleAI(
+    env,
+    model,
+    "chunked article analysis",
+    `CHUNKED ARTICLE FALLBACK - ANALYSIS
+${sharedContext}
+
+Canonical brief:
+${JSON.stringify(compactBrief, null, 2)}
+
+Body fields:
+${JSON.stringify({ ...bodyA, ...bodyB }, null, 2)}
+
+Write only this JSON:
+{
+  "analysisGood":[{"title":"3-5 words","detail":"60+ words, specific decision and why it worked"}],
+  "analysisBad":[{"title":"3-5 words","detail":"60+ words, specific failure and better alternative"}],
+  "editorialNote":"80+ words from the thisDay. team"
+}
+
+Requirements:
+- analysisGood must contain exactly 3 items.
+- analysisBad must contain exactly 3 items.
+- Every detail must include a concrete name, date, number, institution, place, or source.
+- editorialNote must be specific to this article and must not add unsupported facts.`,
+    2200,
+  );
+  requireChunkArray(analysis, "analysisGood", { exact: 3, label: "chunked article analysis" });
+  requireChunkArray(analysis, "analysisBad", { exact: 3, label: "chunked article analysis" });
+
+  const merged = normalizeGeneratedArticleContent({
+    ...brief,
+    ...bodyA,
+    ...bodyB,
+    ...facts,
+    ...analysis,
+  }, date);
+  const continuity = auditChunkedArticleContinuity(merged);
+  if (!continuity.ok) {
+    throw new Error(`chunked article fallback continuity failed: ${continuity.issues.join("; ")}`);
+  }
+  delete merged.sourceFacts;
+  validateChunkedArticleSupport(merged);
+  console.warn(`Blog: chunked article fallback produced ${articleBodyWordCount(merged)} body words for ${monthName} ${day}.`);
+  return merged;
+}
 
 async function callWorkersAI(
   env,
@@ -8524,7 +9271,7 @@ STRICT DATE REQUIREMENT: You MUST write about an event that occurred on ${monthN
 
 ${eventSelection}
 ${avoidSection}
-The article must be substantial — at least 1,500 words of body content across all paragraph fields combined. Every paragraph must earn its place with real historical depth, not filler.
+The article must be substantial without being padded. Target 1,050 to 1,250 words of body content across overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs combined. The absolute floor is ${MIN_REAL_ARTICLE_BODY_WORDS} body words. A precise, complete ${MIN_REAL_ARTICLE_BODY_WORDS} word article is better than a repetitive 1,500 word article. Every paragraph must earn its place with new historical depth, not filler.
 
 HARD RULE — COMPLETE EVERY FIELD: You have enough token budget to finish the entire response. Every paragraph must be a complete thought ending with terminal punctuation (period, exclamation mark, or question mark). Never end a paragraph or field mid-sentence. If you are running out of content ideas, write a shorter but fully complete paragraph rather than cutting off mid-sentence. An incomplete sentence anywhere in the JSON is a critical error.
 
@@ -8535,6 +9282,7 @@ Write as a passionate, opinionated history narrator — serious and authoritativ
 Specific voice qualities:
 - PLAY YOUR ACE CARD FIRST: The single most surprising, counterintuitive, or little-known fact in the entire article belongs in the first two sentences. Do not save the best for the end. Most readers will not reach it.
 - FOCUS ON ONE THREAD: Do not try to cover everything about the event. Find the sharpest angle — one person, one decision, one consequence — and pull that thread through the whole article. Breadth kills impact.
+- QUALITY OVER QUANTITY: Once the source-supported facts are exhausted, stop expanding. Do not repeat a person, number, technical detail, or institutional fact just to make the article longer. Shorter is acceptable only when it is complete, specific, and above the body-word floor.
 - FACTS BEFORE FEELINGS: The first paragraph must contain at least three hard facts, drawn from different categories such as one named person, one exact place, one number, one document, or one precise date. Do not open with mood words like "dramatic", "remarkable", "significant", or "unexpected" unless the very same sentence also supplies the concrete fact that earns that description.
 - SOURCE-BOUND SENSORY writing: Use sound, smell, weather, texture, or physical sensation only when the SOURCE MATERIAL or a named account supports it. Never manufacture atmosphere merely to make a scene vivid.
 - NEVER make a summary mood judgment. Do not write "it was a dark time", "it was a difficult period", "it was chaotic", "it was a bleak time", or any sentence that labels a mood without evidence. Describe the specific thing that is dark, difficult, or chaotic — what someone would see, hear, smell, or feel on the ground — and let the reader draw the conclusion themselves. The writer plants the evidence; the reader forms the judgment.
@@ -8556,6 +9304,7 @@ Sentence and paragraph rules:
 - FACT FIRST IN EVERY SECTION: The first sentence of Overview, Eyewitness Accounts, Aftermath, and Legacy must state the key fact before any scene-setting. Answer the implied reader question immediately, then expand.
 - AFTERMATH MUST CASH OUT: The aftermath paragraphs must name specific actions taken in the days, weeks, or years after the event, including who acted, where, and what changed. Do not hide behind phrases like "it reshaped politics" unless you name the office, law, institution, or military result that changed.
 - NO REPETITION ACROSS SECTIONS: Each paragraph must introduce new information. Never restate a point, conclusion, or fact already made in a previous section. Do not name the same person, institution, or concept more than three times in the full article — use pronouns or contextual references after the first mention.
+- NO SEMANTIC DUPLICATION: A repeated fact with different wording is still repetition. If Did You Know already uses the gas flame, the crowd count, the bill, or the named designer, the body may mention it once for context but must spend its next sentence on a different consequence, limitation, action, or source-supported detail.
 - Include at least one clear "what would need to be true for this to be wrong" check somewhere in the article when you make a strong claim.
 - Start with the takeaway, then walk backward to the evidence. Avoid "Picture..." and "This was not some minor accident." Write like a human: a little uneven, a little opinionated, and not overly polished.
 - Avoid semicolons. If absolutely necessary, use at most one semicolon in a paragraph.
@@ -8620,30 +9369,30 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     { "label": "Legacy", "value": "Long-term impact" }
   ],
   "didYouKnowFacts": [
-    "A genuinely surprising lesser-known fact — something most people would not expect, 2 to 3 sentences, minimum 40 words. Must include a specific name, number, or place.",
-    "A detail that reframes the main story or reveals a hidden layer of complexity, 2 to 3 sentences, minimum 40 words.",
-    "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 2 to 3 sentences, minimum 40 words.",
-    "A fact about a specific person involved — their background, motive, or fate — that most accounts skip, 2 to 3 sentences, minimum 40 words.",
-    "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 2 to 3 sentences, minimum 40 words.",
-    "A fact about the long-term legacy or a surprising modern echo of the event, 2 to 3 sentences, minimum 40 words. Provide SIX facts in total and make every one distinct — never restate another."
+    "A genuinely surprising lesser-known fact — something most people would not expect, 1 to 2 sentences, minimum 35 words. Must include a specific name, number, or place. Use one vivid claim plus one supporting detail.",
+    "A detail that reframes the main story or reveals a hidden layer of complexity, 1 to 2 sentences, minimum 35 words. Do not recycle a detail from the first fact.",
+    "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 1 to 2 sentences, minimum 35 words.",
+    "A fact about a specific person involved — their background, motive, or fate — that most accounts skip, 1 to 2 sentences, minimum 35 words.",
+    "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 1 to 2 sentences, minimum 35 words.",
+    "A fact about the long-term legacy or a surprising modern echo of the event, 1 to 2 sentences, minimum 35 words. Provide SIX facts in total and make every one distinct — never restate another."
   ],
   "overviewParagraphs": [
-    "Paragraph 1 (claim + strongest evidence; ~120+ words): Open with a striking scene, a concrete detail, or a blunt declarative statement — never with a rhetorical question. State the core claim directly. Include the single strongest, attributable piece of evidence (name, year, number, or place) that supports it. No chatty openers like 'So, what happened' or 'For starters'. Start with the most important thing.",
-    "Paragraph 2 (nuance + synthesis; ~100 words): Introduce the strongest complication or contrary reality as part of the narrative — not as a rhetorical question or a 'But why?' setup. State the complication directly as a fact or claim, then synthesize. Do NOT begin with 'But the [topic] wasn't without...' or 'But why was it...'. End with a precise assessment that links back to the opening claim."
+    "Paragraph 1 (claim + strongest evidence; ~105 to 125 words): Open with a striking concrete detail or blunt declarative statement — never with a rhetorical question. State the core claim directly. Include the single strongest, attributable piece of evidence (name, year, number, or place) that supports it. No chatty openers like 'So, what happened' or 'For starters'. Start with the most important thing.",
+    "Paragraph 2 (nuance + synthesis; ~90 to 115 words): Introduce the strongest complication or contrary reality as part of the narrative — not as a rhetorical question or a 'But why?' setup. State the complication directly as a fact or claim, then synthesize. Do NOT begin with 'But the [topic] wasn't without...' or 'But why was it...'. End with a precise assessment that links back to the opening claim."
   ],
   "eyewitnessOrChronicle": [
-    "Paragraph 1 (~100+ words): If SOURCE MATERIAL names a witness, chronicler, historian, or document, describe and assess that account in THIRD PERSON. Otherwise explain exactly what the supplied Wikipedia record establishes about the event and identify a limitation in that record without inventing a missing witness or document.",
-    "Paragraph 2 (~100+ words): Contrast only accounts or facts actually present in SOURCE MATERIAL. If no contrasting named account is supplied, analyze the gap between what the record confirms and what it leaves unresolved. Do not add a historian, memoir, newspaper, decree, archive, quotation, or motive from general knowledge."
+    "Paragraph 1 (~90 to 115 words): If SOURCE MATERIAL names a witness, chronicler, historian, or document, describe and assess that account in THIRD PERSON. Otherwise explain exactly what the supplied Wikipedia record establishes about the event and identify a limitation in that record without inventing a missing witness or document.",
+    "Paragraph 2 (~90 to 115 words): Contrast only accounts or facts actually present in SOURCE MATERIAL. If no contrasting named account is supplied, analyze the gap between what the record confirms and what it leaves unresolved. Do not add a historian, memoir, newspaper, decree, archive, quotation, or motive from general knowledge."
   ],
   "eyewitnessQuote": "Use a direct or closely paraphrased quote only when that quote appears in SOURCE MATERIAL; otherwise use an empty string.",
   "eyewitnessQuoteSource": "Use the exact attribution from SOURCE MATERIAL for eyewitnessQuote; otherwise use an empty string.",
   "aftermathParagraphs": [
-    "Paragraph 1 (immediate aftermath; ~120+ words): Describe the first days and weeks after the event with concrete actions, dates, and effects on people and institutions. Focus on specific, attributable changes on the ground.",
-    "Paragraph 2 (medium-term + long view synthesis; ~120+ words): Combine medium-term consequences and the long historical assessment: reforms, responses, and how historians judge the legacy. Be specific and, where appropriate, opinionated."
+    "Paragraph 1 (immediate aftermath; ~100 to 120 words): Describe the first days and weeks after the event with concrete actions, dates, and effects on people and institutions. Focus on specific, attributable changes on the ground.",
+    "Paragraph 2 (medium-term + long view synthesis; ~100 to 120 words): Combine medium-term consequences and the long historical assessment: reforms, responses, and how historians judge the legacy. Be specific and, where appropriate, opinionated."
   ],
   "conclusionParagraphs": [
-    "Paragraph 1 (honest assessment; ~100+ words): State plainly what the event changed and what remained unchanged. Name the specific people, institutions, or ideas that were different afterward, and name what surprised historians about the outcome. Avoid vague grandiosity.",
-    "Paragraph 2 (reframing close; ~80+ words): End with a specific fact, contradiction, or detail that reframes everything the reader just learned — the kind of thing that makes someone put the article down and think. Not a call to reflection, not a generic statement about the importance of history. A concrete surprising detail that lands. The final sentence must be short, direct, and self-contained."
+    "Paragraph 1 (honest assessment; ~90 to 110 words): State plainly what the event changed and what remained unchanged. Name the specific people, institutions, or ideas that were different afterward, and name what surprised historians about the outcome. Avoid vague grandiosity.",
+    "Paragraph 2 (reframing close; ~80 to 100 words): End with a specific fact, contradiction, or detail that reframes everything the reader just learned — the kind of thing that makes someone put the article down and think. Not a call to reflection, not a generic statement about the importance of history. A concrete surprising detail that lands. The final sentence must be short, direct, and self-contained."
   ],
   "analysisGood": [
     { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who deserves credit and why. Describe the specific decision, action, or circumstance that worked, what the alternatives were, and why this outcome was not guaranteed. No generic praise." },
@@ -8676,9 +9425,98 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "contentRationale": "Minimum 40 words. Answer this specific question: what does a reader find in this article that Wikipedia's entry on the same event does not already give them? Name the specific angle, the particular framing, the overlooked detail, or the editorial judgement that makes this article worth reading over the Wikipedia source. Do not be vague. Do not say 'deeper context' or 'engaging narrative'."
 }`;
 
-  // The complete article schema routinely exceeds 4k completion tokens once
-  // every required analysis and enrichment field is populated. Keep enough
-  // headroom to finish valid JSON instead of accepting a truncated object.
+  // Provider-size contract: the full style guide above is useful as a writing
+  // reference, but it pushes free external providers over their per-request
+  // token limits once source material and a 4k completion budget are included.
+  // Send a compact contract and let the structural/quality gates below enforce
+  // the same requirements before any draft can be stored.
+  const compactSourceSection = sourceMaterial
+    ? `SOURCE MATERIAL, the single source of truth:\n"""\n${String(sourceMaterial).slice(0, 5500)}\n"""\n`
+    : "";
+  const compactContextHook = contextHook
+    ? `Current-world hook to weave into conclusion or editorial note, not verbatim: ${contextHook}\n`
+    : "";
+  const compactAvoidSection = takenThisMonth.length > 0
+    ? `Avoid these already covered or closely related topics:\n${takenThisMonth.slice(0, 18).map((title) => `- ${title}`).join("\n")}\n`
+    : "";
+  const compactPrompt = `Write a source-grounded thisDay.info history article as raw JSON only.
+
+Event: ${forcedEvent ? `"${forcedEvent}"` : `a significant event from ${monthName} ${day}`}
+Required date: ${monthName} ${day}. The historicalDate and historicalDateISO month/day must match this date.
+${compactContextHook}${compactSourceSection}${compactAvoidSection}${stricterGrounding ? "Previous draft failed grounding. Be conservative and omit any unsupported specific.\n" : ""}
+Grounding rules:
+- Use only SOURCE MATERIAL for factual claims when it is supplied. If a number, quote, person, document, place, motive, or consequence is not there, do not invent it.
+- Do not include any proper noun, year, treaty, law, massacre, conference, battle, aviation protocol, or named policy unless it appears in SOURCE MATERIAL.
+- If SOURCE MATERIAL is thin on aftermath, say what the record confirms and what remains unresolved. Never fill the gap with general knowledge.
+- Keep recognition, arrest, death, departure, arrival, and capture dates and places distinct.
+- If no named witness or document appears in SOURCE MATERIAL, leave eyewitnessQuote and eyewitnessQuoteSource empty and use eyewitnessOrChronicle to explain what the record confirms and what it leaves unresolved.
+
+Output exactly this JSON shape and no extra text:
+{
+  "title": "... — ${monthName} ${day}, Year",
+  "eventTitle": "...",
+  "historicalDate": "Month Day, Year",
+  "historicalYear": 1234,
+  "historicalDateISO": "YYYY-MM-DD",
+  "location": "City, Country",
+  "country": "Country",
+  "description": "120-155 chars",
+  "ogDescription": "100-130 chars",
+  "twitterDescription": "90-120 chars",
+  "keywords": "comma separated keywords",
+  "imageUrl": "",
+  "imageAlt": "specific alt text",
+  "jsonLdName": "event name",
+  "jsonLdDescription": "schema description",
+  "jsonLdUrl": "source URL",
+  "organizerName": "key person or organization",
+  "readingTimeMinutes": 8,
+  "quickFacts": [{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
+  "didYouKnowFacts": ["six distinct facts, 35-55 words each"],
+  "overviewParagraphs": ["two paragraphs, 125-145 words each"],
+  "eyewitnessOrChronicle": ["two paragraphs, 115-135 words each"],
+  "eyewitnessQuote": "",
+  "eyewitnessQuoteSource": "",
+  "aftermathParagraphs": ["two paragraphs, 120-145 words each"],
+  "conclusionParagraphs": ["two paragraphs, 105-125 words each"],
+  "analysisGood": [{"title":"3-5 words","detail":"60+ words, specific decision and why it worked"}],
+  "analysisBad": [{"title":"3-5 words","detail":"60+ words, specific failure and better alternative"}],
+  "editorialNote": "80+ words from the thisDay. team",
+  "keyTerms": [{"term":"exact article phrase","wikiUrl":"https://en.wikipedia.org/wiki/...","type":"person"}],
+  "wikiUrl": "source URL",
+  "youtubeSearchQuery": "specific event year history documentary",
+  "bookSearchQuery": "3-5 word book search",
+  "amazonBookTopic": "3-7 word book topic",
+  "amazonProductIdeas": [{"label":"3-6 words","searchQuery":"specific book or item search","type":"book"}],
+  "contentRationale": "40+ words"
+}
+
+Field requirements:
+- quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 6 distinct facts.
+- analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
+- keyTerms must contain 5-8 entries and at least one real named person connected to the event.
+- imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
+- Body fields overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs must total 900-1250 words. This is a hard publication gate.
+- overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs must each be arrays of exactly 2 paragraph strings, exactly 8 body paragraphs total.
+- Every body paragraph must be at least 105 words. Count silently before responding. If any body paragraph is under 105 words, the article is rejected.
+
+Writing rules:
+- Lead with the strongest concrete fact in the first two sentences. Facts before mood.
+- Every paragraph needs a specific name, date, number, place, institution, source, or quote.
+- No rhetorical questions, no first-person singular narrator, no fake witness voice.
+- No hyphens or em dashes inside article body fields. Use commas or periods.
+- No filler phrases: significant event, pivotal moment, changed history, lasting impact, cannot be overstated, it is important to remember, dark chapter.
+- Do not repeat the same fact across sections. Repeated facts with different wording are still repetition.
+- Title and eventTitle must be short subject-plus-finite-verb clauses, not noun phrases with a bare verb appended.
+- End every string as a complete sentence where prose is expected.`;
+
+  // 4096 matches the documented article-generation budget (1050-1250 word
+  // body + the full JSON structure needs real headroom). Per-model defensive
+  // capping now lives in callAI()'s Groq path (capGroqMaxTokens in
+  // js/shared/ai-call.js) — it trims the request down for any fallback model
+  // with a tighter TPM ceiling than the primary, so this base value doesn't
+  // need to be conservative for the worst-case model anymore. Truncation is
+  // still handled by the malformed-output retry loop and quality gates.
   const rawValue = await callAI(
     env,
     [
@@ -8687,9 +9525,9 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
         content:
           "You are a historical content writer. Always respond with valid JSON only, no markdown, no extra text. You MUST complete every field fully — every paragraph must end with a complete sentence and a closing punctuation mark. Never truncate mid-sentence.",
       },
-      { role: "user", content: prompt },
+      { role: "user", content: compactPrompt },
     ],
-    { maxTokens: 8192, timeoutMs: 90_000, cfModel: model },
+    { maxTokens: 4096, timeoutMs: 90_000, cfModel: model, temperature: 0.15 },
   );
 
   if (!rawValue || rawValue.trim().length < 100) {
@@ -8721,10 +9559,10 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
         {
           role: "user",
           content:
-            `${prompt}\n\nIMPORTANT: Start your response immediately with the character { and end with }. Do not write any prose or explanation. Begin with { right now.`,
+            `${compactPrompt}\n\nIMPORTANT: Start your response immediately with the character { and end with }. Do not write any prose or explanation. Begin with { right now.`,
         },
       ],
-      { maxTokens: 8192, timeoutMs: 90_000, cfModel: model },
+      { maxTokens: 4096, timeoutMs: 90_000, cfModel: model, temperature: 0.15 },
     );
     const retryStart = String(retryRaw || "").trim().indexOf("{");
     if (retryStart === -1)
@@ -8770,57 +9608,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     }
   }
 
-  // Enforce that the title always follows the format "Event Name — Month Day, Year".
-  // The AI sometimes omits the date, uses wrong format, or uses colloquial date names.
-  // Derive the historical year from the content (historicalYear → ISO → date →
-  // title). Never silently default to date.getFullYear(): the publication year is
-  // not the event's year, and doing so re-stamps the current year every year. Only
-  // fall back when the model returned no year anywhere, and warn loudly so the
-  // degenerate output is visible.
-  let year = deriveHistoricalYear(parsed);
-  if (!Number.isInteger(year)) {
-    year = date.getFullYear();
-    console.warn(
-      `Blog: no historical year in AI output for ${date.toISOString().slice(0, 10)} — falling back to publication year ${year}`,
-    );
-  }
-  const expectedDateSuffix = `${monthName} ${day}, ${year}`;
-  const hasSeparator = parsed.title && parsed.title.includes(" — ");
-  if (
-    !parsed.title ||
-    !parsed.title.includes(expectedDateSuffix) ||
-    !hasSeparator
-  ) {
-    parsed.title = buildDisplayTitle(
-      parsed.title,
-      parsed.eventTitle ?? "Untitled",
-      expectedDateSuffix,
-    );
-  }
-
-  // Normalise fields that must be strings — the model occasionally returns arrays.
-  if (Array.isArray(parsed.keywords)) parsed.keywords = parsed.keywords.join(", ");
-  if (Array.isArray(parsed.amazonProductIdeas)) {
-    // already expected as array — leave it
-  }
-  if (typeof parsed.keywords !== "string") parsed.keywords = String(parsed.keywords || "");
-
-  enforceAnswerFirstSections(parsed);
-
-  // Truncation audit: check that key paragraph arrays end with complete sentences.
-  // This runs silently — a truncated paragraph is kept as-is (better than nothing)
-  // but a warning is logged so we can spot if 8000 tokens is still not enough.
-  const PARA_FIELDS = ["overviewParagraphs", "eyewitnessOrChronicle", "aftermathParagraphs", "conclusionParagraphs"];
-  for (const field of PARA_FIELDS) {
-    const arr = parsed[field];
-    if (!Array.isArray(arr) || arr.length === 0) continue;
-    const last = String(arr[arr.length - 1] || "").trimEnd();
-    if (last && !/[.!?'"»]$/.test(last)) {
-      console.warn(`Blog: paragraph truncation detected in ${field} for ${date.toISOString().slice(0, 10)} — last char: "${last.slice(-20)}"`);
-    }
-  }
-
-  return parsed;
+  return normalizeGeneratedArticleContent(parsed, date);
 }
 
 // ---------------------------------------------------------------------------
@@ -9990,7 +10778,8 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     "'left a lasting impact', 'cannot be overstated', 'shows the importance of', 'reminder of', " +
     "'it was a dark time', 'it was a bleak time', 'it was a difficult period', 'dark chapter', " +
     "'that's the thing', 'it's a shame', 'still resonates today', 'testament to', 'played a crucial role', " +
-    "'had a profound impact', 'turning point', 'watershed moment', 'throughout history'\n" +
+    "'had a profound impact', 'turning point', 'watershed moment', 'throughout history', " +
+    "'dive into', 'delve into', 'unleash', 'game-changing', 'in today's fast-paced world', 'it's worth noting'\n" +
     "- Makes a mood judgment without observable evidence ('it was brutal' with no detail of what the brutality was)\n" +
     "- Restates a point already made in a previous paragraph\n" +
     "When rewriting: add the specific fact being avoided, replace mood labels with concrete observable detail, " +
@@ -10003,8 +10792,15 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     "- Open sentences different ways: a fronted prepositional or subordinate clause, a consequence, occasionally a sentence-initial 'And', 'But', 'Yet', or 'Except that'. Do not march three sentences from the same subject or pattern.\n" +
     "- Replace AI connectors ('Furthermore', 'Moreover', 'Additionally', 'In conclusion', 'Notably', 'Significantly') with conversational ones ('And yet', 'In other words', 'That is to say', 'After all', 'Even so', 'What matters is').\n" +
     "- Vary paragraph length too. An occasional one-sentence paragraph can carry a turn in the argument.\n" +
+    "- Clarity first. Every sentence must land on first read. Prefer plain words and concrete verbs; reach for a complex word only when the idea itself is complex.\n" +
+    "- Cut words that don't earn their place. An adjective or adverb must add information, not enthusiasm. Strip filler frames ('It's important to note that the treaty failed' becomes 'The treaty failed') and say each idea once, well.\n" +
+    "- Quality beats length. Keep the article above the real-article floor, but never add padding or repeat a source fact just to sound substantial. If a paragraph repeats an earlier detail, replace it with a new source-supported consequence, limitation, action, or uncertainty.\n" +
+    "- No marketing hype, buzzwords, or forced warmth. Honest and specific beats impressive-sounding: write what the evidence supports, plainly.\n" +
+    "- Prefer active voice. Use passive only when the actor is genuinely unknown or beside the point.\n" +
     "PROHIBITIONS: No rhetorical questions to the reader. No 'Picture this', 'So,', 'You have to understand'. " +
-    "No sentence fragments as decoration. No chatty filler: 'That's the thing', 'It's a shame, really', 'He saw it all'.\n\n" +
+    "No sentence fragments as decoration. No chatty filler: 'That's the thing', 'It's a shame, really', 'He saw it all'.\n" +
+    "DISCIPLINE: Meaning is invariant. A trim that changes what a sentence claims is a bug, so keep the fact. " +
+    "And never flatten a quirky, specific sentence into smooth generic prose. These rules serve the voice, they do not replace it.\n\n" +
     SOURCE_BOUND_REPAIR_RULES + "\n" +
     WRITING_REWRITE_RULES + "\n" +
     "PUNCTUATION: Use only periods, commas, and question marks. Never use em dashes (—), en dashes (–), semicolons (;), colons (:), or a hyphen between words (write 'best known', not 'best-known'). Convert any such break to a period or comma with correct grammar.\n\n" +

@@ -9,7 +9,7 @@
  * so video.js can render animated synchronized captions.
  *
  * Voice: Max — e-learning + documentary tone.
- * Model: eleven_turbo_v2_5 — lowest character cost on the free plan.
+ * Model: eleven_turbo_v2_5 primary, eleven_flash_v2_5 fallback.
  *
  * Free plan: 10 000 chars/month.
  * Schedule: 1 video every 3 days ≈ 10 videos/month.
@@ -26,7 +26,10 @@ import { recordQuotaSignal } from "./tracker.js";
 
 const ASSETS_DIR = "./assets";
 const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George — warm captivating storyteller
-const MODEL_ID = "eleven_turbo_v2_5"; // fastest + lowest character cost
+const MODEL_IDS = [
+  "eleven_turbo_v2_5", // proven existing output; kept first while still accepted
+  "eleven_flash_v2_5", // documented functional replacement for Turbo v2.5
+];
 
 /**
  * Builds the TTS narration script.
@@ -148,7 +151,7 @@ export function buildNarrationParts(post, contentItems, articleText) {
  * Calls ElevenLabs /with-timestamps endpoint.
  * Returns the raw Response so the caller can handle status codes.
  */
-async function callElevenLabsWithTimestamps(apiKey, script) {
+async function callElevenLabsWithTimestamps(apiKey, script, modelId) {
   return fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}/with-timestamps`,
     {
@@ -160,7 +163,7 @@ async function callElevenLabsWithTimestamps(apiKey, script) {
       },
       body: JSON.stringify({
         text: script,
-        model_id: MODEL_ID,
+        model_id: modelId,
         voice_settings: {
           stability: 0.42,        // lower = more natural variation, less robotic
           similarity_boost: 0.78, // keep voice identity consistent
@@ -249,33 +252,54 @@ export async function generateNarration(slug, script) {
 
   console.log(`  TTS: ${script.length} chars — "${script.slice(0, 60)}..."`);
 
-  const isQuotaError = (r) => r && (r.status === 429 || r.status === 401);
+  const isKeyRotationError = (r) => r && (r.status === 429 || r.status === 401);
 
   let res = null;
-  for (let i = 0; i < keys.length; i++) {
-    res = await callElevenLabsWithTimestamps(keys[i], script);
-    if (res.ok) break;
-    if (isQuotaError(res) && i < keys.length - 1) {
-      console.warn(
-        `  ⚠ ElevenLabs key ${i + 1} quota reached — trying key ${i + 2}`,
-      );
-      await recordQuotaSignal(
-        "elevenlabs",
-        `key ${i + 1} quota reached (${res.status})`,
-      );
+  let selectedModel = MODEL_IDS[0];
+  let lastStatus = null;
+  let lastBody = "no API key available";
+  for (let modelIndex = 0; modelIndex < MODEL_IDS.length; modelIndex++) {
+    const modelId = MODEL_IDS[modelIndex];
+    for (let i = 0; i < keys.length; i++) {
+      res = await callElevenLabsWithTimestamps(keys[i], script, modelId);
+      if (res.ok) {
+        selectedModel = modelId;
+        break;
+      }
+
+      lastStatus = res.status;
+      lastBody = await res.text().catch(() => "");
+
+      if (isKeyRotationError(res) && i < keys.length - 1) {
+        console.warn(
+          `  ⚠ ElevenLabs key ${i + 1} failed (${res.status}) on ${modelId} — trying key ${i + 2}`,
+        );
+        await recordQuotaSignal(
+          "elevenlabs",
+          `key ${i + 1} failed on ${modelId} (${res.status})`,
+        );
+        continue;
+      }
+
+      if (!isKeyRotationError(res) && modelIndex < MODEL_IDS.length - 1) {
+        console.warn(
+          `  ⚠ ElevenLabs model ${modelId} failed (${res.status}) — trying ${MODEL_IDS[modelIndex + 1]}`,
+        );
+      }
+      break;
     }
+    if (res?.ok) break;
   }
 
   if (!res || !res.ok) {
-    const body = res ? await res.text() : "no API key available";
-    if (res && isQuotaError(res)) {
+    if (res && isKeyRotationError(res)) {
       await recordQuotaSignal(
         "elevenlabs",
-        `${res.status}: ${body.slice(0, 120)}`,
+        `${lastStatus}: ${String(lastBody).slice(0, 120)}`,
       );
     }
     console.warn(
-      `  ⚠ ElevenLabs error ${res?.status ?? "—"}: ${body} — video will have no narration`,
+      `  ⚠ ElevenLabs error ${lastStatus ?? "—"}: ${lastBody} — video will have no narration`,
     );
     return { path: null, words: [] };
   }
@@ -294,7 +318,7 @@ export async function generateNarration(slug, script) {
   // Parse word timestamps
   const words = alignmentToWords(data.alignment);
   console.log(
-    `  Narration saved → ${outputPath} (${words.length} word timestamps)`,
+    `  Narration saved → ${outputPath} (${words.length} word timestamps, ${selectedModel})`,
   );
 
   return { path: outputPath, words };

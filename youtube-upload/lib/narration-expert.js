@@ -1,5 +1,5 @@
 import { recordQuotaSignal } from "./tracker.js";
-import { resolveGroqModels, resolveHFTextModel } from "./model-resolver.js";
+import { resolveGroqModels, resolveHFTextModel, groqReasoningParams, reasoningCompletionBudget, capGroqMaxTokens } from "./model-resolver.js";
 
 /**
  * Narration Expert — rewrites DYK / Quick Facts content items into engaging
@@ -32,12 +32,17 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({
-      model,
-      messages,
-      max_tokens: 1024,
-      temperature: 0.5,
-    }),
+    body: (model, messages) => {
+      const maxTokens = capGroqMaxTokens(model, reasoningCompletionBudget(model, 1024), messages);
+      if (maxTokens == null) return null;
+      return {
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.5,
+        ...groqReasoningParams(model),
+      };
+    },
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -49,12 +54,17 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({
-      model,
-      messages,
-      max_tokens: 1024,
-      temperature: 0.5,
-    }),
+    body: (model, messages) => {
+      const maxTokens = capGroqMaxTokens(model, reasoningCompletionBudget(model, 1024), messages);
+      if (maxTokens == null) return null;
+      return {
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.5,
+        ...groqReasoningParams(model),
+      };
+    },
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -66,12 +76,17 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({
-      model,
-      messages,
-      max_tokens: 1024,
-      temperature: 0.5,
-    }),
+    body: (model, messages) => {
+      const maxTokens = capGroqMaxTokens(model, reasoningCompletionBudget(model, 1024), messages);
+      if (maxTokens == null) return null;
+      return {
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.5,
+        ...groqReasoningParams(model),
+      };
+    },
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -83,12 +98,17 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
     }),
-    body: (model, messages) => ({
-      model,
-      messages,
-      max_tokens: 1024,
-      temperature: 0.5,
-    }),
+    body: (model, messages) => {
+      const maxTokens = capGroqMaxTokens(model, reasoningCompletionBudget(model, 1024), messages);
+      if (maxTokens == null) return null;
+      return {
+        model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.5,
+        ...groqReasoningParams(model),
+      };
+    },
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
   {
@@ -104,9 +124,10 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
     body: (model, messages) => ({
       model,
       messages,
-      max_tokens: 1024,
+      max_tokens: reasoningCompletionBudget(model, 1024),
       temperature: 0.5,
       stream: false,
+      ...groqReasoningParams(model),
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
@@ -123,9 +144,10 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
     body: (model, messages) => ({
       model,
       messages,
-      max_tokens: 1024,
+      max_tokens: reasoningCompletionBudget(model, 1024),
       temperature: 0.5,
       stream: false,
+      ...groqReasoningParams(model),
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
@@ -142,9 +164,10 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
     body: (model, messages) => ({
       model,
       messages,
-      max_tokens: 1024,
+      max_tokens: reasoningCompletionBudget(model, 1024),
       temperature: 0.5,
       stream: false,
+      ...groqReasoningParams(model),
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
@@ -161,9 +184,10 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
     body: (model, messages) => ({
       model,
       messages,
-      max_tokens: 1024,
+      max_tokens: reasoningCompletionBudget(model, 1024),
       temperature: 0.5,
       stream: false,
+      ...groqReasoningParams(model),
     }),
     extractText: (data) => data?.choices?.[0]?.message?.content ?? "",
   },
@@ -188,7 +212,9 @@ Style guide:
 - Open with strong hooks: specific numbers, dramatic contrasts, or vivid imagery
 - Use active voice and present-tense verbs where they add urgency ("Soviet forces surround…")
 - Keep each item as ONE sentence or two short connected sentences — no lists
+- Prefer one vivid claim plus one supporting detail per item; do not pack in every source detail
 - Avoid starting consecutive items with the same word
+- If the article repeats itself, choose the freshest detail and cut duplicate context
 - Do not begin items with the calendar date or repeat the title date; the video card already shows it
 - If a fact starts with "On [Month] [day]" or "[Month] [day], [year]", remove that lead-in and start with the actor, number, or action
 - Do NOT invent facts not present in the original items or the article text
@@ -202,10 +228,14 @@ Style guide:
 // ---------------------------------------------------------------------------
 
 async function callProvider(provider, apiKey, messages) {
+  const body = provider.body(provider.model, messages);
+  if (!body) {
+    throw new Error("prompt too large for configured token budget");
+  }
   const res = await fetch(provider.url, {
     method: "POST",
     headers: provider.headers(apiKey),
-    body: JSON.stringify(provider.body(provider.model, messages)),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
 

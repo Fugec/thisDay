@@ -8,6 +8,7 @@
  */
 
 import { config } from "dotenv";
+import { groqReasoningParams, reasoningCompletionBudget, capGroqMaxTokens, resolveGroqModels } from "./lib/model-resolver.js";
 config();
 
 // ---------------------------------------------------------------------------
@@ -19,23 +20,97 @@ function assert(condition, message) {
 }
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+// Resolver keeps llama-3.3-70b-versatile primary while Groq still serves it;
+// these are explicit fallbacks for when the resolved primary is unavailable.
+const GROQ_MODEL_FALLBACK = "openai/gpt-oss-120b";
+const GROQ_MODEL_FALLBACKS = [
+  GROQ_MODEL_FALLBACK,
+  "qwen/qwen3-32b",
+  "qwen/qwen3.6-27b",
+  "openai/gpt-oss-20b",
+];
 
-async function callGroq(messages, maxTokens = 1500) {
-  const key = process.env.GROQ_API_KEY;
-  if (!key) return null;
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: GROQ_MODEL, messages, max_tokens: maxTokens, temperature: 0.3 }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+function uniqueStrings(values) {
+  return [...new Set(values.filter(Boolean).map((value) => String(value)))];
+}
+
+function getGroqKeys() {
+  return [
+    process.env.GROQ_API_KEY,
+    process.env.GROQ_API_KEY_2,
+    process.env.GROQ_API_KEY_3,
+    process.env.GROQ_API_KEY_4,
+  ].filter(Boolean);
+}
+
+function saveGroqEnv() {
+  return {
+    GROQ_API_KEY: process.env.GROQ_API_KEY,
+    GROQ_API_KEY_2: process.env.GROQ_API_KEY_2,
+    GROQ_API_KEY_3: process.env.GROQ_API_KEY_3,
+    GROQ_API_KEY_4: process.env.GROQ_API_KEY_4,
+  };
+}
+
+function restoreGroqEnv(saved) {
+  for (const [key, value] of Object.entries(saved)) {
+    if (value == null) delete process.env[key];
+    else process.env[key] = value;
   }
-  const data = await res.json();
-  return (data?.choices?.[0]?.message?.content ?? "").trim();
+}
+
+async function getGroqModelCandidates() {
+  const { textModel } = await resolveGroqModels();
+  return uniqueStrings([textModel, ...GROQ_MODEL_FALLBACKS]);
+}
+
+function isRetryableGroqStatus(status) {
+  return status === 429 || status === 413 || status >= 500;
+}
+
+async function callGroq(messages, maxTokens = 2200, validateText = null) {
+  const keys = getGroqKeys();
+  if (!keys.length) return null;
+
+  let lastError = null;
+  for (const model of await getGroqModelCandidates()) {
+    for (const key of keys) {
+      const cappedMaxTokens = capGroqMaxTokens(
+        model,
+        reasoningCompletionBudget(model, maxTokens),
+        messages,
+      );
+      if (cappedMaxTokens == null) {
+        lastError = new Error(`Prompt too large for ${model}`);
+        break;
+      }
+      const res = await fetch(GROQ_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens: cappedMaxTokens,
+          temperature: 0.3,
+          ...groqReasoningParams(model),
+        }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = (data?.choices?.[0]?.message?.content ?? "").trim();
+        if (!validateText || validateText(text)) return text;
+        lastError = new Error(`Invalid Groq response (${model}): ${text.slice(0, 200)}`);
+        break;
+      }
+      const body = await res.text().catch(() => "");
+      lastError = new Error(`HTTP ${res.status} (${model}): ${body.slice(0, 200)}`);
+      if (!isRetryableGroqStatus(res.status) && res.status !== 401 && res.status !== 403) {
+        throw lastError;
+      }
+    }
+  }
+  throw lastError ?? new Error("Groq request failed with no response");
 }
 
 function parseQuestions(raw) {
@@ -99,16 +174,44 @@ const EXPERT_SYSTEM =
 
 const TESTS = [
   {
+    name: "Groq TPM capping — model-resolver caps tight free-tier models before requests",
+    run: async () => {
+      assert(
+        reasoningCompletionBudget("openai/gpt-oss-120b", 4096) === 6144,
+        "gpt-oss should receive completion headroom before capping",
+      );
+      assert(
+        capGroqMaxTokens("openai/gpt-oss-120b", 6144) === 6000,
+        "gpt-oss 8000 TPM ceiling should leave 2000 tokens for prompt",
+      );
+      assert(
+        capGroqMaxTokens("qwen/qwen3.6-27b", 7000) === 6000,
+        "qwen3.6 8000 TPM ceiling should cap at 6000",
+      );
+      assert(
+        capGroqMaxTokens("qwen/qwen3-32b", 4096) === 4000,
+        "qwen3-32b 6000 TPM ceiling should cap at 4000",
+      );
+      assert(
+        capGroqMaxTokens("llama-3.3-70b-versatile", 4096) === 4096,
+        "llama-3.3 primary should stay uncapped",
+      );
+      console.log("  ✓ Groq TPM cap logic matches worker-side behavior");
+    },
+  },
+
+  {
     name: "Quiz generation — Groq produces a valid 5-question quiz from blog context",
     run: async () => {
-      if (!process.env.GROQ_API_KEY) {
+      if (!getGroqKeys().length) {
         console.log("  ⚠ GROQ_API_KEY not set — skipping live API test");
         return;
       }
 
       const raw = await callGroq(
         [{ role: "system", content: QUIZ_SYSTEM }, { role: "user", content: QUIZ_USER }],
-        1500,
+        2200,
+        parseQuestions,
       );
       assert(raw && raw.length > 0, "empty response from Groq");
 
@@ -128,7 +231,7 @@ const TESTS = [
   {
     name: "Quiz expert — sharpens questions and shows before/after diff",
     run: async () => {
-      if (!process.env.GROQ_API_KEY) {
+      if (!getGroqKeys().length) {
         console.log("  ⚠ GROQ_API_KEY not set — skipping live API test");
         return;
       }
@@ -136,7 +239,8 @@ const TESTS = [
       // Step 1: generate base quiz
       const rawBase = await callGroq(
         [{ role: "system", content: QUIZ_SYSTEM }, { role: "user", content: QUIZ_USER }],
-        1500,
+        2200,
+        parseQuestions,
       );
       const baseQuiz = parseQuestions(rawBase);
       assert(baseQuiz !== null, `Base quiz parse failed.\nRaw: ${rawBase?.slice(0, 400)}`);
@@ -150,7 +254,8 @@ const TESTS = [
 
       const rawSharp = await callGroq(
         [{ role: "system", content: EXPERT_SYSTEM }, { role: "user", content: expertUser }],
-        2000,
+        2200,
+        parseQuestions,
       );
       assert(rawSharp && rawSharp.length > 0, "empty response from quiz expert");
 
@@ -185,8 +290,11 @@ const TESTS = [
   {
     name: "Fallback — no GROQ_API_KEY set: no fetch called, returns null",
     run: async () => {
-      const saved = process.env.GROQ_API_KEY;
+      const saved = saveGroqEnv();
       process.env.GROQ_API_KEY = "";
+      process.env.GROQ_API_KEY_2 = "";
+      process.env.GROQ_API_KEY_3 = "";
+      process.env.GROQ_API_KEY_4 = "";
       let fetchCalled = false;
       const realFetch = globalThis.fetch;
       globalThis.fetch = async (...args) => { fetchCalled = true; return realFetch(...args); };
@@ -199,7 +307,7 @@ const TESTS = [
         console.log("  ✓ No fetch called, null returned");
       } finally {
         globalThis.fetch = realFetch;
-        process.env.GROQ_API_KEY = saved;
+        restoreGroqEnv(saved);
       }
     },
   },
@@ -207,8 +315,11 @@ const TESTS = [
   {
     name: "Fallback — bad token (401): throws, caller should use originals",
     run: async () => {
-      const saved = process.env.GROQ_API_KEY;
+      const saved = saveGroqEnv();
       process.env.GROQ_API_KEY = "gsk_invalid_token_for_testing";
+      process.env.GROQ_API_KEY_2 = "gsk_invalid_token_for_testing";
+      process.env.GROQ_API_KEY_3 = "gsk_invalid_token_for_testing";
+      process.env.GROQ_API_KEY_4 = "gsk_invalid_token_for_testing";
       try {
         let threw = false;
         try {
@@ -225,7 +336,7 @@ const TESTS = [
         assert(threw, "Expected callGroq to throw on invalid key");
         console.log("  ✓ Bad token throws auth error — caller falls back to originals");
       } finally {
-        process.env.GROQ_API_KEY = saved;
+        restoreGroqEnv(saved);
       }
     },
   },

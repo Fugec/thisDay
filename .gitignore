@@ -17,8 +17,7 @@ CONFIGURATION.txt
 # Tests — local only, not deployed or committed
 tests/
 package.json
-youtube-upload/test-history-expert.js
-youtube-upload/test-narration-expert.js
+youtube-upload/test-*.js
 
 # Wrangler build artifacts
 .wrangler/

@@ -4871,6 +4871,13 @@ const ARTICLE_BODY_FIELDS = [
 
 const MIN_REAL_ARTICLE_BODY_WORDS = 850;
 
+// The chunked fallback writes exactly 8 body paragraphs (2 each across the four
+// ARTICLE_BODY_FIELDS). This per-paragraph floor must be high enough that a
+// fully valid chunked body clears MIN_REAL_ARTICLE_BODY_WORDS: 8 x 110 = 880.
+// A lower floor (it was 70 → 560) let the chunked "success" still fail the
+// publish gate it exists to satisfy (2026-07-05 incident).
+const CHUNKED_BODY_PARAGRAPH_MIN_WORDS = 110;
+
 function articleBodyWordCount(content) {
   return ARTICLE_BODY_FIELDS.reduce((total, field) => {
     const paragraphs = Array.isArray(content?.[field]) ? content[field] : [];
@@ -5162,13 +5169,64 @@ function extractFirstJsonObject(value) {
   return cleaned.slice(start);
 }
 
+/**
+ * AI models routinely emit raw newlines, tabs, or other control characters
+ * INSIDE JSON string values instead of the escaped \n / \t sequences JSON
+ * requires. JSON.parse rejects those with "Bad control character in string
+ * literal", which on 2026-07-05 aborted the chunked "facts" sub-call and took
+ * down the whole chunked article fallback. This walks the JSON and escapes any
+ * unescaped control character (U+0000–U+001F) that appears inside a string
+ * literal, leaving structure and already-escaped sequences untouched.
+ */
+function sanitizeJsonControlChars(json) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    const code = json.charCodeAt(i);
+    if (inString && code <= 0x1f) {
+      if (ch === "\n") out += "\\n";
+      else if (ch === "\r") out += "\\r";
+      else if (ch === "\t") out += "\\t";
+      else if (ch === "\b") out += "\\b";
+      else if (ch === "\f") out += "\\f";
+      else out += "\\u" + code.toString(16).padStart(4, "0");
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function parseJsonObjectFromAI(value, label) {
   const json = extractFirstJsonObject(value);
   if (!json) throw new Error(`${label}: no JSON object returned`);
   try {
     return JSON.parse(json);
   } catch (err) {
-    throw new Error(`${label}: JSON parse failed (${err.message})`);
+    // Retry once after escaping raw control characters inside string literals,
+    // the single most common reason a well-formed AI JSON object fails to parse.
+    try {
+      return JSON.parse(sanitizeJsonControlChars(json));
+    } catch {
+      throw new Error(`${label}: JSON parse failed (${err.message})`);
+    }
   }
 }
 
@@ -5679,6 +5737,10 @@ async function generateAndStore(
     }
     throw lastError;
   };
+  // Per-attempt failure trail. recordPipelineFailure only keeps the single last
+  // message, so terminal throws carry the whole sequence — the 2026-07-05 post
+  // mortem could not tell which gate failed on each attempt without wrangler tail.
+  const attemptFailures = [];
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
     content =
       attempt === 1
@@ -5692,6 +5754,7 @@ async function generateAndStore(
 
     const dateValidation = validateContentDateForPublish(content, now);
     if (!dateValidation.ok) {
+      attemptFailures.push(`attempt ${attempt} date: ${dateValidation.reason}`);
       if (attempt < MAX_CONTENT_ATTEMPTS) {
         const avoid = [...takenAllTime, content?.title].filter(Boolean);
         console.warn(
@@ -5701,45 +5764,73 @@ async function generateAndStore(
         continue;
       }
 
-      throw new Error(dateValidation.reason);
+      throw new Error(`${dateValidation.reason} [attempts: ${attemptFailures.join(" | ")}]`);
     }
 
     try {
       assertRequiredContentBlocks(content);
     } catch (err) {
-      if (attempt < MAX_CONTENT_ATTEMPTS) {
-        const avoid = [...takenAllTime, content?.title].filter(Boolean);
-        if (isShortArticleBodyFailure(err) && chunkedArticleFallbackEnabled(env)) {
-          console.warn(
-            `Blog AI: one-shot article body too short for "${content?.title || "untitled"}" — ${err.message}. Trying chunked article fallback (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+      attemptFailures.push(`attempt ${attempt} blocks: ${err.message}`);
+      const avoid = [...takenAllTime, content?.title].filter(Boolean);
+
+      // Short body → chunked fallback. The chunked path writes body paragraphs in
+      // dedicated calls with a firm per-paragraph floor, so it reliably clears the
+      // 850-word gate the one-shot chronically undershoots. This runs on EVERY
+      // attempt, including the last: on 2026-07-05 the fallback was gated behind
+      // `attempt < MAX_CONTENT_ATTEMPTS`, so the final attempt had no escape hatch
+      // and the post failed to publish.
+      if (isShortArticleBodyFailure(err) && chunkedArticleFallbackEnabled(env)) {
+        console.warn(
+          `Blog AI: one-shot article body too short for "${content?.title || "untitled"}" — ${err.message}. Trying chunked article fallback (attempt ${attempt}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        try {
+          const chunked = await generateArticleContentChunkedFallback(
+            env,
+            now,
+            avoid,
+            activeModel,
+            selectedForcedEvent,
+            preferredPillars,
+            contextHook,
+            recentPillars,
+            sourceMaterial,
+            false,
           );
-          try {
-            content = await generateArticleContentChunkedFallback(
-              env,
-              now,
-              avoid,
-              activeModel,
-              selectedForcedEvent,
-              preferredPillars,
-              contextHook,
-              recentPillars,
-              sourceMaterial,
-              false,
-            );
-            continue;
-          } catch (fallbackErr) {
-            console.warn(
-              `Blog AI: chunked article fallback failed — ${fallbackErr.message}. Falling back to one-shot regeneration.`,
-            );
+          // Re-run the same per-iteration gates on the chunked result so a
+          // recovered body is still date-validated and structurally complete
+          // before it falls through to the grounding gate below.
+          if (selectedEvent) {
+            attachSelectedEventSourcePages(chunked, selectedEvent);
+            enforceSelectedEventDate(chunked, selectedEvent);
           }
+          const chunkedDate = validateContentDateForPublish(chunked, now);
+          if (!chunkedDate.ok) throw new Error(chunkedDate.reason);
+          assertRequiredContentBlocks(chunked);
+          content = chunked;
+          // Recovered — annotate the 'blocks' entry pushed above so a later
+          // terminal failure's trail does not read as an unrescued block failure.
+          attemptFailures[attemptFailures.length - 1] += " (recovered via chunked fallback)";
+          // Do not continue/throw; fall through to the grounding gate.
+        } catch (fallbackErr) {
+          attemptFailures.push(`attempt ${attempt} chunked: ${fallbackErr.message}`);
+          console.warn(
+            `Blog AI: chunked article fallback failed — ${fallbackErr.message}.`,
+          );
+          if (attempt < MAX_CONTENT_ATTEMPTS) {
+            content = await generateArticleContent(avoid);
+            continue;
+          }
+          throw new Error(`${err.message} [attempts: ${attemptFailures.join(" | ")}]`);
         }
+      } else if (attempt < MAX_CONTENT_ATTEMPTS) {
         console.warn(
           `Blog AI: incomplete generated content for "${content?.title || "untitled"}" - ${err.message}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
         content = await generateArticleContent(avoid);
         continue;
+      } else {
+        throw new Error(`${err.message} [attempts: ${attemptFailures.join(" | ")}]`);
       }
-      throw err;
     }
 
     // Credibility gate (2026-06-20): the article must be grounded in the selected
@@ -5751,6 +5842,7 @@ async function generateAndStore(
     if (groundingSource) {
       const grounding = verifyArticleGrounding(content, groundingSource);
       if (!grounding.ok) {
+        attemptFailures.push(`attempt ${attempt} grounding: ${grounding.reasons.join("; ")}`);
         if (attempt < MAX_CONTENT_ATTEMPTS) {
           const avoid = [...takenAllTime, content?.title].filter(Boolean);
           console.warn(
@@ -5760,7 +5852,7 @@ async function generateAndStore(
           continue;
         }
         throw new Error(
-          `Article failed source-grounding credibility check: ${grounding.reasons.join("; ")}`,
+          `Article failed source-grounding credibility check: ${grounding.reasons.join("; ")} [attempts: ${attemptFailures.join(" | ")}]`,
         );
       }
     }
@@ -8828,7 +8920,7 @@ function requireChunkArray(chunk, field, { min = 1, exact = null, label = "chunk
 function validateChunkedArticleBodyChunk(chunk, fields, label) {
   for (const field of fields) {
     const paragraphs = requireChunkArray(chunk, field, { exact: 2, label });
-    if (!paragraphs.every((paragraph) => typeof paragraph === "string" && wordCount(paragraph) >= 70)) {
+    if (!paragraphs.every((paragraph) => typeof paragraph === "string" && wordCount(paragraph) >= CHUNKED_BODY_PARAGRAPH_MIN_WORDS)) {
       throw new Error(`${label}: ${field} contains a thin paragraph`);
     }
   }
@@ -8955,26 +9047,43 @@ function auditChunkedArticleContinuity(content) {
   return { ok: issues.length === 0, issues };
 }
 
-async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens) {
-  const raw = await callAI(
-    env,
-    [
-      {
-        role: "system",
-        content:
-          "You are a source-grounded history article component writer. Return one valid JSON object only. No markdown, no prose outside JSON.",
-      },
-      { role: "user", content: userPrompt },
-    ],
-    {
-      maxTokens,
-      timeoutMs: 60_000,
-      cfModel: model,
-      temperature: 0.15,
-      providerAttemptLimit: 8,
-    },
-  );
-  return parseJsonObjectFromAI(raw, label);
+async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, validate = null) {
+  // Retry a failed sub-call once before letting it abort the whole chunked
+  // fallback. A single transient parse error or short-count response (the
+  // 2026-07-05 "facts" sub-call) previously dropped the pipeline back to the
+  // undershooting one-shot; one retry makes the chunked path resilient to it.
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const raw = await callAI(
+        env,
+        [
+          {
+            role: "system",
+            content:
+              "You are a source-grounded history article component writer. Return one valid JSON object only. No markdown, no prose outside JSON.",
+          },
+          { role: "user", content: userPrompt },
+        ],
+        {
+          maxTokens,
+          timeoutMs: 60_000,
+          cfModel: model,
+          temperature: 0.15,
+          providerAttemptLimit: 8,
+        },
+      );
+      const parsed = parseJsonObjectFromAI(raw, label);
+      if (typeof validate === "function") validate(parsed);
+      return parsed;
+    } catch (err) {
+      lastError = err;
+      if (attempt < 2) {
+        console.warn(`Blog: ${label} attempt ${attempt} failed (${err.message}) — retrying once.`);
+      }
+    }
+  }
+  throw lastError;
 }
 
 async function generateArticleContentChunkedFallback(
@@ -9060,13 +9169,20 @@ Return JSON only with this shape:
 
 Requirements: keyTerms must include at least one real named person connected to the event. imageUrl may be empty or a supported Wikimedia URL, never a placeholder.`,
     1500,
+    (parsed) => {
+      requireChunkArray(parsed, "keyTerms", { min: 1, label: "chunked article brief" });
+      // Validate the person against the SAME first-8 slice that
+      // compactChunkedArticleBrief forwards as grounding context to every body,
+      // facts, and analysis sub-prompt. A person beyond index 8 would pass a
+      // whole-array check but be dropped before it could ground the body prose.
+      const forwardedTerms = parsed.keyTerms.slice(0, 8);
+      if (!forwardedTerms.some((term) => String(term?.type || "").toLowerCase() === "person" && String(term?.term || "").trim())) {
+        throw new Error("chunked article brief: keyTerms must include one named person");
+      }
+    },
   );
 
   const compactBrief = compactChunkedArticleBrief(brief);
-  requireChunkArray(brief, "keyTerms", { min: 1, label: "chunked article brief" });
-  if (!compactBrief.keyTerms.some((term) => String(term?.type || "").toLowerCase() === "person" && String(term?.term || "").trim())) {
-    throw new Error("chunked article brief: keyTerms must include one named person");
-  }
 
   const bodyA = await callChunkedArticleAI(
     env,
@@ -9086,12 +9202,12 @@ Write only these body fields as JSON:
 
 Requirements:
 - Each array must contain exactly 2 paragraphs.
-- Each paragraph should be 105-145 words, source-grounded, and non-repetitive.
+- Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
 - overviewParagraphs open with the strongest concrete fact.
 - eyewitnessOrChronicle must not invent a witness, memoir, newspaper, decree, archive, or quote. If the source names no account, analyze what the record confirms and leaves unresolved.`,
     2300,
+    (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
   );
-  validateChunkedArticleBodyChunk(bodyA, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A");
 
   const bodyB = await callChunkedArticleAI(
     env,
@@ -9114,12 +9230,12 @@ Write only these body fields as JSON:
 
 Requirements:
 - Each array must contain exactly 2 paragraphs.
-- Each paragraph should be 105-145 words, source-grounded, and non-repetitive.
+- Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
 - Aftermath must name specific actions, dates, people, institutions, or confirmed limits in the record.
 - Conclusion must reframe the event with a concrete fact, not a generic reflection.`,
     2300,
+    (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
   );
-  validateChunkedArticleBodyChunk(bodyB, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B");
 
   const facts = await callChunkedArticleAI(
     env,
@@ -9142,9 +9258,11 @@ Requirements:
 - didYouKnowFacts must contain exactly 6 distinct source-grounded facts.
 - Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.`,
     1600,
+    (parsed) => {
+      requireChunkArray(parsed, "quickFacts", { exact: 6, label: "chunked article facts" });
+      requireChunkArray(parsed, "didYouKnowFacts", { exact: 6, label: "chunked article facts" });
+    },
   );
-  requireChunkArray(facts, "quickFacts", { exact: 6, label: "chunked article facts" });
-  requireChunkArray(facts, "didYouKnowFacts", { exact: 6, label: "chunked article facts" });
 
   const analysis = await callChunkedArticleAI(
     env,
@@ -9172,9 +9290,11 @@ Requirements:
 - Every detail must include a concrete name, date, number, institution, place, or source.
 - editorialNote must be specific to this article and must not add unsupported facts.`,
     2200,
+    (parsed) => {
+      requireChunkArray(parsed, "analysisGood", { exact: 3, label: "chunked article analysis" });
+      requireChunkArray(parsed, "analysisBad", { exact: 3, label: "chunked article analysis" });
+    },
   );
-  requireChunkArray(analysis, "analysisGood", { exact: 3, label: "chunked article analysis" });
-  requireChunkArray(analysis, "analysisBad", { exact: 3, label: "chunked article analysis" });
 
   const merged = normalizeGeneratedArticleContent({
     ...brief,
@@ -9577,6 +9697,16 @@ Writing rules:
   try {
     parsed = JSON.parse(jsonCandidate);
   } catch (_firstErr) {
+    // First try escaping raw control characters inside string literals — AI
+    // models frequently emit literal newlines/tabs inside string values, which
+    // is a formatting slip, not a truncation. Sanitizing recovers the full
+    // article instead of falling into the lossy truncation-repair path below.
+    try {
+      parsed = JSON.parse(sanitizeJsonControlChars(jsonCandidate));
+      return normalizeGeneratedArticleContent(parsed, date);
+    } catch (_sanitizeErr) {
+      // fall through to truncation repair
+    }
     // Attempt basic truncation repair: close any open string and unclosed brackets.
     // This recovers articles where the last field was cut mid-value.
     let repaired = jsonCandidate;
@@ -14077,4 +14207,14 @@ export const __entityResolutionTestHooks = {
   sourceEventPageMatchesPerson,
   extractSourcePagesFromHtml,
   compactSourcePagesForIndex,
+};
+
+export const __contentGenerationTestHooks = {
+  sanitizeJsonControlChars,
+  parseJsonObjectFromAI,
+  isShortArticleBodyFailure,
+  articleBodyWordCount,
+  validateChunkedArticleBodyChunk,
+  MIN_REAL_ARTICLE_BODY_WORDS,
+  CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
 };

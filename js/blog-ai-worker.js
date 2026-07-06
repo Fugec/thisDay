@@ -4438,6 +4438,11 @@ async function maybeGenerateBlogPost(env, ctx) {
             entity.overviewCards = await generateEntityOverviewCards(env, entity, sourceContent, fallbackCards);
             const fallbackSections = buildFallbackEntityBodySections(entity, sourceContent);
             entity.bodySections = await generateEntityBodySections(env, entity, sourceContent, fallbackSections);
+            if (entity.type === "person") {
+              const timeline = await generateEntityTimeline(env, entity).catch(() => []);
+              if (timeline.length) entity.timeline = timeline;
+              else delete entity.timeline;
+            }
             await env.BLOG_AI_KV.put(kvKey, JSON.stringify(entity));
             await upsertEntityIndex(env, [entity]);
             console.log(`Blog AI: refreshed wiki data for entity ${kvKey}`);
@@ -5524,6 +5529,110 @@ function groundLearningBlocks(content) {
     if (kept.length >= 3) content.timeline = kept;
     else delete content.timeline;
   }
+}
+
+// Person life-and-career timeline for /people/{slug}/ pages. Same
+// generate-then-ground mechanism as the article learning-blocks timeline
+// (generateLearningBlocks + groundLearningBlocks) but sourced from the person's
+// own biography and grounded against it. Returns [] on any failure or when fewer
+// than three entries survive grounding; the seo-worker renders entity.timeline
+// deterministically (buildEntityTimelineBlock).
+async function generateEntityTimeline(env, entity) {
+  if (entity?.type !== "person") return [];
+  const bodyText = [
+    entity.intro || "",
+    entity.summary || "",
+    ...(Array.isArray(entity.bodySections)
+      ? entity.bodySections.flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
+      : []),
+  ]
+    .join("\n\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 6000);
+  if (bodyText.length < 120) return [];
+
+  const name = entity.name || "this person";
+  const lifeLine = [
+    entity.birthDate ? `Born: ${entity.birthDate}` : "",
+    entity.deathDate ? `Died: ${entity.deathDate}` : "",
+  ]
+    .filter(Boolean)
+    .join("  ");
+
+  const systemPrompt =
+    "You add a factual life-and-career timeline to a biography. Output STRICT JSON only.\n" +
+    "timeline: 4-7 dated milestones in the person's life and career, in chronological order. " +
+    "Use ONLY years that appear in the supplied biography text or life dates; never invent a date. " +
+    "Each label describes only real events, works, roles, awards, places, and institutions named in the biography; never invent anything. " +
+    'Each entry: {"year":"1971","date":"1971","label":"...","kind":"birth|milestone|death"}. ' +
+    'Use kind "birth" for the birth year, "death" for the death year when present, otherwise "milestone". ' +
+    "No dashes, em-dashes, semicolons, or colons in any label.";
+  const userMessage =
+    `Person: ${name}\n${lifeLine ? `${lifeLine}\n` : ""}\nBIOGRAPHY:\n${bodyText}\n\nReturn ONLY JSON: {"timeline":[]}`;
+
+  let raw;
+  try {
+    raw = await callAI(
+      env,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      { maxTokens: 1200, timeoutMs: 40_000 },
+    );
+  } catch (err) {
+    console.warn(`generateEntityTimeline: AI call failed (${err.message}) — skipping`);
+    return [];
+  }
+  const cleaned = String(raw || "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    return [];
+  }
+  const rawTimeline = Array.isArray(parsed.timeline) ? parsed.timeline : [];
+
+  // Ground: keep only entries whose year appears in the biography corpus (or the
+  // known life dates), dedupe by year+label, sort chronologically.
+  const corpus = normalizeForCompare(`${bodyText} ${entity.birthDate || ""} ${entity.deathDate || ""}`);
+  const yearOf = (e) => {
+    // Require a real 3-4 digit year (the last one in the string). Rejects
+    // century references like "16th century" that would otherwise yield "16".
+    const matches = String(e.year || e.date || "").match(/\b\d{3,4}\b/g);
+    return matches ? matches[matches.length - 1] : "";
+  };
+  const yearNum = (e) => {
+    const y = yearOf(e);
+    if (!y) return 0;
+    return /\bbce?\b/i.test(`${e.year} ${e.date}`) ? -parseInt(y, 10) : parseInt(y, 10);
+  };
+  const seen = new Set();
+  const grounded = rawTimeline
+    .map((e) => ({
+      year: String(e.year || "").trim(),
+      date: String(e.date || e.year || "").trim(),
+      label: String(e.label || "").trim(),
+      kind: ["birth", "milestone", "death"].includes(e.kind) ? e.kind : "milestone",
+    }))
+    .filter((e) => e.label && (e.year || e.date))
+    .filter((e) => {
+      const y = yearOf(e);
+      return y && corpus.includes(y);
+    })
+    .filter((e) => {
+      const k = `${yearOf(e)}|${normalizeForCompare(e.label)}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .sort((a, b) => yearNum(a) - yearNum(b));
+
+  return grounded.length >= 3 ? grounded : [];
 }
 
 /**
@@ -7932,6 +8041,10 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
     entity.bodySections = skipAiGeneration
       ? fallbackSections
       : await generateEntityBodySections(env, entity, content, fallbackSections);
+    if (type === "person" && !skipAiGeneration) {
+      const timeline = await generateEntityTimeline(env, entity).catch(() => []);
+      if (timeline.length) entity.timeline = timeline;
+    }
     const savedEntity = await upsertEntityRecord(env, entity);
     saved.push(savedEntity);
     articleEntities.push(savedEntity);
@@ -14217,4 +14330,6 @@ export const __contentGenerationTestHooks = {
   validateChunkedArticleBodyChunk,
   MIN_REAL_ARTICLE_BODY_WORDS,
   CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
+  generateEntityTimeline,
+  fetchWikipediaEntityData,
 };

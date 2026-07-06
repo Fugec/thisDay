@@ -675,24 +675,33 @@ const PERSON_CARD_PREFER = [
 
 function personIntroSentences(text) {
   if (!text) return [];
-  return text
+  // Mask periods in common abbreviations and single-letter initials so the
+  // sentence split does not break mid-phrase ("South Carolina Mr. Basketball",
+  // "Alan J. Dixon").
+  const masked = cleanWikiExtract(text)
+    .replace(/\b(Mr|Mrs|Ms|Dr|Jr|Sr|St|Mt|Prof|Rev|Gen|Col|Sgt|Lt|Capt|Inc|Ltd|Co|No|vs|etc)\.\s/gi, "$1\x01 ")
+    .replace(/\b([A-Z])\.\s(?=[A-Z])/g, "$1\x01 ");
+  return masked
     .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
+    .map((s) => s.replace(/\x01/g, ".").trim())
     .filter((s) => s.length >= 45 && s.length <= 350)
     .filter((s) => !PERSON_CARD_SKIP.some((p) => p.test(s)))
     .sort((a, b) => {
       return PERSON_CARD_PREFER.filter((p) => p.test(b)).length - PERSON_CARD_PREFER.filter((p) => p.test(a)).length;
     })
-    .slice(0, 4);
+    .slice(0, 8);
 }
 
 function sentenceLabel(sentence) {
-  if (/primary author|principal author|wrote|composed|authored/i.test(sentence)) return "Written work";
+  if (/\b(triple crown|only \w+ to|first \w+ to|became the first|record|unprecedented)\b/i.test(sentence)) return "Distinction";
+  if (/primary author|principal author|wrote|composed|authored|novel|screenplay/i.test(sentence)) return "Written work";
   if (/founded|established|created|built/i.test(sentence)) return "Founded";
   if (/invented|discovered|pioneered/i.test(sentence)) return "Discovery";
   if (/proponent|democracy|rights|philosophy/i.test(sentence)) return "Philosophy";
-  if (/served as|president|governor|minister|senator|general/i.test(sentence)) return "Career";
-  if (/awarded|won|prize|medal/i.test(sentence)) return "Achievement";
+  if (/\b(debut|breakthrough|first appeared|rose to (fame|prominence))\b/i.test(sentence)) return "Breakthrough";
+  if (/nominat|shortlist/i.test(sentence)) return "Recognition";
+  if (/awarded|\bwon\b|prize|medal|oscar|academy award|grammy|tony|bafta|emmy|golden globe|nobel|pulitzer/i.test(sentence)) return "Achievement";
+  if (/served as|president|governor|minister|senator|general|director of|chair(man|person)?\b/i.test(sentence)) return "Career";
   return "Legacy";
 }
 
@@ -711,19 +720,28 @@ function buildEntityOverviewSlider(entity) {
     }
 
     // Role from Wikipedia description (most reliable one-liner)
-    if (entity.description && !isEntityPlaceholder(entity.description)) {
-      cards.push({ label: "Role", value: entity.description });
+    const roleValue = entity.description && !isEntityPlaceholder(entity.description) ? entity.description : "";
+    if (roleValue) {
+      cards.push({ label: "Role", value: roleValue });
     }
+    const nameStart = String(entity.name || "").trim().split(/\s+/)[0].toLowerCase();
 
     // Concrete sentences from Wikipedia intro
     const sentences = personIntroSentences(entity.intro || entity.summary || "");
     const usedTexts = new Set(cards.map((c) => c.value.toLowerCase()));
     for (const sentence of sentences) {
-      if (cards.length >= 5) break;
-      if (!usedTexts.has(sentence.toLowerCase())) {
-        cards.push({ label: sentenceLabel(sentence), value: sentence });
-        usedTexts.add(sentence.toLowerCase());
-      }
+      if (cards.length >= 6) break;
+      const key = sentence.toLowerCase();
+      if (usedTexts.has(key)) continue;
+      // Skip the definitional opener ("X (born …) is an Australian actor") that
+      // just restates the Role card. The opener uniquely leads with the person's
+      // name and an "is/was a/an <noun>" clause; pronoun-led substantive
+      // sentences ("He is a five-time All-Star …") are kept. No length cap, so a
+      // long opener ("Zion Lateef Williamson … is an American professional …")
+      // is still caught.
+      if (roleValue && nameStart && key.startsWith(nameStart) && /\b(is|was|are|were)\s+(a|an)\s+[A-Za-z]/.test(sentence)) continue;
+      cards.push({ label: sentenceLabel(sentence), value: sentence });
+      usedTexts.add(key);
     }
 
     // Fill remaining from stored AI cards that look concrete
@@ -808,8 +826,19 @@ function buildEntityBookOrAdSlot(entity) {
   </div>`;
 }
 
+function renderEntityInlineFigure(img, altFallback = "") {
+  if (!img?.src) return "";
+  const proxied = `/image-proxy?src=${encodeURIComponent(img.src)}&w=760&q=82`;
+  const alt = img.caption || altFallback;
+  return `<figure class="entity-inline-figure">
+    <img src="${escapeHtml(proxied)}" loading="lazy" alt="${escapeHtml(alt)}" />
+    ${img.caption ? `<figcaption class="article-meta mt-2"><small>${escapeHtml(img.caption)}</small></figcaption>` : ""}
+  </figure>`;
+}
+
 function buildEntityBodySections(entity) {
   const sections = Array.isArray(entity.bodySections) ? entity.bodySections : [];
+  const inlineImages = Array.isArray(entity.inlineImages) ? entity.inlineImages : [];
   const validSections = sections
     .map((section) => ({
       heading: String(section?.heading || "").trim(),
@@ -836,10 +865,38 @@ function buildEntityBodySections(entity) {
           `<div class="entity-body-section">
             <h2 class="h3">${escapeHtml(section.heading)}</h2>
             ${section.paragraphs.map((paragraph) => `<p>${escapeHtml(ensureCompleteSentences(paragraph))}</p>`).join("")}
-          </div>${i === 0 ? buildEntityBookOrAdSlot(entity) : ""}${i === 1 ? `<div class="entity-career-ad">${ENTITY_INLINE_AD}</div>` : ""}`,
+          </div>${renderEntityInlineFigure(inlineImages[i], entity.name)}${i === 0 ? buildEntityBookOrAdSlot(entity) : ""}${i === 1 ? `<div class="entity-career-ad">${ENTITY_INLINE_AD}</div>` : ""}`,
       )
       .join("")}
   </section>`;
+}
+
+// Deterministic render of a stored entity.timeline (generated by the blog
+// worker's AI learning-blocks path). Mirrors the blog article timeline markup
+// (.article-timeline / .tl-*) so it inherits the same styling. Shown only when
+// at least three grounded entries survive.
+function buildEntityTimelineBlock(entity) {
+  const items = (Array.isArray(entity.timeline) ? entity.timeline : []).filter(
+    (e) => e && String(e.label || "").trim() && (String(e.year || "").trim() || String(e.date || "").trim()),
+  );
+  if (items.length < 3) return "";
+  const rows = items
+    .map(
+      (e) => `        <li class="tl-entry tl-${escapeHtml(e.kind || "milestone")}">
+          <span class="tl-date">${escapeHtml(e.date || e.year || "")}</span>
+          <span class="tl-label">${escapeHtml(e.label || "")}</span>
+        </li>`,
+    )
+    .join("\n");
+  const heading = entity.type === "person"
+    ? `Life and career timeline: ${entity.name}`
+    : `Timeline: ${entity.name}`;
+  return `<section class="article-timeline entity-timeline mb-4" aria-label="Timeline">
+      <h2 class="h3">${escapeHtml(heading)}</h2>
+      <ol class="tl-list">
+${rows}
+      </ol>
+    </section>`;
 }
 
 function buildEntityRelatedPosts(entity, posts) {
@@ -1062,7 +1119,7 @@ async function fetchEntityWikiHydration(entity, type) {
       { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
     ).catch(() => null),
     fetch(
-      `https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exchars=3200&format=json&origin=*&titles=${encodeURIComponent(pageTitle)}`,
+      `https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exchars=6000&format=json&origin=*&titles=${encodeURIComponent(pageTitle)}`,
       { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
     ).catch(() => null),
     fetchEntityLifeDates(type, pageTitle),
@@ -1083,11 +1140,82 @@ async function fetchEntityWikiHydration(entity, type) {
   };
 }
 
+// Wikimedia file key used to dedupe an inline image against the hero image and
+// other inline images (ignores the thumbnail size bucket in the path).
+function wikimediaImageKeyFromUrl(imageUrl) {
+  const file = String(imageUrl || "").split("?")[0].split("/").pop() || "";
+  return file.replace(/^\d+px-/, "").toLowerCase();
+}
+
+// Additional in-article images from the Wikipedia REST media-list endpoint.
+// Returns up to `max` proxy-ready content images (skips icons, flags, logos,
+// signatures, maps, and non-raster files) deduped against the hero image.
+async function fetchEntityMediaImages(pageTitle, heroUrl = "", max = 2) {
+  if (!pageTitle) return [];
+  const res = await fetch(
+    `https://en.wikipedia.org/api/rest_v1/page/media-list/${encodeURIComponent(pageTitle)}`,
+    { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
+  ).catch(() => null);
+  if (!res?.ok) return [];
+  const data = await res.json().catch(() => null);
+  const items = Array.isArray(data?.items) ? data.items : [];
+  // Chrome/illustration files to skip, matched as whole file-name TOKENS (split
+  // on separators) — NOT substrings, or "Morricone" would match "icon" and
+  // "Flagstad" would match "flag".
+  const skipTokens = new Set([
+    "icon", "logo", "flag", "edit", "ambox", "locator", "signature",
+    "map", "seal", "emblem", "banner", "commons", "wikimedia", "thumbnail",
+  ]);
+  const skipPhraseRe = /(coat[_ ]of[_ ]arms|question[_ ]book|\.svg$|\.ogg$|\.oga$|\.webm$|\.gif$)/i;
+  // Require the file name to contain a token of the person's name so we skip
+  // role/subject illustrations that live on the article but are not of them
+  // (e.g. the "Sir Francis Walsingham" painting on Geoffrey Rush's page).
+  const nameTokens = String(pageTitle || "").toLowerCase().split(/[^a-z]+/).filter((t) => t.length >= 4);
+  const out = [];
+  const seen = new Set();
+  const heroKey = wikimediaImageKeyFromUrl(heroUrl);
+  if (heroKey) seen.add(heroKey);
+  for (const item of items) {
+    if (out.length >= max) break;
+    if (item?.type !== "image" || item.showInGallery === false) continue;
+    const fileTitle = String(item.title || "");
+    const fileLc = fileTitle.toLowerCase();
+    if (skipPhraseRe.test(fileTitle)) continue;
+    if (fileLc.replace(/^file:/, "").split(/[^a-z0-9]+/).some((t) => skipTokens.has(t))) continue;
+    if (nameTokens.length && !nameTokens.some((t) => fileLc.includes(t))) continue;
+    const srcset = Array.isArray(item.srcset) ? item.srcset : [];
+    const best = srcset[srcset.length - 1] || srcset[0];
+    let src = best?.src || "";
+    if (!src) continue;
+    if (src.startsWith("//")) src = `https:${src}`;
+    if (!/\.(jpe?g|png)$/i.test(src.split("?")[0])) continue;
+    const key = wikimediaImageKeyFromUrl(src);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const caption = String(item.caption?.text || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    out.push({ src, caption: caption.length > 160 ? "" : caption });
+  }
+  return out;
+}
+
 function cleanWikiExtract(value) {
-  return String(value || "")
+  let text = String(value || "")
     .replace(/^=+[^=\n]+?=+\s*/gm, "")
     .replace(/\s+/g, " ")
     .trim();
+  // Wikipedia's exchars truncation appends "..." / "…" mid-sentence (e.g.
+  // "...playing Philip Henslowe in..."). Drop the dangling partial clause back
+  // to the last complete sentence so we never render or card a fragment.
+  if (/(?:\.{3}|…)\s*$/.test(text)) {
+    const trimmed = text.replace(/(?:\.{3}|…)\s*$/, "").trim();
+    const lastStop = Math.max(
+      trimmed.lastIndexOf("."),
+      trimmed.lastIndexOf("!"),
+      trimmed.lastIndexOf("?"),
+    );
+    text = lastStop >= 0 ? trimmed.slice(0, lastStop + 1).trim() : trimmed;
+  }
+  return text;
 }
 
 function splitEntityHydratedSections(entity) {
@@ -1111,9 +1239,18 @@ function splitEntityHydratedSections(entity) {
   if (current.length) sections.push(current.join(" ").trim());
 
   const name = entity.name || "This subject";
-  const headings = entity.type === "person"
-    ? [`Who was ${name}?`, "Career and public life", "Historical significance"]
-    : [`What was ${name}?`, "Background and consequences", "Why it matters"];
+  if (entity.type === "person") {
+    // Two sections for people: everything but the last chunk under the opener,
+    // the final chunk as a distinct significance section.
+    if (sections.length <= 1) {
+      return sections.map((paragraph) => ({ heading: `Who was ${name}?`, paragraphs: [paragraph] }));
+    }
+    return [
+      { heading: `Who was ${name}?`, paragraphs: sections.slice(0, -1) },
+      { heading: "Historical significance", paragraphs: [sections[sections.length - 1]] },
+    ];
+  }
+  const headings = [`What was ${name}?`, "Background and consequences", "Why it matters"];
   return sections.slice(0, 3).map((paragraph, index) => ({
     heading: headings[index] || headings[headings.length - 1],
     paragraphs: [paragraph],
@@ -1272,7 +1409,10 @@ function entityFactParagraphs(entity) {
       .match(/[^.!?]+[.!?]+(?:\s|$)/g) || [];
     for (const sentence of sentences) {
       const clean = normalizeSentence(sentence);
-      const key = clean.toLowerCase();
+      // Dedup key ignores parentheticals and years so near-duplicates collapse:
+      // "X (born 6 July 1951) is an Australian actor" and "X is an Australian
+      // actor" share a key and only the first (richer) one is kept.
+      const key = clean.toLowerCase().replace(/\([^)]*\)/g, "").replace(/\b\d{3,4}\b/g, "").replace(/\s+/g, " ").trim();
       if (clean.length < 35 || seen.has(key)) continue;
       seen.add(key);
       target.push(clean);
@@ -1297,8 +1437,11 @@ function entityFactParagraphs(entity) {
   const paragraphs = [];
   const factualSentences = facts.slice();
   if (lifeLine) {
-    if (factualSentences.length) factualSentences[0] = `${lifeLine} ${factualSentences[0]}`;
-    else factualSentences.push(lifeLine);
+    // Don't prepend the life line when the first fact already states the birth/
+    // death (the Wikipedia intro "X (born …) is …" would otherwise duplicate it).
+    const firstStatesLife = /\b(born|died|b\.|d\.)\b/i.test(factualSentences[0] || "");
+    if (factualSentences.length && !firstStatesLife) factualSentences[0] = `${lifeLine} ${factualSentences[0]}`;
+    else if (!factualSentences.length) factualSentences.push(lifeLine);
   }
 
   let current = [];
@@ -1392,21 +1535,30 @@ function rebuildPersonBodySections(entity) {
     return !backgroundRe.test(sentence) && !significanceSentences.some((item) => item.toLowerCase() === key);
   });
 
+  // Two sections instead of three: fold background + career into the "Who was"
+  // opener, keep a distinct "Historical significance" section. The who/career/
+  // significance buckets are already disjoint (each sentence lands in one via
+  // `used`), so the merge cannot repeat a sentence across the two sections.
+  let openerSentences = whoSentences.concat(careerSentences.length ? careerSentences : careerFallback);
+  let significanceInput = significanceSentences.slice();
+  if (!significanceInput.length && openerSentences.length > 3) {
+    // No sentence flagged as significance: peel the tail off the opener rather
+    // than fabricating a significance section from opener duplicates.
+    significanceInput = openerSentences.slice(-2);
+    openerSentences = openerSentences.slice(0, -2);
+  }
+
   const sections = [];
   sections.push({
     heading: `Who was ${name}?`,
-    paragraphs: chunkSentences(whoSentences.length ? whoSentences : allSentences.slice(0, 1)),
+    paragraphs: chunkSentences(openerSentences.length ? openerSentences : allSentences.slice(0, 1)),
   });
-  sections.push({
-    heading: "Career and public life",
-    paragraphs: chunkSentences(careerSentences.length ? careerSentences : careerFallback),
-  });
-  sections.push({
-    heading: "Historical significance",
-    paragraphs: chunkSentences(significanceSentences.length
-      ? significanceSentences
-      : careerSentences.filter((sentence) => contributionRe.test(sentence)).slice(0, 3)),
-  });
+  if (significanceInput.length) {
+    sections.push({
+      heading: "Historical significance",
+      paragraphs: chunkSentences(significanceInput),
+    });
+  }
   return sections.filter((section) => section.paragraphs.length > 0);
 }
 
@@ -1842,6 +1994,19 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   entity = syncEntitySourcePostFromIndex(entity, posts);
   entity = await hydrateSparseEntity(env, entity, type, ctx);
   entity.relatedTopics = inferEntityTopicPillars(entity, type);
+  if (type === "person") {
+    // Always normalise person bodies to the clean two-section layout at render
+    // time (deterministic, no KV write). This replaces stale three-section or
+    // malformed stored sections (e.g. a trailing empty "Section" block) so
+    // every people page shows a single "Who was …?" opener + significance.
+    const rebuiltSections = rebuildPersonBodySections(entity);
+    if (rebuiltSections.length) entity.bodySections = rebuiltSections;
+    // Up to two inline article images from the Wikipedia media-list (edge-cached
+    // with the page; fail-open to text-only when the person has no usable media).
+    entity.inlineImages = entity.wikiUrl
+      ? await fetchEntityMediaImages(wikiTitleFromEntityUrl(entity.wikiUrl) || entity.name, entity.imageUrl, 2).catch(() => [])
+      : [];
+  }
   if (type === "person" && url.searchParams.has("repair")) {
     entity.bodySections = rebuildPersonBodySections(entity);
     entity.relatedTopics = inferEntityTopicPillars(entity, type);
@@ -1949,7 +2114,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}main{flex:1;margin-top:20px}p{font-size:15px;line-height:1.6}a{color:var(--btn-bg)}a:hover{color:var(--accent)}h1,h2,h3{color:var(--text)}.article-meta{color:var(--text-muted);font-size:13px}.breadcrumb{background:transparent;padding:0;margin-bottom:1rem}.breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
     .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;text-decoration:none}.pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
     .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}.dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}.slider-controls{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}.slider-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:50%;background:#fff;color:var(--btn-bg);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.slider-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.slider-btn:disabled{opacity:.35;cursor:default}
-    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:15px;line-height:1.75;margin-bottom:1rem}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:15px;line-height:1.75;margin-bottom:1rem}.entity-inline-figure{margin:1.25rem 0;text-align:center}.entity-inline-figure img{max-width:100%;height:auto;border-radius:8px;border:1px solid var(--border)}.entity-inline-figure figcaption{margin-top:.4rem}.article-timeline{margin:1.75rem 0}.article-timeline h2{margin-bottom:1rem}.article-timeline .tl-list{list-style:none;margin:0;padding:0;border-left:2px solid var(--border)}.article-timeline .tl-entry{position:relative;padding:0 0 1rem 1.25rem}.article-timeline .tl-entry:last-child{padding-bottom:0}.article-timeline .tl-entry::before{content:"";position:absolute;left:-7px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--btn-bg);border:2px solid var(--bg)}.article-timeline .tl-entry.tl-birth::before,.article-timeline .tl-entry.tl-death::before{background:var(--accent)}.article-timeline .tl-date{display:block;font-size:13px;font-weight:600;color:var(--btn-bg)}.article-timeline .tl-label{display:block;font-size:15px;line-height:1.6;color:var(--text)}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
     .amazon-related{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px}.amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}.amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}.amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}.amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.amazon-slider-wrap::-webkit-scrollbar{display:none}.amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.amazon-product-card{flex:0 0 170px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}.amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.amazon-product-card small{color:var(--text-muted)}.amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden}.amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}@media(min-width:768px){.amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
     .entity-grid{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:720px){.entity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}.entity-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72);text-decoration:none;color:inherit}.entity-card:hover{background:var(--bg-alt);text-decoration:none;color:inherit}.border{border:1px solid var(--border)!important;box-shadow:none}.nav-inner{max-width:1920px!important;margin:0 auto!important}
     .entity-description{font-size:1rem;color:var(--text-muted);font-style:italic;line-height:1.4}.entity-dates{font-size:13px;color:var(--text-muted)}
@@ -1974,6 +2139,7 @@ ${siteNav()}
         ${imageFigure}
         ${buildEntityOverviewSlider(entity)}
         ${buildEntityBodySections(entity)}
+        ${buildEntityTimelineBlock(entity)}
         ${buildEntityAdUnits()}
         ${buildEntityRelatedPosts(entity, posts)}
         ${sourceLinks}

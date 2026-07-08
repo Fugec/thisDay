@@ -9039,6 +9039,63 @@ function validateChunkedArticleBodyChunk(chunk, fields, label) {
   }
 }
 
+function chunkedArticleBodyFieldGuidance(field) {
+  switch (field) {
+    case "overviewParagraphs":
+      return "Open with the strongest concrete fact and establish the event, stakes, people, place, and date without drifting into generic background.";
+    case "eyewitnessOrChronicle":
+      return "Analyze what the supplied record confirms and what it leaves unresolved. Do not invent a witness, memoir, newspaper, decree, archive, or quote.";
+    case "aftermathParagraphs":
+      return "Name specific actions, dates, people, institutions, responses, or confirmed limits in the record after the event.";
+    case "conclusionParagraphs":
+      return "Reframe the event with concrete facts already established by the article, not a generic reflection or new unsupported material.";
+    default:
+      return "Keep the section source-grounded, specific, and non-repetitive.";
+  }
+}
+
+async function generateChunkedArticleBodyField(
+  env,
+  model,
+  field,
+  sharedContext,
+  compactBrief,
+  alreadyWritten = null,
+) {
+  const label = `chunked article ${field}`;
+  const existingSection = alreadyWritten
+    ? `Already written body fields, for continuity and non-repetition:\n${JSON.stringify(alreadyWritten, null, 2)}\n\n`
+    : "";
+
+  return callChunkedArticleAI(
+    env,
+    model,
+    label,
+    `CHUNKED ARTICLE FALLBACK - ${field}
+${sharedContext}
+
+Canonical brief:
+${JSON.stringify(compactBrief, null, 2)}
+
+${existingSection}Write only this JSON:
+{
+  "${field}":["paragraph 1","paragraph 2"]
+}
+
+Requirements:
+- Return exactly one top-level key: "${field}".
+- ${chunkedArticleBodyFieldGuidance(field)}
+- The array must contain exactly 2 paragraphs.
+- Each paragraph should be 145-175 words, source-grounded, and non-repetitive.
+- Absolute minimum is ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS} words, but aim for at least ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 25} words to leave margin.
+- Count both paragraphs before responding. If either paragraph is below ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 15} words, add source-grounded detail before returning.
+- Every paragraph must end with terminal punctuation.
+- Do not use hyphens or em dashes in article body prose.`,
+    1700,
+    (parsed) => validateChunkedArticleBodyChunk(parsed, [field], label),
+  );
+}
+
 function validateChunkedArticleSupport(merged) {
   requireChunkArray(merged, "quickFacts", { exact: 6, label: "chunked article fallback" });
   requireChunkArray(merged, "didYouKnowFacts", { exact: 6, label: "chunked article fallback" });
@@ -9297,11 +9354,33 @@ Requirements: keyTerms must include at least one real named person connected to 
 
   const compactBrief = compactChunkedArticleBrief(brief);
 
-  const bodyA = await callChunkedArticleAI(
-    env,
-    model,
-    "chunked article body A",
-    `CHUNKED ARTICLE FALLBACK - BODY A
+  const generateSplitBodyFields = async (fields, alreadyWritten = null) => {
+    const merged = {};
+    for (const field of fields) {
+      const continuityContext =
+        alreadyWritten || Object.keys(merged).length > 0
+          ? { ...(alreadyWritten || {}), ...merged }
+          : null;
+      const chunk = await generateChunkedArticleBodyField(
+        env,
+        model,
+        field,
+        sharedContext,
+        compactBrief,
+        continuityContext,
+      );
+      Object.assign(merged, chunk);
+    }
+    return merged;
+  };
+
+  let bodyA;
+  try {
+    bodyA = await callChunkedArticleAI(
+      env,
+      model,
+      "chunked article body A",
+      `CHUNKED ARTICLE FALLBACK - BODY A
 ${sharedContext}
 
 Canonical brief:
@@ -9318,15 +9397,23 @@ Requirements:
 - Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
 - overviewParagraphs open with the strongest concrete fact.
 - eyewitnessOrChronicle must not invent a witness, memoir, newspaper, decree, archive, or quote. If the source names no account, analyze what the record confirms and leaves unresolved.`,
-    2300,
-    (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
-  );
+      2300,
+      (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
+    );
+  } catch (err) {
+    console.warn(
+      `Blog: combined chunked article body A failed (${err.message}); splitting into single-section calls.`,
+    );
+    bodyA = await generateSplitBodyFields(["overviewParagraphs", "eyewitnessOrChronicle"]);
+  }
 
-  const bodyB = await callChunkedArticleAI(
-    env,
-    model,
-    "chunked article body B",
-    `CHUNKED ARTICLE FALLBACK - BODY B
+  let bodyB;
+  try {
+    bodyB = await callChunkedArticleAI(
+      env,
+      model,
+      "chunked article body B",
+      `CHUNKED ARTICLE FALLBACK - BODY B
 ${sharedContext}
 
 Canonical brief:
@@ -9346,9 +9433,15 @@ Requirements:
 - Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
 - Aftermath must name specific actions, dates, people, institutions, or confirmed limits in the record.
 - Conclusion must reframe the event with a concrete fact, not a generic reflection.`,
-    2300,
-    (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
-  );
+      2300,
+      (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
+    );
+  } catch (err) {
+    console.warn(
+      `Blog: combined chunked article body B failed (${err.message}); splitting into single-section calls.`,
+    );
+    bodyB = await generateSplitBodyFields(["aftermathParagraphs", "conclusionParagraphs"], bodyA);
+  }
 
   const facts = await callChunkedArticleAI(
     env,

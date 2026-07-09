@@ -10293,48 +10293,95 @@ function verifyArticleGrounding(content, source) {
   return { ok: reasons.length === 0, reasons };
 }
 
+// The LLM final-grounding grader frequently faults an article for OMITTING
+// background facts from the source ("does not mention the Sirte Declaration",
+// "does not mention the 55 member states") even when everything the article
+// actually states is correct. Omissions are not grounding failures: an article
+// need not restate every fact in its source, and the deterministic
+// verifyArticleGrounding pass above already fails closed on the dangerous cases
+// (subject mismatch, casualty-number contradictions) before we ever reach the
+// LLM. Dropping omission-only issues stops correct articles (e.g. the
+// 9-july-2026 African Union post) from being blocked. Only issues that assert
+// the article STATES something contradicting the source survive to block it.
+const GROUNDING_OMISSION_ISSUE_PATTERN =
+  /(?:does|did|do)\s?n['’o]?t\s+(?:mention|include|state|specify|note|cover|address|elaborate|discuss|reference|list|acknowledge)|fail(?:s|ed)?\s+to\s+(?:mention|include|state|specify|note|list|acknowledge)|neglect(?:s|ed)?\s+to\s+(?:mention|include|note)|omit(?:s|ted|ting)?\b|no\s+mention\s+of|without\s+mention(?:ing)?|lack(?:s|ing)?\s+(?:a\s+)?mention|missing\s+(?:the\s+|any\s+)?(?:mention|context|reference|detail)|(?:could|should)\s+(?:also\s+)?(?:have\s+)?(?:mention(?:ed)?|included?|noted?)/i;
+
+function filterGroundingIssues(issues) {
+  const list = Array.isArray(issues)
+    ? issues.map((issue) => String(issue).trim()).filter(Boolean)
+    : [];
+  const real = [];
+  const dropped = [];
+  for (const issue of list) {
+    if (GROUNDING_OMISSION_ISSUE_PATTERN.test(issue)) dropped.push(issue);
+    else real.push(issue);
+  }
+  return { real, dropped };
+}
+
 async function verifyFinalArticleGrounding(env, content, source) {
   const deterministic = verifyArticleGrounding(content, source);
   if (!deterministic.ok) return deterministic;
   const sourceMaterial = sourceMaterialForGrounding(source);
   if (!sourceMaterial) return deterministic;
   const articleText = articleGroundingText(content).slice(0, 14000);
-  try {
-    const raw = await callPublicationGateAI(
-      env,
-      [
-        {
-          role: "system",
-          content:
-            "You are a fail-closed historical fact checker. Compare the article with the supplied authoritative source material. Reply with JSON only.",
-        },
-        {
-          role: "user",
-          content:
-            `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
-            `FINAL ARTICLE:\n${articleText}\n\n` +
-            "Reject only clear factual contradictions, conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
-            "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +
-            "Do not reject ordinary interpretation or clearly labeled opinion. Return exactly one JSON object: " +
-            '{"passed":true,"issues":[]} or {"passed":false,"issues":["specific issue"]}.',
-        },
-      ],
-      { maxTokens: 700, timeoutMs: 25_000 },
-    );
+
+  // Retry only on transport/parse failure. A clean parse is trusted: it either
+  // passes (no real issues after omission filtering) or fails closed on the
+  // remaining genuine contradictions. The grader is stochastic, so a dropped
+  // request or garbled response is worth one more attempt before we hard-fail.
+  let lastReason = "final grounding verifier rejected the article";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let raw;
+    try {
+      raw = await callPublicationGateAI(
+        env,
+        [
+          {
+            role: "system",
+            content:
+              "You are a fail-closed historical fact checker. Compare the article with the supplied authoritative source material. Reply with JSON only.",
+          },
+          {
+            role: "user",
+            content:
+              `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
+              `FINAL ARTICLE:\n${articleText}\n\n` +
+              "Reject ONLY clear factual contradictions: conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
+              "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +
+              "OMISSIONS ARE NOT FAILURES. The article does not need to mention, include, or elaborate on every fact in the source. Never raise an issue that the article 'does not mention', 'does not include', or 'fails to mention' something, and never fault it for leaving out background context. Only flag a fact the article actively STATES that contradicts the source. " +
+              "Do not reject ordinary interpretation or clearly labeled opinion. Return exactly one JSON object: " +
+              '{"passed":true,"issues":[]} or {"passed":false,"issues":["specific contradiction the article states"]}.',
+          },
+        ],
+        { maxTokens: 700, timeoutMs: 25_000 },
+      );
+    } catch (err) {
+      lastReason = `final grounding verifier unavailable: ${err.message}`;
+      continue;
+    }
     const match = raw?.match(/\{[\s\S]*\}/);
-    if (!match) return { ok: false, reasons: ["final grounding verifier returned no JSON"] };
-    const result = JSON.parse(match[0]);
-    const issues = Array.isArray(result.issues)
-      ? result.issues.map((issue) => String(issue).trim()).filter(Boolean)
-      : [];
-    if (result.passed === true && issues.length === 0) return { ok: true, reasons: [] };
-    return {
-      ok: false,
-      reasons: issues.length > 0 ? issues : ["final grounding verifier rejected the article"],
-    };
-  } catch (err) {
-    return { ok: false, reasons: [`final grounding verifier unavailable: ${err.message}`] };
+    if (!match) {
+      lastReason = "final grounding verifier returned no JSON";
+      continue;
+    }
+    let result;
+    try {
+      result = JSON.parse(match[0]);
+    } catch {
+      lastReason = "final grounding verifier returned invalid JSON";
+      continue;
+    }
+    const { real, dropped } = filterGroundingIssues(result.issues);
+    if (dropped.length > 0) {
+      console.warn(
+        `Final grounding: ignored ${dropped.length} omission-only issue(s): ${dropped.join(" | ").slice(0, 300)}`,
+      );
+    }
+    if (real.length === 0) return { ok: true, reasons: [] };
+    return { ok: false, reasons: real };
   }
+  return { ok: false, reasons: [lastReason] };
 }
 
 async function factCheckContent(env, content, source = null) {
@@ -14425,4 +14472,6 @@ export const __contentGenerationTestHooks = {
   CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
   generateEntityTimeline,
   fetchWikipediaEntityData,
+  filterGroundingIssues,
+  verifyArticleGrounding,
 };

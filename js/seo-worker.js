@@ -26,6 +26,7 @@ import {
   extractFirstSentence,
   truncateForMeta,
   buildEventsDateTitle,
+  splitSentences,
 } from "./shared/seo-text.js";
 
 // --- Configuration Constants ---
@@ -1221,7 +1222,8 @@ function cleanWikiExtract(value) {
 function splitEntityHydratedSections(entity) {
   const text = String(entity.intro || entity.summary || "").replace(/\s+/g, " ").trim();
   if (!text) return [];
-  const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)/g) || [text];
+  const parsedSentences = splitCompleteSentences(text);
+  const sentences = parsedSentences.length ? parsedSentences : [text];
   const sections = [];
   let current = [];
   let words = 0;
@@ -1405,8 +1407,7 @@ function entityFactParagraphs(entity) {
       .replace(/\(\s*([^)]*?)\s*$/, "")
       .trim();
   const addSentences = (value, target) => {
-    const sentences = cleanWikiExtract(value)
-      .match(/[^.!?]+[.!?]+(?:\s|$)/g) || [];
+    const sentences = splitCompleteSentences(cleanWikiExtract(value));
     for (const sentence of sentences) {
       const clean = normalizeSentence(sentence);
       // Dedup key ignores parentheticals and years so near-duplicates collapse:
@@ -1465,9 +1466,12 @@ function entityFactParagraphs(entity) {
 }
 
 function splitCompleteSentences(value) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .match(/[^.!?]+[.!?]+(?:\s|$)/g) || [];
+  // Abbreviation-safe: shares maskAbbreviationPeriods (via splitSentences) so a
+  // middle initial ("Thomas J. Whitmore"), "U.S.", "Dr." etc. never splits at
+  // the abbreviation period. Keeps only complete sentences ending in terminal
+  // punctuation, matching the previous regex contract (drops a trailing
+  // punctuation-less fragment).
+  return splitSentences(value).filter((sentence) => /[.!?]["'”’)\]]*$/.test(sentence));
 }
 
 function chunkSentences(sentences, maxWords = 150) {
@@ -7426,7 +7430,7 @@ async function handleFetchRequest(request, env, ctx) {
   const csp =
     `default-src 'none'; ` +
     `connect-src 'self' https://api.wikimedia.org https://en.wikipedia.org https://cdn.jsdelivr.net ` +
-    `https://www.google-analytics.com https://www.google.com https://www.google.ba https://www.gstatic.com ` +
+    `https://www.google-analytics.com https://analytics.google.com https://*.google-analytics.com https://www.google.com https://www.google.ba https://www.gstatic.com ` +
     `https://www.googleadservices.com https://pagead2.googlesyndication.com ` +
     `https://*.adtrafficquality.google https://*.doubleclick.net ` +
     `https://www.googletagmanager.com https://fundingchoicesmessages.google.com https://openlibrary.org; ` +
@@ -7450,7 +7454,12 @@ async function handleFetchRequest(request, env, ctx) {
   // Permissions-Policy - disable browser features the site doesn't use
   newResponse.headers.set(
     "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    // unload=* explicitly permits the deprecated `unload` event that Google's
+    // Funding Choices ad-block-recovery script (lidar.js, injected by
+    // injectAdBlockRecoveryScript in js/script.js) registers. Chrome now
+    // disables unload by default, which broke ad-block detection and logged a
+    // Permissions-Policy violation.
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=(), unload=*",
   );
 
   // Cache-Control - allow CDN/edge to cache transformed HTML for 1 hour, serve stale for 24h while revalidating

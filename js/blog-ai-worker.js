@@ -236,6 +236,19 @@ const SOURCE_PAGE_RELEVANCE_STOPWORDS = new Set([
   "before", "into", "its", "their", "his", "her", "this", "that", "united", "states",
 ]);
 const EVENT_FAMILY_REPEAT_WINDOW_DAYS = 7;
+// Royal/papal succession detection, shared by the scorer and the event-family
+// cooldown. Runs against normalizeTopicMatchText output (lowercased, no
+// punctuation). July 11 2026 incident: "Election of pope Adrian V" stacked
+// election +22, pope +20, death +10 and beat every famous event of the date,
+// and no cooldown family stopped five medieval successions in eight days.
+// Modern presidential/parliamentary elections are deliberately not matched.
+const ROYAL_SUCCESSION_PATTERN =
+  /\b(coronation|crowned|enthroned|papal election|papal conclave|antipope)\b|\b(elected|election of|becomes|proclaimed|acclaimed)\b[a-z0-9\s]{0,40}\b(pope|king|queen|emperor|tsar|sultan|caliph)\b|\b(pope|king|queen|emperor)\b[a-z0-9\s]{0,30}\b(is elected|is crowned)\b/;
+// Minimum feed-extract length for a candidate to qualify. The old 300-char
+// floor silently dropped major events whose feed extract happened to be short
+// (Skylab reentry 217, Branson spaceflight 199, 1982 World Cup final 268);
+// fuller source pages are fetched after selection anyway.
+const MIN_CANDIDATE_EXTRACT_CHARS = 150;
 const EVENT_FAMILY_RULES = [
   {
     name: "shooting",
@@ -277,6 +290,10 @@ const EVENT_FAMILY_RULES = [
   {
     name: "independence",
     pattern: /\bindependence\b/,
+  },
+  {
+    name: "royal or papal succession",
+    pattern: ROYAL_SUCCESSION_PATTERN,
   },
 ];
 const EVERY_OTHER_DAYS = 1; // Generate every N days
@@ -1652,23 +1669,34 @@ function scoreBlogEventCandidate(event) {
   ) {
     score += 14;
   }
-  // Constructive / world-shaping milestones — discoveries, inventions, science,
-  // medicine, culture, civil rights, exploration, independence, and peace. Given
-  // equal footing with catastrophe so triumphs surface as often as tragedies.
-  if (
-    /\b(discover\w*|invent\w*|breakthrough|premiere|publish\w*|founded|founding|establish\w*|independence|treaty|peace|elect(?:ed|ion|oral|s)|coronation|crown\w*|expedition|spaceflight|orbit\w*|vaccine|nobel|unveil\w*|inaugurat\w*|charter\w*|abolish\w*|suffrage)\b/.test(
-      haystack,
-    )
-  ) {
-    score += 22;
-  }
-  // Globally recognised figures — a significance and person-richness signal.
-  if (
-    /\b(president|prime minister|foreign minister|king|queen|emperor|pope|monarch|supreme leader|head of state|john f kennedy|martin luther king|winston churchill|napoleon|atat rk|ataturk|anne boleyn)\b/.test(
-      haystack,
-    )
-  ) {
-    score += 20;
+  // Royal/papal successions used to triple-dip: the election/coronation token
+  // earned the +22 milestone bonus, the pope/king/emperor token earned the +20
+  // figure bonus, and a "death of ..." predecessor added +10 — so any obscure
+  // medieval succession out-scored genuinely famous events (July 11 2026:
+  // Pope Adrian V at 60 beat To Kill a Mockingbird at 44 and Srebrenica at 26).
+  // A succession now earns one modest bonus and must prove real-world fame
+  // through the pageview notability re-rank instead.
+  if (ROYAL_SUCCESSION_PATTERN.test(haystack)) {
+    score += 12;
+  } else {
+    // Constructive / world-shaping milestones — discoveries, inventions, science,
+    // medicine, culture, civil rights, exploration, independence, and peace. Given
+    // equal footing with catastrophe so triumphs surface as often as tragedies.
+    if (
+      /\b(discover\w*|invent\w*|breakthrough|premiere|publish\w*|founded|founding|establish\w*|independence|treaty|peace|elect(?:ed|ion|oral|s)|coronation|crown\w*|expedition|spaceflight|orbit\w*|vaccine|nobel|unveil\w*|inaugurat\w*|charter\w*|abolish\w*|suffrage)\b/.test(
+        haystack,
+      )
+    ) {
+      score += 22;
+    }
+    // Globally recognised figures — a significance and person-richness signal.
+    if (
+      /\b(president|prime minister|foreign minister|king|queen|emperor|pope|monarch|supreme leader|head of state|john f kennedy|martin luther king|winston churchill|napoleon|atat rk|ataturk|anne boleyn)\b/.test(
+        haystack,
+      )
+    ) {
+      score += 20;
+    }
   }
   // Human-loss outcomes — kept low so loss does not dominate selection by itself.
   if (
@@ -1729,6 +1757,73 @@ function rankBlogEventCandidates(events) {
       }
       return Number.parseInt(b.year, 10) - Number.parseInt(a.year, 10);
     });
+}
+
+// ---------------------------------------------------------------------------
+// Pageview notability re-rank (2026-07-11). Keyword scores cannot tell a
+// world-famous event from an obscure one that happens to share vocabulary, so
+// the top-ranked candidates are re-ordered by editorial score PLUS a bonus
+// derived from their Wikipedia page's monthly pageviews. Every failure path
+// fails open (bonus 0, editorial order preserved).
+// ---------------------------------------------------------------------------
+const PAGEVIEW_RERANK_TOP_N = 8;
+const PAGEVIEW_NOTABILITY_MAX_BONUS = 55;
+
+function pageviewNotabilityBonus(monthlyViews) {
+  const views = Number(monthlyViews);
+  if (!Number.isFinite(views) || views <= 1000) return 0;
+  // log scale: 10k/month → +20, 100k → +40, capped at +55 (~1M+).
+  return Math.min(
+    PAGEVIEW_NOTABILITY_MAX_BONUS,
+    Math.round((Math.log10(views) - 3) * 20),
+  );
+}
+
+async function fetchMonthlyPageviews(pageTitle, fetchImpl = fetch) {
+  const title = String(pageTitle || "").trim();
+  if (!title) return 0;
+  // Previous full calendar month (the monthly granularity needs whole months).
+  const now = new Date();
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+  const fmt = (d) => `${d.toISOString().slice(0, 10).replace(/-/g, "")}00`;
+  const article = encodeURIComponent(title.replace(/\s+/g, "_"));
+  const url =
+    `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/` +
+    `all-access/user/${article}/monthly/${fmt(start)}/${fmt(end)}`;
+  const response = await fetchImpl(url, {
+    headers: { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" },
+  });
+  if (!response?.ok) return 0;
+  const data = await response.json();
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return items.reduce((sum, item) => sum + (Number(item?.views) || 0), 0);
+}
+
+async function applyPageviewNotabilityRerank(candidates, fetchImpl = fetch) {
+  if (!Array.isArray(candidates) || candidates.length < 2) return candidates;
+  const head = candidates.slice(0, PAGEVIEW_RERANK_TOP_N);
+  const tail = candidates.slice(PAGEVIEW_RERANK_TOP_N);
+  const views = await Promise.all(
+    head.map((candidate) =>
+      fetchMonthlyPageviews(candidate.pageTitle, fetchImpl).catch(() => 0),
+    ),
+  );
+  const boosted = head.map((candidate, i) => ({
+    ...candidate,
+    monthlyPageviews: views[i],
+    notabilityScore: pageviewNotabilityBonus(views[i]),
+    combinedScore:
+      (Number.parseInt(candidate.editorialScore, 10) || 0) +
+      pageviewNotabilityBonus(views[i]),
+  }));
+  boosted.sort((a, b) => {
+    if (b.combinedScore !== a.combinedScore) {
+      return b.combinedScore - a.combinedScore;
+    }
+    return Number.parseInt(b.year, 10) - Number.parseInt(a.year, 10);
+  });
+  return [...boosted, ...tail];
 }
 
 function truncateSelectorText(value, maxLength = 210) {
@@ -1840,7 +1935,7 @@ async function chooseEventForDate(
       .filter((event) => event.year && event.text && event.pageTitle);
 
     candidateEvents = allEvents
-      .filter((event) => event.hasThumbnail && event.extractLength >= 300)
+      .filter((event) => event.hasThumbnail && event.extractLength >= MIN_CANDIDATE_EXTRACT_CHARS)
       .filter((event) => {
         const haystack = `${event.pageTitle} ${event.text}`.toLowerCase();
         return !takenAllTime.some((taken) =>
@@ -1859,6 +1954,22 @@ async function chooseEventForDate(
     }
     candidateEvents = familyGuard.candidates;
     candidateEvents = rankBlogEventCandidates(candidateEvents);
+    try {
+      candidateEvents = await applyPageviewNotabilityRerank(candidateEvents);
+      const preview = candidateEvents
+        .slice(0, 3)
+        .map(
+          (event) =>
+            `"${event.pageTitle}" editorial=${event.editorialScore}` +
+            (event.monthlyPageviews !== undefined
+              ? ` views/mo=${event.monthlyPageviews} combined=${event.combinedScore}`
+              : ""),
+        )
+        .join(" | ");
+      console.log(`Event selector: pageview notability re-rank top: ${preview}`);
+    } catch (err) {
+      console.warn(`Event selector pageview re-rank failed (keeping editorial order): ${err.message}`);
+    }
   } catch (err) {
     console.warn(`Event selector candidate load failed: ${err.message}`);
   }
@@ -5689,6 +5800,29 @@ async function generateAndStore(
           ),
     );
 
+  // A previous enrichment for this date refused its event on a source-grounding
+  // contradiction and deleted the draft (see markGroundingBlockedEvent). Exclude
+  // that event so regeneration picks a different topic instead of failing the
+  // same deterministic way for the rest of the day.
+  if (!forcedEvent) {
+    try {
+      const blocked = await env.BLOG_AI_KV.get(
+        `${KV_BLOCKED_EVENT_PREFIX}${buildSlug(now)}`,
+        { type: "json" },
+      );
+      if (blocked) {
+        for (const title of [blocked.pageTitle, blocked.eventTitle]) {
+          if (title) takenAllTime.push(title);
+        }
+        console.warn(
+          `Blog AI: excluding grounding-blocked event "${blocked.pageTitle || blocked.eventTitle}" for ${buildSlug(now)}.`,
+        );
+      }
+    } catch (err) {
+      console.warn(`Blog AI: blocked-event lookup failed: ${err.message}`);
+    }
+  }
+
   // Rotation signals: topic-family repeats are enforced before candidate
   // ranking; pillar preferences remain editorial guidance.
   // - recentPillars: primary pillars of the last 7 published posts (explicit avoid list)
@@ -6078,12 +6212,14 @@ async function generateAndStore(
     );
   } else if (!lightweightPublish) {
     if (groundingSource) {
-      const finalGrounding = await verifyFinalArticleGrounding(env, content, groundingSource);
+      const finalGrounding = await verifyFinalGroundingWithRepair(env, content, groundingSource, slug);
       if (!finalGrounding.ok) {
+        await markGroundingBlockedEvent(env, slug, content, finalGrounding.reasons);
         throw new Error(
           `Refusing to publish ${slug}: final source-grounding check failed — ${finalGrounding.reasons.join("; ")}`,
         );
       }
+      content = finalGrounding.content;
     }
     const quizParagraphs = [
       ...(content.overviewParagraphs || []),
@@ -6793,12 +6929,14 @@ async function enrichPublishedPost(env, slug) {
 
   if (groundingSource) {
     await chk("pre-final-grounding");
-    const finalGrounding = await verifyFinalArticleGrounding(env, enriched, groundingSource);
+    const finalGrounding = await verifyFinalGroundingWithRepair(env, enriched, groundingSource, slug);
     if (!finalGrounding.ok) {
+      await markGroundingBlockedEvent(env, slug, enriched, finalGrounding.reasons);
       throw new Error(
         `Refusing to publish ${slug}: final source-grounding check failed — ${finalGrounding.reasons.join("; ")}`,
       );
     }
+    enriched = finalGrounding.content;
     await chk("post-final-grounding");
   }
 
@@ -10382,6 +10520,175 @@ async function verifyFinalArticleGrounding(env, content, source) {
     return { ok: false, reasons: real };
   }
   return { ok: false, reasons: [lastReason] };
+}
+
+// ---------------------------------------------------------------------------
+// Final-grounding repair + self-heal (2026-07-11 incident). The Wikipedia feed
+// blurb for Pope Adrian V asserted the wrong predecessor; the article echoed
+// it, the grounding gate correctly refused, and — because the claim was baked
+// into the stored draft — every retry failed identically and the day was lost.
+// Now a flagged contradiction gets exactly one surgical source-bound repair
+// pass and a re-verification; if that still fails, the event is recorded as
+// blocked for the date and the draft is deleted so the next generation run
+// picks a different topic.
+// ---------------------------------------------------------------------------
+
+const KV_BLOCKED_EVENT_PREFIX = "blocked-event:";
+// Transport-level verifier failures (provider down, garbled JSON) are not
+// article defects; a content repair would be pointless churn.
+const GROUNDING_VERIFIER_TRANSPORT_PATTERN = /final grounding verifier/;
+
+const GROUNDING_REPAIRABLE_STRING_FIELDS = [
+  "description",
+  "ogDescription",
+  "twitterDescription",
+  "jsonLdDescription",
+  "editorialNote",
+];
+// Titles are deliberately NOT repairable: they are locked to the source event
+// headline and rewriting them here would desync the KV index.
+const GROUNDING_REPAIRABLE_ARRAY_FIELDS = [
+  "overviewParagraphs",
+  "eyewitnessOrChronicle",
+  "aftermathParagraphs",
+  "conclusionParagraphs",
+  "didYouKnowFacts",
+  "quickFacts",
+  "analysisGood",
+  "analysisBad",
+];
+
+async function repairGroundingContradictions(env, content, reasons, source, callAIImpl = callAI) {
+  if (!Array.isArray(reasons) || reasons.length === 0) return content;
+  const sourceMaterial = sourceBoundRepairContext(source);
+  const repairPayload = {};
+  for (const field of [...GROUNDING_REPAIRABLE_STRING_FIELDS, ...GROUNDING_REPAIRABLE_ARRAY_FIELDS]) {
+    if (content[field] !== undefined) repairPayload[field] = content[field];
+  }
+
+  const systemPrompt =
+    "You are a surgical fact-repair editor. The article failed a fail-closed source-grounding check. " +
+    "Correct ONLY the contradicted facts listed in the audit, changing as few words as possible. " +
+    "The supplied source material is authoritative; when the article and the source disagree, the source wins. " +
+    "Do not rephrase, expand, or polish anything that is not contradicted. Preserve array lengths exactly. " +
+    "Never use hyphens or em dashes in article body fields. " +
+    SOURCE_BOUND_REPAIR_RULES +
+    "Return ONLY a JSON object containing the corrected fields.";
+
+  const userMessage =
+    (sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : "") +
+    `Contradictions that must be corrected:\n${reasons.map((reason) => `- ${reason}`).join("\n")}\n\n` +
+    `Article fields:\n${JSON.stringify(repairPayload, null, 2)}\n\n` +
+    "Return only the fields you corrected.";
+
+  let raw;
+  try {
+    raw = await callAIImpl(
+      env,
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      { maxTokens: 4000, timeoutMs: 50_000 },
+    );
+  } catch (err) {
+    console.warn(`repairGroundingContradictions: AI call failed (${err.message}) — keeping original`);
+    return content;
+  }
+
+  const cleaned = String(raw || "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) {
+    console.warn("repairGroundingContradictions: no JSON in response — keeping original");
+    return content;
+  }
+  let fixes;
+  try {
+    fixes = JSON.parse(match[0]);
+  } catch {
+    console.warn("repairGroundingContradictions: JSON parse error — keeping original");
+    return content;
+  }
+
+  const updated = { ...content };
+  let applied = 0;
+  for (const field of GROUNDING_REPAIRABLE_STRING_FIELDS) {
+    if (
+      typeof fixes[field] === "string" &&
+      fixes[field].trim() &&
+      typeof content[field] === "string"
+    ) {
+      updated[field] = fixes[field].trim();
+      applied += 1;
+    }
+  }
+  for (const field of GROUNDING_REPAIRABLE_ARRAY_FIELDS) {
+    const fix = fixes[field];
+    const original = content[field];
+    if (!Array.isArray(fix) || !Array.isArray(original) || fix.length !== original.length) continue;
+    const shapeMatches = fix.every(
+      (item, i) =>
+        typeof item === typeof original[i] &&
+        (typeof item !== "string" || item.trim().length > 0),
+    );
+    if (!shapeMatches) continue;
+    updated[field] = fix;
+    applied += 1;
+  }
+  return applied > 0 ? updated : content;
+}
+
+async function verifyFinalGroundingWithRepair(env, content, source, slug, deps = {}) {
+  const verify = deps.verify || verifyFinalArticleGrounding;
+  const repair = deps.repair || repairGroundingContradictions;
+
+  const first = await verify(env, content, source);
+  if (first.ok) return { ok: true, reasons: [], content };
+
+  const contradictions = (first.reasons || []).filter(
+    (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
+  );
+  if (contradictions.length === 0) return { ...first, content };
+
+  console.warn(
+    `Final grounding failed for ${slug}; attempting one source-bound repair pass: ${contradictions.join("; ").slice(0, 400)}`,
+  );
+  let repaired;
+  try {
+    repaired = await repair(env, content, contradictions, source);
+  } catch (err) {
+    console.warn(`Final-grounding repair pass failed for ${slug}: ${err.message}`);
+    return { ...first, content };
+  }
+  if (!repaired || repaired === content) return { ...first, content };
+
+  const second = await verify(env, repaired, source);
+  if (second.ok) {
+    console.log(`Final grounding repair succeeded for ${slug}.`);
+    return { ok: true, reasons: [], content: repaired };
+  }
+  return { ...second, content };
+}
+
+async function markGroundingBlockedEvent(env, slug, content, reasons) {
+  try {
+    await env.BLOG_AI_KV.put(
+      `${KV_BLOCKED_EVENT_PREFIX}${slug}`,
+      JSON.stringify({
+        pageTitle: content?.sourcePageTitle || "",
+        eventTitle: content?.eventTitle || "",
+        reasons: (Array.isArray(reasons) ? reasons : []).slice(0, 5),
+        ts: new Date().toISOString(),
+      }),
+      { expirationTtl: 3 * 86_400 },
+    );
+    await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`);
+    console.warn(
+      `Grounding self-heal: blocked event "${content?.sourcePageTitle || content?.eventTitle}" for ${slug} and deleted the draft so regeneration picks a different topic.`,
+    );
+  } catch (err) {
+    console.warn(`Grounding self-heal marking failed for ${slug}: ${err.message}`);
+  }
 }
 
 async function factCheckContent(env, content, source = null) {

@@ -4236,7 +4236,7 @@ export default {
           );
           // Inject VideoObject JSON-LD schema for SEO
           if (!ytHtml.includes('"@type":"VideoObject"')) {
-            // Extract title and description from existing NewsArticle schema or meta tags
+            // Extract title and description from the existing article schema or meta tags
             const titleMatch = ytHtml.match(
               /<meta property="og:title" content="([^"]+)"/,
             );
@@ -6967,7 +6967,15 @@ async function savePublishedPost(
   );
 
   assertRequiredContentBlocks(content);
-  const rawHtml = buildPostHTML(content, date, slug, existingIndex, safePillars, bookCoverUrl);
+  const rawHtml = buildPostHTML(
+    content,
+    date,
+    slug,
+    existingIndex,
+    safePillars,
+    bookCoverUrl,
+    safeEntityMeta,
+  );
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
   if (safePersonImages.length > 0) html = injectPersonImages(html, safePersonImages);
   if (safeEventImages.length > 0) html = injectEventImages(html, safeEventImages);
@@ -6978,6 +6986,16 @@ async function savePublishedPost(
   html = addHtmlMarker(html, FEATURED_IMAGE_CHECK_MARKER);
   if (/<figure style="float:(?:right|left);/i.test(html)) {
     html = addHtmlMarker(html, EVENT_FIGURES_BACKFILL_MARKER);
+  }
+  const structuredDataValidation = validateArticleStructuredDataForPublish(
+    html,
+    content,
+    safeEntityMeta,
+  );
+  if (!structuredDataValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: structured-data contract failed — ${structuredDataValidation.reasons.join("; ")}`,
+    );
   }
   // Tier 1: hard structural check — throws if buildPostHTML produced a broken article.
   assertArticleStructure(html);
@@ -13225,7 +13243,295 @@ function buildArticleSectionHeadings(content, pillars = []) {
  * Builds the full blog post HTML page, matching the structure of existing
  * hand-written posts on thisday.info.
  */
-function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCoverUrl = null) {
+function visibleArticleCorpus(content) {
+  return normalizeTopicMatchText(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.description,
+      content?.historicalDate,
+      content?.location,
+      content?.country,
+      ...(content?.overviewParagraphs || []),
+      ...(content?.eyewitnessOrChronicle || []),
+      ...(content?.aftermathParagraphs || []),
+      ...(content?.conclusionParagraphs || []),
+      ...(content?.quickFacts || []).map((fact) => `${fact?.label || ""} ${fact?.value || ""}`),
+      ...(content?.didYouKnowFacts || []),
+    ].join(" "),
+  );
+}
+
+function schemaTypeForEntity(type) {
+  if (type === "person") return "Person";
+  if (type === "place") return "Place";
+  if (type === "organization") return "Organization";
+  if (type === "event") return "Event";
+  return "Thing";
+}
+
+function buildVerifiedArticleMentions(content, entityMeta = []) {
+  const mentions = [];
+  const seen = new Set();
+  const push = (mention) => {
+    const name = String(mention?.name || "").replace(/\s+/g, " ").trim();
+    const type = String(mention?.["@type"] || "Thing");
+    const key = `${type}:${normalizeTopicMatchText(name)}`;
+    if (!name || seen.has(key)) return;
+    seen.add(key);
+    mentions.push({ ...mention, name });
+  };
+
+  // The people strip is the visible source of truth for Person mentions. A
+  // Wikipedia identity is emitted only after the substantive-profile verifier
+  // approved that exact person.
+  for (const entity of Array.isArray(entityMeta) ? entityMeta : []) {
+    if (entity?.type !== "person" || entity.skipStrip || !entity.name) continue;
+    push({
+      "@type": "Person",
+      name: entity.name,
+      ...(entity.profileLinkEligible === true &&
+      entity.profileSubjectVerified === true &&
+      /^https:\/\/en\.wikipedia\.org\/wiki\/[^?#]+$/i.test(String(entity.wikiUrl || ""))
+        ? { sameAs: entity.wikiUrl }
+        : {}),
+    });
+  }
+
+  // Non-person key terms are included only when their label actually appears
+  // in visible article copy. AI-provided identity URLs are intentionally not
+  // copied into schema without an equivalent subject-verification contract.
+  const visibleCorpus = visibleArticleCorpus(content);
+  for (const term of Array.isArray(content?.keyTerms) ? content.keyTerms : []) {
+    if (!term?.term || term.type === "person") continue;
+    const normalizedTerm = normalizeTopicMatchText(term.term);
+    if (!normalizedTerm || !` ${visibleCorpus} `.includes(` ${normalizedTerm} `)) continue;
+    push({ "@type": schemaTypeForEntity(term.type), name: term.term });
+  }
+
+  return mentions;
+}
+
+function buildBlogPostStructuredData(
+  content,
+  date,
+  canonicalUrl,
+  previewImageUrl,
+  featuredImageUrl,
+  entityMeta = [],
+) {
+  const publishedAt = date.toISOString();
+  const description = content.jsonLdDescription || content.description;
+  const eventName = content.eventTitle || content.jsonLdName || content.title;
+  const event = {
+    "@type": "Event",
+    name: eventName,
+    ...(content.historicalDateISO || content.historicalYear
+      ? { startDate: content.historicalDateISO || String(content.historicalYear) }
+      : {}),
+    ...(description ? { description } : {}),
+    ...(content.location || content.country
+      ? {
+          location: {
+            "@type": "Place",
+            ...(content.location ? { name: content.location } : {}),
+            ...(content.country
+              ? { address: { "@type": "PostalAddress", addressCountry: content.country } }
+              : {}),
+          },
+        }
+      : {}),
+    ...(content.wikiUrl || content.jsonLdUrl ? { url: content.wikiUrl || content.jsonLdUrl } : {}),
+    eventStatus: "https://schema.org/EventCompleted",
+    ...(content.organizerName &&
+    ` ${visibleArticleCorpus(content)} `.includes(` ${normalizeTopicMatchText(content.organizerName)} `)
+      ? { organizer: { "@type": "Organization", name: content.organizerName } }
+      : {}),
+  };
+  const mentions = buildVerifiedArticleMentions(content, entityMeta);
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
+    headline: content.title,
+    datePublished: publishedAt,
+    inLanguage: "en",
+    articleSection: "History",
+    author: {
+      "@type": "Organization",
+      name: "thisDay.info Editorial Team",
+      url: "https://thisday.info/about/editorial/",
+    },
+    publisher: {
+      "@type": "Organization",
+      name: "thisDay.info",
+      url: "https://thisday.info/",
+      logo: {
+        "@type": "ImageObject",
+        url: "https://thisday.info/images/logo.png",
+      },
+    },
+    ...(description ? { description } : {}),
+    ...(previewImageUrl
+      ? {
+          image: {
+            "@type": "ImageObject",
+            url: previewImageUrl,
+            ...(featuredImageUrl ? { contentUrl: featuredImageUrl } : {}),
+            ...(content.imageAlt ? { caption: content.imageAlt } : {}),
+          },
+        }
+      : {}),
+    url: canonicalUrl,
+    about: event,
+    ...(mentions.length > 0 ? { mentions } : {}),
+  };
+}
+
+function buildArticleBreadcrumbStructuredData(content, canonicalUrl, currentPillars = []) {
+  const pillarSlug = (str) =>
+    str
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+  const itemListElement = [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "thisDay.",
+      item: "https://thisday.info/",
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: "Historical Blog",
+      item: "https://thisday.info/blog/",
+    },
+  ];
+  if (currentPillars.length > 0) {
+    itemListElement.push({
+      "@type": "ListItem",
+      position: 3,
+      name: currentPillars[0],
+      item: `https://thisday.info/blog/topic/${pillarSlug(currentPillars[0])}/`,
+    });
+  }
+  itemListElement.push({
+    "@type": "ListItem",
+    position: itemListElement.length + 1,
+    name: content.title,
+    item: canonicalUrl,
+  });
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement,
+  };
+}
+
+function extractJsonLdObjects(html) {
+  const objects = [];
+  const invalidBlocks = [];
+  const pattern = /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = pattern.exec(String(html || ""))) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (Array.isArray(parsed?.["@graph"])) objects.push(...parsed["@graph"]);
+      else objects.push(parsed);
+    } catch (error) {
+      invalidBlocks.push(error.message);
+    }
+  }
+  return { objects, invalidBlocks };
+}
+
+function schemaObjectHasType(object, type) {
+  const schemaType = object?.["@type"];
+  return Array.isArray(schemaType) ? schemaType.includes(type) : schemaType === type;
+}
+
+function validateArticleStructuredDataForPublish(html, content, entityMeta = []) {
+  const reasons = [];
+  const { objects, invalidBlocks } = extractJsonLdObjects(html);
+  if (invalidBlocks.length > 0) reasons.push(`invalid JSON-LD: ${invalidBlocks.join("; ")}`);
+
+  const articles = objects.filter((object) =>
+    ["Article", "BlogPosting", "NewsArticle"].some((type) => schemaObjectHasType(object, type)),
+  );
+  const breadcrumbs = objects.filter((object) => schemaObjectHasType(object, "BreadcrumbList"));
+  const faqPages = objects.filter((object) => schemaObjectHasType(object, "FAQPage"));
+  if (articles.length !== 1) reasons.push(`expected one article schema, found ${articles.length}`);
+  if (articles.some((article) => schemaObjectHasType(article, "NewsArticle"))) {
+    reasons.push("historical feature must not use NewsArticle schema");
+  }
+  if (articles.length === 1 && !schemaObjectHasType(articles[0], "BlogPosting")) {
+    reasons.push("historical blog feature must use BlogPosting schema");
+  }
+  if (breadcrumbs.length !== 1) reasons.push(`expected one BreadcrumbList, found ${breadcrumbs.length}`);
+  if (faqPages.length > 0) reasons.push("FAQPage schema is not eligible for this historical feature");
+
+  const article = articles[0];
+  if (article) {
+    if (article.headline !== content?.title) reasons.push("schema headline does not match the visible title");
+    const about = article.about;
+    if (!schemaObjectHasType(about, "Event")) reasons.push("article about schema must describe an Event");
+    const expectedEventName = content?.eventTitle || content?.jsonLdName || content?.title;
+    if (about?.name !== expectedEventName) reasons.push("schema event name does not match visible content");
+    const expectedStartDate = content?.historicalDateISO ||
+      (content?.historicalYear ? String(content.historicalYear) : "");
+    if (expectedStartDate && about?.startDate !== expectedStartDate) {
+      reasons.push("schema event date does not match the historical date");
+    }
+    if (content?.location && about?.location?.name !== content.location) {
+      reasons.push("schema location does not match visible content");
+    }
+    if (content?.country && about?.location?.address?.addressCountry !== content.country) {
+      reasons.push("schema country does not match visible content");
+    }
+  }
+
+  const visiblePeople = new Map(
+    (Array.isArray(entityMeta) ? entityMeta : [])
+      .filter((entity) => entity?.type === "person" && entity.name && !entity.skipStrip)
+      .map((entity) => [normalizeTopicMatchText(entity.name), entity]),
+  );
+  const personMentions = (Array.isArray(article?.mentions) ? article.mentions : [])
+    .filter((mention) => schemaObjectHasType(mention, "Person"));
+  for (const mention of personMentions) {
+    const key = normalizeTopicMatchText(mention.name);
+    const entity = visiblePeople.get(key);
+    if (!entity || !String(html || "").includes(esc(mention.name))) {
+      reasons.push(`schema person is not visible: ${mention.name || "unnamed person"}`);
+      continue;
+    }
+    if (mention.sameAs && !(
+      entity.profileLinkEligible === true &&
+      entity.profileSubjectVerified === true &&
+      mention.sameAs === entity.wikiUrl
+    )) {
+      reasons.push(`schema person identity is not verified: ${mention.name}`);
+    }
+  }
+  for (const [key, entity] of visiblePeople) {
+    if (!personMentions.some((mention) => normalizeTopicMatchText(mention.name) === key)) {
+      reasons.push(`visible person missing from schema: ${entity.name}`);
+    }
+  }
+
+  return { ok: reasons.length === 0, reasons, objects };
+}
+
+function buildPostHTML(
+  c,
+  date,
+  slug,
+  allPosts = [],
+  currentPillars = [],
+  bookCoverUrl = null,
+  entityMeta = [],
+) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
   const publishYear = date.getFullYear();
@@ -13303,103 +13609,21 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
     ? `&nbsp;|&nbsp;${esc(String(c.readingTimeMinutes))} min read`
     : "";
 
-  const publishedDateISO = date.toISOString().split("T")[0];
   const featuredImageUrl = isProxyableArticleImageUrl(c.imageUrl) ? c.imageUrl : "";
   const previewImageUrl = buildSocialPreviewImageUrl(featuredImageUrl);
   const jsonLd = JSON.stringify(
-    {
-      "@context": "https://schema.org",
-      "@type": "NewsArticle",
-      mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
-      headline: c.title,
-      datePublished: publishedDateISO,
-      dateModified: publishedDateISO,
-      inLanguage: "en",
-      articleSection: "History",
-      author: {
-        "@type": "Organization",
-        name: "thisDay.info Editorial Team",
-        url: "https://thisday.info/about/editorial/",
-      },
-      publisher: {
-        "@type": "Organization",
-        name: "thisDay.info",
-        logo: {
-          "@type": "ImageObject",
-          url: "https://thisday.info/images/logo.png",
-        },
-      },
-      description: c.jsonLdDescription || c.description,
-      image: previewImageUrl,
-      url: canonicalUrl,
-      about: {
-        "@type": "Event",
-        name: c.eventTitle || c.jsonLdName,
-        startDate: c.historicalDateISO || String(c.historicalYear),
-        description: c.jsonLdDescription || c.description,
-        location: {
-          "@type": "Place",
-          name: c.location,
-          address: { "@type": "PostalAddress", addressCountry: c.country },
-        },
-        url: c.wikiUrl || c.jsonLdUrl,
-        eventStatus: "https://schema.org/EventCompleted",
-        organizer: { "@type": "Organization", name: c.organizerName },
-      },
-      ...(Array.isArray(c.keyTerms) && c.keyTerms.length > 0 && {
-        mentions: c.keyTerms.map((kt) => ({
-          "@type": kt.type === "person" ? "Person" : kt.type === "place" ? "Place" : kt.type === "organization" ? "Organization" : "Thing",
-          name: kt.term,
-          ...(kt.wikiUrl ? { sameAs: kt.wikiUrl } : {}),
-        })),
-      }),
-    },
+    buildBlogPostStructuredData(c, date, canonicalUrl, previewImageUrl, featuredImageUrl, entityMeta),
     null,
     2,
   );
 
-  // BreadcrumbList: Home > Blog > [Pillar] > Article
-  // Pillar level included only when currentPillars data is available.
-  // Pillar hub URLs (/blog/topic/…/) will be live once P3b (hub pages) lands.
   const pillarSlug = (str) =>
     str
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "");
-  const breadcrumbItems = [
-    {
-      "@type": "ListItem",
-      position: 1,
-      name: "thisDay.",
-      item: "https://thisday.info/",
-    },
-    {
-      "@type": "ListItem",
-      position: 2,
-      name: "Historical Blog",
-      item: "https://thisday.info/blog/",
-    },
-  ];
-  if (currentPillars.length > 0) {
-    breadcrumbItems.push({
-      "@type": "ListItem",
-      position: 3,
-      name: currentPillars[0],
-      item: `https://thisday.info/blog/topic/${pillarSlug(currentPillars[0])}/`,
-    });
-  }
-  breadcrumbItems.push({
-    "@type": "ListItem",
-    position: breadcrumbItems.length + 1,
-    name: c.title,
-    item: canonicalUrl,
-  });
   const breadcrumbJsonLd = JSON.stringify(
-    {
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      itemListElement: breadcrumbItems,
-    },
+    buildArticleBreadcrumbStructuredData(c, canonicalUrl, currentPillars),
     null,
     2,
   );
@@ -13466,62 +13690,6 @@ ${jsonLd}
     </script>
     <script type="application/ld+json">
 ${breadcrumbJsonLd}
-    </script>
-    <script type="application/ld+json">
-${JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: [
-    {
-      "@type": "Question",
-      name: `What was ${esc(eventNounLabel(c))}?`,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: esc(c.jsonLdDescription || c.description),
-      },
-    },
-    {
-      "@type": "Question",
-      name: `When and where did ${esc(eventNounLabel(c))} take place?`,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: `${esc(eventNounLabel(c))} took place on ${esc(c.historicalDate)} in ${esc(c.location)}.`,
-      },
-    },
-    {
-      "@type": "Question",
-      name: `What was the historical significance of ${esc(eventNounLabel(c))}?`,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: esc(
-          (c.quickFacts || []).find((f) => f.label === "Significance")?.value ||
-            c.description,
-        ),
-      },
-    },
-  ],
-})}
-    </script>
-    <script type="application/ld+json">
-${JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "BreadcrumbList",
-  itemListElement: [
-    {
-      "@type": "ListItem",
-      position: 1,
-      name: "Home",
-      item: "https://thisday.info/",
-    },
-    {
-      "@type": "ListItem",
-      position: 2,
-      name: "Blog",
-      item: "https://thisday.info/blog/",
-    },
-    { "@type": "ListItem", position: 3, name: c.title, item: canonicalUrl },
-  ],
-})}
     </script>
 
     <link rel="icon" href="/images/favicon.ico" />
@@ -14319,7 +14487,7 @@ ${JSON.stringify(
       },
     },
     hasPart: index.slice(0, 20).map((p) => ({
-      "@type": "NewsArticle",
+      "@type": "BlogPosting",
       name: p.title,
       url: `https://thisday.info/blog/${p.slug}/`,
       datePublished: p.publishedAt
@@ -14541,7 +14709,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
         },
       },
       hasPart: posts.slice(0, 20).map((p) => ({
-        "@type": "NewsArticle",
+        "@type": "BlogPosting",
         name: p.title,
         url: `https://thisday.info/blog/${p.slug}/`,
         datePublished: p.publishedAt

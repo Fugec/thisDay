@@ -1782,6 +1782,8 @@ async function createPersonEntityFromWikipediaRequest(env, slug, url) {
     summaryType: wiki.summaryType || "",
   };
   if (!isLikelyWikipediaPersonEntity(entity)) return null;
+  entity.profileLinkEligible = true;
+  entity.profileSubjectVerified = true;
 
   entity.bodySections = ensureEntityContextSections(
     { ...entity, bodySections: rebuildPersonBodySections(entity) },
@@ -1898,12 +1900,18 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     ? "index, follow, max-image-preview:large"
     : "noindex, follow";
   const schemaType = type === "person" ? "Person" : "Event";
+  const verifiedSameAs =
+    entity.wikiUrl &&
+    (type !== "person" ||
+      (entity.profileLinkEligible === true && entity.profileSubjectVerified === true))
+      ? entity.wikiUrl
+      : undefined;
   const jsonLd = JSON.stringify({
     "@context": "https://schema.org",
     "@type": schemaType,
     name: entity.name,
     url: canonical,
-    sameAs: entity.wikiUrl || undefined,
+    sameAs: verifiedSameAs,
     description,
     image: imageUrl,
     ...(type === "person" && entity.birthDate ? { birthDate: entity.birthDate } : {}),
@@ -2759,7 +2767,7 @@ async function handleTopicHubPage(env, url, slug) {
     description: pageDesc,
     about: { "@type": "Thing", name: hub.title },
     hasPart: matchedPosts.slice(0, 10).map((post) => ({
-      "@type": "NewsArticle",
+      "@type": "BlogPosting",
       headline: post.title,
       url: `${url.origin}/blog/${post.slug}/`,
       description: post.description,
@@ -2985,18 +2993,26 @@ function buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange }) {
   return buildPersonAnswerBlock({ mDisplay, day, featured, count: deaths.length, type: "died", eraRange });
 }
 
+function verifiedPersonWikipediaUrl(item) {
+  const page = item?.pages?.[0];
+  const verified = item?.profileSubjectVerified === true || page?.profileSubjectVerified === true;
+  const pageUrl = page?.content_urls?.desktop?.page || "";
+  return verified && /^https:\/\/en\.wikipedia\.org\/wiki\/[^?#]+$/i.test(pageUrl)
+    ? pageUrl
+    : "";
+}
+
 function buildPersonMentions(items = [], dateKey) {
   return items.slice(0, 8).map((item) => {
     const name = String(item?.text || "").split(",")[0].trim();
     const description = String(item?.text || "").trim();
+    const verifiedWikiUrl = verifiedPersonWikipediaUrl(item);
     return {
       "@type": "Person",
       name,
       ...(item?.year ? { [dateKey]: `${item.year}` } : {}),
       ...(description ? { description } : {}),
-      ...(item?.pages?.[0]?.content_urls?.desktop?.page
-        ? { sameAs: item.pages[0].content_urls.desktop.page }
-        : {}),
+      ...(verifiedWikiUrl ? { sameAs: verifiedWikiUrl } : {}),
     };
   });
 }
@@ -3774,7 +3790,6 @@ function generateEventsDateHTML(
     events.length > 0
       ? `${mDisplay} ${day} spans ${eventsCountLabel} across recorded history${evEraRange ? ` — from ${evEraRange}` : ""}. Below is a curated digest of the most significant moments tied to this date.`
       : `Explore historical events, births, and deaths that occurred on ${mDisplay} ${day} throughout world history.`;
-  const today = new Date().toISOString().split("T")[0];
   const _todayDate = new Date();
   const todayMonthSlug = MONTHS_ALL[_todayDate.getUTCMonth()];
   const todayDayNum = _todayDate.getUTCDate();
@@ -3790,70 +3805,14 @@ function generateEventsDateHTML(
   const nextMonthName = MONTHS_ALL[nextMIdx];
   const nextMonthDisplay = MONTH_DISPLAY_NAMES[nextMIdx + 1];
 
-  // FAQ schema for voice search + featured snippets
-  const faqSchema = JSON.stringify({
+  const collectionPageSchema = JSON.stringify({
     "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: [
-      {
-        "@type": "Question",
-        name: `What happened on ${mDisplay} ${day} in history?`,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: featured
-            ? `On ${mDisplay} ${day}, ${featured.year}: ${featured.text}`
-            : `Explore historical events on thisDay.info for ${mDisplay} ${day}.`,
-        },
-      },
-      ...(births.length > 0
-        ? [
-            {
-              "@type": "Question",
-              name: `Who are famous people born on ${mDisplay} ${day}?`,
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: `Famous people born on ${mDisplay} ${day} include: ${births
-                  .slice(0, 3)
-                  .map((b) => b.text.split(",")[0])
-                  .join(", ")}.`,
-              },
-            },
-          ]
-        : []),
-      ...(deaths.length > 0
-        ? [
-            {
-              "@type": "Question",
-              name: `What famous people died on ${mDisplay} ${day}?`,
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: `Notable historical figures who died on ${mDisplay} ${day} include: ${deaths
-                  .slice(0, 3)
-                  .map((d) => d.text.split(",")[0])
-                  .join(", ")}.`,
-              },
-            },
-          ]
-        : []),
-    ],
-  }).replace(/<\//g, "<\\/");
-
-  const articleSchema = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "NewsArticle",
+    "@type": "CollectionPage",
     mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
-    headline: pageTitle,
+    name: pageTitle,
     description: pageDesc,
     url: canonical,
-    datePublished: today,
-    dateModified: today,
-    articleSection: "History",
     inLanguage: "en",
-    author: {
-      "@type": "Person",
-      name: "thisDay.info Editorial Team",
-      url: `${siteUrl}/about/`,
-    },
     publisher: {
       "@type": "Organization",
       name: "thisDay.info",
@@ -4109,9 +4068,8 @@ function generateEventsDateHTML(
 <meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="${escapeHtml(pageTitle)}"/>
 <meta name="twitter:description" content="${escapeHtml(pageDesc)}"/><meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
 <meta name="author" content="thisDay.info"/>
-<script type="application/ld+json">${articleSchema}</script>
+<script type="application/ld+json">${collectionPageSchema}</script>
 ${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` : ""}
-<script type="application/ld+json">${faqSchema}</script>
 <script type="application/ld+json">${breadcrumbSchema}</script>
 ${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
@@ -4144,7 +4102,7 @@ ${siteNav()}
     ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
   </div>`}
   ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(eventsIntroLine)}</p>
-  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
+  <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time>${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
   ${
     featured || others.length > 0
       ? `
@@ -4155,7 +4113,7 @@ ${siteNav()}
       <h2 class="article-hero-title">${featTitle}</h2>
       ${featRemainder ? `<p class="article-hero-subtitle">${escapeHtml(featRemainder)}</p>` : ""}
       <p class="article-hero-meta">${escapeHtml(eventsIntroLine)}</p>
-      <p class="article-hero-meta">By <a href="/about/" rel="author">thisDay.info Editorial Team</a> &middot; <time datetime="${today}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
+      <p class="article-hero-meta">By <a href="/about/" rel="author">thisDay.info Editorial Team</a> &middot; <time>${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
       <div class="article-hero-pill-row">
         <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-calendar-event me-1"></i>Historical Events</span>
         ${events.length > 0 ? `<span class="article-hero-pill"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
@@ -4494,40 +4452,6 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 
   const topEvents = (eventsData?.events || []).slice(0, 3);
 
-  // Schema — FAQPage
-  const faqSchema = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: [
-      {
-        "@type": "Question",
-        name: `Who was born on ${mDisplay} ${day}?`,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text:
-            births.length > 0
-              ? `Famous people born on ${mDisplay} ${day} include: ${births
-                  .slice(0, 5)
-                  .map((b) => b.text.split(",")[0])
-                  .join(", ")}.`
-              : `Explore notable birthdays on ${mDisplay} ${day} at thisDay.info.`,
-        },
-      },
-      ...(featured
-        ? [
-            {
-              "@type": "Question",
-              name: `What is ${featName} known for?`,
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: escapeHtml(featured.text),
-              },
-            },
-          ]
-        : []),
-    ],
-  });
-
   // Schema — ItemList with jobTitle
   const personListSchema =
     births.length > 0
@@ -4542,6 +4466,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
             const jobTitle = b.text.includes(",")
               ? b.text.slice(b.text.indexOf(",") + 1).trim()
               : "";
+            const verifiedWikiUrl = verifiedPersonWikipediaUrl(b);
             return {
               "@type": "ListItem",
               position: i + 1,
@@ -4551,9 +4476,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
                 birthDate: `${b.year}-${MM}-${DD}`,
                 description: b.text,
                 ...(jobTitle ? { jobTitle } : {}),
-                ...(b.pages?.[0]?.content_urls?.desktop?.page
-                  ? { sameAs: b.pages[0].content_urls.desktop.page }
-                  : {}),
+                ...(verifiedWikiUrl ? { sameAs: verifiedWikiUrl } : {}),
               },
             };
           }),
@@ -4657,7 +4580,6 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 	<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
 	<meta name="author" content="thisDay.info"/>
 	<script type="application/ld+json">${pageSchema}</script>
-	<script type="application/ld+json">${faqSchema}</script>
 	<script type="application/ld+json">${breadcrumbSchema}</script>
 	${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
@@ -4845,40 +4767,6 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 
   const topEvents = (eventsData?.events || []).slice(0, 3);
 
-  // Schema — FAQPage
-  const faqSchema = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: [
-      {
-        "@type": "Question",
-        name: `Who died on ${mDisplay} ${day}?`,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text:
-            deaths.length > 0
-              ? `Notable people who died on ${mDisplay} ${day} include: ${deaths
-                  .slice(0, 5)
-                  .map((d) => d.text.split(",")[0])
-                  .join(", ")}.`
-              : `Explore notable deaths on ${mDisplay} ${day} at thisDay.info.`,
-        },
-      },
-      ...(featured
-        ? [
-            {
-              "@type": "Question",
-              name: `What is ${featName} known for?`,
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: escapeHtml(featured.text),
-              },
-            },
-          ]
-        : []),
-    ],
-  });
-
   // Schema — ItemList with jobTitle
   const personListSchema =
     deaths.length > 0
@@ -4893,6 +4781,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
             const jobTitle = d.text.includes(",")
               ? d.text.slice(d.text.indexOf(",") + 1).trim()
               : "";
+            const verifiedWikiUrl = verifiedPersonWikipediaUrl(d);
             return {
               "@type": "ListItem",
               position: i + 1,
@@ -4902,9 +4791,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
                 deathDate: `${d.year}-${MM}-${DD}`,
                 description: d.text,
                 ...(jobTitle ? { jobTitle } : {}),
-                ...(d.pages?.[0]?.content_urls?.desktop?.page
-                  ? { sameAs: d.pages[0].content_urls.desktop.page }
-                  : {}),
+                ...(verifiedWikiUrl ? { sameAs: verifiedWikiUrl } : {}),
               },
             };
           }),
@@ -5008,7 +4895,6 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 	<meta name="twitter:image" content="${escapeHtml(ogImg)}"/>
 	<meta name="author" content="thisDay.info"/>
 	<script type="application/ld+json">${pageSchema}</script>
-	<script type="application/ld+json">${faqSchema}</script>
 	<script type="application/ld+json">${breadcrumbSchema}</script>
 	${personListSchema ? `<script type="application/ld+json">${personListSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
@@ -6956,20 +6842,10 @@ async function handleFetchRequest(request, env, ctx) {
               const personName = nameMatch
                 ? nameMatch[1].trim()
                 : birthItem.text.split(",")[0].trim();
-              const personImage =
-                birthItem.pages &&
-                birthItem.pages.length > 0 &&
-                birthItem.pages[0].thumbnail &&
-                birthItem.pages[0].thumbnail.source
-                  ? birthItem.pages[0].thumbnail.source
-                  : undefined;
-
-              const wikiUrl =
-                birthItem.pages &&
-                birthItem.pages.length > 0 &&
-                birthItem.pages[0].content_urls?.desktop?.page
-                  ? birthItem.pages[0].content_urls.desktop.page
-                  : ogUrl;
+              const wikiUrl = verifiedPersonWikipediaUrl(birthItem);
+              const personImage = wikiUrl
+                ? birthItem.pages?.[0]?.thumbnail?.source
+                : undefined;
 
               return {
                 "@type": "ListItem",
@@ -6984,16 +6860,7 @@ async function handleFetchRequest(request, env, ctx) {
                     "0",
                   )}`,
                   description: birthItem.text,
-                  url: wikiUrl,
-                  // Add additional context if available
-                  ...(birthItem.pages &&
-                    birthItem.pages.length > 0 && {
-                      sameAs: [
-                        `https://en.wikipedia.org/wiki/${encodeURIComponent(
-                          birthItem.pages[0].title.replace(/ /g, "_"),
-                        )}`,
-                      ],
-                    }),
+                  ...(wikiUrl ? { url: wikiUrl, sameAs: wikiUrl } : {}),
                   // Image for Person if available
                   ...(personImage && { image: personImage }),
                 },
@@ -7024,20 +6891,10 @@ async function handleFetchRequest(request, env, ctx) {
               const personName = nameMatch
                 ? nameMatch[1].trim()
                 : deathItem.text.split(",")[0].trim();
-              const personImage =
-                deathItem.pages &&
-                deathItem.pages.length > 0 &&
-                deathItem.pages[0].thumbnail &&
-                deathItem.pages[0].thumbnail.source
-                  ? deathItem.pages[0].thumbnail.source
-                  : undefined;
-
-              const wikiUrl =
-                deathItem.pages &&
-                deathItem.pages.length > 0 &&
-                deathItem.pages[0].content_urls?.desktop?.page
-                  ? deathItem.pages[0].content_urls.desktop.page
-                  : ogUrl;
+              const wikiUrl = verifiedPersonWikipediaUrl(deathItem);
+              const personImage = wikiUrl
+                ? deathItem.pages?.[0]?.thumbnail?.source
+                : undefined;
 
               return {
                 "@type": "ListItem",
@@ -7052,16 +6909,7 @@ async function handleFetchRequest(request, env, ctx) {
                     "0",
                   )}`,
                   description: deathItem.text,
-                  url: wikiUrl,
-                  // Add Wikipedia link if available
-                  ...(deathItem.pages &&
-                    deathItem.pages.length > 0 && {
-                      sameAs: [
-                        `https://en.wikipedia.org/wiki/${encodeURIComponent(
-                          deathItem.pages[0].title.replace(/ /g, "_"),
-                        )}`,
-                      ],
-                    }),
+                  ...(wikiUrl ? { url: wikiUrl, sameAs: wikiUrl } : {}),
                   // Image for Person if available
                   ...(personImage && { image: personImage }),
                 },
@@ -7100,67 +6948,6 @@ async function handleFetchRequest(request, env, ctx) {
         element.append(
           `<script type="application/ld+json">${JSON.stringify(
             breadcrumbSchema,
-          )}</script>`,
-          { html: true },
-        );
-
-        // --- Add FAQ Schema if you have common questions ---
-        const faqSchema = {
-          "@context": "https://schema.org",
-          "@type": "FAQPage",
-          mainEntity: [
-            {
-              "@type": "Question",
-              name: `What happened on ${formattedDate}?`,
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: dynamicDescription,
-              },
-            },
-            {
-              "@type": "Question",
-              name: "How do I find historical events for other dates?",
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: "Use the interactive calendar on thisDay.info to navigate to any month and day. Click a day card to see all events, births, and deaths that occurred on that date throughout history.",
-              },
-            },
-            {
-              "@type": "Question",
-              name: "Where does thisDay.info get its historical data?",
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: "All historical event data is sourced from Wikipedia via the Wikimedia REST API. Each event links directly to its Wikipedia article for further reading.",
-              },
-            },
-            {
-              "@type": "Question",
-              name: `Who was born on ${formattedDate}?`,
-              acceptedAnswer: {
-                "@type": "Answer",
-                text:
-                  eventsData?.births?.length > 0
-                    ? `Notable people born on ${formattedDate} include: ${eventsData.births
-                        .slice(0, 3)
-                        .map((b) => b.text.split(",")[0])
-                        .join(", ")}. Browse the full list on thisDay.info.`
-                    : `Explore thisDay.info to discover notable people born on ${formattedDate} throughout history.`,
-              },
-            },
-            {
-              "@type": "Question",
-              name: "Is thisDay.info free to use?",
-              acceptedAnswer: {
-                "@type": "Answer",
-                text: "Yes, thisDay.info is completely free. Explore historical events, famous birthdays, and notable deaths for any date without any registration or subscription.",
-              },
-            },
-          ],
-        };
-
-        element.append(
-          `<script type="application/ld+json">${JSON.stringify(
-            faqSchema,
           )}</script>`,
           { html: true },
         );

@@ -1,0 +1,1481 @@
+#!/usr/bin/env node
+/**
+ * Read-only content inventory quality audit.
+ *
+ * Production safety:
+ *   - Reads BLOG_AI_KV through Cloudflare's GET-only REST value endpoint.
+ *   - Never calls public Worker page routes, because some GET handlers can
+ *     hydrate entities or repair stored HTML as a side effect.
+ *   - Never writes KV, redirects, sitemaps, robots directives, or page HTML.
+ *   - Writes generated reports only under the local documentation directory.
+ *
+ * Inputs:
+ *   - BLOG_AI_KV `index`, `entity-index-v1`, and stored `post:{slug}` values.
+ *   - Local legacy/static HTML and Worker route templates.
+ *   - Cached GSC exports in documentation/gsc (staleness is reported).
+ *   - Optional backlink CSV/JSON supplied with --backlinks PATH.
+ *
+ * Outputs:
+ *   documentation/quality/inventory-quality-report.md
+ *   documentation/quality/inventory-quality-report.csv
+ *   documentation/quality/inventory-quality-report.json
+ *
+ * Run:
+ *   node tools/content-inventory-audit.js
+ *   node tools/content-inventory-audit.js --backlinks path/to/export.csv
+ */
+
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const SITE = "https://thisday.info";
+const BLOG_KV_NAMESPACE = "5173c34a7bd04cde9988c0e89d77bb6e";
+const DEFAULT_GSC_DIR = join(ROOT, "documentation/gsc");
+const DEFAULT_OUTPUT_DIR = join(ROOT, "documentation/quality");
+const REQUIRED_HUB_ARTICLES = 5;
+const MIN_ARTICLE_WORDS = 850;
+const WINNABLE_MIN_IMPRESSIONS = 10;
+const WINNABLE_POSITION = [5, 20];
+
+const MONTHS = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+];
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+const HUBS = [
+  ["war-conflict", "War & Conflict"],
+  ["politics-government", "Politics & Government"],
+  ["science-technology", "Science & Technology"],
+  ["arts-culture", "Arts & Culture"],
+  ["sports", "Sports"],
+  ["disasters-accidents", "Disasters & Accidents"],
+  ["social-human-rights", "Social & Human Rights"],
+  ["economy-business", "Economy & Business"],
+  ["health-medicine", "Health & Medicine"],
+  ["exploration-discovery", "Exploration & Discovery"],
+  ["famous-persons", "Famous Persons"],
+  ["born-on-this-day", "Born on This Day"],
+  ["died-on-this-day", "Died on This Day"],
+];
+
+const CORE_PAGES = [
+  { path: "/", type: "home", localFile: "index.html" },
+  { path: "/about/", type: "core", localFile: "about/index.html" },
+  { path: "/about/editorial/", type: "core", localFile: "about/editorial/index.html" },
+  { path: "/contact/", type: "core", localFile: "contact/index.html" },
+  { path: "/blog/", type: "blog_index", localFile: "blog/index.html" },
+  { path: "/privacy-policy/", type: "core", localFile: "privacy-policy/index.html" },
+  { path: "/terms/", type: "core", localFile: "terms/index.html" },
+];
+
+const FUNCTION_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "of", "to", "in", "on", "at",
+  "by", "for", "with", "from", "as", "into", "that", "while", "after",
+  "before", "between", "against", "over", "under", "during", "per", "via",
+  "near", "than", "then", "when", "which", "who", "whom",
+]);
+
+const SUBJECTLESS_HEADLINE_OPENING =
+  /^(?:execute|kill|shoot|bomb|invade|launch|open|found|elect|appoint|arrest|capture|assassinate|declare|sign|seal|attack|destroy|overthrow|resign|discover|present|establish|begin|end|order|ban|recognize|liberate|surrender|sink|crash)\b/i;
+
+const SEARCH_OR_PLACEHOLDER_URL =
+  /(?:google\.[^/]+\/search|bing\.com\/search|duckduckgo\.com\/?\?|search\?|\/search\/|example\.com|placeholder)/i;
+
+const NON_SOURCE_HOSTS = new Set([
+  "amazon.com",
+  "www.amazon.com",
+  "youtube.com",
+  "www.youtube.com",
+  "youtu.be",
+  "facebook.com",
+  "www.facebook.com",
+  "x.com",
+  "twitter.com",
+  "instagram.com",
+  "www.instagram.com",
+  "creativecommons.org",
+  "www.buymeacoffee.com",
+  "buymeacoffee.com",
+  "openlibrary.org",
+  "covers.openlibrary.org",
+]);
+
+function parseArgs(argv) {
+  const options = {
+    backlinks: "",
+    gscDir: DEFAULT_GSC_DIR,
+    outputDir: DEFAULT_OUTPUT_DIR,
+    noKv: false,
+    help: false,
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "--backlinks") options.backlinks = resolve(argv[++i] || "");
+    else if (arg === "--gsc-dir") options.gscDir = resolve(argv[++i] || "");
+    else if (arg === "--out-dir") options.outputDir = resolve(argv[++i] || "");
+    else if (arg === "--no-kv") options.noKv = true;
+    else if (arg === "--help" || arg === "-h") options.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
+  }
+  return options;
+}
+
+function printHelp() {
+  console.log(`Usage: node tools/content-inventory-audit.js [options]
+
+Options:
+  --backlinks PATH  Optional backlink CSV or JSON export.
+  --gsc-dir PATH    Cached GSC export directory (default documentation/gsc).
+  --out-dir PATH    Local output directory (default documentation/quality).
+  --no-kv           Do not make read-only Cloudflare KV GET requests.
+  -h, --help        Show this help.
+
+The script never calls public page routes and contains no production write path.`);
+}
+
+function parseEnvFile(path) {
+  const out = {};
+  if (!existsSync(path)) return out;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*)\s*$/);
+    if (!match) continue;
+    let value = match[2].trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    out[match[1]] = value;
+  }
+  return out;
+}
+
+function readJson(path, fallback) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeUrl(value) {
+  try {
+    const url = new URL(String(value || ""), SITE);
+    if (url.hostname.toLowerCase().replace(/^www\./, "") !== "thisday.info") {
+      return "";
+    }
+    url.protocol = "https:";
+    url.hostname = "thisday.info";
+    url.port = "";
+    url.search = "";
+    url.hash = "";
+    if (!url.pathname.includes(".") && !url.pathname.endsWith("/")) {
+      url.pathname += "/";
+    }
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function urlForPath(path) {
+  return normalizeUrl(`${SITE}${path}`);
+}
+
+function pageType(value) {
+  const url = new URL(normalizeUrl(value) || SITE);
+  const path = url.pathname;
+  if (path === "/") return "home";
+  if (path === "/blog/") return "blog_index";
+  if (/^\/blog\/topic\/[^/]+\/$/.test(path)) return "blog_hub";
+  if (/^\/blog\/(?:[a-z]+\/)?\d{1,2}-[a-z]+-\d{4}\/$/.test(path)) return "blog_article";
+  if (/^\/events\/[a-z]+\/\d{1,2}\/$/.test(path)) return "events_date";
+  if (/^\/quiz\/[a-z]+\/\d{1,2}\/$/.test(path)) return "quiz_date";
+  if (/^\/born\/[a-z]+\/\d{1,2}\/$/.test(path)) return "born_date";
+  if (/^\/died\/[a-z]+\/\d{1,2}\/$/.test(path)) return "died_date";
+  if (/^\/people\/[^/]+\/$/.test(path)) return "person_entity";
+  if (/^\/history\/[^/]+\/$/.test(path)) return "history_entity";
+  return "core";
+}
+
+function isBotQuery(query) {
+  const text = String(query || "");
+  if (text.includes('"')) return true;
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 8) return true;
+  if (/\b(?:19|20)\d{2}\b/.test(text) && words.length >= 5) return true;
+  return false;
+}
+
+function loadGscCache(gscDir) {
+  const pagesDoc = readJson(join(gscDir, "pages-raw.json"), {});
+  const queryPageDoc = readJson(join(gscDir, "query-page-raw.json"), {});
+  const weeklyPath = join(gscDir, "weekly-report.md");
+  const weekly = existsSync(weeklyPath) ? readFileSync(weeklyPath, "utf8") : "";
+  const reportDate = weekly.match(/^# .*?(\d{4}-\d{2}-\d{2})/m)?.[1] || "unknown";
+  const windowMatch = weekly.match(/Window:\s+\*\*(\d{4}-\d{2}-\d{2})\s+→\s+(\d{4}-\d{2}-\d{2})\*\*/);
+  const byUrl = new Map();
+
+  for (const row of Array.isArray(pagesDoc.rows) ? pagesDoc.rows : []) {
+    const url = normalizeUrl(row?.keys?.[0]);
+    if (!url) continue;
+    byUrl.set(url, {
+      observed: true,
+      clicks: Number(row.clicks || 0),
+      impressions: Number(row.impressions || 0),
+      position: Number.isFinite(Number(row.position)) ? Number(row.position) : null,
+      knownHumanClicks: 0,
+      knownHumanImpressions: 0,
+      knownHumanPositionSum: 0,
+      knownBotImpressions: 0,
+      humanQueries: [],
+      botQueries: [],
+    });
+  }
+
+  for (const row of Array.isArray(queryPageDoc.rows) ? queryPageDoc.rows : []) {
+    const query = String(row?.keys?.[0] || "").trim();
+    const url = normalizeUrl(row?.keys?.[1]);
+    if (!url) continue;
+    const stats = byUrl.get(url) || {
+      observed: true,
+      clicks: 0,
+      impressions: 0,
+      position: null,
+      knownHumanClicks: 0,
+      knownHumanImpressions: 0,
+      knownHumanPositionSum: 0,
+      knownBotImpressions: 0,
+      humanQueries: [],
+      botQueries: [],
+    };
+    const impressions = Number(row.impressions || 0);
+    const clicks = Number(row.clicks || 0);
+    const position = Number(row.position || 0);
+    if (isBotQuery(query)) {
+      stats.knownBotImpressions += impressions;
+      stats.botQueries.push({ query, impressions, position });
+    } else {
+      stats.knownHumanImpressions += impressions;
+      stats.knownHumanClicks += clicks;
+      stats.knownHumanPositionSum += impressions * position;
+      stats.humanQueries.push({ query, impressions, clicks, position });
+    }
+    byUrl.set(url, stats);
+  }
+
+  for (const stats of byUrl.values()) {
+    stats.knownHumanPosition = stats.knownHumanImpressions
+      ? stats.knownHumanPositionSum / stats.knownHumanImpressions
+      : null;
+    stats.humanQueries.sort((a, b) => b.impressions - a.impressions);
+    stats.botQueries.sort((a, b) => b.impressions - a.impressions);
+  }
+
+  return {
+    available: byUrl.size > 0,
+    reportDate,
+    windowStart: windowMatch?.[1] || "unknown",
+    windowEnd: windowMatch?.[2] || reportDate,
+    byUrl,
+  };
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (quoted) {
+      if (char === '"' && text[i + 1] === '"') {
+        field += '"';
+        i += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field.replace(/\r$/, ""));
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+  if (field || row.length) {
+    row.push(field.replace(/\r$/, ""));
+    rows.push(row);
+  }
+  return rows;
+}
+
+function loadBacklinks(path) {
+  const byUrl = new Map();
+  if (!path || !existsSync(path)) return { available: false, byUrl, source: "not supplied" };
+  const raw = readFileSync(path, "utf8");
+  let records = [];
+  if (/\.json$/i.test(path)) {
+    const parsed = JSON.parse(raw);
+    records = Array.isArray(parsed) ? parsed : parsed.rows || [];
+  } else {
+    const rows = parseCsv(raw);
+    const headers = (rows.shift() || []).map((value) => value.trim().toLowerCase());
+    records = rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]])));
+  }
+
+  for (const record of records) {
+    const url = normalizeUrl(
+      record.url ||
+      record.page ||
+      record.target ||
+      record["target page"] ||
+      record["top linked pages"] ||
+      record.keys?.[0],
+    );
+    if (!url) continue;
+    const count = Number(
+      record.backlinks ||
+      record.links ||
+      record["external links"] ||
+      record["linking pages"] ||
+      record.count ||
+      0,
+    );
+    const domains = Number(record.domains || record["linking sites"] || record["referring domains"] || 0);
+    byUrl.set(url, {
+      backlinks: Number.isFinite(count) ? count : 0,
+      referringDomains: Number.isFinite(domains) ? domains : 0,
+    });
+  }
+  return { available: true, byUrl, source: path };
+}
+
+async function readKvValue(env, key, { json = false } = {}) {
+  if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
+    throw new Error("Missing CF_ACCOUNT_ID / CF_API_TOKEN in youtube-upload/.env");
+  }
+  const url =
+    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}` +
+    `/storage/kv/namespaces/${BLOG_KV_NAMESPACE}/values/${encodeURIComponent(key)}`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Cloudflare KV GET ${key} failed: HTTP ${response.status}`);
+  return json ? response.json() : response.text();
+}
+
+async function mapLimit(values, concurrency, mapper) {
+  const output = new Array(values.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      output[index] = await mapper(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
+  return output;
+}
+
+function walkHtmlFiles(root) {
+  if (!existsSync(root)) return [];
+  const output = [];
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      const stat = statSync(path);
+      if (stat.isDirectory()) visit(path);
+      else if (entry === "index.html") output.push(path);
+    }
+  };
+  visit(root);
+  return output;
+}
+
+function inventoryItem(url, input = {}) {
+  return {
+    url,
+    type: input.type || pageType(url),
+    discovery: new Set(input.discovery || []),
+    sitemapIntended: input.sitemapIntended !== false,
+    localFile: input.localFile || "",
+    metadata: input.metadata || null,
+    contentMode: input.contentMode || "template-only",
+    html: input.html || "",
+    audit: null,
+    traffic: null,
+    backlinks: null,
+    classification: "keep",
+    confidence: "low",
+    classificationReasons: [],
+    duplicateGroup: "",
+    duplicateLeader: false,
+  };
+}
+
+function buildInventory({ blogIndex, entityIndex, gsc }) {
+  const byUrl = new Map();
+  const add = (urlValue, input = {}) => {
+    const url = normalizeUrl(urlValue);
+    if (!url) return;
+    const existing = byUrl.get(url);
+    if (existing) {
+      for (const source of input.discovery || []) existing.discovery.add(source);
+      if (input.metadata) existing.metadata = { ...(existing.metadata || {}), ...input.metadata };
+      if (input.localFile) existing.localFile = input.localFile;
+      if (input.contentMode && existing.contentMode === "template-only") existing.contentMode = input.contentMode;
+      existing.sitemapIntended = existing.sitemapIntended || input.sitemapIntended !== false;
+      return existing;
+    }
+    const item = inventoryItem(url, input);
+    byUrl.set(url, item);
+    return item;
+  };
+
+  for (const page of CORE_PAGES) {
+    add(urlForPath(page.path), {
+      type: page.type,
+      discovery: ["sitemap-main"],
+      localFile: join(ROOT, page.localFile),
+      contentMode: "local-html",
+    });
+  }
+
+  for (const [slug, pillar] of HUBS) {
+    add(urlForPath(`/blog/topic/${slug}/`), {
+      type: "blog_hub",
+      discovery: ["sitemap-main"],
+      metadata: { pillar, hubSlug: slug },
+      contentMode: "worker-template",
+    });
+  }
+
+  for (const path of walkHtmlFiles(join(ROOT, "blog"))) {
+    if (path === join(ROOT, "blog/index.html")) continue;
+    const rel = relative(join(ROOT, "blog"), dirname(path)).split("\\").join("/");
+    add(urlForPath(`/blog/${rel}/`), {
+      type: "blog_article",
+      discovery: ["legacy-static-blog"],
+      localFile: path,
+      contentMode: "local-html",
+    });
+  }
+
+  for (const post of Array.isArray(blogIndex) ? blogIndex : []) {
+    if (!post?.slug) continue;
+    add(urlForPath(`/blog/${post.slug}/`), {
+      type: "blog_article",
+      discovery: ["blog-kv-index", "sitemap-main"],
+      metadata: post,
+      contentMode: "kv-stored-html",
+    });
+  }
+
+  for (let monthIndex = 0; monthIndex < MONTHS.length; monthIndex += 1) {
+    const month = MONTHS[monthIndex];
+    for (let day = 1; day <= DAYS_IN_MONTH[monthIndex]; day += 1) {
+      for (const type of ["events", "quiz", "born", "died"]) {
+        add(urlForPath(`/${type}/${month}/${day}/`), {
+          type: `${type}_date`,
+          discovery: [type === "events" || type === "quiz" ? "generated-date-template" : "people-date-template"],
+          contentMode: "worker-template",
+        });
+      }
+    }
+  }
+
+  for (const entity of Array.isArray(entityIndex) ? entityIndex : []) {
+    if (!entity?.slug || !entity?.type || entity.indexable !== true) continue;
+    const path = entity.url || (entity.type === "person" ? `/people/${entity.slug}/` : `/history/${entity.slug}/`);
+    add(urlForPath(path), {
+      type: entity.type === "person" ? "person_entity" : "history_entity",
+      discovery: ["entity-kv-index", "sitemap-entities"],
+      metadata: entity,
+      contentMode: "kv-entity-metadata",
+    });
+  }
+
+  for (const [url] of gsc.byUrl) {
+    add(url, {
+      type: pageType(url),
+      discovery: ["gsc-observed"],
+      sitemapIntended: false,
+      contentMode: "gsc-only",
+    });
+  }
+
+  return [...byUrl.values()].sort((a, b) => a.url.localeCompare(b.url));
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)));
+}
+
+function plainText(value) {
+  return decodeHtml(
+    String(value || "")
+      .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+      .replace(/<!--([\s\S]*?)-->/g, " ")
+      .replace(/<[^>]+>/g, " "),
+  ).replace(/\s+/g, " ").trim();
+}
+
+function wordCount(value) {
+  return plainText(value).split(/\s+/).filter(Boolean).length;
+}
+
+function normalizedText(value) {
+  return plainText(value)
+    .toLowerCase()
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function extractTagText(html, tag) {
+  const match = String(html || "").match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
+  return plainText(match?.[1] || "");
+}
+
+function extractMeta(html, name) {
+  const tags = String(html || "").match(/<meta\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const key = tag.match(/\b(?:name|property)\s*=\s*(["'])(.*?)\1/i)?.[2]?.toLowerCase();
+    if (key !== name.toLowerCase()) continue;
+    return decodeHtml(tag.match(/\bcontent\s*=\s*(["'])(.*?)\1/i)?.[2] || "").trim();
+  }
+  return "";
+}
+
+function extractCanonical(html) {
+  const tags = String(html || "").match(/<link\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const rel = tag.match(/\brel\s*=\s*(["'])(.*?)\1/i)?.[2]?.toLowerCase() || "";
+    if (!rel.split(/\s+/).includes("canonical")) continue;
+    return normalizeUrl(tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2] || "");
+  }
+  return "";
+}
+
+function flattenJsonLd(value, output = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) flattenJsonLd(item, output);
+    return output;
+  }
+  if (!value || typeof value !== "object") return output;
+  output.push(value);
+  if (Array.isArray(value["@graph"])) flattenJsonLd(value["@graph"], output);
+  return output;
+}
+
+function parseJsonLd(html) {
+  const objects = [];
+  const errors = [];
+  const regex = /<script\b[^>]*type\s*=\s*(["'])application\/ld\+json\1[^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = regex.exec(String(html || ""))) !== null) {
+    try {
+      flattenJsonLd(JSON.parse(match[2]), objects);
+    } catch (error) {
+      errors.push(error.message);
+    }
+  }
+  const counts = {};
+  for (const object of objects) {
+    const types = Array.isArray(object["@type"]) ? object["@type"] : [object["@type"]];
+    for (const type of types.filter(Boolean)) counts[type] = (counts[type] || 0) + 1;
+  }
+  return { objects, errors, counts };
+}
+
+function finding(category, code, severity, detail) {
+  return { category, code, severity, detail };
+}
+
+function classifyHeadline(title, { url = "", eventTitle = "", historicalYear = null } = {}) {
+  const findings = [];
+  const text = plainText(title);
+  if (!text) {
+    findings.push(finding("technical", "missing_title", "high", "The page has no usable title."));
+    return findings;
+  }
+  const titleCore = text.replace(/\s+\|\s+thisDay\.?\s*$/i, "").trim();
+  const dateMatch = titleCore.match(/\s[-—]\s+([A-Z][a-z]+)\s+(\d{1,2}),\s*(\d{3,4})\s*$/);
+  const headline = dateMatch ? titleCore.slice(0, dateMatch.index).trim() : titleCore;
+  const words = headline.split(/\s+/).filter(Boolean);
+  const lastWord = (words.at(-1) || "").toLowerCase().replace(/[^a-z]/g, "");
+
+  if (text.length > 70) {
+    findings.push(finding("cosmetic", "long_title", "low", `Title is ${text.length} characters and likely to truncate.`));
+  }
+  if (words.length >= 2 && FUNCTION_WORDS.has(lastWord)) {
+    findings.push(finding("factual", "headline_fragment", "high", `Headline ends with a dangling function word: “${words.at(-1)}”.`));
+  }
+  if (/[,;:]\s*$/.test(headline) || /(?:…|\.\.\.)/.test(headline)) {
+    findings.push(finding("factual", "headline_truncation", "high", "Headline appears truncated or unfinished."));
+  }
+  if (SUBJECTLESS_HEADLINE_OPENING.test(headline)) {
+    findings.push(finding("factual", "subjectless_imperative_headline", "high", "Headline opens as a command or subjectless verb and may misstate the historical actor."));
+  }
+
+  if (pageType(url) === "blog_article") {
+    if (!dateMatch) {
+      findings.push(finding("cosmetic", "missing_historical_date_suffix", "medium", "Article title has no “Month Day, Year” historical-date suffix."));
+    } else {
+      const pathMatch = new URL(normalizeUrl(url)).pathname.match(/\/(\d{1,2})-([a-z]+)-\d{4}\/$/);
+      if (
+        pathMatch &&
+        (Number(pathMatch[1]) !== Number(dateMatch[2]) || pathMatch[2] !== dateMatch[1].toLowerCase())
+      ) {
+        findings.push(finding("factual", "url_title_day_mismatch", "high", `URL date ${pathMatch[2]} ${pathMatch[1]} conflicts with title date ${dateMatch[1]} ${dateMatch[2]}.`));
+      }
+      if (historicalYear && Number(historicalYear) !== Number(dateMatch[3])) {
+        findings.push(finding("factual", "historical_year_conflict", "high", `Metadata year ${historicalYear} conflicts with title year ${dateMatch[3]}.`));
+      }
+    }
+  }
+
+  if (eventTitle) {
+    const titleTokens = new Set(normalizedText(headline).split(" ").filter((token) => token.length > 3));
+    const eventTokens = normalizedText(eventTitle).split(" ").filter((token) => token.length > 3);
+    const overlap = eventTokens.filter((token) => titleTokens.has(token)).length;
+    if (eventTokens.length >= 2 && overlap === 0) {
+      findings.push(finding("factual", "headline_event_mismatch", "high", "Headline and stored event title have no substantive token overlap."));
+    }
+  }
+  return findings;
+}
+
+function sourceAudit(metadata, html, type) {
+  if (type !== "blog_article") return { sourceCount: null, independentSourceCount: null, urls: [], findings: [] };
+  const pages = Array.isArray(metadata?.sourcePages) ? metadata.sourcePages : [];
+  const urls = pages.map((page) => String(page?.pageUrl || "").trim()).filter(Boolean);
+  if (!urls.length && html) {
+    const linkRegex = /<a\b[^>]*href\s*=\s*(["'])(https?:\/\/[^"']+)\1[^>]*>/gi;
+    let match;
+    while ((match = linkRegex.exec(html)) !== null) {
+      try {
+        const host = new URL(decodeHtml(match[2])).hostname.toLowerCase();
+        if (host !== "thisday.info" && !NON_SOURCE_HOSTS.has(host)) urls.push(decodeHtml(match[2]));
+      } catch {
+        // Ignore malformed legacy links here; the invalid-link rule below handles stored metadata.
+      }
+    }
+  }
+  const uniqueUrls = [...new Set(urls)];
+  const independent = uniqueUrls.filter((url) => {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      return !host.endsWith("wikipedia.org") && !NON_SOURCE_HOSTS.has(host);
+    } catch {
+      return false;
+    }
+  });
+  const findings = [];
+  const invalid = uniqueUrls.filter((url) => SEARCH_OR_PLACEHOLDER_URL.test(url));
+  if (invalid.length) {
+    findings.push(finding("source", "invalid_source_url", "high", `${invalid.length} source URL(s) are search or placeholder URLs.`));
+  }
+  if (uniqueUrls.length < 2) {
+    findings.push(finding("source", "insufficient_direct_sources", "high", `Only ${uniqueUrls.length} direct source page(s) are stored.`));
+  }
+  if (independent.length < 1) {
+    findings.push(finding("source", "no_independent_source", "high", "No non-Wikipedia source publisher is stored for the article."));
+  }
+  return {
+    sourceCount: uniqueUrls.length,
+    independentSourceCount: independent.length,
+    urls: uniqueUrls,
+    findings,
+  };
+}
+
+function auditHtml(html, { url, type, metadata = null, evidenceMode = "html" } = {}) {
+  const title = extractTagText(html, "title") || metadata?.title || "";
+  const h1Matches = [...String(html || "").matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((match) => plainText(match[1])).filter(Boolean);
+  const description = extractMeta(html, "description") || metadata?.description || "";
+  const canonical = extractCanonical(html);
+  const robots = extractMeta(html, "robots").toLowerCase();
+  const schema = parseJsonLd(html);
+  const findings = [
+    ...classifyHeadline(title, {
+      url,
+      eventTitle: metadata?.eventTitle,
+      historicalYear: metadata?.historicalYear,
+    }),
+  ];
+
+  if (!description) findings.push(finding("technical", "missing_description", "medium", "Meta description is missing."));
+  else if (description.length < 70) findings.push(finding("cosmetic", "short_description", "medium", `Meta description is only ${description.length} characters.`));
+  else if (description.length > 160) findings.push(finding("cosmetic", "long_description", "low", `Meta description is ${description.length} characters.`));
+  if (h1Matches.length !== 1) findings.push(finding("technical", "h1_count", "medium", `Expected one H1 but found ${h1Matches.length}.`));
+  if (!canonical) findings.push(finding("technical", "missing_canonical", "medium", "Canonical URL is missing."));
+  else if (canonical !== normalizeUrl(url)) findings.push(finding("technical", "canonical_mismatch", "high", `Canonical points to ${canonical}.`));
+  if (/\bnoindex\b/.test(robots)) findings.push(finding("technical", "noindex_in_inventory", "medium", "Page declares noindex while present in the intended index inventory."));
+  if (schema.errors.length) findings.push(finding("technical", "invalid_json_ld", "high", `${schema.errors.length} JSON-LD block(s) do not parse.`));
+  if ((schema.counts.BreadcrumbList || 0) > 1) findings.push(finding("technical", "duplicate_breadcrumb_schema", "high", `${schema.counts.BreadcrumbList} BreadcrumbList objects are stored.`));
+  if (type === "blog_article") {
+    const articleSchemaCount = (schema.counts.BlogPosting || 0) + (schema.counts.Article || 0);
+    if (articleSchemaCount !== 1) findings.push(finding("technical", "article_schema_count", "high", `Expected one Article/BlogPosting object but found ${articleSchemaCount}.`));
+    if (schema.counts.NewsArticle) findings.push(finding("technical", "obsolete_news_schema", "medium", "Stored markup still contains NewsArticle schema."));
+    if (schema.counts.FAQPage) findings.push(finding("technical", "obsolete_faq_schema", "medium", "Stored markup still contains FAQPage schema."));
+  }
+
+  const paragraphs = [...String(html || "").matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((match) => plainText(match[1]))
+    .filter((text) => text.length >= 80);
+  const paragraphGroups = new Map();
+  paragraphs.forEach((text, index) => {
+    const key = normalizedText(text);
+    if (!key) return;
+    const group = paragraphGroups.get(key) || [];
+    group.push(index + 1);
+    paragraphGroups.set(key, group);
+  });
+  const repeatedParagraphs = [...paragraphGroups.entries()]
+    .filter(([, positions]) => positions.length > 1)
+    .map(([text, positions]) => ({ text: text.slice(0, 140), positions }));
+  if (repeatedParagraphs.length) findings.push(finding("repetition", "repeated_paragraphs", "medium", `${repeatedParagraphs.length} paragraph text(s) repeat exactly.`));
+
+  const headings = [...String(html || "").matchAll(/<h[2-4]\b[^>]*>([\s\S]*?)<\/h[2-4]>/gi)]
+    .map((match) => normalizedText(match[1]))
+    .filter(Boolean);
+  const headingCounts = new Map();
+  for (const heading of headings) headingCounts.set(heading, (headingCounts.get(heading) || 0) + 1);
+  const repeatedHeadings = [...headingCounts.entries()].filter(([, count]) => count > 1);
+  if (repeatedHeadings.length) findings.push(finding("repetition", "repeated_headings", "medium", `${repeatedHeadings.length} section heading(s) repeat.`));
+
+  const contentWords = wordCount(html);
+  if (type === "blog_article" && contentWords < MIN_ARTICLE_WORDS) {
+    findings.push(finding("content", "thin_article", "high", `Stored HTML exposes approximately ${contentWords} words, below the ${MIN_ARTICLE_WORDS}-word article floor.`));
+  }
+
+  const sources = sourceAudit(metadata, html, type);
+  findings.push(...sources.findings);
+
+  return {
+    evidenceMode,
+    title,
+    h1: h1Matches[0] || "",
+    description,
+    canonical,
+    robots,
+    wordCount: contentWords,
+    schemaCounts: schema.counts,
+    schemaParseErrors: schema.errors,
+    repeatedParagraphs,
+    repeatedHeadings: repeatedHeadings.map(([heading, count]) => ({ heading, count })),
+    sourceCount: sources.sourceCount,
+    independentSourceCount: sources.independentSourceCount,
+    sourceUrls: sources.urls,
+    findings,
+  };
+}
+
+function auditMetadata(item, hubCounts, hubCountsAvailable = true) {
+  const metadata = item.metadata || {};
+  const findings = [];
+  let title = metadata.title || metadata.name || "";
+  let words = null;
+  let sourceCount = null;
+  let independentSourceCount = null;
+
+  if (item.type === "blog_article") {
+    findings.push(...classifyHeadline(title, {
+      url: item.url,
+      eventTitle: metadata.eventTitle,
+      historicalYear: metadata.historicalYear,
+    }));
+    const sources = sourceAudit(metadata, "", item.type);
+    findings.push(...sources.findings);
+    sourceCount = sources.sourceCount;
+    independentSourceCount = sources.independentSourceCount;
+    if (!metadata.description || String(metadata.description).trim().length < 70) {
+      findings.push(finding("cosmetic", "weak_index_description", "medium", "Stored index description is missing or shorter than 70 characters."));
+    }
+    if (/example\.com|placeholder/i.test(metadata.imageUrl || "")) {
+      findings.push(finding("technical", "placeholder_image", "high", "Article index points to a placeholder image."));
+    }
+  } else if (item.type === "person_entity" || item.type === "history_entity") {
+    words = wordCount(`${metadata.summary || ""} ${metadata.intro || ""}`);
+    if (!metadata.wikiUrl) findings.push(finding("source", "entity_missing_source", "high", "Entity has no Wikipedia identity/source URL."));
+    if (!metadata.imageUrl) findings.push(finding("content", "entity_missing_image", "medium", "Entity has no image."));
+    if (words < 45) findings.push(finding("content", "thin_entity_summary", "high", `Entity index summary contains approximately ${words} words.`));
+    if (!Array.isArray(metadata.relatedPosts) || metadata.relatedPosts.length < 1) {
+      findings.push(finding("hub", "orphan_entity", "high", "Entity has no related article in its index metadata."));
+    }
+    if (metadata.needsWikiRefresh === true) {
+      findings.push(finding("content", "entity_refresh_pending", "medium", "Entity is marked as needing Wikipedia enrichment."));
+    }
+  } else if (item.type === "blog_hub") {
+    const count = hubCounts.get(metadata.pillar) || 0;
+    title = `${metadata.pillar || "Unknown"} hub`;
+    if (!hubCountsAvailable) {
+      findings.push(finding("hub", "hub_count_unavailable", "low", "Article-pillar inventory is unavailable; no indexability recommendation was inferred."));
+    } else if (count < REQUIRED_HUB_ARTICLES) {
+      findings.push(finding("hub", "thin_hub", "high", `Hub has ${count} related articles; indexability threshold is ${REQUIRED_HUB_ARTICLES}.`));
+    }
+  }
+
+  return {
+    evidenceMode: item.contentMode,
+    title,
+    h1: "",
+    description: metadata.description || metadata.summary || "",
+    canonical: item.url,
+    robots: "",
+    wordCount: words,
+    schemaCounts: {},
+    schemaParseErrors: [],
+    repeatedParagraphs: [],
+    repeatedHeadings: [],
+    sourceCount,
+    independentSourceCount,
+    sourceUrls: Array.isArray(metadata.sourcePages) ? metadata.sourcePages.map((source) => source.pageUrl).filter(Boolean) : [],
+    findings,
+  };
+}
+
+function auditTemplateItem(item) {
+  const traffic = item.traffic || {};
+  const findings = [];
+  if (
+    item.type === "quiz_date" &&
+    traffic.botQueries?.some((entry) => /(?:flight|pilot|born|died|answer|quiz)/i.test(entry.query))
+  ) {
+    findings.push(finding("factual", "quiz_distractor_query_risk", "medium", "A synthetic query exposed quiz-like entity combinations; distractor truthfulness needs manual review."));
+  }
+  return {
+    evidenceMode: item.contentMode,
+    title: "",
+    h1: "",
+    description: "",
+    canonical: item.url,
+    robots: "",
+    wordCount: null,
+    schemaCounts: {},
+    schemaParseErrors: [],
+    repeatedParagraphs: [],
+    repeatedHeadings: [],
+    sourceCount: null,
+    independentSourceCount: null,
+    sourceUrls: [],
+    findings,
+  };
+}
+
+function positionBand(position) {
+  if (!Number.isFinite(position)) return "unavailable";
+  if (position <= 4) return "1-4";
+  if (position <= 10) return "5-10";
+  if (position <= 20) return "11-20";
+  if (position <= 50) return "21-50";
+  return "51+";
+}
+
+function attachMeasurement(items, gsc, backlinks) {
+  for (const item of items) {
+    item.traffic = gsc.byUrl.get(item.url) || {
+      observed: false,
+      clicks: null,
+      impressions: null,
+      position: null,
+      knownHumanClicks: null,
+      knownHumanImpressions: null,
+      knownHumanPosition: null,
+      knownBotImpressions: null,
+      humanQueries: [],
+      botQueries: [],
+    };
+    item.backlinks = backlinks.available
+      ? backlinks.byUrl.get(item.url) || { backlinks: 0, referringDomains: 0 }
+      : null;
+  }
+}
+
+function duplicateKey(item) {
+  const metadata = item.metadata || {};
+  if (item.type === "blog_article") {
+    const event = normalizedText(metadata.eventTitle || "");
+    const year = Number(metadata.historicalYear || 0);
+    return event && year ? `article:${year}:${event}` : "";
+  }
+  if (item.type === "person_entity" || item.type === "history_entity") {
+    const wiki = String(metadata.wikiUrl || "").replace(/[#?].*$/, "").toLowerCase();
+    if (wiki) return `entity-wiki:${item.type}:${wiki}`;
+    const name = normalizedText(metadata.name || "");
+    return name ? `entity-name:${item.type}:${name}` : "";
+  }
+  return "";
+}
+
+function scoreDuplicateLeader(item) {
+  const traffic = item.traffic || {};
+  const links = item.backlinks || {};
+  const findings = item.audit?.findings || [];
+  return (
+    Number(traffic.clicks || 0) * 1000 +
+    Number(traffic.impressions || 0) * 2 +
+    Number(links.backlinks || 0) * 50 +
+    Number(item.audit?.wordCount || 0) -
+    findings.filter((entry) => entry.severity === "high").length * 500
+  );
+}
+
+function markDuplicates(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = duplicateKey(item);
+    if (!key) continue;
+    const group = groups.get(key) || [];
+    group.push(item);
+    groups.set(key, group);
+  }
+  let sequence = 0;
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    sequence += 1;
+    const id = `duplicate-${String(sequence).padStart(3, "0")}`;
+    group.sort((a, b) => scoreDuplicateLeader(b) - scoreDuplicateLeader(a));
+    group.forEach((item, index) => {
+      item.duplicateGroup = id;
+      item.duplicateLeader = index === 0;
+      if (index > 0) {
+        item.audit.findings.push(finding("duplication", "duplicate_intent_candidate", "high", `Shares a strong event/entity identity with ${group[0].url}.`));
+      }
+    });
+  }
+}
+
+function classifyItem(item, { gscCurrent = false, backlinksAvailable = false } = {}) {
+  const findings = item.audit?.findings || [];
+  const reasons = [];
+  const has = (category, minimum = "low") => {
+    const order = { low: 1, medium: 2, high: 3 };
+    return findings.some((entry) => entry.category === category && order[entry.severity] >= order[minimum]);
+  };
+  const highFindings = findings.filter((entry) => entry.severity === "high");
+  const humanImpressions = Number(item.traffic?.knownHumanImpressions || 0);
+  const humanPosition = item.traffic?.knownHumanPosition;
+  const winnable =
+    humanImpressions >= WINNABLE_MIN_IMPRESSIONS &&
+    Number.isFinite(humanPosition) &&
+    humanPosition >= WINNABLE_POSITION[0] &&
+    humanPosition <= WINNABLE_POSITION[1];
+
+  if (item.duplicateGroup) {
+    item.classification = "merge";
+    reasons.push(
+      item.duplicateLeader
+        ? "Member of a strong duplicate group; this is only a provisional retain candidate, and the canonical winner requires manual traffic, backlink, URL-quality, and source review."
+        : "Member of a strong duplicate group; consolidate only after a canonical winner is selected through manual traffic, backlink, URL-quality, and source review.",
+    );
+  } else if (has("hub", "high") && item.type === "blog_hub") {
+    item.classification = "noindex";
+    reasons.push("Hub is below the five-related-article indexability threshold.");
+  } else if (
+    has("factual", "medium") ||
+    has("technical", "high") ||
+    has("source", "high") ||
+    has("content", "high") ||
+    has("repetition", "medium") ||
+    winnable
+  ) {
+    item.classification = "improve";
+    if (has("factual", "medium")) reasons.push("Possible factual/headline risk requires human verification.");
+    if (has("technical", "high")) reasons.push("High-severity technical or schema defect.");
+    if (has("source", "high")) reasons.push("Direct-source coverage is below the publication standard.");
+    if (has("content", "high")) reasons.push("Content completeness/original-value signal is weak.");
+    if (has("repetition", "medium")) reasons.push("Repeated visible sections reduce page value.");
+    if (winnable) reasons.push("Historical human-query opportunity sits in positions 5-20.");
+  } else {
+    item.classification = "keep";
+    reasons.push(highFindings.length ? "No automated action beyond the listed manual checks." : "No high-confidence defect found in the available evidence.");
+  }
+
+  if (item.classification === "keep" && /\bnoindex\b/.test(item.audit?.robots || "")) {
+    item.classification = "noindex";
+    reasons.splice(0, reasons.length, "Page already declares noindex; remove it from index-oriented inventories if that directive is intentional.");
+  }
+
+  // A removal recommendation is intentionally impossible without both current
+  // indexing/traffic evidence and backlink evidence. A missing dataset must
+  // never be treated as a zero-value page.
+  item.confidence = item.contentMode === "kv-stored-html" || item.contentMode === "local-html"
+    ? "medium"
+    : "low";
+  if (gscCurrent && backlinksAvailable && item.confidence === "medium") item.confidence = "high";
+  if (!gscCurrent || !backlinksAvailable) {
+    reasons.push("Provisional: current GSC indexing/traffic and/or backlink evidence is unavailable.");
+  }
+  item.classificationReasons = [...new Set(reasons)];
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function markdownCell(value) {
+  return String(value ?? "").replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
+}
+
+function countBy(values, keyFn) {
+  const counts = new Map();
+  for (const value of values) {
+    const key = keyFn(value);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+function reportMarkdown(items, context) {
+  const lines = [];
+  const now = new Date().toISOString().slice(0, 10);
+  const classifications = countBy(items, (item) => item.classification);
+  const types = countBy(items, (item) => item.type);
+  const severityOrder = { high: 3, medium: 2, low: 1 };
+  const factual = items
+    .flatMap((item) => item.audit.findings.filter((entry) => entry.category === "factual").map((entry) => ({ item, entry })))
+    .sort((a, b) => severityOrder[b.entry.severity] - severityOrder[a.entry.severity] || a.item.url.localeCompare(b.item.url));
+  const repeated = items.filter((item) => item.audit.findings.some((entry) => entry.category === "repetition"));
+  const sourceProblems = items.filter((item) => item.audit.findings.some((entry) => entry.category === "source" && entry.severity === "high"));
+  const thinHubs = items.filter((item) => item.audit.findings.some((entry) => entry.code === "thin_hub"));
+  const winnable = items
+    .filter((item) => {
+      const stats = item.traffic;
+      return Number(stats?.knownHumanImpressions || 0) >= WINNABLE_MIN_IMPRESSIONS &&
+        Number.isFinite(stats?.knownHumanPosition) &&
+        stats.knownHumanPosition >= WINNABLE_POSITION[0] &&
+        stats.knownHumanPosition <= WINNABLE_POSITION[1];
+    })
+    .sort((a, b) => Number(b.traffic.knownHumanImpressions || 0) - Number(a.traffic.knownHumanImpressions || 0));
+
+  lines.push(`# Existing Content Inventory Quality Report — ${now}`);
+  lines.push("");
+  lines.push("This is a read-only decision report. It did not call public page routes and did not modify production KV, HTML, redirects, sitemaps, robots directives, canonicals, or indexability.");
+  lines.push("");
+  lines.push("## Executive summary");
+  lines.push("");
+  lines.push(`- **${items.length} unique URLs classified** across sitemap-intended templates, stored blog posts, entity records, local legacy pages, and GSC-observed URLs.`);
+  lines.push(`- **${factual.length} possible factual/headline risks** are separated from cosmetic and technical issues. They are leads for human verification, not confirmed corrections.`);
+  lines.push(`- **${sourceProblems.length} pages** have high-severity stored source-coverage findings.`);
+  lines.push(`- **${repeated.length} pages** contain exact repeated paragraph/heading signals in the safely available stored/local HTML.`);
+  lines.push(`- **Remove is deliberately zero unless current traffic/indexing and backlink evidence both support it.** Missing datasets are never interpreted as zero value.`);
+  lines.push("");
+  lines.push("## Evidence coverage and limitations");
+  lines.push("");
+  lines.push("| Signal | Coverage | Limitation |");
+  lines.push("|---|---:|---|");
+  lines.push(`| Production blog index | ${context.blogIndexCount} posts | Read through GET-only Cloudflare KV REST. |`);
+  lines.push(`| Stored/local HTML | ${items.filter((item) => ["kv-stored-html", "local-html"].includes(item.contentMode)).length} pages | Stored HTML can differ from serve-time normalization; public routes were not invoked because some GET handlers can write repairs/entities. |`);
+  lines.push(`| Entity metadata | ${items.filter((item) => item.contentMode === "kv-entity-metadata").length} pages | Metadata audit, not rendered-page crawl. |`);
+  lines.push(`| Generated date templates | ${items.filter((item) => item.type.endsWith("_date")).length} pages | Classified per URL using route/template and GSC evidence; no production page fetches. |`);
+  lines.push(`| Dynamic hub templates | ${items.filter((item) => item.type === "blog_hub").length} pages | Hub article counts come from the read-only blog index; rendered routes were not fetched. |`);
+  lines.push(`| GSC traffic | ${context.gsc.available ? `${context.gsc.byUrl.size} observed URLs, ${context.gsc.windowStart} → ${context.gsc.windowEnd}` : "Unavailable"} | ${context.gscCurrent ? "Current." : `Cached export is stale (report ${context.gsc.reportDate}); anonymous-query totals exceed query-page rows.`} |`);
+  lines.push(`| GSC indexing status | Unavailable | Search Analytics observation is not the same as current URL Inspection/Pages indexing state. |`);
+  lines.push(`| Backlinks | ${context.backlinks.available ? `${context.backlinks.byUrl.size} URLs from supplied export` : "Unavailable"} | ${context.backlinks.available ? "Counts depend on the supplied export." : "No Search Console Links or third-party backlink export was supplied."} |`);
+  lines.push("");
+  lines.push("Because current GSC indexing and backlinks are incomplete, every classification is a recommendation for review, not authorization to change production.");
+  lines.push("");
+  lines.push("## Classification summary");
+  lines.push("");
+  lines.push("| Classification | Pages | Meaning |");
+  lines.push("|---|--:|---|");
+  const meanings = {
+    keep: "No high-confidence defect in available evidence; continue monitoring.",
+    improve: "Retain URL and repair factual, source, content, repetition, schema, or winnable-snippet issues.",
+    merge: "Strong duplicate candidate; choose a canonical winner only after manual traffic/backlink review.",
+    noindex: "Page/hub is below the indexability threshold or already declares noindex.",
+    remove: "Reserved for confirmed gone/valueless URLs with current traffic and backlink proof.",
+  };
+  for (const classification of ["keep", "improve", "merge", "noindex", "remove"]) {
+    lines.push(`| ${classification} | ${classifications.get(classification) || 0} | ${meanings[classification]} |`);
+  }
+  lines.push("");
+  lines.push("### By page type");
+  lines.push("");
+  lines.push("| Type | Pages | Keep | Improve | Merge | Noindex | Remove |");
+  lines.push("|---|--:|--:|--:|--:|--:|--:|");
+  for (const [type, count] of [...types.entries()].sort((a, b) => b[1] - a[1])) {
+    const typed = items.filter((item) => item.type === type);
+    const typedCounts = countBy(typed, (item) => item.classification);
+    lines.push(`| ${type} | ${count} | ${typedCounts.get("keep") || 0} | ${typedCounts.get("improve") || 0} | ${typedCounts.get("merge") || 0} | ${typedCounts.get("noindex") || 0} | ${typedCounts.get("remove") || 0} |`);
+  }
+  lines.push("");
+
+  lines.push(`## Possible factual or headline risks — ${factual.length}`);
+  lines.push("");
+  lines.push("These are separated from cosmetic findings. Verify each against authoritative sources before changing a title or article.");
+  lines.push("");
+  if (!factual.length) {
+    lines.push("None detected by the deterministic checks.");
+  } else {
+    lines.push("| Severity | URL | Code | Evidence |");
+    lines.push("|---|---|---|---|");
+    for (const { item, entry } of factual.slice(0, 80)) {
+      lines.push(`| ${entry.severity} | ${markdownCell(item.url.replace(SITE, ""))} | ${entry.code} | ${markdownCell(entry.detail)} |`);
+    }
+    if (factual.length > 80) lines.push(`\n_${factual.length - 80} additional factual-risk rows are in the CSV/JSON inventory._`);
+  }
+  lines.push("");
+
+  lines.push(`## Direct-source coverage — ${sourceProblems.length} high-severity pages`);
+  lines.push("");
+  if (!sourceProblems.length) {
+    lines.push("No high-severity source gap was detected in available stored metadata/HTML.");
+  } else {
+    lines.push("| URL | Sources | Independent | Finding(s) |");
+    lines.push("|---|--:|--:|---|");
+    for (const item of sourceProblems.slice(0, 60)) {
+      const details = item.audit.findings.filter((entry) => entry.category === "source").map((entry) => entry.detail).join("; ");
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${item.audit.sourceCount ?? "—"} | ${item.audit.independentSourceCount ?? "—"} | ${markdownCell(details)} |`);
+    }
+    if (sourceProblems.length > 60) lines.push(`\n_${sourceProblems.length - 60} additional source rows are in the CSV/JSON inventory._`);
+  }
+  lines.push("");
+
+  lines.push(`## Repeated sections — ${repeated.length} pages`);
+  lines.push("");
+  if (!repeated.length) lines.push("No exact repeated paragraph or heading signals were found in safely audited HTML.");
+  else {
+    lines.push("| URL | Signal |");
+    lines.push("|---|---|");
+    for (const item of repeated.slice(0, 50)) {
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${markdownCell(item.audit.findings.filter((entry) => entry.category === "repetition").map((entry) => entry.detail).join("; "))} |`);
+    }
+  }
+  lines.push("");
+
+  lines.push(`## Hub relevance — ${thinHubs.length} below threshold`);
+  lines.push("");
+  lines.push(`A narrow hub needs at least ${REQUIRED_HUB_ARTICLES} genuinely related indexed articles before “keep” is recommended.`);
+  lines.push("");
+  if (!thinHubs.length) lines.push("All configured blog hubs meet the mechanical article-count threshold. Evidence-based membership still requires editorial review.");
+  else {
+    lines.push("| Hub | Recommendation | Evidence |");
+    lines.push("|---|---|---|");
+    for (const item of thinHubs) {
+      const evidence = item.audit.findings.find((entry) => entry.code === "thin_hub")?.detail || "";
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | noindex | ${markdownCell(evidence)} |`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## Historical GSC opportunities");
+  lines.push("");
+  lines.push(`Position bands use known human query-page rows from the cached export; anonymous queries are not silently classified as human or bot.`);
+  lines.push("");
+  const observed = items.filter((item) => item.traffic?.observed);
+  const allBands = countBy(observed, (item) => positionBand(item.traffic?.position));
+  const knownHuman = items.filter((item) => Number(item.traffic?.knownHumanImpressions || 0) > 0);
+  const humanBands = countBy(knownHuman, (item) => positionBand(item.traffic?.knownHumanPosition));
+  lines.push("### Known human query-page position bands");
+  lines.push("");
+  lines.push("| Average-position band | Pages with known human queries |");
+  lines.push("|---|--:|");
+  for (const band of ["1-4", "5-10", "11-20", "21-50", "51+", "unavailable"]) {
+    lines.push(`| ${band} | ${humanBands.get(band) || 0} |`);
+  }
+  lines.push("");
+  lines.push("### All page-level Search Analytics position bands");
+  lines.push("");
+  lines.push("This second view includes anonymous and bot/agent impressions and must not be interpreted as human-query ranking.");
+  lines.push("");
+  lines.push("| Average-position band | GSC-observed pages (mixed query segments) |");
+  lines.push("|---|--:|");
+  for (const band of ["1-4", "5-10", "11-20", "21-50", "51+", "unavailable"]) {
+    lines.push(`| ${band} | ${allBands.get(band) || 0} |`);
+  }
+  lines.push("");
+  lines.push(`### Human-query pages with ≥${WINNABLE_MIN_IMPRESSIONS} impressions in positions ${WINNABLE_POSITION[0]}–${WINNABLE_POSITION[1]}`);
+  lines.push("");
+  if (!winnable.length) lines.push("None in the cached query-page export.");
+  else {
+    lines.push("| URL | Human impr | Pos | Clicks | Top human queries |");
+    lines.push("|---|--:|--:|--:|---|");
+    for (const item of winnable) {
+      const queries = (item.traffic.humanQueries || []).slice(0, 3).map((entry) => entry.query).join("; ");
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${item.traffic.knownHumanImpressions} | ${item.traffic.knownHumanPosition.toFixed(1)} | ${item.traffic.knownHumanClicks} | ${markdownCell(queries)} |`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## Backlinks");
+  lines.push("");
+  if (!context.backlinks.available) {
+    lines.push("No backlink export was supplied. Backlinks are recorded as **unavailable**, never zero. Merge, noindex, and remove decisions must be rechecked after importing Search Console Links or another trusted backlink export.");
+  } else {
+    const linked = items.filter((item) => Number(item.backlinks?.backlinks || 0) > 0).sort((a, b) => b.backlinks.backlinks - a.backlinks.backlinks);
+    lines.push(`Backlink data covers ${context.backlinks.byUrl.size} URLs; ${linked.length} inventory URLs have at least one reported external link.`);
+    lines.push("");
+    lines.push("| URL | Backlinks | Referring domains | Classification |");
+    lines.push("|---|--:|--:|---|");
+    for (const item of linked.slice(0, 50)) {
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${item.backlinks.backlinks} | ${item.backlinks.referringDomains} | ${item.classification} |`);
+    }
+  }
+  lines.push("");
+
+  lines.push("## Full per-URL inventory");
+  lines.push("");
+  lines.push("Every URL and its classification, evidence mode, measurements, findings, and reasons are in:");
+  lines.push("");
+  lines.push("- `inventory-quality-report.csv` — sortable decision sheet.");
+  lines.push("- `inventory-quality-report.json` — complete machine-readable evidence.");
+  lines.push("");
+  lines.push("## Classification safeguards");
+  lines.push("");
+  lines.push("- `keep` does not certify factual accuracy; it means no high-confidence defect was found in available evidence.");
+  lines.push("- `improve` preserves the URL and separates possible factual corrections from cosmetic work.");
+  lines.push("- `merge` is a candidate only; choose the winner after current traffic, backlinks, canonical intent, and source coverage are reviewed.");
+  lines.push("- `noindex` is recommended only for a mechanical thin-hub/directive case in this preliminary run.");
+  lines.push("- `remove` requires confirmed current indexing/traffic plus backlink evidence and is intentionally unavailable when either dataset is missing.");
+  lines.push("- No recommendation in this report authorizes a production change.");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function reportCsv(items) {
+  const headers = [
+    "url", "type", "classification", "confidence", "discovery", "evidence_mode",
+    "title", "word_count", "factual_risks", "technical_issues", "cosmetic_issues",
+    "source_issues", "repetition_issues", "source_count", "independent_source_count",
+    "duplicate_group", "gsc_observed", "impressions", "clicks", "all_query_position", "all_query_position_band",
+    "known_human_impressions", "known_human_clicks", "known_human_position",
+    "known_bot_impressions", "backlinks", "referring_domains", "classification_reasons",
+  ];
+  const rows = [headers];
+  for (const item of items) {
+    const findings = item.audit.findings;
+    const details = (category) => findings.filter((entry) => entry.category === category).map((entry) => `${entry.code}: ${entry.detail}`).join(" | ");
+    rows.push([
+      item.url,
+      item.type,
+      item.classification,
+      item.confidence,
+      [...item.discovery].join(" | "),
+      item.contentMode,
+      item.audit.title,
+      item.audit.wordCount ?? "",
+      details("factual"),
+      details("technical"),
+      details("cosmetic"),
+      details("source"),
+      details("repetition"),
+      item.audit.sourceCount ?? "",
+      item.audit.independentSourceCount ?? "",
+      item.duplicateGroup,
+      item.traffic?.observed ? "yes" : "no",
+      item.traffic?.impressions ?? "",
+      item.traffic?.clicks ?? "",
+      item.traffic?.position ?? "",
+      positionBand(item.traffic?.position),
+      item.traffic?.knownHumanImpressions ?? "",
+      item.traffic?.knownHumanClicks ?? "",
+      item.traffic?.knownHumanPosition ?? "",
+      item.traffic?.knownBotImpressions ?? "",
+      item.backlinks?.backlinks ?? "unavailable",
+      item.backlinks?.referringDomains ?? "unavailable",
+      item.classificationReasons.join(" | "),
+    ]);
+  }
+  return rows.map((row) => row.map(csvCell).join(",")).join("\n");
+}
+
+function serializableItem(item) {
+  return {
+    ...item,
+    discovery: [...item.discovery],
+    html: undefined,
+  };
+}
+
+async function runAudit(options = {}) {
+  const gsc = loadGscCache(options.gscDir || DEFAULT_GSC_DIR);
+  const backlinks = loadBacklinks(options.backlinks || "");
+  const cfEnv = parseEnvFile(join(ROOT, "youtube-upload/.env"));
+  let blogIndex = [];
+  let entityIndex = [];
+  let kvAvailable = false;
+  const warnings = [];
+
+  if (!options.noKv) {
+    try {
+      [blogIndex, entityIndex] = await Promise.all([
+        readKvValue(cfEnv, "index", { json: true }),
+        readKvValue(cfEnv, "entity-index-v1", { json: true }),
+      ]);
+      blogIndex = Array.isArray(blogIndex) ? blogIndex : [];
+      entityIndex = Array.isArray(entityIndex) ? entityIndex : [];
+      kvAvailable = true;
+    } catch (error) {
+      warnings.push(error.message);
+    }
+  }
+
+  if (!blogIndex.length) {
+    blogIndex = readJson(join(ROOT, "blog/archive.json"), []);
+    warnings.push("Using local blog/archive.json because the production blog index was unavailable.");
+  }
+
+  const items = buildInventory({ blogIndex, entityIndex, gsc });
+  attachMeasurement(items, gsc, backlinks);
+  const hubCounts = new Map();
+  for (const post of blogIndex) {
+    for (const pillar of Array.isArray(post?.pillars) ? post.pillars : []) {
+      hubCounts.set(pillar, (hubCounts.get(pillar) || 0) + 1);
+    }
+  }
+  const hubCountsAvailable = blogIndex.some((post) => Array.isArray(post?.pillars) && post.pillars.length > 0);
+
+  if (kvAvailable) {
+    const storedPosts = items.filter((item) => item.contentMode === "kv-stored-html" && item.metadata?.slug);
+    await mapLimit(storedPosts, 6, async (item, index) => {
+      try {
+        item.html = await readKvValue(cfEnv, `post:${item.metadata.slug}`) || "";
+        if (!item.html) item.contentMode = "kv-index-only";
+      } catch (error) {
+        item.contentMode = "kv-index-only";
+        warnings.push(`${item.metadata.slug}: ${error.message}`);
+      }
+      if ((index + 1) % 25 === 0) console.log(`Read ${index + 1}/${storedPosts.length} stored posts (GET only)…`);
+    });
+  }
+
+  for (const item of items) {
+    if (item.contentMode === "local-html" && item.localFile && existsSync(item.localFile)) {
+      item.html = readFileSync(item.localFile, "utf8");
+    }
+    if (item.html) {
+      item.audit = auditHtml(item.html, {
+        url: item.url,
+        type: item.type,
+        metadata: item.metadata,
+        evidenceMode: item.contentMode,
+      });
+    } else if (item.metadata || item.type === "blog_hub") {
+      item.audit = auditMetadata(item, hubCounts, hubCountsAvailable);
+    } else {
+      item.audit = auditTemplateItem(item);
+    }
+  }
+
+  markDuplicates(items);
+
+  const now = new Date();
+  const gscDate = /^\d{4}-\d{2}-\d{2}$/.test(gsc.reportDate) ? new Date(`${gsc.reportDate}T00:00:00Z`) : null;
+  const gscAgeDays = gscDate ? Math.floor((now - gscDate) / 86_400_000) : Infinity;
+  const gscCurrent = gscAgeDays <= 14;
+  for (const item of items) classifyItem(item, { gscCurrent, backlinksAvailable: backlinks.available });
+
+  const context = {
+    generatedAt: now.toISOString(),
+    productionWrites: 0,
+    publicPageFetches: 0,
+    kvReadOnly: kvAvailable,
+    blogIndexCount: blogIndex.length,
+    entityIndexCount: entityIndex.length,
+    gsc,
+    gscCurrent,
+    gscAgeDays: Number.isFinite(gscAgeDays) ? gscAgeDays : null,
+    backlinks,
+    warnings,
+  };
+
+  const outputDir = options.outputDir || DEFAULT_OUTPUT_DIR;
+  mkdirSync(outputDir, { recursive: true });
+  const markdownPath = join(outputDir, "inventory-quality-report.md");
+  const csvPath = join(outputDir, "inventory-quality-report.csv");
+  const jsonPath = join(outputDir, "inventory-quality-report.json");
+  writeFileSync(markdownPath, reportMarkdown(items, context));
+  writeFileSync(csvPath, reportCsv(items));
+  writeFileSync(jsonPath, JSON.stringify({ context: { ...context, gsc: { ...gsc, byUrl: undefined }, backlinks: { ...backlinks, byUrl: undefined } }, items: items.map(serializableItem) }, null, 2));
+
+  return { items, context, paths: { markdownPath, csvPath, jsonPath } };
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    printHelp();
+    return;
+  }
+  const result = await runAudit(options);
+  const counts = countBy(result.items, (item) => item.classification);
+  console.log("\nRead-only inventory quality audit complete.");
+  console.log(`URLs: ${result.items.length}`);
+  console.log(`Classifications: keep ${counts.get("keep") || 0}, improve ${counts.get("improve") || 0}, merge ${counts.get("merge") || 0}, noindex ${counts.get("noindex") || 0}, remove ${counts.get("remove") || 0}`);
+  console.log(`Production writes: ${result.context.productionWrites}; public page fetches: ${result.context.publicPageFetches}`);
+  console.log(`GSC cache: ${result.context.gsc.reportDate} (${result.context.gscCurrent ? "current" : "stale"}); backlinks: ${result.context.backlinks.available ? "supplied" : "unavailable"}`);
+  if (result.context.warnings.length) console.log(`Warnings: ${result.context.warnings.length}`);
+  console.log(`Report: ${result.paths.markdownPath}`);
+  console.log(`CSV: ${result.paths.csvPath}`);
+  console.log(`JSON: ${result.paths.jsonPath}`);
+}
+
+const isCli = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (isCli) {
+  main().catch((error) => {
+    console.error("ERROR:", error.stack || error.message);
+    process.exitCode = 1;
+  });
+}
+
+export {
+  auditHtml,
+  buildInventory,
+  classifyHeadline,
+  classifyItem,
+  isBotQuery,
+  loadBacklinks,
+  loadGscCache,
+  markDuplicates,
+  normalizeUrl,
+  pageType,
+  positionBand,
+  reportCsv,
+  runAudit,
+};

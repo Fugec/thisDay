@@ -1021,6 +1021,100 @@ function validateContentDateForPublish(content, targetDate) {
   };
 }
 
+// A headline that opens with a bare action verb is normally an instruction,
+// not a historical subject-verb clause ("Execute Chancellor Yang Guozhong").
+// Keep ambiguous event nouns out of this list where practical. When an action
+// word can also be a noun (for example "Bomb"), a second finite verb in the
+// remainder proves that the first word is acting as the subject ("Bomb
+// Explodes...") and the headline is allowed.
+const HEADLINE_IMPERATIVE_START_RE =
+  /^(?:accept|adopt|appoint|approve|arrest|assassinate|bomb|capture|convict|create|declare|defeat|deport|destroy|detain|discover|elect|establish|execute|free|found|honou?r|imprison|invade|invent|kill|launch|liberate|meet|negotiate|open|order|publish|ratify|reject|rescue|sign|surrender|visit|withdraw)\b/i;
+
+function headlineStartsWithUnsupportedImperative(value) {
+  const lead = getTitleLead(value).replace(/^["'“‘]+/, "").trim();
+  const match = lead.match(HEADLINE_IMPERATIVE_START_RE);
+  if (!match) return false;
+  const remainder = lead.slice(match[0].length).trim();
+  return !hasFiniteHeadlineVerb(remainder);
+}
+
+function historicalYearFields(content) {
+  const found = [];
+  const add = (field, value) => {
+    const year = Number.parseInt(value, 10);
+    if (Number.isInteger(year) && year > 0) found.push({ field, year });
+  };
+
+  add("historicalYear", content?.historicalYear);
+  add(
+    "historicalDateISO",
+    String(content?.historicalDateISO || "").match(/^(\d{3,4})-\d{2}-\d{2}$/)?.[1],
+  );
+  add(
+    "historicalDate",
+    String(content?.historicalDate || "").match(/\b(\d{3,4})\s*$/)?.[1],
+  );
+  add(
+    "title",
+    String(content?.title || "").match(
+      /\s+[-—]\s+[A-Z][a-z]+\s+\d{1,2},\s*(\d{3,4})\s*$/,
+    )?.[1],
+  );
+  return found;
+}
+
+/**
+ * Deterministic semantic publication contract for fields where a confident
+ * local decision is possible. Deeper actor/action and relationship checks stay
+ * in the source-grounding AI gate, but this function ensures malformed titles
+ * and conflicting historical years can never reach public KV even if an
+ * enrichment pass rewrites them after generation.
+ */
+function validateContentSemanticsForPublish(content) {
+  const reasons = [];
+  const titleLead = getTitleLead(content?.title);
+  const eventLead = getTitleLead(content?.eventTitle);
+  const leads = [...new Set([titleLead, eventLead].filter(Boolean))];
+
+  if (leads.length === 0) {
+    reasons.push("headline is missing");
+  }
+
+  for (const lead of leads) {
+    if (isWeakCtaTitleLead(lead)) {
+      reasons.push(`headline is a call to action rather than an event clause: "${lead}"`);
+    }
+    if (headlineStartsWithUnsupportedImperative(lead)) {
+      reasons.push(`headline starts with an unsupported imperative and has no actor: "${lead}"`);
+    }
+    const repaired = repairStackedTitleLead(lead);
+    if (repaired && repaired !== lead) {
+      reasons.push(`headline contains a stacked trailing action: "${lead}"`);
+    }
+  }
+
+  // Once the selected Wikipedia event sentence has been locked, later SEO or
+  // enrichment passes must not replace it with a different central claim.
+  const sourceLead = getTitleLead(content?.sourceEventHeadline);
+  if (sourceLead) {
+    for (const [field, lead] of [["title", titleLead], ["eventTitle", eventLead]]) {
+      if (lead && normalizeForCompare(lead) !== normalizeForCompare(sourceLead)) {
+        reasons.push(`${field} no longer matches the locked source event headline`);
+      }
+    }
+  }
+
+  const years = historicalYearFields(content);
+  const distinctYears = [...new Set(years.map(({ year }) => year))];
+  if (distinctYears.length > 1) {
+    reasons.push(
+      `historical year conflict: ${years.map(({ field, year }) => `${field}=${year}`).join(" | ")}`,
+    );
+  }
+
+  return { ok: reasons.length === 0, reasons };
+}
+
 function deriveHistoricalYear(content) {
   const explicitYear = Number.parseInt(content?.historicalYear, 10);
   if (Number.isInteger(explicitYear) && explicitYear > 0) return explicitYear;
@@ -6010,6 +6104,23 @@ async function generateAndStore(
       throw new Error(`${dateValidation.reason} [attempts: ${attemptFailures.join(" | ")}]`);
     }
 
+    const semanticValidation = validateContentSemanticsForPublish(content);
+    if (!semanticValidation.ok) {
+      const reason = semanticValidation.reasons.join("; ");
+      attemptFailures.push(`attempt ${attempt} semantics: ${reason}`);
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        console.warn(
+          `Blog AI: semantic publication contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await generateArticleContent(avoid, true);
+        continue;
+      }
+      throw new Error(
+        `Article failed semantic publication contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
+      );
+    }
+
     try {
       assertRequiredContentBlocks(content);
     } catch (err) {
@@ -6048,6 +6159,12 @@ async function generateAndStore(
           }
           const chunkedDate = validateContentDateForPublish(chunked, now);
           if (!chunkedDate.ok) throw new Error(chunkedDate.reason);
+          const chunkedSemantics = validateContentSemanticsForPublish(chunked);
+          if (!chunkedSemantics.ok) {
+            throw new Error(
+              `semantic publication contract failed: ${chunkedSemantics.reasons.join("; ")}`,
+            );
+          }
           assertRequiredContentBlocks(chunked);
           content = chunked;
           // Recovered — annotate the 'blocks' entry pushed above so a later
@@ -6716,6 +6833,12 @@ async function savePublishedPost(
   if (!dateValidation.ok) {
     throw new Error(`Refusing to publish ${slug}: ${dateValidation.reason}`);
   }
+  const semanticValidation = validateContentSemanticsForPublish(content);
+  if (!semanticValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: semantic publication contract failed — ${semanticValidation.reasons.join("; ")}`,
+    );
+  }
   // Final publication gate: enrichment is allowed to retry transient image
   // failures, but public HTML must never be written without a working Wikimedia
   // hero. This also protects callers that bypass the normal generation path.
@@ -6926,6 +7049,12 @@ async function enrichPublishedPost(env, slug) {
   }
 
   normalizeContentMetadata(enriched);
+  const semanticValidation = validateContentSemanticsForPublish(enriched);
+  if (!semanticValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: semantic publication contract failed — ${semanticValidation.reasons.join("; ")}`,
+    );
+  }
 
   if (groundingSource) {
     await chk("pre-final-grounding");
@@ -10485,6 +10614,7 @@ async function verifyFinalArticleGrounding(env, content, source) {
             content:
               `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
               `FINAL ARTICLE:\n${articleText}\n\n` +
+              "Start with the headline and central event claim. Reject a command-style or imperative headline with no historical actor. Reject any headline or body claim that assigns an action, order, execution, killing, relationship, title, or identity to a person when the source assigns it to someone else or does not support that attribution. Distinguish who ordered an act, who carried it out, and who was its target. " +
               "Reject ONLY clear factual contradictions: conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
               "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +
               "OMISSIONS ARE NOT FAILURES. The article does not need to mention, include, or elaborate on every fact in the source. Never raise an issue that the article 'does not mention', 'does not include', or 'fails to mention' something, and never fault it for leaving out background context. Only flag a fact the article actively STATES that contradicts the source. " +

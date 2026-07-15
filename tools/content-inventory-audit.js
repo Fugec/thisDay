@@ -23,6 +23,7 @@
  * Run:
  *   node tools/content-inventory-audit.js
  *   node tools/content-inventory-audit.js --backlinks path/to/export.csv
+ *   node tools/content-inventory-audit.js --repair-plan-limit 10
  */
 
 import {
@@ -33,6 +34,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -168,6 +171,7 @@ function parseArgs(argv) {
     gscDir: DEFAULT_GSC_DIR,
     outputDir: DEFAULT_OUTPUT_DIR,
     noKv: false,
+    repairPlanLimit: 0,
     help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -176,6 +180,13 @@ function parseArgs(argv) {
     else if (arg === "--gsc-dir") options.gscDir = resolve(argv[++i] || "");
     else if (arg === "--out-dir") options.outputDir = resolve(argv[++i] || "");
     else if (arg === "--no-kv") options.noKv = true;
+    else if (arg === "--repair-plan-limit") {
+      const limit = Number(argv[++i]);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+        throw new Error("--repair-plan-limit must be an integer from 1 to 50");
+      }
+      options.repairPlanLimit = limit;
+    }
     else if (arg === "--help" || arg === "-h") options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
@@ -190,6 +201,10 @@ Options:
   --gsc-dir PATH    Cached GSC export directory (default documentation/gsc).
   --out-dir PATH    Local output directory (default documentation/quality).
   --no-kv           Do not make read-only Cloudflare KV GET requests.
+  --repair-plan-limit N
+                    Generate before/after snapshots and exact unified diffs
+                    for up to N metadata-only legacy repairs (1-50). GET-only;
+                    never applies the plans to production KV.
   -h, --help        Show this help.
 
 The script never calls public page routes and contains no production write path.`);
@@ -991,6 +1006,165 @@ function buildLegacyCompatibility(audit, type) {
   };
 }
 
+function jsonLdScriptBlocks(html) {
+  const blocks = [];
+  const regex = /<script\b[^>]*type\s*=\s*(["'])application\/ld\+json\1[^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = regex.exec(String(html || ""))) !== null) {
+    try {
+      const parsed = JSON.parse(match[2]);
+      blocks.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        raw: match[0],
+        parsed,
+        nodes: flattenJsonLd(parsed, []),
+      });
+    } catch {
+      // Invalid JSON-LD is never a deterministic-safe repair candidate.
+    }
+  }
+  return blocks;
+}
+
+function nodeHasSchemaType(node, expected) {
+  const types = Array.isArray(node?.["@type"]) ? node["@type"] : [node?.["@type"]];
+  return types.includes(expected);
+}
+
+function blockHasSchemaType(block, expected) {
+  return block.nodes.some((node) => nodeHasSchemaType(node, expected));
+}
+
+function standaloneSchemaBlock(block, expected) {
+  const roots = Array.isArray(block.parsed) ? block.parsed : [block.parsed];
+  return roots.length === 1 && nodeHasSchemaType(roots[0], expected) && !Array.isArray(roots[0]?.["@graph"]);
+}
+
+function replaceHtmlRanges(html, ranges) {
+  let output = String(html || "");
+  for (const range of [...ranges].sort((left, right) => right.start - left.start)) {
+    output = output.slice(0, range.start) + (range.replacement || "") + output.slice(range.end);
+  }
+  return output;
+}
+
+function transformLegacyNewsSchema(html) {
+  const blocks = jsonLdScriptBlocks(html);
+  const newsNodes = blocks.flatMap((block) => block.nodes.filter((node) => nodeHasSchemaType(node, "NewsArticle")));
+  const currentArticleNodes = blocks.flatMap((block) => block.nodes.filter((node) =>
+    nodeHasSchemaType(node, "Article") || nodeHasSchemaType(node, "BlogPosting"),
+  ));
+  if (newsNodes.length !== 1 || currentArticleNodes.length !== 0) {
+    return { html, reason: `Expected one NewsArticle and no current Article/BlogPosting; found ${newsNodes.length} and ${currentArticleNodes.length}.` };
+  }
+  const block = blocks.find((entry) => blockHasSchemaType(entry, "NewsArticle"));
+  const typeMatches = [...block.raw.matchAll(/("@type"\s*:\s*)"NewsArticle"/g)];
+  if (typeMatches.length !== 1) {
+    return { html, reason: `Expected one exact NewsArticle type token; found ${typeMatches.length}.` };
+  }
+  const replacement = block.raw.replace(/("@type"\s*:\s*)"NewsArticle"/, '$1"BlogPosting"');
+  return {
+    html: replaceHtmlRanges(html, [{ start: block.start, end: block.end, replacement }]),
+    reason: "",
+  };
+}
+
+function transformLegacyFaqSchema(html) {
+  const blocks = jsonLdScriptBlocks(html);
+  const faqNodes = blocks.flatMap((block) => block.nodes.filter((node) => nodeHasSchemaType(node, "FAQPage")));
+  const removable = blocks.filter((block) => standaloneSchemaBlock(block, "FAQPage"));
+  if (!faqNodes.length) return { html, reason: "No FAQPage JSON-LD exists." };
+  if (faqNodes.length !== removable.length) {
+    return { html, reason: "FAQPage is embedded in mixed JSON-LD and cannot be removed without restructuring other schema." };
+  }
+  return { html: replaceHtmlRanges(html, removable), reason: "" };
+}
+
+function transformDuplicateBreadcrumbSchema(html) {
+  const blocks = jsonLdScriptBlocks(html);
+  const breadcrumbNodes = blocks.flatMap((block) => block.nodes.filter((node) => nodeHasSchemaType(node, "BreadcrumbList")));
+  if (breadcrumbNodes.length <= 1) return { html, reason: "No duplicate BreadcrumbList exists." };
+
+  const preferred = blocks.find((block) =>
+    blockHasSchemaType(block, "BreadcrumbList") &&
+    ["NewsArticle", "Article", "BlogPosting"].some((type) => blockHasSchemaType(block, type)),
+  ) || blocks.find((block) => blockHasSchemaType(block, "BreadcrumbList"));
+  const removable = blocks.filter((block) =>
+    block !== preferred && standaloneSchemaBlock(block, "BreadcrumbList"),
+  );
+  if (breadcrumbNodes.length - removable.length !== 1) {
+    return { html, reason: "Duplicate breadcrumbs are embedded in mixed JSON-LD; removing them would require restructuring another schema block." };
+  }
+  return { html: replaceHtmlRanges(html, removable), reason: "" };
+}
+
+function transformMissingCanonical(html, url) {
+  if (extractCanonical(html)) return { html, reason: "A canonical URL already exists." };
+  const headClose = String(html || "").search(/<\/head\s*>/i);
+  if (headClose < 0) return { html, reason: "Document has no closing head tag." };
+  const canonical = `    <link rel="canonical" href="${normalizeUrl(url)}" />\n`;
+  return {
+    html: String(html).slice(0, headClose) + canonical + String(html).slice(headClose),
+    reason: "",
+  };
+}
+
+function sha256(value) {
+  return createHash("sha256").update(String(value || "")).digest("hex");
+}
+
+function applyDeterministicLegacyRepairs(
+  html,
+  { url, metadata = null, requestedCodes = [] } = {},
+) {
+  const transforms = new Map([
+    ["obsolete_news_schema", (value) => transformLegacyNewsSchema(value)],
+    ["obsolete_faq_schema", (value) => transformLegacyFaqSchema(value)],
+    ["duplicate_breadcrumb_schema", (value) => transformDuplicateBreadcrumbSchema(value)],
+    ["missing_canonical", (value) => transformMissingCanonical(value, url)],
+  ]);
+  let output = String(html || "");
+  const applied = [];
+  const skipped = [];
+  for (const code of requestedCodes) {
+    const transform = transforms.get(code);
+    if (!transform) {
+      skipped.push({ code, reason: "No deterministic transformer is implemented for this action." });
+      continue;
+    }
+    const result = transform(output);
+    if (!result.html || result.html === output) {
+      skipped.push({ code, reason: result.reason || "Transformation made no change." });
+      continue;
+    }
+    const verification = auditHtml(result.html, {
+      url,
+      type: "blog_article",
+      metadata,
+      evidenceMode: "dry-run-after",
+    });
+    const codeRemains = verification.findings.some((entry) => entry.code === code);
+    const articleSchemaStillBroken =
+      code === "obsolete_news_schema" &&
+      verification.findings.some((entry) => entry.code === "article_schema_count");
+    if (codeRemains || articleSchemaStillBroken) {
+      skipped.push({ code, reason: "Post-transform audit did not clear the targeted contract finding." });
+      continue;
+    }
+    output = result.html;
+    applied.push({ code, detail: SAFE_LEGACY_REPAIR_ACTIONS.get(code) || code });
+  }
+  return {
+    html: output,
+    changed: output !== String(html || ""),
+    applied,
+    skipped,
+    beforeSha256: sha256(html),
+    afterSha256: sha256(output),
+  };
+}
+
 function auditHtml(html, { url, type, metadata = null, evidenceMode = "html" } = {}) {
   const title = extractTagText(html, "title") || metadata?.title || "";
   const h1Matches = [...String(html || "").matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((match) => plainText(match[1])).filter(Boolean);
@@ -1695,6 +1869,150 @@ function reportCsv(items) {
   return rows.map((row) => row.map(csvCell).join(",")).join("\n");
 }
 
+function writeUnifiedDiff(beforePath, afterPath, diffPath) {
+  const result = spawnSync("diff", ["-u", beforePath, afterPath], {
+    encoding: "utf8",
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.error) throw result.error;
+  if (![0, 1].includes(result.status)) {
+    throw new Error(`diff failed for ${beforePath}: ${String(result.stderr || "unknown error").trim()}`);
+  }
+  writeFileSync(diffPath, result.stdout || "");
+}
+
+function writeLegacySafeRepairPlan(
+  items,
+  { outputDir, limit, generatedAt = new Date() } = {},
+) {
+  if (!Number.isInteger(limit) || limit < 1) return null;
+  const stamp = generatedAt.toISOString().replace(/[:.]/g, "-");
+  const planDir = join(outputDir, `legacy-safe-repair-plan-${stamp}`);
+  const backupDir = join(planDir, "backups");
+  const proposedDir = join(planDir, "proposed");
+  const diffDir = join(planDir, "diffs");
+  for (const path of [planDir, backupDir, proposedDir, diffDir]) mkdirSync(path, { recursive: true });
+
+  const supportedCodes = new Set([
+    "obsolete_news_schema",
+    "obsolete_faq_schema",
+    "duplicate_breadcrumb_schema",
+    "missing_canonical",
+  ]);
+  const candidates = items
+    .filter((item) =>
+      item.type === "blog_article" &&
+      item.contentMode === "kv-stored-html" &&
+      item.html &&
+      /^[a-z0-9-]+$/.test(item.metadata?.slug || "") &&
+      (item.audit.legacyCompatibility?.safeRepairs || []).some((entry) => supportedCodes.has(entry.code)),
+    )
+    .sort((left, right) =>
+      new Date(right.metadata?.publishedAt || 0) - new Date(left.metadata?.publishedAt || 0) ||
+      left.url.localeCompare(right.url),
+    );
+
+  const plans = [];
+  const skippedCandidates = [];
+  for (const item of candidates) {
+    if (plans.length >= limit) break;
+    const requestedCodes = item.audit.legacyCompatibility.safeRepairs
+      .map((entry) => entry.code)
+      .filter((code) => supportedCodes.has(code));
+    const result = applyDeterministicLegacyRepairs(item.html, {
+      url: item.url,
+      metadata: item.metadata,
+      requestedCodes,
+    });
+    if (!result.changed || !result.applied.length) {
+      skippedCandidates.push({
+        slug: item.metadata.slug,
+        requestedCodes,
+        skipped: result.skipped,
+      });
+      continue;
+    }
+
+    const slug = item.metadata.slug;
+    const beforePath = join(backupDir, `post-${slug}.html`);
+    const afterPath = join(proposedDir, `post-${slug}.html`);
+    const diffPath = join(diffDir, `post-${slug}.diff`);
+    writeFileSync(beforePath, item.html);
+    writeFileSync(afterPath, result.html);
+    writeUnifiedDiff(beforePath, afterPath, diffPath);
+
+    const afterAudit = auditHtml(result.html, {
+      url: item.url,
+      type: "blog_article",
+      metadata: item.metadata,
+      evidenceMode: "dry-run-after",
+    });
+    plans.push({
+      slug,
+      kvKey: `post:${slug}`,
+      url: item.url,
+      publishedAt: item.metadata?.publishedAt || "",
+      beforeBytes: Buffer.byteLength(item.html),
+      afterBytes: Buffer.byteLength(result.html),
+      beforeSha256: result.beforeSha256,
+      afterSha256: result.afterSha256,
+      applied: result.applied,
+      skipped: result.skipped,
+      remainingEditorialReview: afterAudit.legacyCompatibility.editorialReview,
+      remainingContractBlockers: afterAudit.legacyCompatibility.currentContractBlockers,
+      paths: {
+        backup: relative(ROOT, beforePath),
+        proposed: relative(ROOT, afterPath),
+        diff: relative(ROOT, diffPath),
+      },
+    });
+  }
+
+  const manifest = {
+    generatedAt: generatedAt.toISOString(),
+    mode: "GET-only dry run",
+    productionWrites: 0,
+    publicPageFetches: 0,
+    requestedLimit: limit,
+    plannedValues: plans.length,
+    instructions: "Re-read and back up each live KV value immediately before any separately approved write. Refuse to apply if its SHA-256 no longer matches beforeSha256.",
+    plans,
+    skippedCandidates,
+  };
+  const manifestPath = join(planDir, "manifest.json");
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+
+  const lines = [
+    `# Legacy metadata safe-repair plan — ${generatedAt.toISOString()}`,
+    "",
+    "**Dry run only. Production writes: 0.**",
+    "",
+    "Every proposed KV value has a byte-for-byte backup, proposed replacement, unified diff, and SHA-256 precondition. A later apply step must re-read production and refuse the write if the live hash changed.",
+    "",
+    `Planned values: ${plans.length} of requested ${limit}.`,
+    "",
+    "| KV key | Metadata-only actions | Before SHA-256 | After SHA-256 | Diff | Editorial review remains? |",
+    "|---|---|---|---|---|---|",
+  ];
+  for (const plan of plans) {
+    lines.push(`| ${plan.kvKey} | ${plan.applied.map((entry) => entry.code).join(", ")} | ${plan.beforeSha256} | ${plan.afterSha256} | ${plan.paths.diff} | ${plan.remainingEditorialReview.length ? "yes" : "no"} |`);
+  }
+  if (!plans.length) lines.push("| — | No conservative transformation could be verified. | — | — | — | — |");
+  lines.push("");
+  lines.push("This plan does not authorize publication, regeneration, title changes, source changes, or factual rewrites.");
+  const summaryPath = join(planDir, "README.md");
+  writeFileSync(summaryPath, lines.join("\n"));
+
+  return {
+    planDir,
+    manifestPath,
+    summaryPath,
+    plannedValues: plans.length,
+    skippedCandidates: skippedCandidates.length,
+    plans,
+  };
+}
+
 function serializableItem(item) {
   return {
     ...item,
@@ -1797,6 +2115,26 @@ async function runAudit(options = {}) {
 
   const outputDir = options.outputDir || DEFAULT_OUTPUT_DIR;
   mkdirSync(outputDir, { recursive: true });
+  let repairPlan = null;
+  if (Number(options.repairPlanLimit || 0) > 0) {
+    if (!kvAvailable) {
+      throw new Error("Safe repair planning requires read-only production KV access; refusing to plan from fallback/local data.");
+    }
+    repairPlan = writeLegacySafeRepairPlan(items, {
+      outputDir,
+      limit: options.repairPlanLimit,
+      generatedAt: now,
+    });
+    context.safeRepairPlan = {
+      mode: "GET-only dry run",
+      productionWrites: 0,
+      plannedValues: repairPlan?.plannedValues || 0,
+      skippedCandidates: repairPlan?.skippedCandidates || 0,
+      planDir: repairPlan?.planDir || "",
+      manifestPath: repairPlan?.manifestPath || "",
+      summaryPath: repairPlan?.summaryPath || "",
+    };
+  }
   const markdownPath = join(outputDir, "inventory-quality-report.md");
   const csvPath = join(outputDir, "inventory-quality-report.csv");
   const jsonPath = join(outputDir, "inventory-quality-report.json");
@@ -1804,7 +2142,7 @@ async function runAudit(options = {}) {
   writeFileSync(csvPath, reportCsv(items));
   writeFileSync(jsonPath, JSON.stringify({ context: { ...context, gsc: { ...gsc, byUrl: undefined }, backlinks: { ...backlinks, byUrl: undefined } }, items: items.map(serializableItem) }, null, 2));
 
-  return { items, context, paths: { markdownPath, csvPath, jsonPath } };
+  return { items, context, paths: { markdownPath, csvPath, jsonPath }, repairPlan };
 }
 
 async function main() {
@@ -1824,6 +2162,10 @@ async function main() {
   console.log(`Report: ${result.paths.markdownPath}`);
   console.log(`CSV: ${result.paths.csvPath}`);
   console.log(`JSON: ${result.paths.jsonPath}`);
+  if (result.repairPlan) {
+    console.log(`Safe repair plan: ${result.repairPlan.summaryPath}`);
+    console.log(`Planned KV values: ${result.repairPlan.plannedValues}; production writes: 0`);
+  }
 }
 
 const isCli = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
@@ -1836,6 +2178,7 @@ if (isCli) {
 
 export {
   auditHtml,
+  applyDeterministicLegacyRepairs,
   buildInventory,
   classifyHeadline,
   classifyItem,
@@ -1848,4 +2191,5 @@ export {
   positionBand,
   reportCsv,
   runAudit,
+  writeLegacySafeRepairPlan,
 };

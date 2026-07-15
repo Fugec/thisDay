@@ -120,6 +120,48 @@ const NON_SOURCE_HOSTS = new Set([
   "covers.openlibrary.org",
 ]);
 
+const LEGACY_IMAGE_TOKENS_TO_IGNORE = new Set([
+  "file", "image", "photo", "picture", "portrait", "painting", "illustration",
+  "commons", "wikimedia", "wikipedia", "original", "thumbnail", "upload",
+  "jpg", "jpeg", "png", "webp", "gif", "svg", "the", "and", "for", "from",
+  "with", "that", "this", "into", "during", "traditional", "attire",
+]);
+
+const SAFE_LEGACY_REPAIR_ACTIONS = new Map([
+  ["duplicate_breadcrumb_schema", "Keep one canonical BreadcrumbList JSON-LD object."],
+  ["obsolete_faq_schema", "Remove ineligible FAQPage JSON-LD without deleting visible article content."],
+  ["obsolete_news_schema", "Normalize the single historical-article schema object from NewsArticle to BlogPosting."],
+  ["missing_canonical", "Add the known self-referencing canonical URL for the stored article slug."],
+]);
+
+const CURRENT_PUBLICATION_BLOCKER_CODES = new Set([
+  "missing_title",
+  "headline_fragment",
+  "headline_truncation",
+  "subjectless_imperative_headline",
+  "url_title_day_mismatch",
+  "historical_year_conflict",
+  "headline_event_mismatch",
+  "missing_canonical",
+  "canonical_mismatch",
+  "invalid_json_ld",
+  "duplicate_breadcrumb_schema",
+  "article_schema_count",
+  "obsolete_news_schema",
+  "obsolete_faq_schema",
+  "insufficient_direct_sources",
+  "no_independent_source",
+  "legacy_quick_facts_count",
+  "legacy_did_you_know_count",
+  "legacy_did_you_know_duplicates",
+  "legacy_people_labels_missing",
+  "legacy_analysis_count",
+  "legacy_hero_missing",
+  "legacy_hero_unsupported",
+  "legacy_hero_alt_missing",
+  "legacy_hero_alt_file_mismatch",
+]);
+
 function parseArgs(argv) {
   const options = {
     backlinks: "",
@@ -732,6 +774,223 @@ function sourceAudit(metadata, html, type) {
   };
 }
 
+function extractHtmlAttribute(tag, name) {
+  const match = String(tag || "").match(
+    new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, "i"),
+  );
+  return decodeHtml(match?.[2] || "").trim();
+}
+
+function decodeArticleImageSource(value) {
+  const source = decodeHtml(value);
+  try {
+    const url = new URL(source, SITE);
+    if (url.hostname.toLowerCase().replace(/^www\./, "") === "thisday.info" && url.pathname === "/image-proxy") {
+      return url.searchParams.get("src") || "";
+    }
+    return url.toString();
+  } catch {
+    return source;
+  }
+}
+
+function isSupportedLegacyArticleImage(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const host = url.hostname.toLowerCase();
+    return url.protocol === "https:" && (host === "wikimedia.org" || host.endsWith(".wikimedia.org"));
+  } catch {
+    return false;
+  }
+}
+
+function legacyImageSubjectTokens(value) {
+  let text = String(value || "");
+  try {
+    const url = new URL(text, SITE);
+    text = url.pathname.split("/").at(-1) || "";
+  } catch {
+    // Use the supplied label as-is when it is not a URL.
+  }
+  try {
+    text = decodeURIComponent(text);
+  } catch {
+    // A partially encoded Commons filename can still provide useful tokens.
+  }
+  return new Set(
+    text
+      .replace(/^\d+px-/i, "")
+      .replace(/\.[a-z0-9]+$/i, "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 3 && !/^\d+$/.test(token) && !LEGACY_IMAGE_TOKENS_TO_IGNORE.has(token)),
+  );
+}
+
+function tokenOverlap(left, right) {
+  for (const token of left) {
+    if (right.has(token)) return true;
+  }
+  return false;
+}
+
+function legacyNearDuplicateFacts(left, right, ignoredTokens = new Set()) {
+  const tokensFor = (value) => new Set(
+    normalizedText(value)
+      .split(" ")
+      .filter((token) => token.length >= 4 && !FUNCTION_WORDS.has(token) && !ignoredTokens.has(token)),
+  );
+  const leftTokens = tokensFor(left);
+  const rightTokens = tokensFor(right);
+  if (!leftTokens.size || !rightTokens.size) return false;
+  let shared = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) shared += 1;
+  }
+  return shared >= 6 && shared / Math.min(leftTokens.size, rightTokens.size) >= 0.55;
+}
+
+function auditLegacyArticleContract(html, { title = "", h1 = "", description = "", metadata = null } = {}) {
+  const source = String(html || "");
+  const findings = [];
+  const quickFactCount = (source.match(/class\s*=\s*(["'])[^"']*\bai-answer-item\b[^"']*\1/gi) || []).length;
+  if (quickFactCount < 6) {
+    findings.push(finding("content", "legacy_quick_facts_count", "high", `Current publication requires at least six populated Quick Facts; stored HTML has ${quickFactCount}.`));
+  }
+
+  const didYouKnowFacts = [...source.matchAll(/<p\b[^>]*class\s*=\s*(["'])[^"']*\bdyn-fact\b[^"']*\1[^>]*>([\s\S]*?)<\/p>/gi)]
+    .map((match) => plainText(match[2]))
+    .filter(Boolean);
+  if (didYouKnowFacts.length !== 5) {
+    findings.push(finding("content", "legacy_did_you_know_count", "high", `Current publication requires exactly five populated Did You Know facts; stored HTML has ${didYouKnowFacts.length}.`));
+  }
+  const ignoredFactTokens = new Set(normalizedText(`${title} ${h1} ${metadata?.eventTitle || ""}`).split(" ").filter((token) => token.length >= 4));
+  const duplicatePairs = [];
+  for (let left = 0; left < didYouKnowFacts.length; left += 1) {
+    for (let right = left + 1; right < didYouKnowFacts.length; right += 1) {
+      if (
+        normalizedText(didYouKnowFacts[left]) === normalizedText(didYouKnowFacts[right]) ||
+        legacyNearDuplicateFacts(didYouKnowFacts[left], didYouKnowFacts[right], ignoredFactTokens)
+      ) {
+        duplicatePairs.push([left + 1, right + 1]);
+      }
+    }
+  }
+  if (duplicatePairs.length) {
+    findings.push(finding("content", "legacy_did_you_know_duplicates", "high", `${duplicatePairs.length} exact or near-duplicate Did You Know fact pair(s) require source-based rewriting.`));
+  }
+
+  const peopleLabelCount = (source.match(/class\s*=\s*(["'])[^"']*\bperson-pill-name\b[^"']*\1/gi) || []).length;
+  if (peopleLabelCount < 1) {
+    findings.push(finding("content", "legacy_people_labels_missing", "high", "Current publication requires at least one visible People in this story label."));
+  }
+
+  const positiveBlock = source.match(/<div\b[^>]*class\s*=\s*(["'])[^"']*\banalysis-good\b[^"']*\1[^>]*>[\s\S]*?<ul\b[^>]*>([\s\S]*?)<\/ul>/i)?.[2] || "";
+  const criticalBlock = source.match(/<div\b[^>]*class\s*=\s*(["'])[^"']*\banalysis-bad\b[^"']*\1[^>]*>[\s\S]*?<ul\b[^>]*>([\s\S]*?)<\/ul>/i)?.[2] || "";
+  const positiveAnalysisCount = (positiveBlock.match(/<li\b/gi) || []).length;
+  const criticalAnalysisCount = (criticalBlock.match(/<li\b/gi) || []).length;
+  if (positiveAnalysisCount < 3 || criticalAnalysisCount < 3) {
+    findings.push(finding("content", "legacy_analysis_count", "high", `Current publication requires at least three positive and three critical analysis items; stored HTML has ${positiveAnalysisCount} and ${criticalAnalysisCount}.`));
+  }
+
+  const heroFigure = [...source.matchAll(/<figure\b[^>]*>[\s\S]*?<\/figure>/gi)]
+    .map((match) => match[0])
+    .find((figure) => /class\s*=\s*(["'])[^"']*\barticle-hero-fig\b[^"']*\1/i.test(figure)) || "";
+  const heroTag = heroFigure.match(/<img\b[^>]*>/i)?.[0] || "";
+  const heroImageUrl = decodeArticleImageSource(extractHtmlAttribute(heroTag, "src"));
+  const heroImageAlt = extractHtmlAttribute(heroTag, "alt");
+  const heroImageSupported = isSupportedLegacyArticleImage(heroImageUrl);
+  if (!heroTag || !heroImageUrl) {
+    findings.push(finding("technical", "legacy_hero_missing", "high", "Current publication requires a rendered featured hero image."));
+  } else if (!heroImageSupported) {
+    findings.push(finding("technical", "legacy_hero_unsupported", "high", `Hero image is not a supported HTTPS Wikimedia asset: ${heroImageUrl}`));
+  }
+  if (heroTag && !heroImageAlt) {
+    findings.push(finding("content", "legacy_hero_alt_missing", "high", "Featured hero image has no usable alt text."));
+  }
+
+  const fileTokens = legacyImageSubjectTokens(heroImageUrl);
+  const altTokens = legacyImageSubjectTokens(heroImageAlt);
+  const articleTokens = legacyImageSubjectTokens(
+    `${title} ${h1} ${description} ${metadata?.eventTitle || ""} ${metadata?.keywords || ""}`,
+  );
+  if (fileTokens.size >= 2 && altTokens.size >= 2 && !tokenOverlap(fileTokens, altTokens)) {
+    findings.push(finding("factual", "legacy_hero_alt_file_mismatch", "high", "Hero alt text has no substantive overlap with the Wikimedia filename; verify what the image actually depicts before rewriting it."));
+  }
+  if (fileTokens.size >= 2 && articleTokens.size >= 2 && !tokenOverlap(fileTokens, articleTokens)) {
+    findings.push(finding("factual", "legacy_hero_subject_page_mismatch", "medium", "Wikimedia filename has no substantive overlap with the article title, event, description, or keywords; image relevance needs human review."));
+  }
+
+  return {
+    quickFactCount,
+    didYouKnowCount: didYouKnowFacts.length,
+    didYouKnowDuplicatePairs: duplicatePairs,
+    peopleLabelCount,
+    positiveAnalysisCount,
+    criticalAnalysisCount,
+    heroImageUrl,
+    heroImageAlt,
+    heroImageSupported,
+    groundingEvidence: "unavailable-from-rendered-html",
+    findings,
+  };
+}
+
+function buildLegacyCompatibility(audit, type) {
+  if (type !== "blog_article") {
+    return {
+      applicable: false,
+      status: "not_applicable",
+      safeRepairs: [],
+      editorialReview: [],
+      currentContractBlockers: [],
+    };
+  }
+
+  const safeRepairs = [];
+  const editorialReview = [];
+  const currentContractBlockers = [];
+  const newsSchemaOnly =
+    (audit.schemaCounts?.NewsArticle || 0) === 1 &&
+    (audit.schemaCounts?.Article || 0) === 0 &&
+    (audit.schemaCounts?.BlogPosting || 0) === 0;
+
+  for (const entry of audit.findings || []) {
+    const safeAction = SAFE_LEGACY_REPAIR_ACTIONS.get(entry.code);
+    if (safeAction) safeRepairs.push({ code: entry.code, detail: safeAction });
+    if (CURRENT_PUBLICATION_BLOCKER_CODES.has(entry.code)) {
+      currentContractBlockers.push({ code: entry.code, detail: entry.detail });
+    }
+    const safelyCoveredSchemaCount = entry.code === "article_schema_count" && newsSchemaOnly;
+    const needsEditorialReview =
+      !safeAction &&
+      !safelyCoveredSchemaCount &&
+      (
+        ["factual", "source", "content", "repetition", "duplication"].includes(entry.category) ||
+        (entry.category === "technical" && ["medium", "high"].includes(entry.severity)) ||
+        (entry.category === "cosmetic" && entry.severity === "medium")
+      );
+    if (needsEditorialReview) editorialReview.push({ code: entry.code, detail: entry.detail });
+  }
+
+  const unique = (entries) => [...new Map(entries.map((entry) => [entry.code, entry])).values()];
+  const dedupedSafe = unique(safeRepairs);
+  const dedupedEditorial = unique(editorialReview);
+  const dedupedBlockers = unique(currentContractBlockers);
+  const status = dedupedEditorial.length
+    ? "editorial_review_required"
+    : dedupedSafe.length
+      ? "deterministic_safe_repair"
+      : "compatible";
+  return {
+    applicable: true,
+    status,
+    safeRepairs: dedupedSafe,
+    editorialReview: dedupedEditorial,
+    currentContractBlockers: dedupedBlockers,
+  };
+}
+
 function auditHtml(html, { url, type, metadata = null, evidenceMode = "html" } = {}) {
   const title = extractTagText(html, "title") || metadata?.title || "";
   const h1Matches = [...String(html || "").matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((match) => plainText(match[1])).filter(Boolean);
@@ -795,7 +1054,12 @@ function auditHtml(html, { url, type, metadata = null, evidenceMode = "html" } =
   const sources = sourceAudit(metadata, html, type);
   findings.push(...sources.findings);
 
-  return {
+  const currentContract = type === "blog_article"
+    ? auditLegacyArticleContract(html, { title, h1: h1Matches[0] || "", description, metadata })
+    : null;
+  if (currentContract) findings.push(...currentContract.findings);
+
+  const audit = {
     evidenceMode,
     title,
     h1: h1Matches[0] || "",
@@ -810,8 +1074,11 @@ function auditHtml(html, { url, type, metadata = null, evidenceMode = "html" } =
     sourceCount: sources.sourceCount,
     independentSourceCount: sources.independentSourceCount,
     sourceUrls: sources.urls,
+    currentContract,
     findings,
   };
+  audit.legacyCompatibility = buildLegacyCompatibility(audit, type);
+  return audit;
 }
 
 function auditMetadata(item, hubCounts, hubCountsAvailable = true) {
@@ -859,7 +1126,7 @@ function auditMetadata(item, hubCounts, hubCountsAvailable = true) {
     }
   }
 
-  return {
+  const audit = {
     evidenceMode: item.contentMode,
     title,
     h1: "",
@@ -874,8 +1141,19 @@ function auditMetadata(item, hubCounts, hubCountsAvailable = true) {
     sourceCount,
     independentSourceCount,
     sourceUrls: Array.isArray(metadata.sourcePages) ? metadata.sourcePages.map((source) => source.pageUrl).filter(Boolean) : [],
+    currentContract: null,
     findings,
   };
+  audit.legacyCompatibility = item.type === "blog_article"
+    ? {
+        applicable: true,
+        status: "evidence_unavailable",
+        safeRepairs: [],
+        editorialReview: [{ code: "stored_html_unavailable", detail: "Stored HTML was unavailable, so compatibility with current rendering and publication gates could not be assessed." }],
+        currentContractBlockers: [],
+      }
+    : buildLegacyCompatibility(audit, item.type);
+  return audit;
 }
 
 function auditTemplateItem(item) {
@@ -887,7 +1165,7 @@ function auditTemplateItem(item) {
   ) {
     findings.push(finding("factual", "quiz_distractor_query_risk", "medium", "A synthetic query exposed quiz-like entity combinations; distractor truthfulness needs manual review."));
   }
-  return {
+  const audit = {
     evidenceMode: item.contentMode,
     title: "",
     h1: "",
@@ -902,8 +1180,11 @@ function auditTemplateItem(item) {
     sourceCount: null,
     independentSourceCount: null,
     sourceUrls: [],
+    currentContract: null,
     findings,
   };
+  audit.legacyCompatibility = buildLegacyCompatibility(audit, item.type);
+  return audit;
 }
 
 function positionBand(position) {
@@ -1083,6 +1364,20 @@ function reportMarkdown(items, context) {
   const repeated = items.filter((item) => item.audit.findings.some((entry) => entry.category === "repetition"));
   const sourceProblems = items.filter((item) => item.audit.findings.some((entry) => entry.category === "source" && entry.severity === "high"));
   const thinHubs = items.filter((item) => item.audit.findings.some((entry) => entry.code === "thin_hub"));
+  const legacyArticles = items.filter((item) => item.type === "blog_article");
+  const compatibilityCounts = countBy(
+    legacyArticles,
+    (item) => item.audit.legacyCompatibility?.status || "evidence_unavailable",
+  );
+  const deterministicRepairQueue = legacyArticles.filter(
+    (item) => item.audit.legacyCompatibility?.status === "deterministic_safe_repair",
+  );
+  const safeRepairArticles = legacyArticles.filter(
+    (item) => (item.audit.legacyCompatibility?.safeRepairs || []).length > 0,
+  );
+  const editorialRepairQueue = legacyArticles.filter(
+    (item) => item.audit.legacyCompatibility?.status === "editorial_review_required",
+  );
   const winnable = items
     .filter((item) => {
       const stats = item.traffic;
@@ -1103,6 +1398,7 @@ function reportMarkdown(items, context) {
   lines.push(`- **${factual.length} possible factual/headline risks** are separated from cosmetic and technical issues. They are leads for human verification, not confirmed corrections.`);
   lines.push(`- **${sourceProblems.length} pages** have high-severity stored source-coverage findings.`);
   lines.push(`- **${repeated.length} pages** contain exact repeated paragraph/heading signals in the safely available stored/local HTML.`);
+  lines.push(`- **${safeRepairArticles.length} legacy articles** have at least one metadata-only repair candidate (${deterministicRepairQueue.length} have no concurrent editorial finding); **${editorialRepairQueue.length}** require source or editorial review for their remaining content issues.`);
   lines.push(`- **Remove is deliberately zero unless current traffic/indexing and backlink evidence both support it.** Missing datasets are never interpreted as zero value.`);
   lines.push("");
   lines.push("## Evidence coverage and limitations");
@@ -1143,6 +1439,60 @@ function reportMarkdown(items, context) {
     const typed = items.filter((item) => item.type === type);
     const typedCounts = countBy(typed, (item) => item.classification);
     lines.push(`| ${type} | ${count} | ${typedCounts.get("keep") || 0} | ${typedCounts.get("improve") || 0} | ${typedCounts.get("merge") || 0} | ${typedCounts.get("noindex") || 0} | ${typedCounts.get("remove") || 0} |`);
+  }
+  lines.push("");
+
+  lines.push("## Legacy compatibility and safe repair queue");
+  lines.push("");
+  lines.push("This compares stored article HTML with the current publication contract. It proposes actions only; it does not rewrite KV. Deterministic-safe means the action changes machine metadata or canonical markup without inventing historical prose. Any source, factual, image-subject, or content change remains editorial-review work.");
+  lines.push("");
+  lines.push("| Compatibility status | Articles | Next step |");
+  lines.push("|---|--:|---|");
+  const compatibilityMeaning = {
+    compatible: "No contract gap detected in the safely available evidence.",
+    deterministic_safe_repair: "Preview a metadata-only patch, validate its exact diff, then approve a small production batch.",
+    editorial_review_required: "Verify sources and facts before changing stored content.",
+    evidence_unavailable: "Recover/read stored HTML before deciding.",
+  };
+  for (const status of ["compatible", "deterministic_safe_repair", "editorial_review_required", "evidence_unavailable"]) {
+    lines.push(`| ${status} | ${compatibilityCounts.get(status) || 0} | ${compatibilityMeaning[status]} |`);
+  }
+  lines.push("");
+
+  lines.push("### Metadata-only candidates");
+  lines.push("");
+  lines.push("These actions can be previewed independently even when the same article has separate editorial findings. Applying a metadata-only action does not mark the article fully compatible.");
+  lines.push("");
+  if (!safeRepairArticles.length) {
+    lines.push("No metadata-only candidates were found.");
+  } else {
+    lines.push("| URL | Proposed metadata-only actions | Editorial review still required? | Current-contract blockers cleared by those actions |");
+    lines.push("|---|---|---|---|");
+    for (const item of safeRepairArticles.slice(0, 80)) {
+      const compatibility = item.audit.legacyCompatibility;
+      const safeCodes = new Set(compatibility.safeRepairs.map((entry) => entry.code));
+      if (safeCodes.has("obsolete_news_schema")) safeCodes.add("article_schema_count");
+      const clearedBlockers = compatibility.currentContractBlockers
+        .filter((entry) => safeCodes.has(entry.code))
+        .map((entry) => entry.code);
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${markdownCell(compatibility.safeRepairs.map((entry) => `${entry.code}: ${entry.detail}`).join("; "))} | ${compatibility.editorialReview.length ? "yes" : "no"} | ${markdownCell(clearedBlockers.join(", ")) || "—"} |`);
+    }
+    if (safeRepairArticles.length > 80) lines.push(`\n_${safeRepairArticles.length - 80} additional metadata-only candidates are in the CSV/JSON inventory._`);
+  }
+  lines.push("");
+
+  lines.push("### Editorial/source review queue");
+  lines.push("");
+  if (!editorialRepairQueue.length) {
+    lines.push("No stored article requires editorial review under the current deterministic checks.");
+  } else {
+    lines.push("| URL | Current-contract blockers | Review-required findings | Safe actions that can be bundled after review |");
+    lines.push("|---|---|---|---|");
+    for (const item of editorialRepairQueue.slice(0, 80)) {
+      const compatibility = item.audit.legacyCompatibility;
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${markdownCell(compatibility.currentContractBlockers.map((entry) => entry.code).join(", ")) || "—"} | ${markdownCell(compatibility.editorialReview.map((entry) => entry.code).join(", ")) || "—"} | ${markdownCell(compatibility.safeRepairs.map((entry) => entry.code).join(", ")) || "—"} |`);
+    }
+    if (editorialRepairQueue.length > 80) lines.push(`\n_${editorialRepairQueue.length - 80} additional review candidates are in the CSV/JSON inventory._`);
   }
   lines.push("");
 
@@ -1281,7 +1631,11 @@ function reportMarkdown(items, context) {
 function reportCsv(items) {
   const headers = [
     "url", "type", "classification", "confidence", "discovery", "evidence_mode",
-    "title", "word_count", "factual_risks", "technical_issues", "cosmetic_issues",
+    "title", "word_count", "legacy_compatibility", "safe_repairs", "editorial_review",
+    "current_contract_blockers", "quick_fact_count", "did_you_know_count",
+    "did_you_know_duplicate_pairs", "people_label_count", "positive_analysis_count",
+    "critical_analysis_count", "hero_image_url", "hero_image_alt", "hero_image_supported",
+    "factual_risks", "technical_issues", "cosmetic_issues", "content_issues",
     "source_issues", "repetition_issues", "source_count", "independent_source_count",
     "duplicate_group", "gsc_observed", "impressions", "clicks", "all_query_position", "all_query_position_band",
     "known_human_impressions", "known_human_clicks", "known_human_position",
@@ -1290,6 +1644,8 @@ function reportCsv(items) {
   const rows = [headers];
   for (const item of items) {
     const findings = item.audit.findings;
+    const compatibility = item.audit.legacyCompatibility || {};
+    const contract = item.audit.currentContract || {};
     const details = (category) => findings.filter((entry) => entry.category === category).map((entry) => `${entry.code}: ${entry.detail}`).join(" | ");
     rows.push([
       item.url,
@@ -1300,9 +1656,23 @@ function reportCsv(items) {
       item.contentMode,
       item.audit.title,
       item.audit.wordCount ?? "",
+      compatibility.status || "not_applicable",
+      (compatibility.safeRepairs || []).map((entry) => `${entry.code}: ${entry.detail}`).join(" | "),
+      (compatibility.editorialReview || []).map((entry) => `${entry.code}: ${entry.detail}`).join(" | "),
+      (compatibility.currentContractBlockers || []).map((entry) => entry.code).join(" | "),
+      contract.quickFactCount ?? "",
+      contract.didYouKnowCount ?? "",
+      (contract.didYouKnowDuplicatePairs || []).map((pair) => pair.join("-" )).join(" | "),
+      contract.peopleLabelCount ?? "",
+      contract.positiveAnalysisCount ?? "",
+      contract.criticalAnalysisCount ?? "",
+      contract.heroImageUrl || "",
+      contract.heroImageAlt || "",
+      contract.heroImageSupported == null ? "" : contract.heroImageSupported ? "yes" : "no",
       details("factual"),
       details("technical"),
       details("cosmetic"),
+      details("content"),
       details("source"),
       details("repetition"),
       item.audit.sourceCount ?? "",

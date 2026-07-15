@@ -446,27 +446,107 @@ ${gridItems}
   </section>`;
 }
 
-function buildDidYouKnowSlider(facts) {
-  const seen = new Set();
-  const cleanedFacts = (Array.isArray(facts) ? facts : [])
+const REQUIRED_DID_YOU_KNOW_FACTS = 5;
+
+function normalizeArticleDidYouKnowFact(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[-•]\s*/, "")
+    .replace(/^did you know that\s*/i, "")
+    .replace(/^did you know[,:]?\s*/i, "")
+    .trim();
+}
+
+function didYouKnowIgnoredTokens(content = {}) {
+  return semanticDuplicateTokens(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.historicalDate,
+      content?.location,
+      content?.country,
+      content?.sourcePageTitle,
+    ].filter(Boolean).join(" "),
+  );
+}
+
+function didYouKnowFactsAreNearDuplicates(left, right, content = {}) {
+  const ignoredTokens = didYouKnowIgnoredTokens(content);
+  const leftTokens = semanticDuplicateTokens(left, ignoredTokens);
+  const rightTokens = semanticDuplicateTokens(right, ignoredTokens);
+  const { shared, ratio } = semanticDuplicateScore(leftTokens, rightTokens);
+  return shared >= 6 && ratio >= 0.55;
+}
+
+function auditDidYouKnowFacts(
+  content,
+  { requireGrounding = false, groundingVerified = false } = {},
+) {
+  const rawFacts = Array.isArray(content?.didYouKnowFacts)
+    ? content.didYouKnowFacts
+    : [];
+  const facts = rawFacts
     .filter((fact) => typeof fact === "string")
-    .map((fact) => fact.trim())
-    .filter(Boolean)
-    .filter((fact) => {
-      const key = normalizeForCompare(fact);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    .map(normalizeArticleDidYouKnowFact)
+    .filter(Boolean);
+  const reasons = [];
+
+  if (rawFacts.length !== REQUIRED_DID_YOU_KNOW_FACTS || facts.length !== REQUIRED_DID_YOU_KNOW_FACTS) {
+    reasons.push(
+      `didYouKnowFacts must contain exactly ${REQUIRED_DID_YOU_KNOW_FACTS} populated facts (got ${facts.length})`,
+    );
+  }
+
+  for (let i = 0; i < facts.length; i += 1) {
+    if (!hasHardFact(facts[i])) {
+      reasons.push(`didYouKnowFacts[${i}] lacks a concrete name, date, number, place, or institution`);
+    }
+    for (let j = i + 1; j < facts.length; j += 1) {
+      const exact = normalizeForCompare(facts[i]) === normalizeForCompare(facts[j]);
+      if (exact) {
+        reasons.push(`didYouKnowFacts[${i}] and didYouKnowFacts[${j}] are exact duplicates`);
+      } else if (didYouKnowFactsAreNearDuplicates(facts[i], facts[j], content)) {
+        reasons.push(`didYouKnowFacts[${i}] and didYouKnowFacts[${j}] repeat the same claim`);
+      }
+    }
+  }
+
+  if (requireGrounding && groundingVerified !== true) {
+    reasons.push("didYouKnowFacts did not pass the final source-grounding verifier");
+  }
+
+  return { ok: reasons.length === 0, reasons, facts };
+}
+
+function distinctDidYouKnowFacts(facts, content = null) {
+  const selected = [];
+  const seen = new Set();
+  for (const value of Array.isArray(facts) ? facts : []) {
+    if (typeof value !== "string") continue;
+    const fact = normalizeArticleDidYouKnowFact(value);
+    const key = normalizeForCompare(fact);
+    if (!key || seen.has(key)) continue;
+    if (
+      content &&
+      selected.some((existing) => didYouKnowFactsAreNearDuplicates(existing, fact, content))
+    ) {
+      continue;
+    }
+    seen.add(key);
+    selected.push(fact);
+  }
+  return selected;
+}
+
+function buildDidYouKnowSlider(facts, content = null) {
+  const cleanedFacts = distinctDidYouKnowFacts(facts, content);
   if (!cleanedFacts.length) return "";
 
-  // The publication contract requires 5 rendered cards. Prefer the unique facts; pad by
-  // cycling ONLY as a last resort when fewer than 5 unique facts exist, so a generation
-  // shortfall never blocks daily publication (scanArticleQuality separately flags fewer
-  // than 5 distinct so enrichment backfills more before this fallback ever shows).
-  const count = 5;
-  const sliderFacts = Array.from({ length: count }, (_, index) => {
-    const fact = cleanedFacts[index] ?? cleanedFacts[index % cleanedFacts.length];
+  // Never manufacture a complete slider by cycling a short fact list. New
+  // publication fails closed before rendering unless five distinct facts pass
+  // source grounding; legacy repairs may render fewer cards rather than repeat.
+  const sliderFacts = cleanedFacts.slice(0, REQUIRED_DID_YOU_KNOW_FACTS).map((fact, index) => {
     return `            <article class="blog-cta-col dyn-slide" aria-label="Did you know fact ${index + 1}">
               <p>Did you know</p>
               <p class="dyn-fact">${esc(fact)}</p>
@@ -5283,14 +5363,8 @@ function scanArticleQuality(content) {
     });
   }
 
-  if (Array.isArray(content.didYouKnowFacts)) {
-    const uniqueDyk = new Set(
-      content.didYouKnowFacts.map((f) => normalizeForCompare(f)).filter(Boolean),
-    );
-    if (uniqueDyk.size < 5) {
-      issues.push(`didYouKnowFacts has only ${uniqueDyk.size} unique facts; needs 5 distinct (slider no longer repeats).`);
-    }
-  }
+  const didYouKnowAudit = auditDidYouKnowFacts(content);
+  issues.push(...didYouKnowAudit.reasons);
   issues.push(...scanEditorialNoteQuality(content));
   if (!plainText(content.contentRationale).match(/\bWikipedia\b/i) || wordCount(content.contentRationale) < 35) {
     issues.push("contentRationale must explain the article's specific value beyond Wikipedia.");
@@ -6415,6 +6489,7 @@ async function generateAndStore(
       { expirationTtl: 3 * 86_400 },
     );
   } else if (!lightweightPublish) {
+    let didYouKnowGroundingVerified = false;
     if (groundingSource) {
       const finalGrounding = await verifyFinalGroundingWithRepair(env, content, groundingSource, slug);
       if (!finalGrounding.ok) {
@@ -6424,6 +6499,7 @@ async function generateAndStore(
         );
       }
       content = finalGrounding.content;
+      didYouKnowGroundingVerified = true;
     }
     const quizParagraphs = [
       ...(content.overviewParagraphs || []),
@@ -6461,6 +6537,7 @@ async function generateAndStore(
       eventImages,
       entityMeta,
       verifiedFeaturedImage: content.imageUrl,
+      didYouKnowGroundingVerified,
     });
   }
 
@@ -6908,6 +6985,7 @@ async function savePublishedPost(
     eventImages = [],
     entityMeta = [],
     verifiedFeaturedImage = null,
+    didYouKnowGroundingVerified = false,
   },
 ) {
   const safePillars = Array.isArray(pillars) ? pillars : [];
@@ -6930,6 +7008,15 @@ async function savePublishedPost(
   if (!citationValidation.ok) {
     throw new Error(
       `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
+    );
+  }
+  const didYouKnowValidation = auditDidYouKnowFacts(content, {
+    requireGrounding: true,
+    groundingVerified: didYouKnowGroundingVerified,
+  });
+  if (!didYouKnowValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: Did You Know contract failed — ${didYouKnowValidation.reasons.join("; ")}`,
     );
   }
   // Final publication gate: enrichment is allowed to retry transient image
@@ -7175,6 +7262,7 @@ async function enrichPublishedPost(env, slug) {
     );
   }
 
+  let didYouKnowGroundingVerified = false;
   if (groundingSource) {
     await chk("pre-final-grounding");
     const finalGrounding = await verifyFinalGroundingWithRepair(env, enriched, groundingSource, slug);
@@ -7185,6 +7273,7 @@ async function enrichPublishedPost(env, slug) {
       );
     }
     enriched = finalGrounding.content;
+    didYouKnowGroundingVerified = true;
     await chk("post-final-grounding");
   }
 
@@ -7231,6 +7320,7 @@ async function enrichPublishedPost(env, slug) {
     eventImages,
     entityMeta,
     verifiedFeaturedImage,
+    didYouKnowGroundingVerified,
   });
   await chk("saved");
 
@@ -8992,8 +9082,6 @@ function assertRequiredContentBlocks(content) {
       String(fact.label || "").trim() &&
       String(fact.value || "").trim(),
   );
-  const didYouKnowFacts = (Array.isArray(content.didYouKnowFacts) ? content.didYouKnowFacts : [])
-    .filter((fact) => typeof fact === "string" && fact.trim());
   const namedPeople = (Array.isArray(content.keyTerms) ? content.keyTerms : []).filter(
     (term) =>
       term &&
@@ -9010,7 +9098,10 @@ function assertRequiredContentBlocks(content) {
     ).length;
   const missing = [];
   if (quickFacts.length < 6) missing.push("six populated quick facts");
-  if (didYouKnowFacts.length < 3) missing.push("three did-you-know facts");
+  const didYouKnowAudit = auditDidYouKnowFacts(content);
+  if (!didYouKnowAudit.ok) {
+    missing.push(`five distinct did-you-know facts (${didYouKnowAudit.reasons.join("; ")})`);
+  }
   if (namedPeople.length < 1) missing.push("one named person for the people strip");
   if (analysisCount(content.analysisGood) < 3) missing.push("three positive analysis items");
   if (analysisCount(content.analysisBad) < 3) missing.push("three critical analysis items");
@@ -9840,7 +9931,7 @@ Requirements:
 
 function validateChunkedArticleSupport(merged) {
   requireChunkArray(merged, "quickFacts", { exact: 6, label: "chunked article fallback" });
-  requireChunkArray(merged, "didYouKnowFacts", { exact: 6, label: "chunked article fallback" });
+  requireChunkArray(merged, "didYouKnowFacts", { exact: 5, label: "chunked article fallback" });
   requireChunkArray(merged, "analysisGood", { min: 3, label: "chunked article fallback" });
   requireChunkArray(merged, "analysisBad", { min: 3, label: "chunked article fallback" });
   assertRequiredContentBlocks(merged);
@@ -10198,17 +10289,24 @@ ${JSON.stringify(compactBrief, null, 2)}
 Write only this JSON:
 {
   "quickFacts":[{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
-  "didYouKnowFacts":["six distinct facts, 35-55 words each"]
+  "didYouKnowFacts":["five distinct facts, 35-55 words each"]
 }
 
 Requirements:
 - quickFacts must contain exactly 6 populated label/value objects.
-- didYouKnowFacts must contain exactly 6 distinct source-grounded facts.
+- didYouKnowFacts must contain exactly 5 distinct source-grounded facts.
 - Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.`,
     1600,
     (parsed) => {
       requireChunkArray(parsed, "quickFacts", { exact: 6, label: "chunked article facts" });
-      requireChunkArray(parsed, "didYouKnowFacts", { exact: 6, label: "chunked article facts" });
+      requireChunkArray(parsed, "didYouKnowFacts", { exact: 5, label: "chunked article facts" });
+      const didYouKnowAudit = auditDidYouKnowFacts({
+        ...compactBrief,
+        didYouKnowFacts: parsed.didYouKnowFacts,
+      });
+      if (!didYouKnowAudit.ok) {
+        throw new Error(`chunked article facts: ${didYouKnowAudit.reasons.join("; ")}`);
+      }
     },
   );
 
@@ -10441,8 +10539,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "A detail that reframes the main story or reveals a hidden layer of complexity, 1 to 2 sentences, minimum 35 words. Do not recycle a detail from the first fact.",
     "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 1 to 2 sentences, minimum 35 words.",
     "A fact about a specific person involved — their background, motive, or fate — that most accounts skip, 1 to 2 sentences, minimum 35 words.",
-    "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 1 to 2 sentences, minimum 35 words.",
-    "A fact about the long-term legacy or a surprising modern echo of the event, 1 to 2 sentences, minimum 35 words. Provide SIX facts in total and make every one distinct — never restate another."
+    "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 1 to 2 sentences, minimum 35 words. Provide exactly FIVE facts in total and make every one distinct — never restate or paraphrase another fact."
   ],
   "overviewParagraphs": [
     "Paragraph 1 (claim + strongest evidence; ~105 to 125 words): Open with a striking concrete detail or blunt declarative statement — never with a rhetorical question. State the core claim directly. Include the single strongest, attributable piece of evidence (name, year, number, or place) that supports it. No chatty openers like 'So, what happened' or 'For starters'. Start with the most important thing.",
@@ -10540,7 +10637,7 @@ Output exactly this JSON shape and no extra text:
   "organizerName": "key person or organization",
   "readingTimeMinutes": 8,
   "quickFacts": [{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
-  "didYouKnowFacts": ["six distinct facts, 35-55 words each"],
+  "didYouKnowFacts": ["five distinct facts, 35-55 words each"],
   "overviewParagraphs": ["two paragraphs, 125-145 words each"],
   "eyewitnessOrChronicle": ["two paragraphs, 115-135 words each"],
   "eyewitnessQuote": "",
@@ -10560,7 +10657,7 @@ Output exactly this JSON shape and no extra text:
 }
 
 Field requirements:
-- quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 6 distinct facts.
+- quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 5 distinct facts.
 - analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
 - keyTerms must contain 5-8 entries and at least one real named person connected to the event.
 - imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
@@ -11091,6 +11188,7 @@ async function verifyFinalArticleGrounding(env, content, source) {
               `FINAL ARTICLE:\n${articleText}\n\n` +
               "Start with the headline and central event claim. Reject a command-style or imperative headline with no historical actor. Reject any headline or body claim that assigns an action, order, execution, killing, relationship, title, or identity to a person when the source assigns it to someone else or does not support that attribution. Distinguish who ordered an act, who carried it out, and who was its target. " +
               "Reject ONLY clear factual contradictions: conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
+              "Audit each of the exactly five Did You Know facts separately. Reject any Did You Know fact whose central claim is not directly supported by the authoritative source material, even when the source does not explicitly contradict it. Identify a rejected fact by its array index. " +
               "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +
               "OMISSIONS ARE NOT FAILURES. The article does not need to mention, include, or elaborate on every fact in the source. Never raise an issue that the article 'does not mention', 'does not include', or 'fails to mention' something, and never fault it for leaving out background context. Only flag a fact the article actively STATES that contradicts the source. " +
               "Do not reject ordinary interpretation or clearly labeled opinion. Return exactly one JSON object: " +
@@ -13541,7 +13639,7 @@ function buildPostHTML(
     ? c.keywords.map((keyword) => String(keyword).trim()).filter(Boolean).join(", ")
     : String(c.keywords || "");
 
-  const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || []);
+  const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || [], c);
   const sectionHeadings = buildArticleSectionHeadings(c, currentPillars);
   const amazonRelatedBlock = buildAmazonRelatedBlock(c, currentPillars);
   const articleBodyAdBlock = amazonRelatedBlock ? buildArticleBodyAdBlock() : "";

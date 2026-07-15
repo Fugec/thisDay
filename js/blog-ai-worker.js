@@ -38,6 +38,10 @@ import {
   aiUsageSummary,
 } from "./shared/ai-call.js";
 import { extractFirstSentence, truncateForMeta, splitSentences, normalizeForCompare } from "./shared/seo-text.js";
+import {
+  getEvidenceBasedTopicHubMatches,
+  selectTopicallyRelatedPosts,
+} from "./shared/topic-relevance.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -442,27 +446,107 @@ ${gridItems}
   </section>`;
 }
 
-function buildDidYouKnowSlider(facts) {
-  const seen = new Set();
-  const cleanedFacts = (Array.isArray(facts) ? facts : [])
+const REQUIRED_DID_YOU_KNOW_FACTS = 5;
+
+function normalizeArticleDidYouKnowFact(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[-•]\s*/, "")
+    .replace(/^did you know that\s*/i, "")
+    .replace(/^did you know[,:]?\s*/i, "")
+    .trim();
+}
+
+function didYouKnowIgnoredTokens(content = {}) {
+  return semanticDuplicateTokens(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.historicalDate,
+      content?.location,
+      content?.country,
+      content?.sourcePageTitle,
+    ].filter(Boolean).join(" "),
+  );
+}
+
+function didYouKnowFactsAreNearDuplicates(left, right, content = {}) {
+  const ignoredTokens = didYouKnowIgnoredTokens(content);
+  const leftTokens = semanticDuplicateTokens(left, ignoredTokens);
+  const rightTokens = semanticDuplicateTokens(right, ignoredTokens);
+  const { shared, ratio } = semanticDuplicateScore(leftTokens, rightTokens);
+  return shared >= 6 && ratio >= 0.55;
+}
+
+function auditDidYouKnowFacts(
+  content,
+  { requireGrounding = false, groundingVerified = false } = {},
+) {
+  const rawFacts = Array.isArray(content?.didYouKnowFacts)
+    ? content.didYouKnowFacts
+    : [];
+  const facts = rawFacts
     .filter((fact) => typeof fact === "string")
-    .map((fact) => fact.trim())
-    .filter(Boolean)
-    .filter((fact) => {
-      const key = normalizeForCompare(fact);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    .map(normalizeArticleDidYouKnowFact)
+    .filter(Boolean);
+  const reasons = [];
+
+  if (rawFacts.length !== REQUIRED_DID_YOU_KNOW_FACTS || facts.length !== REQUIRED_DID_YOU_KNOW_FACTS) {
+    reasons.push(
+      `didYouKnowFacts must contain exactly ${REQUIRED_DID_YOU_KNOW_FACTS} populated facts (got ${facts.length})`,
+    );
+  }
+
+  for (let i = 0; i < facts.length; i += 1) {
+    if (!hasHardFact(facts[i])) {
+      reasons.push(`didYouKnowFacts[${i}] lacks a concrete name, date, number, place, or institution`);
+    }
+    for (let j = i + 1; j < facts.length; j += 1) {
+      const exact = normalizeForCompare(facts[i]) === normalizeForCompare(facts[j]);
+      if (exact) {
+        reasons.push(`didYouKnowFacts[${i}] and didYouKnowFacts[${j}] are exact duplicates`);
+      } else if (didYouKnowFactsAreNearDuplicates(facts[i], facts[j], content)) {
+        reasons.push(`didYouKnowFacts[${i}] and didYouKnowFacts[${j}] repeat the same claim`);
+      }
+    }
+  }
+
+  if (requireGrounding && groundingVerified !== true) {
+    reasons.push("didYouKnowFacts did not pass the final source-grounding verifier");
+  }
+
+  return { ok: reasons.length === 0, reasons, facts };
+}
+
+function distinctDidYouKnowFacts(facts, content = null) {
+  const selected = [];
+  const seen = new Set();
+  for (const value of Array.isArray(facts) ? facts : []) {
+    if (typeof value !== "string") continue;
+    const fact = normalizeArticleDidYouKnowFact(value);
+    const key = normalizeForCompare(fact);
+    if (!key || seen.has(key)) continue;
+    if (
+      content &&
+      selected.some((existing) => didYouKnowFactsAreNearDuplicates(existing, fact, content))
+    ) {
+      continue;
+    }
+    seen.add(key);
+    selected.push(fact);
+  }
+  return selected;
+}
+
+function buildDidYouKnowSlider(facts, content = null) {
+  const cleanedFacts = distinctDidYouKnowFacts(facts, content);
   if (!cleanedFacts.length) return "";
 
-  // The publication contract requires 5 rendered cards. Prefer the unique facts; pad by
-  // cycling ONLY as a last resort when fewer than 5 unique facts exist, so a generation
-  // shortfall never blocks daily publication (scanArticleQuality separately flags fewer
-  // than 5 distinct so enrichment backfills more before this fallback ever shows).
-  const count = 5;
-  const sliderFacts = Array.from({ length: count }, (_, index) => {
-    const fact = cleanedFacts[index] ?? cleanedFacts[index % cleanedFacts.length];
+  // Never manufacture a complete slider by cycling a short fact list. New
+  // publication fails closed before rendering unless five distinct facts pass
+  // source grounding; legacy repairs may render fewer cards rather than repeat.
+  const sliderFacts = cleanedFacts.slice(0, REQUIRED_DID_YOU_KNOW_FACTS).map((fact, index) => {
     return `            <article class="blog-cta-col dyn-slide" aria-label="Did you know fact ${index + 1}">
               <p>Did you know</p>
               <p class="dyn-fact">${esc(fact)}</p>
@@ -512,69 +596,6 @@ const AI_REFERRER_SOURCES = [
     hosts: ["copilot.microsoft.com", "copilot.cloud.microsoft"],
   },
 ];
-
-const ARTICLE_TOPIC_HUBS = [
-  {
-    slug: "world-war-ii",
-    title: "World War II",
-    keywords: ["world war ii", "second world war", "wwii", "nazi", "axis", "allied"],
-    pillars: ["War & Conflict"],
-  },
-  {
-    slug: "cold-war",
-    title: "Cold War",
-    keywords: ["cold war", "soviet", "berlin wall", "cuban missile crisis", "communist"],
-    pillars: ["War & Conflict", "Politics & Government"],
-  },
-  {
-    slug: "french-revolution",
-    title: "French Revolution",
-    keywords: ["french revolution", "robespierre", "bastille", "napoleon", "jacobin"],
-    pillars: ["Politics & Government", "War & Conflict"],
-  },
-  {
-    slug: "roman-empire",
-    title: "Roman Empire",
-    keywords: ["roman empire", "rome", "roman", "caesar", "augustus", "constantinople"],
-    pillars: ["Politics & Government", "War & Conflict"],
-  },
-  {
-    slug: "space-exploration",
-    title: "Space Exploration",
-    keywords: ["space", "apollo", "nasa", "astronaut", "moon", "rocket", "satellite"],
-    pillars: ["Science & Technology", "Exploration & Discovery"],
-  },
-  {
-    slug: "civil-rights",
-    title: "Civil Rights",
-    keywords: ["civil rights", "segregation", "suffrage", "voting rights", "human rights"],
-    pillars: ["Social & Human Rights", "Politics & Government"],
-  },
-  {
-    slug: "medical-breakthroughs",
-    title: "Medical Breakthroughs",
-    keywords: ["vaccine", "medicine", "medical", "pandemic", "epidemic", "surgery"],
-    pillars: ["Health & Medicine", "Science & Technology", "Disasters & Accidents"],
-  },
-  {
-    slug: "exploration-and-discovery",
-    title: "Exploration and Discovery",
-    keywords: ["expedition", "voyage", "explorer", "navigator", "discovery", "polar", "pacific", "atlantic"],
-    pillars: ["Exploration & Discovery"],
-  },
-];
-
-// Maps each blog pillar to the hub slugs that best represent it.
-// Used as the primary (pillar-first) signal before keyword fallback.
-const PILLAR_TO_HUB_SLUGS = {
-  "War & Conflict":          ["world-war-ii", "cold-war", "french-revolution"],
-  "Politics & Government":   ["cold-war", "civil-rights", "french-revolution"],
-  "Science & Technology":    ["space-exploration", "medical-breakthroughs"],
-  "Health & Medicine":       ["medical-breakthroughs"],
-  "Exploration & Discovery": ["exploration-and-discovery", "space-exploration"],
-  "Social & Human Rights":   ["civil-rights"],
-  "Disasters & Accidents":   ["medical-breakthroughs"],
-};
 
 // Per-pillar question heading sets. Each entry is [overview, eyewitness, aftermath, legacy].
 // Falls back to the "default" set for pillars not listed here.
@@ -673,46 +694,11 @@ function normalizeTopicMatchText(value) {
     .trim();
 }
 
-// Returns up to `limit` hub objects for an article.
-// Primary signal: pillars (AI-classified, reliable).
-// Fallback signal: keyword match against title/description/keyTerms/quickFacts.
-function getArticleTopicHubMatches(content, limit = 3, pillars = []) {
-  const seen = new Set();
-  const results = [];
-
-  // Pillar-first: deterministic match from AI classification
-  for (const pillar of pillars) {
-    const slugs = PILLAR_TO_HUB_SLUGS[pillar] || [];
-    for (const slug of slugs) {
-      if (!seen.has(slug)) {
-        const hub = ARTICLE_TOPIC_HUBS.find((h) => h.slug === slug);
-        if (hub) { seen.add(slug); results.push(hub); }
-      }
-      if (results.length >= limit) return results;
-    }
-  }
-
-  // Keyword fallback: catches specific topics not covered by pillar mapping
-  const haystack = normalizeTopicMatchText(
-    [
-      content?.title,
-      content?.eventTitle,
-      content?.description,
-      ...(Array.isArray(content?.keyTerms) ? content.keyTerms.map((kt) => kt?.term || "") : []),
-      ...(content?.quickFacts || []).map((f) => `${f?.label || ""} ${f?.value || ""}`),
-    ].join(" "),
-  );
-  if (haystack) {
-    for (const hub of ARTICLE_TOPIC_HUBS) {
-      if (!seen.has(hub.slug) && hub.keywords.some((kw) => haystack.includes(normalizeTopicMatchText(kw)))) {
-        seen.add(hub.slug);
-        results.push(hub);
-        if (results.length >= limit) break;
-      }
-    }
-  }
-
-  return results;
+// Returns only narrow hubs supported by explicit phrases, named entities, or
+// a matching historical period plus multiple topic terms. Broad pillars are
+// deliberately ignored because "War & Conflict" is not evidence of WWII.
+function getArticleTopicHubMatches(content, limit = 3, _pillars = []) {
+  return getEvidenceBasedTopicHubMatches(content, limit);
 }
 
 // Returns 4 question heading strings tuned to the article's dominant pillar.
@@ -867,41 +853,173 @@ ${faqItems}
   </section>`;
 }
 
-// Maps each pillar to a third authority link (Britannica + History.com are always present).
-const PILLAR_AUTHORITY_EXTRA = {
-  "Science & Technology":    { name: "NASA",             url: (q) => `https://www.nasa.gov/search/?q=${q}` },
-  "Exploration & Discovery": { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
-  "Health & Medicine":       { name: "MedlinePlus (NIH)",url: (q) => `https://medlineplus.gov/search/?query=${q}` },
-  "Arts & Culture":          { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
-  "Sports":                  { name: "Olympics",         url: (q) => `https://olympics.com/en/search?q=${q}` },
-  "Social & Human Rights":   { name: "PBS",              url: (q) => `https://www.pbs.org/search/?q=${q}` },
-  "Disasters & Accidents":   { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
-  "War & Conflict":          { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
-  "Politics & Government":   { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
-  "Economy & Business":      { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
-  "Famous Persons":          { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
-};
+const SOURCE_SEARCH_HOSTS = new Set([
+  "google.com",
+  "www.google.com",
+  "bing.com",
+  "www.bing.com",
+  "duckduckgo.com",
+  "search.yahoo.com",
+]);
+const SOURCE_SEARCH_PARAM_NAMES = new Set([
+  "q",
+  "query",
+  "search",
+  "search_query",
+  "page_search_query",
+  "keyword",
+  "keywords",
+]);
 
-function buildAuthorityLinksBlock(content, pillars = []) {
-  const query = encodeURIComponent(
-    String(content.eventTitle || "").replace(/[^\w\s]/g, " ").trim().substring(0, 80),
+function isPublicCitationHostname(value) {
+  const hostname = String(value || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    !hostname ||
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".internal") ||
+    hostname.includes(":")
+  ) {
+    return false;
+  }
+  const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4) return true;
+  const octets = ipv4.slice(1).map(Number);
+  if (octets.some((part) => part < 0 || part > 255)) return false;
+  return !(
+    octets[0] === 0 ||
+    octets[0] === 10 ||
+    octets[0] === 127 ||
+    (octets[0] === 169 && octets[1] === 254) ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168) ||
+    octets[0] >= 224
   );
-  const extra = PILLAR_AUTHORITY_EXTRA[pillars[0] || ""] ||
-    { name: "Khan Academy", url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` };
+}
 
-  const links = [
-    { name: "Encyclopædia Britannica", url: `https://www.britannica.com/search?query=${query}` },
-    { name: "History.com",             url: `https://www.history.com/search#q=${query}` },
-    { name: extra.name,                url: extra.url(query) },
-  ];
+function isDirectCitationUrl(value) {
+  let parsed;
+  try {
+    parsed = new URL(String(value || "").trim());
+  } catch {
+    return false;
+  }
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || parsed.port) {
+    return false;
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    !isPublicCitationHostname(hostname) ||
+    SOURCE_SEARCH_HOSTS.has(hostname) ||
+    hostname === "example.com"
+  ) {
+    return false;
+  }
+  const path = parsed.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  if (path === "/" || /(?:^|\/)search(?:\/|$|\.)/.test(path)) return false;
+  if (hostname.endsWith("wikipedia.org") && !/^\/wiki\/[^/]+/.test(path)) {
+    return false;
+  }
+  for (const key of parsed.searchParams.keys()) {
+    if (SOURCE_SEARCH_PARAM_NAMES.has(key.toLowerCase())) return false;
+  }
+  if (/^#(?:q|query|search)=/i.test(parsed.hash)) return false;
+  return true;
+}
+
+function sourcePublisherName(value) {
+  let hostname = "";
+  try {
+    hostname = new URL(String(value || "")).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "Source";
+  }
+  if (hostname.endsWith("wikipedia.org")) return "Wikipedia";
+  if (hostname === "britannica.com") return "Encyclopædia Britannica";
+  if (hostname === "history.com") return "History.com";
+  if (hostname === "si.edu") return "Smithsonian Institution";
+  if (hostname === "nasa.gov") return "NASA";
+  return hostname || "Source";
+}
+
+function directCitationPagesFromContent(content, limit = 6) {
+  return sourcePagesFromContent(content)
+    .filter((page) => isDirectCitationUrl(page.pageUrl))
+    .slice(0, limit);
+}
+
+function validateDirectCitationsForPublish(
+  content,
+  { minimumSources = 2, minimumIndependentPublishers = 2 } = {},
+) {
+  const allSources = sourcePagesFromContent(content);
+  const invalidSources = allSources.filter(
+    (page) => page.pageUrl && !isDirectCitationUrl(page.pageUrl),
+  );
+  const directSources = allSources.filter((page) => isDirectCitationUrl(page.pageUrl));
+  const verifiedSources = directSources.filter((page) => {
+    try {
+      const hostname = new URL(page.pageUrl).hostname.toLowerCase();
+      return hostname.endsWith("wikipedia.org") || page.verifiedIndependent === true;
+    } catch {
+      return false;
+    }
+  });
+  const publishers = new Set(
+    verifiedSources.map((page) => {
+      try {
+        return new URL(page.pageUrl).hostname.toLowerCase().replace(/^www\./, "");
+      } catch {
+        return "";
+      }
+    }).filter(Boolean),
+  );
+  const reasons = [];
+  if (invalidSources.length > 0) {
+    reasons.push(
+      `source list contains search, homepage, placeholder, or invalid URLs: ${invalidSources.map((page) => page.pageUrl).join(" | ")}`,
+    );
+  }
+  if (verifiedSources.length < minimumSources) {
+    reasons.push(
+      `only ${verifiedSources.length} verified direct source page(s); needs ${minimumSources}`,
+    );
+  }
+  if (publishers.size < minimumIndependentPublishers) {
+    reasons.push(
+      `only ${publishers.size} independent source publisher(s); needs ${minimumIndependentPublishers}`,
+    );
+  }
+  return { ok: reasons.length === 0, reasons, sources: verifiedSources };
+}
+
+function buildAuthorityLinksBlock(content, _pillars = []) {
+  const links = directCitationPagesFromContent(content);
+  if (links.length === 0) return "";
 
   const chips = links
-    .map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" class="authority-link">${esc(l.name)}</a>`)
+    .map((source) => {
+      const publisher = source.publisher || sourcePublisherName(source.pageUrl);
+      const title = source.pageTitle || publisher;
+      const label = title === publisher ? title : `${title} · ${publisher}`;
+      return `<a href="${esc(source.pageUrl)}" target="_blank" rel="noopener noreferrer" class="authority-link">${esc(label)}</a>`;
+    })
     .join("");
+  const wikipediaLicense = links.some((source) => {
+    try {
+      return new URL(source.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
+    } catch {
+      return false;
+    }
+  })
+    ? `<small class="article-meta" style="display:block;margin-top:10px">Wikipedia text is available under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.</small>`
+    : "";
 
   return `<div class="authority-links mt-3 mb-4">
-    <span class="authority-links-label">Learn more at trusted sources</span>
+    <span class="authority-links-label">Sources used for this article</span>
     <div class="authority-links-row">${chips}</div>
+    ${wikipediaLicense}
   </div>`;
 }
 
@@ -1019,6 +1137,100 @@ function validateContentDateForPublish(content, targetDate) {
       `Generated content date mismatch. Expected ${MONTH_NAMES[expectedMonth - 1]} ${expectedDay}, got ` +
       mismatches.map(({ label, candidate }) => `${label}=${candidate.raw}`).join(" | "),
   };
+}
+
+// A headline that opens with a bare action verb is normally an instruction,
+// not a historical subject-verb clause ("Execute Chancellor Yang Guozhong").
+// Keep ambiguous event nouns out of this list where practical. When an action
+// word can also be a noun (for example "Bomb"), a second finite verb in the
+// remainder proves that the first word is acting as the subject ("Bomb
+// Explodes...") and the headline is allowed.
+const HEADLINE_IMPERATIVE_START_RE =
+  /^(?:accept|adopt|appoint|approve|arrest|assassinate|bomb|capture|convict|create|declare|defeat|deport|destroy|detain|discover|elect|establish|execute|free|found|honou?r|imprison|invade|invent|kill|launch|liberate|meet|negotiate|open|order|publish|ratify|reject|rescue|sign|surrender|visit|withdraw)\b/i;
+
+function headlineStartsWithUnsupportedImperative(value) {
+  const lead = getTitleLead(value).replace(/^["'“‘]+/, "").trim();
+  const match = lead.match(HEADLINE_IMPERATIVE_START_RE);
+  if (!match) return false;
+  const remainder = lead.slice(match[0].length).trim();
+  return !hasFiniteHeadlineVerb(remainder);
+}
+
+function historicalYearFields(content) {
+  const found = [];
+  const add = (field, value) => {
+    const year = Number.parseInt(value, 10);
+    if (Number.isInteger(year) && year > 0) found.push({ field, year });
+  };
+
+  add("historicalYear", content?.historicalYear);
+  add(
+    "historicalDateISO",
+    String(content?.historicalDateISO || "").match(/^(\d{3,4})-\d{2}-\d{2}$/)?.[1],
+  );
+  add(
+    "historicalDate",
+    String(content?.historicalDate || "").match(/\b(\d{3,4})\s*$/)?.[1],
+  );
+  add(
+    "title",
+    String(content?.title || "").match(
+      /\s+[-—]\s+[A-Z][a-z]+\s+\d{1,2},\s*(\d{3,4})\s*$/,
+    )?.[1],
+  );
+  return found;
+}
+
+/**
+ * Deterministic semantic publication contract for fields where a confident
+ * local decision is possible. Deeper actor/action and relationship checks stay
+ * in the source-grounding AI gate, but this function ensures malformed titles
+ * and conflicting historical years can never reach public KV even if an
+ * enrichment pass rewrites them after generation.
+ */
+function validateContentSemanticsForPublish(content) {
+  const reasons = [];
+  const titleLead = getTitleLead(content?.title);
+  const eventLead = getTitleLead(content?.eventTitle);
+  const leads = [...new Set([titleLead, eventLead].filter(Boolean))];
+
+  if (leads.length === 0) {
+    reasons.push("headline is missing");
+  }
+
+  for (const lead of leads) {
+    if (isWeakCtaTitleLead(lead)) {
+      reasons.push(`headline is a call to action rather than an event clause: "${lead}"`);
+    }
+    if (headlineStartsWithUnsupportedImperative(lead)) {
+      reasons.push(`headline starts with an unsupported imperative and has no actor: "${lead}"`);
+    }
+    const repaired = repairStackedTitleLead(lead);
+    if (repaired && repaired !== lead) {
+      reasons.push(`headline contains a stacked trailing action: "${lead}"`);
+    }
+  }
+
+  // Once the selected Wikipedia event sentence has been locked, later SEO or
+  // enrichment passes must not replace it with a different central claim.
+  const sourceLead = getTitleLead(content?.sourceEventHeadline);
+  if (sourceLead) {
+    for (const [field, lead] of [["title", titleLead], ["eventTitle", eventLead]]) {
+      if (lead && normalizeForCompare(lead) !== normalizeForCompare(sourceLead)) {
+        reasons.push(`${field} no longer matches the locked source event headline`);
+      }
+    }
+  }
+
+  const years = historicalYearFields(content);
+  const distinctYears = [...new Set(years.map(({ year }) => year))];
+  if (distinctYears.length > 1) {
+    reasons.push(
+      `historical year conflict: ${years.map(({ field, year }) => `${field}=${year}`).join(" | ")}`,
+    );
+  }
+
+  return { ok: reasons.length === 0, reasons };
 }
 
 function deriveHistoricalYear(content) {
@@ -1970,8 +2182,34 @@ async function chooseEventForDate(
     } catch (err) {
       console.warn(`Event selector pageview re-rank failed (keeping editorial order): ${err.message}`);
     }
+    if (candidateEvents.length > 0) {
+      const originalFirst = candidateEvents[0];
+      const sourceReady = await selectSourceReadyCandidate(candidateEvents);
+      if (sourceReady) {
+        candidateEvents = [
+          sourceReady,
+          ...candidateEvents.filter((candidate) => candidate.pageUrl !== sourceReady.pageUrl),
+        ];
+        if (sourceReady.pageUrl !== originalFirst?.pageUrl) {
+          console.warn(
+            `Event selector: skipped "${originalFirst?.pageTitle}" because no independently verified source was found; using "${sourceReady.pageTitle}".`,
+          );
+        }
+      } else {
+        console.warn(
+          `Event selector: none of the top ${Math.min(candidateEvents.length, SOURCE_READY_EVENT_CANDIDATE_LIMIT)} candidates had a reachable, relevant independent source.`,
+        );
+        candidateEvents = [];
+      }
+    }
   } catch (err) {
     console.warn(`Event selector candidate load failed: ${err.message}`);
+  }
+
+  if (candidateEvents.length === 0) {
+    throw new Error(
+      `No source-ready event with two independent publishers was available for ${monthName} ${day}.`,
+    );
   }
 
   const allEventsSection =
@@ -4078,7 +4316,7 @@ export default {
           );
           // Inject VideoObject JSON-LD schema for SEO
           if (!ytHtml.includes('"@type":"VideoObject"')) {
-            // Extract title and description from existing NewsArticle schema or meta tags
+            // Extract title and description from the existing article schema or meta tags
             const titleMatch = ytHtml.match(
               /<meta property="og:title" content="([^"]+)"/,
             );
@@ -5125,14 +5363,8 @@ function scanArticleQuality(content) {
     });
   }
 
-  if (Array.isArray(content.didYouKnowFacts)) {
-    const uniqueDyk = new Set(
-      content.didYouKnowFacts.map((f) => normalizeForCompare(f)).filter(Boolean),
-    );
-    if (uniqueDyk.size < 5) {
-      issues.push(`didYouKnowFacts has only ${uniqueDyk.size} unique facts; needs 5 distinct (slider no longer repeats).`);
-    }
-  }
+  const didYouKnowAudit = auditDidYouKnowFacts(content);
+  issues.push(...didYouKnowAudit.reasons);
   issues.push(...scanEditorialNoteQuality(content));
   if (!plainText(content.contentRationale).match(/\bWikipedia\b/i) || wordCount(content.contentRationale) < 35) {
     issues.push("contentRationale must explain the article's specific value beyond Wikipedia.");
@@ -6010,6 +6242,40 @@ async function generateAndStore(
       throw new Error(`${dateValidation.reason} [attempts: ${attemptFailures.join(" | ")}]`);
     }
 
+    const semanticValidation = validateContentSemanticsForPublish(content);
+    if (!semanticValidation.ok) {
+      const reason = semanticValidation.reasons.join("; ");
+      attemptFailures.push(`attempt ${attempt} semantics: ${reason}`);
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        console.warn(
+          `Blog AI: semantic publication contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await generateArticleContent(avoid, true);
+        continue;
+      }
+      throw new Error(
+        `Article failed semantic publication contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
+      );
+    }
+
+    const citationValidation = validateDirectCitationsForPublish(content);
+    if (!citationValidation.ok) {
+      const reason = citationValidation.reasons.join("; ");
+      attemptFailures.push(`attempt ${attempt} citations: ${reason}`);
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        console.warn(
+          `Blog AI: direct-citation contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await generateArticleContent(avoid, true);
+        continue;
+      }
+      throw new Error(
+        `Article failed direct-citation contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
+      );
+    }
+
     try {
       assertRequiredContentBlocks(content);
     } catch (err) {
@@ -6048,6 +6314,18 @@ async function generateAndStore(
           }
           const chunkedDate = validateContentDateForPublish(chunked, now);
           if (!chunkedDate.ok) throw new Error(chunkedDate.reason);
+          const chunkedSemantics = validateContentSemanticsForPublish(chunked);
+          if (!chunkedSemantics.ok) {
+            throw new Error(
+              `semantic publication contract failed: ${chunkedSemantics.reasons.join("; ")}`,
+            );
+          }
+          const chunkedCitations = validateDirectCitationsForPublish(chunked);
+          if (!chunkedCitations.ok) {
+            throw new Error(
+              `direct-citation contract failed: ${chunkedCitations.reasons.join("; ")}`,
+            );
+          }
           assertRequiredContentBlocks(chunked);
           content = chunked;
           // Recovered — annotate the 'blocks' entry pushed above so a later
@@ -6211,6 +6489,7 @@ async function generateAndStore(
       { expirationTtl: 3 * 86_400 },
     );
   } else if (!lightweightPublish) {
+    let didYouKnowGroundingVerified = false;
     if (groundingSource) {
       const finalGrounding = await verifyFinalGroundingWithRepair(env, content, groundingSource, slug);
       if (!finalGrounding.ok) {
@@ -6220,6 +6499,7 @@ async function generateAndStore(
         );
       }
       content = finalGrounding.content;
+      didYouKnowGroundingVerified = true;
     }
     const quizParagraphs = [
       ...(content.overviewParagraphs || []),
@@ -6257,6 +6537,7 @@ async function generateAndStore(
       eventImages,
       entityMeta,
       verifiedFeaturedImage: content.imageUrl,
+      didYouKnowGroundingVerified,
     });
   }
 
@@ -6704,6 +6985,7 @@ async function savePublishedPost(
     eventImages = [],
     entityMeta = [],
     verifiedFeaturedImage = null,
+    didYouKnowGroundingVerified = false,
   },
 ) {
   const safePillars = Array.isArray(pillars) ? pillars : [];
@@ -6715,6 +6997,27 @@ async function savePublishedPost(
   const dateValidation = validateContentDateForPublish(content, date);
   if (!dateValidation.ok) {
     throw new Error(`Refusing to publish ${slug}: ${dateValidation.reason}`);
+  }
+  const semanticValidation = validateContentSemanticsForPublish(content);
+  if (!semanticValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: semantic publication contract failed — ${semanticValidation.reasons.join("; ")}`,
+    );
+  }
+  const citationValidation = validateDirectCitationsForPublish(content);
+  if (!citationValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
+    );
+  }
+  const didYouKnowValidation = auditDidYouKnowFacts(content, {
+    requireGrounding: true,
+    groundingVerified: didYouKnowGroundingVerified,
+  });
+  if (!didYouKnowValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: Did You Know contract failed — ${didYouKnowValidation.reasons.join("; ")}`,
+    );
   }
   // Final publication gate: enrichment is allowed to retry transient image
   // failures, but public HTML must never be written without a working Wikimedia
@@ -6751,7 +7054,15 @@ async function savePublishedPost(
   );
 
   assertRequiredContentBlocks(content);
-  const rawHtml = buildPostHTML(content, date, slug, existingIndex, safePillars, bookCoverUrl);
+  const rawHtml = buildPostHTML(
+    content,
+    date,
+    slug,
+    existingIndex,
+    safePillars,
+    bookCoverUrl,
+    safeEntityMeta,
+  );
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
   if (safePersonImages.length > 0) html = injectPersonImages(html, safePersonImages);
   if (safeEventImages.length > 0) html = injectEventImages(html, safeEventImages);
@@ -6762,6 +7073,16 @@ async function savePublishedPost(
   html = addHtmlMarker(html, FEATURED_IMAGE_CHECK_MARKER);
   if (/<figure style="float:(?:right|left);/i.test(html)) {
     html = addHtmlMarker(html, EVENT_FIGURES_BACKFILL_MARKER);
+  }
+  const structuredDataValidation = validateArticleStructuredDataForPublish(
+    html,
+    content,
+    safeEntityMeta,
+  );
+  if (!structuredDataValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: structured-data contract failed — ${structuredDataValidation.reasons.join("; ")}`,
+    );
   }
   // Tier 1: hard structural check — throws if buildPostHTML produced a broken article.
   assertArticleStructure(html);
@@ -6790,6 +7111,7 @@ async function savePublishedPost(
   }
 
   const deduped = [...existingIndex].filter((e) => e.slug !== slug);
+  const topicHubs = getArticleTopicHubMatches(content, 3).map((hub) => hub.slug);
   const entry = {
     slug,
     title: content.title,
@@ -6805,6 +7127,7 @@ async function savePublishedPost(
     ...(compactSourcePagesForIndex(content).length > 0 ? { sourcePages: compactSourcePagesForIndex(content) } : {}),
     ...(content.sourcePageTitle ? { sourcePageTitle: content.sourcePageTitle } : {}),
     ...(safePillars.length > 0 ? { pillars: safePillars } : {}),
+    ...(topicHubs.length > 0 ? { topicHubs } : {}),
     ...(content.contentRationale ? { contentRationale: content.contentRationale } : {}),
   };
   deduped.unshift(entry);
@@ -6926,7 +7249,20 @@ async function enrichPublishedPost(env, slug) {
   }
 
   normalizeContentMetadata(enriched);
+  const semanticValidation = validateContentSemanticsForPublish(enriched);
+  if (!semanticValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: semantic publication contract failed — ${semanticValidation.reasons.join("; ")}`,
+    );
+  }
+  const citationValidation = validateDirectCitationsForPublish(enriched);
+  if (!citationValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
+    );
+  }
 
+  let didYouKnowGroundingVerified = false;
   if (groundingSource) {
     await chk("pre-final-grounding");
     const finalGrounding = await verifyFinalGroundingWithRepair(env, enriched, groundingSource, slug);
@@ -6937,6 +7273,7 @@ async function enrichPublishedPost(env, slug) {
       );
     }
     enriched = finalGrounding.content;
+    didYouKnowGroundingVerified = true;
     await chk("post-final-grounding");
   }
 
@@ -6983,6 +7320,7 @@ async function enrichPublishedPost(env, slug) {
     eventImages,
     entityMeta,
     verifiedFeaturedImage,
+    didYouKnowGroundingVerified,
   });
   await chk("saved");
 
@@ -7060,9 +7398,31 @@ function normalizeSourcePage(page) {
     page.thumbnail?.source ||
     "",
   ).trim();
+  const publisher = String(
+    page.publisher || page.siteName || sourcePublisherName(pageUrl),
+  ).replace(/\s+/g, " ").trim();
+  const accessedAt = String(
+    page.accessedAt || page.accessDate || page.dateAccessed || "",
+  ).trim();
+  const supportedClaims = (Array.isArray(page.supportedClaims)
+    ? page.supportedClaims
+    : [page.supportedClaim || page.claim || ""]
+  )
+    .map((claim) => String(claim || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  const verifiedIndependent = page.verifiedIndependent === true;
+  const verificationMethod = String(page.verificationMethod || "")
+    .replace(/\s+/g, " ")
+    .trim();
   return {
     pageTitle: pageTitle || wikiTitleFromUrl(pageUrl),
     pageUrl,
+    ...(publisher ? { publisher } : {}),
+    ...(accessedAt ? { accessedAt } : {}),
+    ...(supportedClaims.length > 0 ? { supportedClaims } : {}),
+    ...(verifiedIndependent ? { verifiedIndependent: true } : {}),
+    ...(verificationMethod ? { verificationMethod } : {}),
     ...(extract ? { extract } : {}),
     ...(text ? { text } : {}),
     ...(description ? { description } : {}),
@@ -7098,7 +7458,7 @@ function truncateSourceExtract(value, maxChars = 9000) {
     : prefix.replace(/\s+\S*$/, "").trim();
 }
 
-async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000) {
+async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000, fetchImpl = fetch) {
   const normalized = normalizeSourcePage(page);
   if (!normalized) return null;
   const pageTitle = wikiTitleFromUrl(normalized.pageUrl) || normalized.pageTitle;
@@ -7107,7 +7467,7 @@ async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000) {
     "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exsectionformat=plain&format=json&origin=*&titles=" +
     encodeURIComponent(pageTitle);
   try {
-    const response = await fetch(url, {
+    const response = await fetchImpl(url, {
       headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
     });
     if (!response.ok) return normalized;
@@ -7131,21 +7491,333 @@ async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000) {
   }
 }
 
-async function expandSelectedEventSourcePages(selectedEvent) {
+const INDEPENDENT_REFERENCE_FETCH_LIMIT = 4;
+const SOURCE_READY_EVENT_CANDIDATE_LIMIT = 3;
+const BLOCKED_REFERENCE_HOSTS = new Set([
+  "amazon.com",
+  "books.google.com",
+  "creativecommons.org",
+  "facebook.com",
+  "goodreads.com",
+  "imdb.com",
+  "instagram.com",
+  "linkedin.com",
+  "pinterest.com",
+  "tiktok.com",
+  "twitter.com",
+  "web.archive.org",
+  "x.com",
+  "youtube.com",
+]);
+
+function canonicalIndependentReferenceUrl(value) {
+  let raw = String(value || "").replace(/&amp;/g, "&").trim();
+  try {
+    const archive = new URL(raw);
+    if (archive.hostname.toLowerCase() === "web.archive.org") {
+      const archivedTarget = archive.pathname.match(/^\/web\/[^/]+\/(https?:\/\/.*)$/i)?.[1];
+      if (archivedTarget) raw = decodeURIComponent(archivedTarget);
+    }
+  } catch {
+    return "";
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return "";
+  }
+  if (parsed.protocol === "http:") parsed.protocol = "https:";
+  if (parsed.protocol !== "https:") return "";
+  parsed.hash = "";
+  for (const key of [...parsed.searchParams.keys()]) {
+    if (/^(?:utm_|fbclid$|gclid$|mc_)/i.test(key)) parsed.searchParams.delete(key);
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  if (
+    !isPublicCitationHostname(hostname) ||
+    [...BLOCKED_REFERENCE_HOSTS].some(
+      (blockedHost) => hostname === blockedHost || hostname.endsWith(`.${blockedHost}`),
+    ) ||
+    hostname.endsWith("wikipedia.org") ||
+    hostname.endsWith("wikimedia.org") ||
+    hostname.endsWith("wikidata.org") ||
+    hostname === "thisday.info" ||
+    hostname.endsWith(".thisday.info")
+  ) {
+    return "";
+  }
+  if (/\.(?:avif|css|csv|docx?|gif|jpe?g|js|json|mp3|mp4|pdf|png|pptx?|svg|webp|xlsx?|xml|zip)$/i.test(parsed.pathname)) {
+    return "";
+  }
+  return isDirectCitationUrl(parsed.toString()) ? parsed.toString() : "";
+}
+
+function independentReferenceAuthorityScore(value) {
+  let hostname = "";
+  try {
+    hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return 0;
+  }
+  if (/\.gov(?:\.[a-z]{2})?$/.test(hostname) || hostname === "europa.eu") return 90;
+  if (/\.(?:edu|ac)(?:\.[a-z]{2})?$/.test(hostname)) return 85;
+  if (/(?:archives?|museum|library|history)\./.test(hostname)) return 75;
+  if (/\.(?:museum)$/.test(hostname)) return 75;
+  if (/^(?:si\.edu|loc\.gov|archives\.gov|nationalarchives\.gov\.uk|iwm\.org\.uk|ushmm\.org|nasa\.gov)$/.test(hostname)) return 80;
+  if (/(?:jstor\.org|cambridge\.org|oup\.com|springer\.com|nature\.com|science\.org)$/.test(hostname)) return 70;
+  if (/(?:reuters\.com|apnews\.com|bbc\.(?:com|co\.uk)|nytimes\.com|washingtonpost\.com|time\.com|britannica\.com)$/.test(hostname)) return 60;
+  if (hostname.endsWith(".org")) return 35;
+  return 20;
+}
+
+function citationLabelFromWikitext(wikitext, url) {
+  const source = String(wikitext || "");
+  const variants = [url, url.replace(/^https:/, "http:"), url.replace(/&/g, "&amp;")];
+  let index = -1;
+  for (const variant of variants) {
+    index = source.indexOf(variant);
+    if (index !== -1) break;
+  }
+  if (index === -1) return "";
+  const start = Math.max(0, source.lastIndexOf("{{", index));
+  const end = source.indexOf("}}", index);
+  const citation = source.slice(start, end !== -1 && end - start < 1800 ? end : index + 900);
+  const templateTitle = citation.match(/\|\s*title\s*=\s*([^|}\n]+)/i)?.[1];
+  if (templateTitle) {
+    return String(templateTitle)
+      .replace(/\[\[|\]\]/g, "")
+      .replace(/''+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  const bracketStart = source.lastIndexOf("[", index);
+  const bracketEnd = source.indexOf("]", index);
+  if (bracketStart !== -1 && bracketEnd !== -1 && bracketEnd - bracketStart < 900) {
+    const bracket = source.slice(bracketStart + 1, bracketEnd);
+    const label = bracket.slice(bracket.indexOf(" ") + 1).trim();
+    if (label && label !== bracket) return label.replace(/\s+/g, " ").trim();
+  }
+  return "";
+}
+
+async function fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImpl = fetch) {
+  const pageTitle =
+    wikiTitleFromUrl(selectedEvent?.wikiUrl) ||
+    selectedEvent?.sourcePageTitle ||
+    selectedEvent?.pageTitle ||
+    "";
+  if (!pageTitle) return [];
+  const apiUrl =
+    "https://en.wikipedia.org/w/api.php?action=parse&redirects=1&prop=externallinks%7Cwikitext&format=json&formatversion=2&origin=*&page=" +
+    encodeURIComponent(pageTitle);
+  let response;
+  try {
+    response = await fetchImpl(apiUrl, {
+      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+    });
+  } catch (err) {
+    console.warn(`Independent citation discovery failed for ${pageTitle}: ${err.message}`);
+    return [];
+  }
+  if (!response?.ok) return [];
+  const data = await response.json().catch(() => null);
+  const links = Array.isArray(data?.parse?.externallinks) ? data.parse.externallinks : [];
+  const wikitext = String(data?.parse?.wikitext || "");
+  const evidence = [
+    selectedEvent?.eventTitle,
+    selectedEvent?.sourcePageTitle,
+    selectedEvent?.sourceText,
+  ].join(" ");
+  const evidenceTokens = new Set(sourcePageRelevanceTokens(evidence));
+  const seenUrls = new Set();
+  const perHost = new Map();
+  const candidates = [];
+  for (const link of links) {
+    const pageUrl = canonicalIndependentReferenceUrl(link);
+    if (!pageUrl || seenUrls.has(pageUrl)) continue;
+    const hostname = new URL(pageUrl).hostname.toLowerCase().replace(/^www\./, "");
+    const hostCount = perHost.get(hostname) || 0;
+    if (hostCount >= 2) continue;
+    const citationTitle = citationLabelFromWikitext(wikitext, pageUrl);
+    const referenceTokens = sourcePageRelevanceTokens(`${pageUrl} ${citationTitle}`);
+    const overlap = referenceTokens.filter((token) => evidenceTokens.has(token));
+    candidates.push({
+      pageUrl,
+      citationTitle,
+      score: independentReferenceAuthorityScore(pageUrl) + overlap.length * 12,
+    });
+    seenUrls.add(pageUrl);
+    perHost.set(hostname, hostCount + 1);
+  }
+  return candidates.sort((a, b) => b.score - a.score);
+}
+
+function decodeSourceDocumentText(value) {
+  return String(value || "")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function verifyIndependentSourceDocument(selectedEvent, candidate, html, finalUrl) {
+  const pageUrl = canonicalIndependentReferenceUrl(finalUrl || candidate?.pageUrl);
+  if (!pageUrl) return null;
+  const titleHtml =
+    String(html || "").match(/<meta\b[^>]*property=["']og:title["'][^>]*content=["']([^"']+)/i)?.[1] ||
+    String(html || "").match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ||
+    candidate?.citationTitle ||
+    "";
+  const pageTitle = decodeSourceDocumentText(titleHtml).replace(/\s+[|–—-]\s+[^|–—-]{1,50}$/, "").trim();
+  const documentText = decodeSourceDocumentText(html).slice(0, 120000);
+  if (documentText.length < 300) return null;
+
+  const eventEvidence = [
+    selectedEvent?.eventTitle,
+    selectedEvent?.sourcePageTitle,
+    selectedEvent?.sourceText,
+    String(selectedEvent?.sourceExtract || "").slice(0, 1800),
+  ].join(" ");
+  const eventTokens = new Set(sourcePageRelevanceTokens(eventEvidence));
+  const documentTokens = new Set(sourcePageRelevanceTokens(`${pageTitle} ${documentText}`));
+  const overlapTokens = [...eventTokens].filter((token) => documentTokens.has(token));
+  const minimumOverlap = eventTokens.size >= 8 ? 3 : 2;
+  if (overlapTokens.length < minimumOverlap) return null;
+
+  const subjectTokens = sourceSubjectTokens({
+    pageTitle: selectedEvent?.sourcePageTitle || selectedEvent?.pageTitle || "",
+    text: selectedEvent?.sourceText || "",
+    sourceExtract: selectedEvent?.sourceExtract || "",
+  });
+  if (
+    subjectTokens.length > 0 &&
+    !subjectTokens.some((token) => documentText.toLowerCase().includes(token.toLowerCase()))
+  ) {
+    return null;
+  }
+
+  const historicalYear =
+    Number.parseInt(selectedEvent?.historicalYear || selectedEvent?.year, 10) ||
+    deriveHistoricalYear(selectedEvent);
+  if (
+    Number.isInteger(historicalYear) &&
+    historicalYear >= 100 &&
+    !new RegExp(`\\b0*${historicalYear}\\b`).test(documentText)
+  ) {
+    return null;
+  }
+
+  return normalizeSourcePage({
+    pageTitle: pageTitle || candidate?.citationTitle || sourcePublisherName(pageUrl),
+    pageUrl,
+    publisher: sourcePublisherName(pageUrl),
+    accessedAt: utcDateString(),
+    supportedClaims: [String(selectedEvent?.sourceText || selectedEvent?.eventTitle || "").trim()],
+    extract: truncateSourceExtract(documentText, 6000),
+    verifiedIndependent: true,
+    verificationMethod: "wikipedia-reference-http-subject-year-token-match-v1",
+  });
+}
+
+async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch) {
+  const existing = normalizeSourcePages(selectedEvent?.sourcePages || []).find(
+    (page) => page.verifiedIndependent === true && isDirectCitationUrl(page.pageUrl),
+  );
+  if (existing) return existing;
+  const candidates = await fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImpl);
+  for (const candidate of candidates.slice(0, INDEPENDENT_REFERENCE_FETCH_LIMIT)) {
+    try {
+      const response = await fetchImpl(candidate.pageUrl, {
+        redirect: "follow",
+        headers: {
+          "User-Agent": WIKIPEDIA_USER_AGENT,
+          Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
+          Range: "bytes=0-131071",
+        },
+      });
+      if (!response?.ok) continue;
+      const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
+      if (contentType && !/(?:text\/html|application\/xhtml\+xml|text\/plain)/.test(contentType)) {
+        continue;
+      }
+      const contentLength = Number.parseInt(response.headers?.get?.("content-length"), 10);
+      if (Number.isFinite(contentLength) && contentLength > 3_000_000) continue;
+      const html = String(await response.text()).slice(0, 140000);
+      const verified = verifyIndependentSourceDocument(
+        selectedEvent,
+        candidate,
+        html,
+        response.url || candidate.pageUrl,
+      );
+      if (verified) return verified;
+    } catch (err) {
+      console.warn(`Independent citation candidate failed (${candidate.pageUrl}): ${err.message}`);
+    }
+  }
+  return null;
+}
+
+async function selectSourceReadyCandidate(candidates, fetchImpl = fetch) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  for (const candidate of list.slice(0, SOURCE_READY_EVENT_CANDIDATE_LIMIT)) {
+    const selectedEvent = {
+      ...candidate,
+      eventTitle: eventTitleFromCandidate(candidate.pageTitle, candidate),
+      historicalYear: Number.parseInt(candidate.year, 10),
+      sourcePageTitle: candidate.pageTitle,
+      sourceText: candidate.text,
+      sourceExtract: candidate.extract,
+      wikiUrl: candidate.pageUrl,
+      sourcePages: candidate.sourcePages || [],
+    };
+    const citation = await discoverIndependentCitation(selectedEvent, fetchImpl);
+    if (!citation) continue;
+    return {
+      ...candidate,
+      sourcePages: normalizeSourcePages([...(candidate.sourcePages || []), citation]),
+    };
+  }
+  return null;
+}
+
+async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch) {
   if (!selectedEvent) return selectedEvent;
   const sourcePages = normalizeSourcePages(selectedEvent.sourcePages || []);
   if (!sourcePages.length) return selectedEvent;
+  const wikipediaPages = sourcePages.filter((page) => {
+    try {
+      return new URL(page.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
+    } catch {
+      return false;
+    }
+  });
   const expanded = await Promise.all(
-    sourcePages.slice(0, 2).map((page) => fetchExpandedWikipediaSourcePage(page)),
+    wikipediaPages.slice(0, 2).map((page) =>
+      fetchExpandedWikipediaSourcePage(page, 9000, fetchImpl),
+    ),
   );
   const merged = normalizeSourcePages([
     ...expanded.filter(Boolean),
-    ...sourcePages.slice(2),
+    ...sourcePages,
   ]);
   selectedEvent.sourcePages = merged;
   const primary =
-    selectPrimarySourcePage(selectedEvent.sourceText || selectedEvent.text, merged) ||
-    merged[0];
+    selectPrimarySourcePage(selectedEvent.sourceText || selectedEvent.text, wikipediaPages) ||
+    wikipediaPages[0];
   if (primary) {
     selectedEvent.sourcePageTitle = primary.pageTitle || selectedEvent.sourcePageTitle;
     selectedEvent.sourceExtract = primary.extract || selectedEvent.sourceExtract;
@@ -7156,6 +7828,8 @@ async function expandSelectedEventSourcePages(selectedEvent) {
 
 function sourcePagesFromContent(content) {
   const pages = [];
+  if (Array.isArray(content?.citations)) pages.push(...content.citations);
+  if (Array.isArray(content?.sources)) pages.push(...content.sources);
   if (Array.isArray(content?.sourcePages)) pages.push(...content.sourcePages);
   if (content?.sourcePageTitle || content?.sourceText || content?.sourceExtract) {
     pages.push({
@@ -7176,6 +7850,7 @@ function sourcePagesFromContent(content) {
 
 function attachSelectedEventSourcePages(content, selectedEvent) {
   if (!content || !selectedEvent) return content;
+  const accessedAt = utcDateString();
   const sourcePages = normalizeSourcePages(
     selectedEvent.sourcePages?.length
       ? selectedEvent.sourcePages
@@ -7185,12 +7860,24 @@ function attachSelectedEventSourcePages(content, selectedEvent) {
           text: selectedEvent.sourceText,
           extract: selectedEvent.sourceExtract,
         }],
-  );
+  ).map((page, index) => ({
+    ...page,
+    publisher: page.publisher || sourcePublisherName(page.pageUrl),
+    accessedAt: page.accessedAt || accessedAt,
+    ...(index === 0 && selectedEvent.sourceText
+      ? { supportedClaims: [String(selectedEvent.sourceText).replace(/\s+/g, " ").trim().slice(0, 500)] }
+      : {}),
+  }));
   if (sourcePages.length > 0) content.sourcePages = sourcePages;
   if (selectedEvent.sourcePageTitle) content.sourcePageTitle = selectedEvent.sourcePageTitle;
   if (selectedEvent.sourceText) content.sourceText = selectedEvent.sourceText;
   if (selectedEvent.sourceExtract) content.sourceExtract = selectedEvent.sourceExtract;
-  if (selectedEvent.wikiUrl && !content.wikiUrl) content.wikiUrl = selectedEvent.wikiUrl;
+  if (selectedEvent.wikiUrl) {
+    // The selected feed page is authoritative. Never preserve an AI-supplied
+    // placeholder, search URL, or different page over this exact source URL.
+    content.wikiUrl = selectedEvent.wikiUrl;
+    content.jsonLdUrl = selectedEvent.wikiUrl;
+  }
   return content;
 }
 
@@ -7200,6 +7887,13 @@ function compactSourcePagesForIndex(content) {
     .map((page) => ({
       pageTitle: page.pageTitle,
       pageUrl: page.pageUrl,
+      ...(page.publisher ? { publisher: page.publisher } : {}),
+      ...(page.accessedAt ? { accessedAt: page.accessedAt } : {}),
+      ...(Array.isArray(page.supportedClaims) && page.supportedClaims.length > 0
+        ? { supportedClaims: page.supportedClaims.slice(0, 3) }
+        : {}),
+      ...(page.verifiedIndependent === true ? { verifiedIndependent: true } : {}),
+      ...(page.verificationMethod ? { verificationMethod: page.verificationMethod } : {}),
     }))
     .filter((page) => page.pageTitle || page.pageUrl);
 }
@@ -8388,8 +9082,6 @@ function assertRequiredContentBlocks(content) {
       String(fact.label || "").trim() &&
       String(fact.value || "").trim(),
   );
-  const didYouKnowFacts = (Array.isArray(content.didYouKnowFacts) ? content.didYouKnowFacts : [])
-    .filter((fact) => typeof fact === "string" && fact.trim());
   const namedPeople = (Array.isArray(content.keyTerms) ? content.keyTerms : []).filter(
     (term) =>
       term &&
@@ -8406,7 +9098,10 @@ function assertRequiredContentBlocks(content) {
     ).length;
   const missing = [];
   if (quickFacts.length < 6) missing.push("six populated quick facts");
-  if (didYouKnowFacts.length < 3) missing.push("three did-you-know facts");
+  const didYouKnowAudit = auditDidYouKnowFacts(content);
+  if (!didYouKnowAudit.ok) {
+    missing.push(`five distinct did-you-know facts (${didYouKnowAudit.reasons.join("; ")})`);
+  }
   if (namedPeople.length < 1) missing.push("one named person for the people strip");
   if (analysisCount(content.analysisGood) < 3) missing.push("three positive analysis items");
   if (analysisCount(content.analysisBad) < 3) missing.push("three critical analysis items");
@@ -9236,7 +9931,7 @@ Requirements:
 
 function validateChunkedArticleSupport(merged) {
   requireChunkArray(merged, "quickFacts", { exact: 6, label: "chunked article fallback" });
-  requireChunkArray(merged, "didYouKnowFacts", { exact: 6, label: "chunked article fallback" });
+  requireChunkArray(merged, "didYouKnowFacts", { exact: 5, label: "chunked article fallback" });
   requireChunkArray(merged, "analysisGood", { min: 3, label: "chunked article fallback" });
   requireChunkArray(merged, "analysisBad", { min: 3, label: "chunked article fallback" });
   assertRequiredContentBlocks(merged);
@@ -9594,17 +10289,24 @@ ${JSON.stringify(compactBrief, null, 2)}
 Write only this JSON:
 {
   "quickFacts":[{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
-  "didYouKnowFacts":["six distinct facts, 35-55 words each"]
+  "didYouKnowFacts":["five distinct facts, 35-55 words each"]
 }
 
 Requirements:
 - quickFacts must contain exactly 6 populated label/value objects.
-- didYouKnowFacts must contain exactly 6 distinct source-grounded facts.
+- didYouKnowFacts must contain exactly 5 distinct source-grounded facts.
 - Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.`,
     1600,
     (parsed) => {
       requireChunkArray(parsed, "quickFacts", { exact: 6, label: "chunked article facts" });
-      requireChunkArray(parsed, "didYouKnowFacts", { exact: 6, label: "chunked article facts" });
+      requireChunkArray(parsed, "didYouKnowFacts", { exact: 5, label: "chunked article facts" });
+      const didYouKnowAudit = auditDidYouKnowFacts({
+        ...compactBrief,
+        didYouKnowFacts: parsed.didYouKnowFacts,
+      });
+      if (!didYouKnowAudit.ok) {
+        throw new Error(`chunked article facts: ${didYouKnowAudit.reasons.join("; ")}`);
+      }
     },
   );
 
@@ -9837,8 +10539,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "A detail that reframes the main story or reveals a hidden layer of complexity, 1 to 2 sentences, minimum 35 words. Do not recycle a detail from the first fact.",
     "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 1 to 2 sentences, minimum 35 words.",
     "A fact about a specific person involved — their background, motive, or fate — that most accounts skip, 1 to 2 sentences, minimum 35 words.",
-    "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 1 to 2 sentences, minimum 35 words.",
-    "A fact about the long-term legacy or a surprising modern echo of the event, 1 to 2 sentences, minimum 35 words. Provide SIX facts in total and make every one distinct — never restate another."
+    "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 1 to 2 sentences, minimum 35 words. Provide exactly FIVE facts in total and make every one distinct — never restate or paraphrase another fact."
   ],
   "overviewParagraphs": [
     "Paragraph 1 (claim + strongest evidence; ~105 to 125 words): Open with a striking concrete detail or blunt declarative statement — never with a rhetorical question. State the core claim directly. Include the single strongest, attributable piece of evidence (name, year, number, or place) that supports it. No chatty openers like 'So, what happened' or 'For starters'. Start with the most important thing.",
@@ -9936,7 +10637,7 @@ Output exactly this JSON shape and no extra text:
   "organizerName": "key person or organization",
   "readingTimeMinutes": 8,
   "quickFacts": [{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
-  "didYouKnowFacts": ["six distinct facts, 35-55 words each"],
+  "didYouKnowFacts": ["five distinct facts, 35-55 words each"],
   "overviewParagraphs": ["two paragraphs, 125-145 words each"],
   "eyewitnessOrChronicle": ["two paragraphs, 115-135 words each"],
   "eyewitnessQuote": "",
@@ -9956,7 +10657,7 @@ Output exactly this JSON shape and no extra text:
 }
 
 Field requirements:
-- quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 6 distinct facts.
+- quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 5 distinct facts.
 - analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
 - keyTerms must contain 5-8 entries and at least one real named person connected to the event.
 - imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
@@ -10485,7 +11186,9 @@ async function verifyFinalArticleGrounding(env, content, source) {
             content:
               `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
               `FINAL ARTICLE:\n${articleText}\n\n` +
+              "Start with the headline and central event claim. Reject a command-style or imperative headline with no historical actor. Reject any headline or body claim that assigns an action, order, execution, killing, relationship, title, or identity to a person when the source assigns it to someone else or does not support that attribution. Distinguish who ordered an act, who carried it out, and who was its target. " +
               "Reject ONLY clear factual contradictions: conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
+              "Audit each of the exactly five Did You Know facts separately. Reject any Did You Know fact whose central claim is not directly supported by the authoritative source material, even when the source does not explicitly contradict it. Identify a rejected fact by its array index. " +
               "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +
               "OMISSIONS ARE NOT FAILURES. The article does not need to mention, include, or elaborate on every fact in the source. Never raise an issue that the article 'does not mention', 'does not include', or 'fails to mention' something, and never fault it for leaving out background context. Only flag a fact the article actively STATES that contradicts the source. " +
               "Do not reject ordinary interpretation or clearly labeled opinion. Return exactly one JSON object: " +
@@ -12638,7 +13341,295 @@ function buildArticleSectionHeadings(content, pillars = []) {
  * Builds the full blog post HTML page, matching the structure of existing
  * hand-written posts on thisday.info.
  */
-function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCoverUrl = null) {
+function visibleArticleCorpus(content) {
+  return normalizeTopicMatchText(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.description,
+      content?.historicalDate,
+      content?.location,
+      content?.country,
+      ...(content?.overviewParagraphs || []),
+      ...(content?.eyewitnessOrChronicle || []),
+      ...(content?.aftermathParagraphs || []),
+      ...(content?.conclusionParagraphs || []),
+      ...(content?.quickFacts || []).map((fact) => `${fact?.label || ""} ${fact?.value || ""}`),
+      ...(content?.didYouKnowFacts || []),
+    ].join(" "),
+  );
+}
+
+function schemaTypeForEntity(type) {
+  if (type === "person") return "Person";
+  if (type === "place") return "Place";
+  if (type === "organization") return "Organization";
+  if (type === "event") return "Event";
+  return "Thing";
+}
+
+function buildVerifiedArticleMentions(content, entityMeta = []) {
+  const mentions = [];
+  const seen = new Set();
+  const push = (mention) => {
+    const name = String(mention?.name || "").replace(/\s+/g, " ").trim();
+    const type = String(mention?.["@type"] || "Thing");
+    const key = `${type}:${normalizeTopicMatchText(name)}`;
+    if (!name || seen.has(key)) return;
+    seen.add(key);
+    mentions.push({ ...mention, name });
+  };
+
+  // The people strip is the visible source of truth for Person mentions. A
+  // Wikipedia identity is emitted only after the substantive-profile verifier
+  // approved that exact person.
+  for (const entity of Array.isArray(entityMeta) ? entityMeta : []) {
+    if (entity?.type !== "person" || entity.skipStrip || !entity.name) continue;
+    push({
+      "@type": "Person",
+      name: entity.name,
+      ...(entity.profileLinkEligible === true &&
+      entity.profileSubjectVerified === true &&
+      /^https:\/\/en\.wikipedia\.org\/wiki\/[^?#]+$/i.test(String(entity.wikiUrl || ""))
+        ? { sameAs: entity.wikiUrl }
+        : {}),
+    });
+  }
+
+  // Non-person key terms are included only when their label actually appears
+  // in visible article copy. AI-provided identity URLs are intentionally not
+  // copied into schema without an equivalent subject-verification contract.
+  const visibleCorpus = visibleArticleCorpus(content);
+  for (const term of Array.isArray(content?.keyTerms) ? content.keyTerms : []) {
+    if (!term?.term || term.type === "person") continue;
+    const normalizedTerm = normalizeTopicMatchText(term.term);
+    if (!normalizedTerm || !` ${visibleCorpus} `.includes(` ${normalizedTerm} `)) continue;
+    push({ "@type": schemaTypeForEntity(term.type), name: term.term });
+  }
+
+  return mentions;
+}
+
+function buildBlogPostStructuredData(
+  content,
+  date,
+  canonicalUrl,
+  previewImageUrl,
+  featuredImageUrl,
+  entityMeta = [],
+) {
+  const publishedAt = date.toISOString();
+  const description = content.jsonLdDescription || content.description;
+  const eventName = content.eventTitle || content.jsonLdName || content.title;
+  const event = {
+    "@type": "Event",
+    name: eventName,
+    ...(content.historicalDateISO || content.historicalYear
+      ? { startDate: content.historicalDateISO || String(content.historicalYear) }
+      : {}),
+    ...(description ? { description } : {}),
+    ...(content.location || content.country
+      ? {
+          location: {
+            "@type": "Place",
+            ...(content.location ? { name: content.location } : {}),
+            ...(content.country
+              ? { address: { "@type": "PostalAddress", addressCountry: content.country } }
+              : {}),
+          },
+        }
+      : {}),
+    ...(content.wikiUrl || content.jsonLdUrl ? { url: content.wikiUrl || content.jsonLdUrl } : {}),
+    eventStatus: "https://schema.org/EventCompleted",
+    ...(content.organizerName &&
+    ` ${visibleArticleCorpus(content)} `.includes(` ${normalizeTopicMatchText(content.organizerName)} `)
+      ? { organizer: { "@type": "Organization", name: content.organizerName } }
+      : {}),
+  };
+  const mentions = buildVerifiedArticleMentions(content, entityMeta);
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
+    headline: content.title,
+    datePublished: publishedAt,
+    inLanguage: "en",
+    articleSection: "History",
+    author: {
+      "@type": "Organization",
+      name: "thisDay.info Editorial Team",
+      url: "https://thisday.info/about/editorial/",
+    },
+    publisher: {
+      "@type": "Organization",
+      name: "thisDay.info",
+      url: "https://thisday.info/",
+      logo: {
+        "@type": "ImageObject",
+        url: "https://thisday.info/images/logo.png",
+      },
+    },
+    ...(description ? { description } : {}),
+    ...(previewImageUrl
+      ? {
+          image: {
+            "@type": "ImageObject",
+            url: previewImageUrl,
+            ...(featuredImageUrl ? { contentUrl: featuredImageUrl } : {}),
+            ...(content.imageAlt ? { caption: content.imageAlt } : {}),
+          },
+        }
+      : {}),
+    url: canonicalUrl,
+    about: event,
+    ...(mentions.length > 0 ? { mentions } : {}),
+  };
+}
+
+function buildArticleBreadcrumbStructuredData(content, canonicalUrl, currentPillars = []) {
+  const pillarSlug = (str) =>
+    str
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+  const itemListElement = [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "thisDay.",
+      item: "https://thisday.info/",
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: "Historical Blog",
+      item: "https://thisday.info/blog/",
+    },
+  ];
+  if (currentPillars.length > 0) {
+    itemListElement.push({
+      "@type": "ListItem",
+      position: 3,
+      name: currentPillars[0],
+      item: `https://thisday.info/blog/topic/${pillarSlug(currentPillars[0])}/`,
+    });
+  }
+  itemListElement.push({
+    "@type": "ListItem",
+    position: itemListElement.length + 1,
+    name: content.title,
+    item: canonicalUrl,
+  });
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement,
+  };
+}
+
+function extractJsonLdObjects(html) {
+  const objects = [];
+  const invalidBlocks = [];
+  const pattern = /<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+  while ((match = pattern.exec(String(html || ""))) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (Array.isArray(parsed?.["@graph"])) objects.push(...parsed["@graph"]);
+      else objects.push(parsed);
+    } catch (error) {
+      invalidBlocks.push(error.message);
+    }
+  }
+  return { objects, invalidBlocks };
+}
+
+function schemaObjectHasType(object, type) {
+  const schemaType = object?.["@type"];
+  return Array.isArray(schemaType) ? schemaType.includes(type) : schemaType === type;
+}
+
+function validateArticleStructuredDataForPublish(html, content, entityMeta = []) {
+  const reasons = [];
+  const { objects, invalidBlocks } = extractJsonLdObjects(html);
+  if (invalidBlocks.length > 0) reasons.push(`invalid JSON-LD: ${invalidBlocks.join("; ")}`);
+
+  const articles = objects.filter((object) =>
+    ["Article", "BlogPosting", "NewsArticle"].some((type) => schemaObjectHasType(object, type)),
+  );
+  const breadcrumbs = objects.filter((object) => schemaObjectHasType(object, "BreadcrumbList"));
+  const faqPages = objects.filter((object) => schemaObjectHasType(object, "FAQPage"));
+  if (articles.length !== 1) reasons.push(`expected one article schema, found ${articles.length}`);
+  if (articles.some((article) => schemaObjectHasType(article, "NewsArticle"))) {
+    reasons.push("historical feature must not use NewsArticle schema");
+  }
+  if (articles.length === 1 && !schemaObjectHasType(articles[0], "BlogPosting")) {
+    reasons.push("historical blog feature must use BlogPosting schema");
+  }
+  if (breadcrumbs.length !== 1) reasons.push(`expected one BreadcrumbList, found ${breadcrumbs.length}`);
+  if (faqPages.length > 0) reasons.push("FAQPage schema is not eligible for this historical feature");
+
+  const article = articles[0];
+  if (article) {
+    if (article.headline !== content?.title) reasons.push("schema headline does not match the visible title");
+    const about = article.about;
+    if (!schemaObjectHasType(about, "Event")) reasons.push("article about schema must describe an Event");
+    const expectedEventName = content?.eventTitle || content?.jsonLdName || content?.title;
+    if (about?.name !== expectedEventName) reasons.push("schema event name does not match visible content");
+    const expectedStartDate = content?.historicalDateISO ||
+      (content?.historicalYear ? String(content.historicalYear) : "");
+    if (expectedStartDate && about?.startDate !== expectedStartDate) {
+      reasons.push("schema event date does not match the historical date");
+    }
+    if (content?.location && about?.location?.name !== content.location) {
+      reasons.push("schema location does not match visible content");
+    }
+    if (content?.country && about?.location?.address?.addressCountry !== content.country) {
+      reasons.push("schema country does not match visible content");
+    }
+  }
+
+  const visiblePeople = new Map(
+    (Array.isArray(entityMeta) ? entityMeta : [])
+      .filter((entity) => entity?.type === "person" && entity.name && !entity.skipStrip)
+      .map((entity) => [normalizeTopicMatchText(entity.name), entity]),
+  );
+  const personMentions = (Array.isArray(article?.mentions) ? article.mentions : [])
+    .filter((mention) => schemaObjectHasType(mention, "Person"));
+  for (const mention of personMentions) {
+    const key = normalizeTopicMatchText(mention.name);
+    const entity = visiblePeople.get(key);
+    if (!entity || !String(html || "").includes(esc(mention.name))) {
+      reasons.push(`schema person is not visible: ${mention.name || "unnamed person"}`);
+      continue;
+    }
+    if (mention.sameAs && !(
+      entity.profileLinkEligible === true &&
+      entity.profileSubjectVerified === true &&
+      mention.sameAs === entity.wikiUrl
+    )) {
+      reasons.push(`schema person identity is not verified: ${mention.name}`);
+    }
+  }
+  for (const [key, entity] of visiblePeople) {
+    if (!personMentions.some((mention) => normalizeTopicMatchText(mention.name) === key)) {
+      reasons.push(`visible person missing from schema: ${entity.name}`);
+    }
+  }
+
+  return { ok: reasons.length === 0, reasons, objects };
+}
+
+function buildPostHTML(
+  c,
+  date,
+  slug,
+  allPosts = [],
+  currentPillars = [],
+  bookCoverUrl = null,
+  entityMeta = [],
+) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
   const publishYear = date.getFullYear();
@@ -12648,7 +13639,7 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
     ? c.keywords.map((keyword) => String(keyword).trim()).filter(Boolean).join(", ")
     : String(c.keywords || "");
 
-  const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || []);
+  const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || [], c);
   const sectionHeadings = buildArticleSectionHeadings(c, currentPillars);
   const amazonRelatedBlock = buildAmazonRelatedBlock(c, currentPillars);
   const articleBodyAdBlock = amazonRelatedBlock ? buildArticleBodyAdBlock() : "";
@@ -12716,103 +13707,21 @@ function buildPostHTML(c, date, slug, allPosts = [], currentPillars = [], bookCo
     ? `&nbsp;|&nbsp;${esc(String(c.readingTimeMinutes))} min read`
     : "";
 
-  const publishedDateISO = date.toISOString().split("T")[0];
   const featuredImageUrl = isProxyableArticleImageUrl(c.imageUrl) ? c.imageUrl : "";
   const previewImageUrl = buildSocialPreviewImageUrl(featuredImageUrl);
   const jsonLd = JSON.stringify(
-    {
-      "@context": "https://schema.org",
-      "@type": "NewsArticle",
-      mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
-      headline: c.title,
-      datePublished: publishedDateISO,
-      dateModified: publishedDateISO,
-      inLanguage: "en",
-      articleSection: "History",
-      author: {
-        "@type": "Organization",
-        name: "thisDay.info Editorial Team",
-        url: "https://thisday.info/about/editorial/",
-      },
-      publisher: {
-        "@type": "Organization",
-        name: "thisDay.info",
-        logo: {
-          "@type": "ImageObject",
-          url: "https://thisday.info/images/logo.png",
-        },
-      },
-      description: c.jsonLdDescription || c.description,
-      image: previewImageUrl,
-      url: canonicalUrl,
-      about: {
-        "@type": "Event",
-        name: c.eventTitle || c.jsonLdName,
-        startDate: c.historicalDateISO || String(c.historicalYear),
-        description: c.jsonLdDescription || c.description,
-        location: {
-          "@type": "Place",
-          name: c.location,
-          address: { "@type": "PostalAddress", addressCountry: c.country },
-        },
-        url: c.wikiUrl || c.jsonLdUrl,
-        eventStatus: "https://schema.org/EventCompleted",
-        organizer: { "@type": "Organization", name: c.organizerName },
-      },
-      ...(Array.isArray(c.keyTerms) && c.keyTerms.length > 0 && {
-        mentions: c.keyTerms.map((kt) => ({
-          "@type": kt.type === "person" ? "Person" : kt.type === "place" ? "Place" : kt.type === "organization" ? "Organization" : "Thing",
-          name: kt.term,
-          ...(kt.wikiUrl ? { sameAs: kt.wikiUrl } : {}),
-        })),
-      }),
-    },
+    buildBlogPostStructuredData(c, date, canonicalUrl, previewImageUrl, featuredImageUrl, entityMeta),
     null,
     2,
   );
 
-  // BreadcrumbList: Home > Blog > [Pillar] > Article
-  // Pillar level included only when currentPillars data is available.
-  // Pillar hub URLs (/blog/topic/…/) will be live once P3b (hub pages) lands.
   const pillarSlug = (str) =>
     str
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "");
-  const breadcrumbItems = [
-    {
-      "@type": "ListItem",
-      position: 1,
-      name: "thisDay.",
-      item: "https://thisday.info/",
-    },
-    {
-      "@type": "ListItem",
-      position: 2,
-      name: "Historical Blog",
-      item: "https://thisday.info/blog/",
-    },
-  ];
-  if (currentPillars.length > 0) {
-    breadcrumbItems.push({
-      "@type": "ListItem",
-      position: 3,
-      name: currentPillars[0],
-      item: `https://thisday.info/blog/topic/${pillarSlug(currentPillars[0])}/`,
-    });
-  }
-  breadcrumbItems.push({
-    "@type": "ListItem",
-    position: breadcrumbItems.length + 1,
-    name: c.title,
-    item: canonicalUrl,
-  });
   const breadcrumbJsonLd = JSON.stringify(
-    {
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      itemListElement: breadcrumbItems,
-    },
+    buildArticleBreadcrumbStructuredData(c, canonicalUrl, currentPillars),
     null,
     2,
   );
@@ -12879,62 +13788,6 @@ ${jsonLd}
     </script>
     <script type="application/ld+json">
 ${breadcrumbJsonLd}
-    </script>
-    <script type="application/ld+json">
-${JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: [
-    {
-      "@type": "Question",
-      name: `What was ${esc(eventNounLabel(c))}?`,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: esc(c.jsonLdDescription || c.description),
-      },
-    },
-    {
-      "@type": "Question",
-      name: `When and where did ${esc(eventNounLabel(c))} take place?`,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: `${esc(eventNounLabel(c))} took place on ${esc(c.historicalDate)} in ${esc(c.location)}.`,
-      },
-    },
-    {
-      "@type": "Question",
-      name: `What was the historical significance of ${esc(eventNounLabel(c))}?`,
-      acceptedAnswer: {
-        "@type": "Answer",
-        text: esc(
-          (c.quickFacts || []).find((f) => f.label === "Significance")?.value ||
-            c.description,
-        ),
-      },
-    },
-  ],
-})}
-    </script>
-    <script type="application/ld+json">
-${JSON.stringify({
-  "@context": "https://schema.org",
-  "@type": "BreadcrumbList",
-  itemListElement: [
-    {
-      "@type": "ListItem",
-      position: 1,
-      name: "Home",
-      item: "https://thisday.info/",
-    },
-    {
-      "@type": "ListItem",
-      position: 2,
-      name: "Blog",
-      item: "https://thisday.info/blog/",
-    },
-    { "@type": "ListItem", position: 3, name: c.title, item: canonicalUrl },
-  ],
-})}
     </script>
 
     <link rel="icon" href="/images/favicon.ico" />
@@ -13251,46 +14104,17 @@ ${analysisBadItems}
               : ""
           }
 
-          <!-- Wikipedia source -->
-          <div class="mt-4 p-3 rounded" style="background-color: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08);">
-            <small class="article-meta">
-              Want to learn more? Read the full article on
-              <a href="${esc(c.wikiUrl || c.jsonLdUrl)}" target="_blank" rel="noopener noreferrer">Wikipedia</a>.
-              Historical data sourced under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.
-            </small>
-          </div>
-
           ${(() => {
-            const others = allPosts.filter((p) => p.slug !== slug);
-            // Prefer posts that share at least one pillar with the current article.
-            // Sort by overlap count descending, fill remainder from most recent.
-            let related;
-            if (currentPillars.length > 0) {
-              const withOverlap = others
-                .map((p) => ({
-                  p,
-                  overlap: Array.isArray(p.pillars)
-                    ? p.pillars.filter((pl) => currentPillars.includes(pl))
-                        .length
-                    : 0,
-                }))
-                .sort((a, b) => b.overlap - a.overlap);
-              const matching = withOverlap
-                .filter((x) => x.overlap > 0)
-                .map((x) => x.p)
-                .slice(0, 3);
-              if (matching.length < 3) {
-                const seen = new Set(matching.map((p) => p.slug));
-                const rest = others
-                  .filter((p) => !seen.has(p.slug))
-                  .slice(0, 3 - matching.length);
-                related = [...matching, ...rest];
-              } else {
-                related = matching;
-              }
-            } else {
-              related = others.slice(0, 3); // no pillar data yet — fall back to most recent
-            }
+            // A shared broad pillar is only a tie-breaker. A card is eligible
+            // only when hubs, named terms, or at least two topical terms overlap.
+            // Empty slots remain empty instead of being padded with recent posts.
+            const related = selectTopicallyRelatedPosts(
+              c,
+              allPosts,
+              slug,
+              currentPillars,
+              3,
+            );
             const cards = related
               .map((p) => {
                 const relatedImageUrl = isProxyableArticleImageUrl(p.imageUrl) ? p.imageUrl : "";
@@ -13336,8 +14160,7 @@ ${analysisBadItems}
             <span class="article-meta">
               This article was researched and drafted with AI assistance, then reviewed for factual accuracy by the
               <a href="/about/editorial/" rel="author">thisDay. editorial team</a>.
-              Historical source: <a href="${esc(c.wikiUrl || c.jsonLdUrl)}" target="_blank" rel="noopener noreferrer">Wikipedia</a>
-              (licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>).
+              The direct historical sources used for the central event are listed above.
               Images via <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.
               Found an error? <a href="/contact/">Let us know</a>.
             </span>
@@ -13762,7 +14585,7 @@ ${JSON.stringify(
       },
     },
     hasPart: index.slice(0, 20).map((p) => ({
-      "@type": "NewsArticle",
+      "@type": "BlogPosting",
       name: p.title,
       url: `https://thisday.info/blog/${p.slug}/`,
       datePublished: p.publishedAt
@@ -13984,7 +14807,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
         },
       },
       hasPart: posts.slice(0, 20).map((p) => ({
-        "@type": "NewsArticle",
+        "@type": "BlogPosting",
         name: p.title,
         url: `https://thisday.info/blog/${p.slug}/`,
         datePublished: p.publishedAt
@@ -14616,14 +15439,20 @@ function normalizeArticleLayoutHtml(body) {
           ${html.slice(amazonRelatedRange.end)}`;
   }
 
-  // Keep trusted-source links at the bottom of the article, immediately after
+  // Keep direct-source links at the bottom of the article, immediately after
   // the Test Your Knowledge CTA. This also repairs older stored posts whose
   // authority block was rendered near the overview.
-  const trustedSourcesRange = findDivBlockRangeContaining(
-    html,
-    "Learn more at trusted sources",
-    /\bclass="[^"]*\bauthority-links\b/i,
-  );
+  const trustedSourcesRange =
+    findDivBlockRangeContaining(
+      html,
+      "Sources used for this article",
+      /\bclass="[^"]*\bauthority-links\b/i,
+    ) ||
+    findDivBlockRangeContaining(
+      html,
+      "Learn more at trusted sources",
+      /\bclass="[^"]*\bauthority-links\b/i,
+    );
   const quizCtaRange = findDivBlockRangeContaining(
     html,
     "Test Your Knowledge",

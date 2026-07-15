@@ -885,6 +885,33 @@ const SOURCE_SEARCH_PARAM_NAMES = new Set([
   "keywords",
 ]);
 
+function isPublicCitationHostname(value) {
+  const hostname = String(value || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (
+    !hostname ||
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    hostname.endsWith(".internal") ||
+    hostname.includes(":")
+  ) {
+    return false;
+  }
+  const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!ipv4) return true;
+  const octets = ipv4.slice(1).map(Number);
+  if (octets.some((part) => part < 0 || part > 255)) return false;
+  return !(
+    octets[0] === 0 ||
+    octets[0] === 10 ||
+    octets[0] === 127 ||
+    (octets[0] === 169 && octets[1] === 254) ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168) ||
+    octets[0] >= 224
+  );
+}
+
 function isDirectCitationUrl(value) {
   let parsed;
   try {
@@ -892,9 +919,15 @@ function isDirectCitationUrl(value) {
   } catch {
     return false;
   }
-  if (!/^https?:$/.test(parsed.protocol)) return false;
+  if (!/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password || parsed.port) {
+    return false;
+  }
   const hostname = parsed.hostname.toLowerCase();
-  if (!hostname || SOURCE_SEARCH_HOSTS.has(hostname) || hostname === "example.com") {
+  if (
+    !isPublicCitationHostname(hostname) ||
+    SOURCE_SEARCH_HOSTS.has(hostname) ||
+    hostname === "example.com"
+  ) {
     return false;
   }
   const path = parsed.pathname.toLowerCase().replace(/\/+$/, "") || "/";
@@ -932,15 +965,23 @@ function directCitationPagesFromContent(content, limit = 6) {
 
 function validateDirectCitationsForPublish(
   content,
-  { minimumSources = 1, minimumIndependentPublishers = 1 } = {},
+  { minimumSources = 2, minimumIndependentPublishers = 2 } = {},
 ) {
   const allSources = sourcePagesFromContent(content);
   const invalidSources = allSources.filter(
     (page) => page.pageUrl && !isDirectCitationUrl(page.pageUrl),
   );
   const directSources = allSources.filter((page) => isDirectCitationUrl(page.pageUrl));
+  const verifiedSources = directSources.filter((page) => {
+    try {
+      const hostname = new URL(page.pageUrl).hostname.toLowerCase();
+      return hostname.endsWith("wikipedia.org") || page.verifiedIndependent === true;
+    } catch {
+      return false;
+    }
+  });
   const publishers = new Set(
-    directSources.map((page) => {
+    verifiedSources.map((page) => {
       try {
         return new URL(page.pageUrl).hostname.toLowerCase().replace(/^www\./, "");
       } catch {
@@ -954,15 +995,17 @@ function validateDirectCitationsForPublish(
       `source list contains search, homepage, placeholder, or invalid URLs: ${invalidSources.map((page) => page.pageUrl).join(" | ")}`,
     );
   }
-  if (directSources.length < minimumSources) {
-    reasons.push(`only ${directSources.length} direct source page(s); needs ${minimumSources}`);
+  if (verifiedSources.length < minimumSources) {
+    reasons.push(
+      `only ${verifiedSources.length} verified direct source page(s); needs ${minimumSources}`,
+    );
   }
   if (publishers.size < minimumIndependentPublishers) {
     reasons.push(
       `only ${publishers.size} independent source publisher(s); needs ${minimumIndependentPublishers}`,
     );
   }
-  return { ok: reasons.length === 0, reasons, sources: directSources };
+  return { ok: reasons.length === 0, reasons, sources: verifiedSources };
 }
 
 function buildAuthorityLinksBlock(content, _pillars = []) {
@@ -2153,8 +2196,34 @@ async function chooseEventForDate(
     } catch (err) {
       console.warn(`Event selector pageview re-rank failed (keeping editorial order): ${err.message}`);
     }
+    if (candidateEvents.length > 0) {
+      const originalFirst = candidateEvents[0];
+      const sourceReady = await selectSourceReadyCandidate(candidateEvents);
+      if (sourceReady) {
+        candidateEvents = [
+          sourceReady,
+          ...candidateEvents.filter((candidate) => candidate.pageUrl !== sourceReady.pageUrl),
+        ];
+        if (sourceReady.pageUrl !== originalFirst?.pageUrl) {
+          console.warn(
+            `Event selector: skipped "${originalFirst?.pageTitle}" because no independently verified source was found; using "${sourceReady.pageTitle}".`,
+          );
+        }
+      } else {
+        console.warn(
+          `Event selector: none of the top ${Math.min(candidateEvents.length, SOURCE_READY_EVENT_CANDIDATE_LIMIT)} candidates had a reachable, relevant independent source.`,
+        );
+        candidateEvents = [];
+      }
+    }
   } catch (err) {
     console.warn(`Event selector candidate load failed: ${err.message}`);
+  }
+
+  if (candidateEvents.length === 0) {
+    throw new Error(
+      `No source-ready event with two independent publishers was available for ${monthName} ${day}.`,
+    );
   }
 
   const allEventsSection =
@@ -7326,12 +7395,18 @@ function normalizeSourcePage(page) {
     .map((claim) => String(claim || "").replace(/\s+/g, " ").trim())
     .filter(Boolean)
     .slice(0, 6);
+  const verifiedIndependent = page.verifiedIndependent === true;
+  const verificationMethod = String(page.verificationMethod || "")
+    .replace(/\s+/g, " ")
+    .trim();
   return {
     pageTitle: pageTitle || wikiTitleFromUrl(pageUrl),
     pageUrl,
     ...(publisher ? { publisher } : {}),
     ...(accessedAt ? { accessedAt } : {}),
     ...(supportedClaims.length > 0 ? { supportedClaims } : {}),
+    ...(verifiedIndependent ? { verifiedIndependent: true } : {}),
+    ...(verificationMethod ? { verificationMethod } : {}),
     ...(extract ? { extract } : {}),
     ...(text ? { text } : {}),
     ...(description ? { description } : {}),
@@ -7367,7 +7442,7 @@ function truncateSourceExtract(value, maxChars = 9000) {
     : prefix.replace(/\s+\S*$/, "").trim();
 }
 
-async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000) {
+async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000, fetchImpl = fetch) {
   const normalized = normalizeSourcePage(page);
   if (!normalized) return null;
   const pageTitle = wikiTitleFromUrl(normalized.pageUrl) || normalized.pageTitle;
@@ -7376,7 +7451,7 @@ async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000) {
     "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exsectionformat=plain&format=json&origin=*&titles=" +
     encodeURIComponent(pageTitle);
   try {
-    const response = await fetch(url, {
+    const response = await fetchImpl(url, {
       headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
     });
     if (!response.ok) return normalized;
@@ -7400,21 +7475,333 @@ async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000) {
   }
 }
 
-async function expandSelectedEventSourcePages(selectedEvent) {
+const INDEPENDENT_REFERENCE_FETCH_LIMIT = 4;
+const SOURCE_READY_EVENT_CANDIDATE_LIMIT = 3;
+const BLOCKED_REFERENCE_HOSTS = new Set([
+  "amazon.com",
+  "books.google.com",
+  "creativecommons.org",
+  "facebook.com",
+  "goodreads.com",
+  "imdb.com",
+  "instagram.com",
+  "linkedin.com",
+  "pinterest.com",
+  "tiktok.com",
+  "twitter.com",
+  "web.archive.org",
+  "x.com",
+  "youtube.com",
+]);
+
+function canonicalIndependentReferenceUrl(value) {
+  let raw = String(value || "").replace(/&amp;/g, "&").trim();
+  try {
+    const archive = new URL(raw);
+    if (archive.hostname.toLowerCase() === "web.archive.org") {
+      const archivedTarget = archive.pathname.match(/^\/web\/[^/]+\/(https?:\/\/.*)$/i)?.[1];
+      if (archivedTarget) raw = decodeURIComponent(archivedTarget);
+    }
+  } catch {
+    return "";
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return "";
+  }
+  if (parsed.protocol === "http:") parsed.protocol = "https:";
+  if (parsed.protocol !== "https:") return "";
+  parsed.hash = "";
+  for (const key of [...parsed.searchParams.keys()]) {
+    if (/^(?:utm_|fbclid$|gclid$|mc_)/i.test(key)) parsed.searchParams.delete(key);
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  if (
+    !isPublicCitationHostname(hostname) ||
+    [...BLOCKED_REFERENCE_HOSTS].some(
+      (blockedHost) => hostname === blockedHost || hostname.endsWith(`.${blockedHost}`),
+    ) ||
+    hostname.endsWith("wikipedia.org") ||
+    hostname.endsWith("wikimedia.org") ||
+    hostname.endsWith("wikidata.org") ||
+    hostname === "thisday.info" ||
+    hostname.endsWith(".thisday.info")
+  ) {
+    return "";
+  }
+  if (/\.(?:avif|css|csv|docx?|gif|jpe?g|js|json|mp3|mp4|pdf|png|pptx?|svg|webp|xlsx?|xml|zip)$/i.test(parsed.pathname)) {
+    return "";
+  }
+  return isDirectCitationUrl(parsed.toString()) ? parsed.toString() : "";
+}
+
+function independentReferenceAuthorityScore(value) {
+  let hostname = "";
+  try {
+    hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return 0;
+  }
+  if (/\.gov(?:\.[a-z]{2})?$/.test(hostname) || hostname === "europa.eu") return 90;
+  if (/\.(?:edu|ac)(?:\.[a-z]{2})?$/.test(hostname)) return 85;
+  if (/(?:archives?|museum|library|history)\./.test(hostname)) return 75;
+  if (/\.(?:museum)$/.test(hostname)) return 75;
+  if (/^(?:si\.edu|loc\.gov|archives\.gov|nationalarchives\.gov\.uk|iwm\.org\.uk|ushmm\.org|nasa\.gov)$/.test(hostname)) return 80;
+  if (/(?:jstor\.org|cambridge\.org|oup\.com|springer\.com|nature\.com|science\.org)$/.test(hostname)) return 70;
+  if (/(?:reuters\.com|apnews\.com|bbc\.(?:com|co\.uk)|nytimes\.com|washingtonpost\.com|time\.com|britannica\.com)$/.test(hostname)) return 60;
+  if (hostname.endsWith(".org")) return 35;
+  return 20;
+}
+
+function citationLabelFromWikitext(wikitext, url) {
+  const source = String(wikitext || "");
+  const variants = [url, url.replace(/^https:/, "http:"), url.replace(/&/g, "&amp;")];
+  let index = -1;
+  for (const variant of variants) {
+    index = source.indexOf(variant);
+    if (index !== -1) break;
+  }
+  if (index === -1) return "";
+  const start = Math.max(0, source.lastIndexOf("{{", index));
+  const end = source.indexOf("}}", index);
+  const citation = source.slice(start, end !== -1 && end - start < 1800 ? end : index + 900);
+  const templateTitle = citation.match(/\|\s*title\s*=\s*([^|}\n]+)/i)?.[1];
+  if (templateTitle) {
+    return String(templateTitle)
+      .replace(/\[\[|\]\]/g, "")
+      .replace(/''+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  const bracketStart = source.lastIndexOf("[", index);
+  const bracketEnd = source.indexOf("]", index);
+  if (bracketStart !== -1 && bracketEnd !== -1 && bracketEnd - bracketStart < 900) {
+    const bracket = source.slice(bracketStart + 1, bracketEnd);
+    const label = bracket.slice(bracket.indexOf(" ") + 1).trim();
+    if (label && label !== bracket) return label.replace(/\s+/g, " ").trim();
+  }
+  return "";
+}
+
+async function fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImpl = fetch) {
+  const pageTitle =
+    wikiTitleFromUrl(selectedEvent?.wikiUrl) ||
+    selectedEvent?.sourcePageTitle ||
+    selectedEvent?.pageTitle ||
+    "";
+  if (!pageTitle) return [];
+  const apiUrl =
+    "https://en.wikipedia.org/w/api.php?action=parse&redirects=1&prop=externallinks%7Cwikitext&format=json&formatversion=2&origin=*&page=" +
+    encodeURIComponent(pageTitle);
+  let response;
+  try {
+    response = await fetchImpl(apiUrl, {
+      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+    });
+  } catch (err) {
+    console.warn(`Independent citation discovery failed for ${pageTitle}: ${err.message}`);
+    return [];
+  }
+  if (!response?.ok) return [];
+  const data = await response.json().catch(() => null);
+  const links = Array.isArray(data?.parse?.externallinks) ? data.parse.externallinks : [];
+  const wikitext = String(data?.parse?.wikitext || "");
+  const evidence = [
+    selectedEvent?.eventTitle,
+    selectedEvent?.sourcePageTitle,
+    selectedEvent?.sourceText,
+  ].join(" ");
+  const evidenceTokens = new Set(sourcePageRelevanceTokens(evidence));
+  const seenUrls = new Set();
+  const perHost = new Map();
+  const candidates = [];
+  for (const link of links) {
+    const pageUrl = canonicalIndependentReferenceUrl(link);
+    if (!pageUrl || seenUrls.has(pageUrl)) continue;
+    const hostname = new URL(pageUrl).hostname.toLowerCase().replace(/^www\./, "");
+    const hostCount = perHost.get(hostname) || 0;
+    if (hostCount >= 2) continue;
+    const citationTitle = citationLabelFromWikitext(wikitext, pageUrl);
+    const referenceTokens = sourcePageRelevanceTokens(`${pageUrl} ${citationTitle}`);
+    const overlap = referenceTokens.filter((token) => evidenceTokens.has(token));
+    candidates.push({
+      pageUrl,
+      citationTitle,
+      score: independentReferenceAuthorityScore(pageUrl) + overlap.length * 12,
+    });
+    seenUrls.add(pageUrl);
+    perHost.set(hostname, hostCount + 1);
+  }
+  return candidates.sort((a, b) => b.score - a.score);
+}
+
+function decodeSourceDocumentText(value) {
+  return String(value || "")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function verifyIndependentSourceDocument(selectedEvent, candidate, html, finalUrl) {
+  const pageUrl = canonicalIndependentReferenceUrl(finalUrl || candidate?.pageUrl);
+  if (!pageUrl) return null;
+  const titleHtml =
+    String(html || "").match(/<meta\b[^>]*property=["']og:title["'][^>]*content=["']([^"']+)/i)?.[1] ||
+    String(html || "").match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1] ||
+    candidate?.citationTitle ||
+    "";
+  const pageTitle = decodeSourceDocumentText(titleHtml).replace(/\s+[|–—-]\s+[^|–—-]{1,50}$/, "").trim();
+  const documentText = decodeSourceDocumentText(html).slice(0, 120000);
+  if (documentText.length < 300) return null;
+
+  const eventEvidence = [
+    selectedEvent?.eventTitle,
+    selectedEvent?.sourcePageTitle,
+    selectedEvent?.sourceText,
+    String(selectedEvent?.sourceExtract || "").slice(0, 1800),
+  ].join(" ");
+  const eventTokens = new Set(sourcePageRelevanceTokens(eventEvidence));
+  const documentTokens = new Set(sourcePageRelevanceTokens(`${pageTitle} ${documentText}`));
+  const overlapTokens = [...eventTokens].filter((token) => documentTokens.has(token));
+  const minimumOverlap = eventTokens.size >= 8 ? 3 : 2;
+  if (overlapTokens.length < minimumOverlap) return null;
+
+  const subjectTokens = sourceSubjectTokens({
+    pageTitle: selectedEvent?.sourcePageTitle || selectedEvent?.pageTitle || "",
+    text: selectedEvent?.sourceText || "",
+    sourceExtract: selectedEvent?.sourceExtract || "",
+  });
+  if (
+    subjectTokens.length > 0 &&
+    !subjectTokens.some((token) => documentText.toLowerCase().includes(token.toLowerCase()))
+  ) {
+    return null;
+  }
+
+  const historicalYear =
+    Number.parseInt(selectedEvent?.historicalYear || selectedEvent?.year, 10) ||
+    deriveHistoricalYear(selectedEvent);
+  if (
+    Number.isInteger(historicalYear) &&
+    historicalYear >= 100 &&
+    !new RegExp(`\\b0*${historicalYear}\\b`).test(documentText)
+  ) {
+    return null;
+  }
+
+  return normalizeSourcePage({
+    pageTitle: pageTitle || candidate?.citationTitle || sourcePublisherName(pageUrl),
+    pageUrl,
+    publisher: sourcePublisherName(pageUrl),
+    accessedAt: utcDateString(),
+    supportedClaims: [String(selectedEvent?.sourceText || selectedEvent?.eventTitle || "").trim()],
+    extract: truncateSourceExtract(documentText, 6000),
+    verifiedIndependent: true,
+    verificationMethod: "wikipedia-reference-http-subject-year-token-match-v1",
+  });
+}
+
+async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch) {
+  const existing = normalizeSourcePages(selectedEvent?.sourcePages || []).find(
+    (page) => page.verifiedIndependent === true && isDirectCitationUrl(page.pageUrl),
+  );
+  if (existing) return existing;
+  const candidates = await fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImpl);
+  for (const candidate of candidates.slice(0, INDEPENDENT_REFERENCE_FETCH_LIMIT)) {
+    try {
+      const response = await fetchImpl(candidate.pageUrl, {
+        redirect: "follow",
+        headers: {
+          "User-Agent": WIKIPEDIA_USER_AGENT,
+          Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
+          Range: "bytes=0-131071",
+        },
+      });
+      if (!response?.ok) continue;
+      const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
+      if (contentType && !/(?:text\/html|application\/xhtml\+xml|text\/plain)/.test(contentType)) {
+        continue;
+      }
+      const contentLength = Number.parseInt(response.headers?.get?.("content-length"), 10);
+      if (Number.isFinite(contentLength) && contentLength > 3_000_000) continue;
+      const html = String(await response.text()).slice(0, 140000);
+      const verified = verifyIndependentSourceDocument(
+        selectedEvent,
+        candidate,
+        html,
+        response.url || candidate.pageUrl,
+      );
+      if (verified) return verified;
+    } catch (err) {
+      console.warn(`Independent citation candidate failed (${candidate.pageUrl}): ${err.message}`);
+    }
+  }
+  return null;
+}
+
+async function selectSourceReadyCandidate(candidates, fetchImpl = fetch) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  for (const candidate of list.slice(0, SOURCE_READY_EVENT_CANDIDATE_LIMIT)) {
+    const selectedEvent = {
+      ...candidate,
+      eventTitle: eventTitleFromCandidate(candidate.pageTitle, candidate),
+      historicalYear: Number.parseInt(candidate.year, 10),
+      sourcePageTitle: candidate.pageTitle,
+      sourceText: candidate.text,
+      sourceExtract: candidate.extract,
+      wikiUrl: candidate.pageUrl,
+      sourcePages: candidate.sourcePages || [],
+    };
+    const citation = await discoverIndependentCitation(selectedEvent, fetchImpl);
+    if (!citation) continue;
+    return {
+      ...candidate,
+      sourcePages: normalizeSourcePages([...(candidate.sourcePages || []), citation]),
+    };
+  }
+  return null;
+}
+
+async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch) {
   if (!selectedEvent) return selectedEvent;
   const sourcePages = normalizeSourcePages(selectedEvent.sourcePages || []);
   if (!sourcePages.length) return selectedEvent;
+  const wikipediaPages = sourcePages.filter((page) => {
+    try {
+      return new URL(page.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
+    } catch {
+      return false;
+    }
+  });
   const expanded = await Promise.all(
-    sourcePages.slice(0, 2).map((page) => fetchExpandedWikipediaSourcePage(page)),
+    wikipediaPages.slice(0, 2).map((page) =>
+      fetchExpandedWikipediaSourcePage(page, 9000, fetchImpl),
+    ),
   );
   const merged = normalizeSourcePages([
     ...expanded.filter(Boolean),
-    ...sourcePages.slice(2),
+    ...sourcePages,
   ]);
   selectedEvent.sourcePages = merged;
   const primary =
-    selectPrimarySourcePage(selectedEvent.sourceText || selectedEvent.text, merged) ||
-    merged[0];
+    selectPrimarySourcePage(selectedEvent.sourceText || selectedEvent.text, wikipediaPages) ||
+    wikipediaPages[0];
   if (primary) {
     selectedEvent.sourcePageTitle = primary.pageTitle || selectedEvent.sourcePageTitle;
     selectedEvent.sourceExtract = primary.extract || selectedEvent.sourceExtract;
@@ -7489,6 +7876,8 @@ function compactSourcePagesForIndex(content) {
       ...(Array.isArray(page.supportedClaims) && page.supportedClaims.length > 0
         ? { supportedClaims: page.supportedClaims.slice(0, 3) }
         : {}),
+      ...(page.verifiedIndependent === true ? { verifiedIndependent: true } : {}),
+      ...(page.verificationMethod ? { verificationMethod: page.verificationMethod } : {}),
     }))
     .filter((page) => page.pageTitle || page.pageUrl);
 }

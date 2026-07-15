@@ -867,41 +867,130 @@ ${faqItems}
   </section>`;
 }
 
-// Maps each pillar to a third authority link (Britannica + History.com are always present).
-const PILLAR_AUTHORITY_EXTRA = {
-  "Science & Technology":    { name: "NASA",             url: (q) => `https://www.nasa.gov/search/?q=${q}` },
-  "Exploration & Discovery": { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
-  "Health & Medicine":       { name: "MedlinePlus (NIH)",url: (q) => `https://medlineplus.gov/search/?query=${q}` },
-  "Arts & Culture":          { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
-  "Sports":                  { name: "Olympics",         url: (q) => `https://olympics.com/en/search?q=${q}` },
-  "Social & Human Rights":   { name: "PBS",              url: (q) => `https://www.pbs.org/search/?q=${q}` },
-  "Disasters & Accidents":   { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
-  "War & Conflict":          { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
-  "Politics & Government":   { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
-  "Economy & Business":      { name: "Khan Academy",     url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` },
-  "Famous Persons":          { name: "Smithsonian",      url: (q) => `https://www.si.edu/search?q=${q}` },
-};
+const SOURCE_SEARCH_HOSTS = new Set([
+  "google.com",
+  "www.google.com",
+  "bing.com",
+  "www.bing.com",
+  "duckduckgo.com",
+  "search.yahoo.com",
+]);
+const SOURCE_SEARCH_PARAM_NAMES = new Set([
+  "q",
+  "query",
+  "search",
+  "search_query",
+  "page_search_query",
+  "keyword",
+  "keywords",
+]);
 
-function buildAuthorityLinksBlock(content, pillars = []) {
-  const query = encodeURIComponent(
-    String(content.eventTitle || "").replace(/[^\w\s]/g, " ").trim().substring(0, 80),
+function isDirectCitationUrl(value) {
+  let parsed;
+  try {
+    parsed = new URL(String(value || "").trim());
+  } catch {
+    return false;
+  }
+  if (!/^https?:$/.test(parsed.protocol)) return false;
+  const hostname = parsed.hostname.toLowerCase();
+  if (!hostname || SOURCE_SEARCH_HOSTS.has(hostname) || hostname === "example.com") {
+    return false;
+  }
+  const path = parsed.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  if (path === "/" || /(?:^|\/)search(?:\/|$|\.)/.test(path)) return false;
+  if (hostname.endsWith("wikipedia.org") && !/^\/wiki\/[^/]+/.test(path)) {
+    return false;
+  }
+  for (const key of parsed.searchParams.keys()) {
+    if (SOURCE_SEARCH_PARAM_NAMES.has(key.toLowerCase())) return false;
+  }
+  if (/^#(?:q|query|search)=/i.test(parsed.hash)) return false;
+  return true;
+}
+
+function sourcePublisherName(value) {
+  let hostname = "";
+  try {
+    hostname = new URL(String(value || "")).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "Source";
+  }
+  if (hostname.endsWith("wikipedia.org")) return "Wikipedia";
+  if (hostname === "britannica.com") return "Encyclopædia Britannica";
+  if (hostname === "history.com") return "History.com";
+  if (hostname === "si.edu") return "Smithsonian Institution";
+  if (hostname === "nasa.gov") return "NASA";
+  return hostname || "Source";
+}
+
+function directCitationPagesFromContent(content, limit = 6) {
+  return sourcePagesFromContent(content)
+    .filter((page) => isDirectCitationUrl(page.pageUrl))
+    .slice(0, limit);
+}
+
+function validateDirectCitationsForPublish(
+  content,
+  { minimumSources = 1, minimumIndependentPublishers = 1 } = {},
+) {
+  const allSources = sourcePagesFromContent(content);
+  const invalidSources = allSources.filter(
+    (page) => page.pageUrl && !isDirectCitationUrl(page.pageUrl),
   );
-  const extra = PILLAR_AUTHORITY_EXTRA[pillars[0] || ""] ||
-    { name: "Khan Academy", url: (q) => `https://www.khanacademy.org/search?search_again=1&page_search_query=${q}` };
+  const directSources = allSources.filter((page) => isDirectCitationUrl(page.pageUrl));
+  const publishers = new Set(
+    directSources.map((page) => {
+      try {
+        return new URL(page.pageUrl).hostname.toLowerCase().replace(/^www\./, "");
+      } catch {
+        return "";
+      }
+    }).filter(Boolean),
+  );
+  const reasons = [];
+  if (invalidSources.length > 0) {
+    reasons.push(
+      `source list contains search, homepage, placeholder, or invalid URLs: ${invalidSources.map((page) => page.pageUrl).join(" | ")}`,
+    );
+  }
+  if (directSources.length < minimumSources) {
+    reasons.push(`only ${directSources.length} direct source page(s); needs ${minimumSources}`);
+  }
+  if (publishers.size < minimumIndependentPublishers) {
+    reasons.push(
+      `only ${publishers.size} independent source publisher(s); needs ${minimumIndependentPublishers}`,
+    );
+  }
+  return { ok: reasons.length === 0, reasons, sources: directSources };
+}
 
-  const links = [
-    { name: "Encyclopædia Britannica", url: `https://www.britannica.com/search?query=${query}` },
-    { name: "History.com",             url: `https://www.history.com/search#q=${query}` },
-    { name: extra.name,                url: extra.url(query) },
-  ];
+function buildAuthorityLinksBlock(content, _pillars = []) {
+  const links = directCitationPagesFromContent(content);
+  if (links.length === 0) return "";
 
   const chips = links
-    .map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" class="authority-link">${esc(l.name)}</a>`)
+    .map((source) => {
+      const publisher = source.publisher || sourcePublisherName(source.pageUrl);
+      const title = source.pageTitle || publisher;
+      const label = title === publisher ? title : `${title} · ${publisher}`;
+      return `<a href="${esc(source.pageUrl)}" target="_blank" rel="noopener noreferrer" class="authority-link">${esc(label)}</a>`;
+    })
     .join("");
+  const wikipediaLicense = links.some((source) => {
+    try {
+      return new URL(source.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
+    } catch {
+      return false;
+    }
+  })
+    ? `<small class="article-meta" style="display:block;margin-top:10px">Wikipedia text is available under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.</small>`
+    : "";
 
   return `<div class="authority-links mt-3 mb-4">
-    <span class="authority-links-label">Learn more at trusted sources</span>
+    <span class="authority-links-label">Sources used for this article</span>
     <div class="authority-links-row">${chips}</div>
+    ${wikipediaLicense}
   </div>`;
 }
 
@@ -6121,6 +6210,23 @@ async function generateAndStore(
       );
     }
 
+    const citationValidation = validateDirectCitationsForPublish(content);
+    if (!citationValidation.ok) {
+      const reason = citationValidation.reasons.join("; ");
+      attemptFailures.push(`attempt ${attempt} citations: ${reason}`);
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        console.warn(
+          `Blog AI: direct-citation contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await generateArticleContent(avoid, true);
+        continue;
+      }
+      throw new Error(
+        `Article failed direct-citation contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
+      );
+    }
+
     try {
       assertRequiredContentBlocks(content);
     } catch (err) {
@@ -6163,6 +6269,12 @@ async function generateAndStore(
           if (!chunkedSemantics.ok) {
             throw new Error(
               `semantic publication contract failed: ${chunkedSemantics.reasons.join("; ")}`,
+            );
+          }
+          const chunkedCitations = validateDirectCitationsForPublish(chunked);
+          if (!chunkedCitations.ok) {
+            throw new Error(
+              `direct-citation contract failed: ${chunkedCitations.reasons.join("; ")}`,
             );
           }
           assertRequiredContentBlocks(chunked);
@@ -6839,6 +6951,12 @@ async function savePublishedPost(
       `Refusing to publish ${slug}: semantic publication contract failed — ${semanticValidation.reasons.join("; ")}`,
     );
   }
+  const citationValidation = validateDirectCitationsForPublish(content);
+  if (!citationValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
+    );
+  }
   // Final publication gate: enrichment is allowed to retry transient image
   // failures, but public HTML must never be written without a working Wikimedia
   // hero. This also protects callers that bypass the normal generation path.
@@ -7055,6 +7173,12 @@ async function enrichPublishedPost(env, slug) {
       `Refusing to publish ${slug}: semantic publication contract failed — ${semanticValidation.reasons.join("; ")}`,
     );
   }
+  const citationValidation = validateDirectCitationsForPublish(enriched);
+  if (!citationValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
+    );
+  }
 
   if (groundingSource) {
     await chk("pre-final-grounding");
@@ -7189,9 +7313,25 @@ function normalizeSourcePage(page) {
     page.thumbnail?.source ||
     "",
   ).trim();
+  const publisher = String(
+    page.publisher || page.siteName || sourcePublisherName(pageUrl),
+  ).replace(/\s+/g, " ").trim();
+  const accessedAt = String(
+    page.accessedAt || page.accessDate || page.dateAccessed || "",
+  ).trim();
+  const supportedClaims = (Array.isArray(page.supportedClaims)
+    ? page.supportedClaims
+    : [page.supportedClaim || page.claim || ""]
+  )
+    .map((claim) => String(claim || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 6);
   return {
     pageTitle: pageTitle || wikiTitleFromUrl(pageUrl),
     pageUrl,
+    ...(publisher ? { publisher } : {}),
+    ...(accessedAt ? { accessedAt } : {}),
+    ...(supportedClaims.length > 0 ? { supportedClaims } : {}),
     ...(extract ? { extract } : {}),
     ...(text ? { text } : {}),
     ...(description ? { description } : {}),
@@ -7285,6 +7425,8 @@ async function expandSelectedEventSourcePages(selectedEvent) {
 
 function sourcePagesFromContent(content) {
   const pages = [];
+  if (Array.isArray(content?.citations)) pages.push(...content.citations);
+  if (Array.isArray(content?.sources)) pages.push(...content.sources);
   if (Array.isArray(content?.sourcePages)) pages.push(...content.sourcePages);
   if (content?.sourcePageTitle || content?.sourceText || content?.sourceExtract) {
     pages.push({
@@ -7305,6 +7447,7 @@ function sourcePagesFromContent(content) {
 
 function attachSelectedEventSourcePages(content, selectedEvent) {
   if (!content || !selectedEvent) return content;
+  const accessedAt = utcDateString();
   const sourcePages = normalizeSourcePages(
     selectedEvent.sourcePages?.length
       ? selectedEvent.sourcePages
@@ -7314,12 +7457,24 @@ function attachSelectedEventSourcePages(content, selectedEvent) {
           text: selectedEvent.sourceText,
           extract: selectedEvent.sourceExtract,
         }],
-  );
+  ).map((page, index) => ({
+    ...page,
+    publisher: page.publisher || sourcePublisherName(page.pageUrl),
+    accessedAt: page.accessedAt || accessedAt,
+    ...(index === 0 && selectedEvent.sourceText
+      ? { supportedClaims: [String(selectedEvent.sourceText).replace(/\s+/g, " ").trim().slice(0, 500)] }
+      : {}),
+  }));
   if (sourcePages.length > 0) content.sourcePages = sourcePages;
   if (selectedEvent.sourcePageTitle) content.sourcePageTitle = selectedEvent.sourcePageTitle;
   if (selectedEvent.sourceText) content.sourceText = selectedEvent.sourceText;
   if (selectedEvent.sourceExtract) content.sourceExtract = selectedEvent.sourceExtract;
-  if (selectedEvent.wikiUrl && !content.wikiUrl) content.wikiUrl = selectedEvent.wikiUrl;
+  if (selectedEvent.wikiUrl) {
+    // The selected feed page is authoritative. Never preserve an AI-supplied
+    // placeholder, search URL, or different page over this exact source URL.
+    content.wikiUrl = selectedEvent.wikiUrl;
+    content.jsonLdUrl = selectedEvent.wikiUrl;
+  }
   return content;
 }
 
@@ -7329,6 +7484,11 @@ function compactSourcePagesForIndex(content) {
     .map((page) => ({
       pageTitle: page.pageTitle,
       pageUrl: page.pageUrl,
+      ...(page.publisher ? { publisher: page.publisher } : {}),
+      ...(page.accessedAt ? { accessedAt: page.accessedAt } : {}),
+      ...(Array.isArray(page.supportedClaims) && page.supportedClaims.length > 0
+        ? { supportedClaims: page.supportedClaims.slice(0, 3) }
+        : {}),
     }))
     .filter((page) => page.pageTitle || page.pageUrl);
 }
@@ -13381,15 +13541,6 @@ ${analysisBadItems}
               : ""
           }
 
-          <!-- Wikipedia source -->
-          <div class="mt-4 p-3 rounded" style="background-color: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08);">
-            <small class="article-meta">
-              Want to learn more? Read the full article on
-              <a href="${esc(c.wikiUrl || c.jsonLdUrl)}" target="_blank" rel="noopener noreferrer">Wikipedia</a>.
-              Historical data sourced under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.
-            </small>
-          </div>
-
           ${(() => {
             const others = allPosts.filter((p) => p.slug !== slug);
             // Prefer posts that share at least one pillar with the current article.
@@ -13466,8 +13617,7 @@ ${analysisBadItems}
             <span class="article-meta">
               This article was researched and drafted with AI assistance, then reviewed for factual accuracy by the
               <a href="/about/editorial/" rel="author">thisDay. editorial team</a>.
-              Historical source: <a href="${esc(c.wikiUrl || c.jsonLdUrl)}" target="_blank" rel="noopener noreferrer">Wikipedia</a>
-              (licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>).
+              The direct historical sources used for the central event are listed above.
               Images via <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.
               Found an error? <a href="/contact/">Let us know</a>.
             </span>
@@ -14746,14 +14896,20 @@ function normalizeArticleLayoutHtml(body) {
           ${html.slice(amazonRelatedRange.end)}`;
   }
 
-  // Keep trusted-source links at the bottom of the article, immediately after
+  // Keep direct-source links at the bottom of the article, immediately after
   // the Test Your Knowledge CTA. This also repairs older stored posts whose
   // authority block was rendered near the overview.
-  const trustedSourcesRange = findDivBlockRangeContaining(
-    html,
-    "Learn more at trusted sources",
-    /\bclass="[^"]*\bauthority-links\b/i,
-  );
+  const trustedSourcesRange =
+    findDivBlockRangeContaining(
+      html,
+      "Sources used for this article",
+      /\bclass="[^"]*\bauthority-links\b/i,
+    ) ||
+    findDivBlockRangeContaining(
+      html,
+      "Learn more at trusted sources",
+      /\bclass="[^"]*\bauthority-links\b/i,
+    );
   const quizCtaRange = findDivBlockRangeContaining(
     html,
     "Test Your Knowledge",

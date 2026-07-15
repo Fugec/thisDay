@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * Read-only content inventory quality audit.
+ * Content inventory quality audit. Read-only by default.
  *
  * Production safety:
  *   - Reads BLOG_AI_KV through Cloudflare's GET-only REST value endpoint.
  *   - Never calls public Worker page routes, because some GET handlers can
  *     hydrate entities or repair stored HTML as a side effect.
- *   - Never writes KV, redirects, sitemaps, robots directives, or page HTML.
+ *   - Never writes KV, redirects, sitemaps, robots directives, or page HTML
+ *     unless the explicit repair-plan apply command and confirmation flag are
+ *     both supplied.
  *   - Writes generated reports only under the local documentation directory.
  *
  * Inputs:
@@ -24,6 +26,9 @@
  *   node tools/content-inventory-audit.js
  *   node tools/content-inventory-audit.js --backlinks path/to/export.csv
  *   node tools/content-inventory-audit.js --repair-plan-limit 10
+ *   node tools/content-inventory-audit.js \
+ *     --apply-repair-plan documentation/quality/legacy-safe-repair-plan-.../manifest.json \
+ *     --apply-limit 3 --confirm-production-write
  */
 
 import {
@@ -36,7 +41,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -172,6 +177,9 @@ function parseArgs(argv) {
     outputDir: DEFAULT_OUTPUT_DIR,
     noKv: false,
     repairPlanLimit: 0,
+    applyRepairPlan: "",
+    applyLimit: 0,
+    confirmProductionWrite: false,
     help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -187,8 +195,28 @@ function parseArgs(argv) {
       }
       options.repairPlanLimit = limit;
     }
+    else if (arg === "--apply-repair-plan") options.applyRepairPlan = resolve(argv[++i] || "");
+    else if (arg === "--apply-limit") {
+      const limit = Number(argv[++i]);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+        throw new Error("--apply-limit must be an integer from 1 to 10");
+      }
+      options.applyLimit = limit;
+    }
+    else if (arg === "--confirm-production-write") options.confirmProductionWrite = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
+  }
+  if (options.applyRepairPlan) {
+    if (!options.applyLimit) throw new Error("--apply-repair-plan requires --apply-limit N");
+    if (!options.confirmProductionWrite) {
+      throw new Error("--apply-repair-plan requires --confirm-production-write");
+    }
+    if (options.repairPlanLimit || options.noKv) {
+      throw new Error("Repair-plan creation/read-only flags cannot be combined with apply mode");
+    }
+  } else if (options.applyLimit || options.confirmProductionWrite) {
+    throw new Error("--apply-limit and --confirm-production-write require --apply-repair-plan PATH");
   }
   return options;
 }
@@ -205,9 +233,16 @@ Options:
                     Generate before/after snapshots and exact unified diffs
                     for up to N metadata-only legacy repairs (1-50). GET-only;
                     never applies the plans to production KV.
+  --apply-repair-plan PATH
+                    Apply a previously generated manifest after re-reading and
+                    hash-checking each live KV value. Production write mode.
+  --apply-limit N   Apply only the first N manifest entries (1-10).
+  --confirm-production-write
+                    Required explicit acknowledgement for apply mode.
   -h, --help        Show this help.
 
-The script never calls public page routes and contains no production write path.`);
+The script never calls public page routes. The audit and planning modes are GET-only;
+production writes are available only through the separately confirmed apply mode.`);
 }
 
 function parseEnvFile(path) {
@@ -451,6 +486,32 @@ async function readKvValue(env, key, { json = false } = {}) {
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Cloudflare KV GET ${key} failed: HTTP ${response.status}`);
   return json ? response.json() : response.text();
+}
+
+async function writeKvValue(env, key, value) {
+  if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
+    throw new Error("Missing CF_ACCOUNT_ID / CF_API_TOKEN in youtube-upload/.env");
+  }
+  const url =
+    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}` +
+    `/storage/kv/namespaces/${BLOG_KV_NAMESPACE}/values/${encodeURIComponent(key)}`;
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
+      "Content-Type": "text/html; charset=utf-8",
+    },
+    body: value,
+  });
+  const responseText = await response.text();
+  if (!response.ok) throw new Error(`Cloudflare KV PUT ${key} failed: HTTP ${response.status}`);
+  try {
+    const payload = JSON.parse(responseText);
+    if (payload?.success === false) throw new Error(`Cloudflare KV PUT ${key} was rejected`);
+  } catch (error) {
+    if (error instanceof SyntaxError) return;
+    throw error;
+  }
 }
 
 async function mapLimit(values, concurrency, mapper) {
@@ -2013,6 +2074,174 @@ function writeLegacySafeRepairPlan(
   };
 }
 
+function assertPathInside(root, path, label) {
+  const fullPath = resolve(root, path || "");
+  if (fullPath !== root && !fullPath.startsWith(`${root}${sep}`)) {
+    throw new Error(`${label} escapes the allowed artifact root`);
+  }
+  return fullPath;
+}
+
+function exactHtmlSurface(html, pattern) {
+  return String(html || "").match(pattern)?.[0] || "";
+}
+
+function assertMetadataOnlyProposal(beforeHtml, proposedHtml, plan) {
+  const requestedCodes = (plan.applied || []).map((entry) => entry.code).filter(Boolean);
+  if (!requestedCodes.length) throw new Error(`${plan.kvKey} has no declared repair actions`);
+  const regenerated = applyDeterministicLegacyRepairs(beforeHtml, {
+    url: plan.url,
+    requestedCodes,
+  });
+  if (regenerated.html !== proposedHtml) {
+    throw new Error(`${plan.kvKey} proposal does not match the deterministic transformers`);
+  }
+
+  const beforeBody = exactHtmlSurface(beforeHtml, /<body\b[^>]*>[\s\S]*<\/body\s*>/i);
+  const proposedBody = exactHtmlSurface(proposedHtml, /<body\b[^>]*>[\s\S]*<\/body\s*>/i);
+  if (!beforeBody || beforeBody !== proposedBody) {
+    throw new Error(`${plan.kvKey} proposal changes the visible document body`);
+  }
+
+  const beforeTitle = exactHtmlSurface(beforeHtml, /<title\b[^>]*>[\s\S]*?<\/title\s*>/i);
+  const proposedTitle = exactHtmlSurface(proposedHtml, /<title\b[^>]*>[\s\S]*?<\/title\s*>/i);
+  if (beforeTitle !== proposedTitle) throw new Error(`${plan.kvKey} proposal changes the title element`);
+
+  if (!requestedCodes.includes("missing_canonical")) {
+    const beforeCanonical = extractCanonical(beforeHtml);
+    const proposedCanonical = extractCanonical(proposedHtml);
+    if (beforeCanonical !== proposedCanonical) {
+      throw new Error(`${plan.kvKey} proposal changes the canonical URL`);
+    }
+  }
+}
+
+async function applyLegacySafeRepairPlan(
+  manifestPath,
+  {
+    limit,
+    confirmed = false,
+    env = null,
+    artifactRoot = ROOT,
+    generatedAt = new Date(),
+    readKv = null,
+    writeKv = null,
+  } = {},
+) {
+  if (!confirmed) throw new Error("Production repair apply requires explicit confirmation");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+    throw new Error("Repair apply limit must be an integer from 1 to 10");
+  }
+  const resolvedManifestPath = resolve(manifestPath || "");
+  if (!existsSync(resolvedManifestPath)) throw new Error(`Repair manifest not found: ${resolvedManifestPath}`);
+  const manifest = readJson(resolvedManifestPath, null);
+  if (!manifest || manifest.mode !== "GET-only dry run" || manifest.productionWrites !== 0) {
+    throw new Error("Refusing an invalid or non-dry-run repair manifest");
+  }
+  if (!Array.isArray(manifest.plans) || manifest.plans.length < limit) {
+    throw new Error(`Repair manifest contains fewer than ${limit} plans`);
+  }
+
+  const credentials = env || parseEnvFile(join(ROOT, "youtube-upload/.env"));
+  const kvRead = readKv || ((key) => readKvValue(credentials, key));
+  const kvWrite = writeKv || ((key, value) => writeKvValue(credentials, key, value));
+  const selectedPlans = manifest.plans.slice(0, limit);
+  const preflight = [];
+
+  // Validate the complete batch before the first write so a stale later entry
+  // cannot leave an avoidable partially applied batch.
+  for (const plan of selectedPlans) {
+    if (!/^post:[a-z0-9-]+$/.test(plan.kvKey || "") || !/^[a-z0-9-]+$/.test(plan.slug || "")) {
+      throw new Error("Repair manifest contains an unsafe KV key or slug");
+    }
+    if (plan.kvKey !== `post:${plan.slug}`) throw new Error(`${plan.kvKey} does not match its slug`);
+    const backupPath = assertPathInside(artifactRoot, plan.paths?.backup, `${plan.kvKey} backup path`);
+    const proposedPath = assertPathInside(artifactRoot, plan.paths?.proposed, `${plan.kvKey} proposed path`);
+    const plannedBackup = readFileSync(backupPath, "utf8");
+    const proposed = readFileSync(proposedPath, "utf8");
+    if (sha256(plannedBackup) !== plan.beforeSha256) {
+      throw new Error(`${plan.kvKey} planned backup hash does not match the manifest`);
+    }
+    if (sha256(proposed) !== plan.afterSha256) {
+      throw new Error(`${plan.kvKey} proposed hash does not match the manifest`);
+    }
+    assertMetadataOnlyProposal(plannedBackup, proposed, plan);
+    const live = await kvRead(plan.kvKey);
+    if (live == null) throw new Error(`${plan.kvKey} is missing from live KV`);
+    const liveSha256 = sha256(live);
+    if (liveSha256 !== plan.beforeSha256) {
+      throw new Error(`${plan.kvKey} live hash changed; refusing the complete batch`);
+    }
+    preflight.push({ plan, proposed });
+  }
+
+  const stamp = generatedAt.toISOString().replace(/[:.]/g, "-");
+  const applyDir = join(dirname(resolvedManifestPath), `live-apply-${stamp}`);
+  const backupDir = join(applyDir, "backups");
+  mkdirSync(backupDir, { recursive: true });
+  const reportPath = join(applyDir, "result.json");
+  const report = {
+    startedAt: generatedAt.toISOString(),
+    manifestPath: relative(ROOT, resolvedManifestPath),
+    mode: "confirmed production KV metadata repair",
+    requestedValues: limit,
+    productionWrites: 0,
+    publicPageFetches: 0,
+    completed: [],
+  };
+
+  try {
+    for (const { plan, proposed } of preflight) {
+      // Re-read immediately before this write. The just-read value is also the
+      // byte-for-byte recovery backup for this specific operation.
+      const live = await kvRead(plan.kvKey);
+      const liveSha256 = sha256(live);
+      if (liveSha256 !== plan.beforeSha256) {
+        throw new Error(`${plan.kvKey} changed after preflight; refusing this and later writes`);
+      }
+      const liveBackupPath = join(backupDir, `${plan.kvKey.replace(":", "-")}.html`);
+      writeFileSync(liveBackupPath, live);
+      if (sha256(readFileSync(liveBackupPath, "utf8")) !== liveSha256) {
+        throw new Error(`${plan.kvKey} live backup verification failed`);
+      }
+
+      await kvWrite(plan.kvKey, proposed);
+      report.productionWrites += 1;
+
+      let verified = false;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const stored = await kvRead(plan.kvKey);
+        if (sha256(stored) === plan.afterSha256) {
+          verified = true;
+          break;
+        }
+        if (attempt < 5) await new Promise((done) => setTimeout(done, 1000));
+      }
+      if (!verified) throw new Error(`${plan.kvKey} write completed but its after-hash could not be verified`);
+      report.completed.push({
+        slug: plan.slug,
+        kvKey: plan.kvKey,
+        beforeSha256: plan.beforeSha256,
+        afterSha256: plan.afterSha256,
+        backup: relative(ROOT, liveBackupPath),
+        actions: plan.applied.map((entry) => entry.code),
+        verified: true,
+      });
+      writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    }
+  } catch (error) {
+    report.failedAt = new Date().toISOString();
+    report.failure = error.message;
+    writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    error.applyReportPath = reportPath;
+    throw error;
+  }
+
+  report.completedAt = new Date().toISOString();
+  writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  return { applyDir, reportPath, ...report };
+}
+
 function serializableItem(item) {
   return {
     ...item,
@@ -2151,6 +2380,17 @@ async function main() {
     printHelp();
     return;
   }
+  if (options.applyRepairPlan) {
+    const result = await applyLegacySafeRepairPlan(options.applyRepairPlan, {
+      limit: options.applyLimit,
+      confirmed: options.confirmProductionWrite,
+    });
+    console.log("\nConfirmed legacy metadata repair batch complete.");
+    console.log(`KV values written and verified: ${result.completed.length}`);
+    console.log(`Production writes: ${result.productionWrites}; public page fetches: ${result.publicPageFetches}`);
+    console.log(`Result: ${result.reportPath}`);
+    return;
+  }
   const result = await runAudit(options);
   const counts = countBy(result.items, (item) => item.classification);
   console.log("\nRead-only inventory quality audit complete.");
@@ -2177,6 +2417,7 @@ if (isCli) {
 }
 
 export {
+  applyLegacySafeRepairPlan,
   auditHtml,
   applyDeterministicLegacyRepairs,
   buildInventory,

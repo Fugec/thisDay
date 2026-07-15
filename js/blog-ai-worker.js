@@ -38,6 +38,10 @@ import {
   aiUsageSummary,
 } from "./shared/ai-call.js";
 import { extractFirstSentence, truncateForMeta, splitSentences, normalizeForCompare } from "./shared/seo-text.js";
+import {
+  getEvidenceBasedTopicHubMatches,
+  selectTopicallyRelatedPosts,
+} from "./shared/topic-relevance.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -513,69 +517,6 @@ const AI_REFERRER_SOURCES = [
   },
 ];
 
-const ARTICLE_TOPIC_HUBS = [
-  {
-    slug: "world-war-ii",
-    title: "World War II",
-    keywords: ["world war ii", "second world war", "wwii", "nazi", "axis", "allied"],
-    pillars: ["War & Conflict"],
-  },
-  {
-    slug: "cold-war",
-    title: "Cold War",
-    keywords: ["cold war", "soviet", "berlin wall", "cuban missile crisis", "communist"],
-    pillars: ["War & Conflict", "Politics & Government"],
-  },
-  {
-    slug: "french-revolution",
-    title: "French Revolution",
-    keywords: ["french revolution", "robespierre", "bastille", "napoleon", "jacobin"],
-    pillars: ["Politics & Government", "War & Conflict"],
-  },
-  {
-    slug: "roman-empire",
-    title: "Roman Empire",
-    keywords: ["roman empire", "rome", "roman", "caesar", "augustus", "constantinople"],
-    pillars: ["Politics & Government", "War & Conflict"],
-  },
-  {
-    slug: "space-exploration",
-    title: "Space Exploration",
-    keywords: ["space", "apollo", "nasa", "astronaut", "moon", "rocket", "satellite"],
-    pillars: ["Science & Technology", "Exploration & Discovery"],
-  },
-  {
-    slug: "civil-rights",
-    title: "Civil Rights",
-    keywords: ["civil rights", "segregation", "suffrage", "voting rights", "human rights"],
-    pillars: ["Social & Human Rights", "Politics & Government"],
-  },
-  {
-    slug: "medical-breakthroughs",
-    title: "Medical Breakthroughs",
-    keywords: ["vaccine", "medicine", "medical", "pandemic", "epidemic", "surgery"],
-    pillars: ["Health & Medicine", "Science & Technology", "Disasters & Accidents"],
-  },
-  {
-    slug: "exploration-and-discovery",
-    title: "Exploration and Discovery",
-    keywords: ["expedition", "voyage", "explorer", "navigator", "discovery", "polar", "pacific", "atlantic"],
-    pillars: ["Exploration & Discovery"],
-  },
-];
-
-// Maps each blog pillar to the hub slugs that best represent it.
-// Used as the primary (pillar-first) signal before keyword fallback.
-const PILLAR_TO_HUB_SLUGS = {
-  "War & Conflict":          ["world-war-ii", "cold-war", "french-revolution"],
-  "Politics & Government":   ["cold-war", "civil-rights", "french-revolution"],
-  "Science & Technology":    ["space-exploration", "medical-breakthroughs"],
-  "Health & Medicine":       ["medical-breakthroughs"],
-  "Exploration & Discovery": ["exploration-and-discovery", "space-exploration"],
-  "Social & Human Rights":   ["civil-rights"],
-  "Disasters & Accidents":   ["medical-breakthroughs"],
-};
-
 // Per-pillar question heading sets. Each entry is [overview, eyewitness, aftermath, legacy].
 // Falls back to the "default" set for pillars not listed here.
 const PILLAR_QUESTION_HEADINGS = {
@@ -673,46 +614,11 @@ function normalizeTopicMatchText(value) {
     .trim();
 }
 
-// Returns up to `limit` hub objects for an article.
-// Primary signal: pillars (AI-classified, reliable).
-// Fallback signal: keyword match against title/description/keyTerms/quickFacts.
-function getArticleTopicHubMatches(content, limit = 3, pillars = []) {
-  const seen = new Set();
-  const results = [];
-
-  // Pillar-first: deterministic match from AI classification
-  for (const pillar of pillars) {
-    const slugs = PILLAR_TO_HUB_SLUGS[pillar] || [];
-    for (const slug of slugs) {
-      if (!seen.has(slug)) {
-        const hub = ARTICLE_TOPIC_HUBS.find((h) => h.slug === slug);
-        if (hub) { seen.add(slug); results.push(hub); }
-      }
-      if (results.length >= limit) return results;
-    }
-  }
-
-  // Keyword fallback: catches specific topics not covered by pillar mapping
-  const haystack = normalizeTopicMatchText(
-    [
-      content?.title,
-      content?.eventTitle,
-      content?.description,
-      ...(Array.isArray(content?.keyTerms) ? content.keyTerms.map((kt) => kt?.term || "") : []),
-      ...(content?.quickFacts || []).map((f) => `${f?.label || ""} ${f?.value || ""}`),
-    ].join(" "),
-  );
-  if (haystack) {
-    for (const hub of ARTICLE_TOPIC_HUBS) {
-      if (!seen.has(hub.slug) && hub.keywords.some((kw) => haystack.includes(normalizeTopicMatchText(kw)))) {
-        seen.add(hub.slug);
-        results.push(hub);
-        if (results.length >= limit) break;
-      }
-    }
-  }
-
-  return results;
+// Returns only narrow hubs supported by explicit phrases, named entities, or
+// a matching historical period plus multiple topic terms. Broad pillars are
+// deliberately ignored because "War & Conflict" is not evidence of WWII.
+function getArticleTopicHubMatches(content, limit = 3, _pillars = []) {
+  return getEvidenceBasedTopicHubMatches(content, limit);
 }
 
 // Returns 4 question heading strings tuned to the article's dominant pillar.
@@ -7100,6 +7006,7 @@ async function savePublishedPost(
   }
 
   const deduped = [...existingIndex].filter((e) => e.slug !== slug);
+  const topicHubs = getArticleTopicHubMatches(content, 3).map((hub) => hub.slug);
   const entry = {
     slug,
     title: content.title,
@@ -7115,6 +7022,7 @@ async function savePublishedPost(
     ...(compactSourcePagesForIndex(content).length > 0 ? { sourcePages: compactSourcePagesForIndex(content) } : {}),
     ...(content.sourcePageTitle ? { sourcePageTitle: content.sourcePageTitle } : {}),
     ...(safePillars.length > 0 ? { pillars: safePillars } : {}),
+    ...(topicHubs.length > 0 ? { topicHubs } : {}),
     ...(content.contentRationale ? { contentRationale: content.contentRationale } : {}),
   };
   deduped.unshift(entry);
@@ -13931,36 +13839,16 @@ ${analysisBadItems}
           }
 
           ${(() => {
-            const others = allPosts.filter((p) => p.slug !== slug);
-            // Prefer posts that share at least one pillar with the current article.
-            // Sort by overlap count descending, fill remainder from most recent.
-            let related;
-            if (currentPillars.length > 0) {
-              const withOverlap = others
-                .map((p) => ({
-                  p,
-                  overlap: Array.isArray(p.pillars)
-                    ? p.pillars.filter((pl) => currentPillars.includes(pl))
-                        .length
-                    : 0,
-                }))
-                .sort((a, b) => b.overlap - a.overlap);
-              const matching = withOverlap
-                .filter((x) => x.overlap > 0)
-                .map((x) => x.p)
-                .slice(0, 3);
-              if (matching.length < 3) {
-                const seen = new Set(matching.map((p) => p.slug));
-                const rest = others
-                  .filter((p) => !seen.has(p.slug))
-                  .slice(0, 3 - matching.length);
-                related = [...matching, ...rest];
-              } else {
-                related = matching;
-              }
-            } else {
-              related = others.slice(0, 3); // no pillar data yet — fall back to most recent
-            }
+            // A shared broad pillar is only a tie-breaker. A card is eligible
+            // only when hubs, named terms, or at least two topical terms overlap.
+            // Empty slots remain empty instead of being padded with recent posts.
+            const related = selectTopicallyRelatedPosts(
+              c,
+              allPosts,
+              slug,
+              currentPillars,
+              3,
+            );
             const cards = related
               .map((p) => {
                 const relatedImageUrl = isProxyableArticleImageUrl(p.imageUrl) ? p.imageUrl : "";

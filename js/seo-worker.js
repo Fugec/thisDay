@@ -28,6 +28,12 @@ import {
   buildEventsDateTitle,
   splitSentences,
 } from "./shared/seo-text.js";
+import {
+  EVIDENCE_TOPIC_HUBS,
+  getEvidenceBasedTopicHubBySlug,
+  getEvidenceBasedTopicHubMatches,
+  scoreContentForTopicHub,
+} from "./shared/topic-relevance.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -347,168 +353,14 @@ const AI_REFERRER_SOURCES = [
   },
 ];
 
-const TOPIC_HUBS = [
-  {
-    slug: "world-war-ii",
-    title: "World War II",
-    summary:
-      "A topic hub for battles, invasions, political decisions, and turning points tied to the Second World War.",
-    keywords: [
-      "world war ii",
-      "second world war",
-      "wwii",
-      "nazi",
-      "hitler",
-      "allied",
-      "axis",
-      "d-day",
-      "normandy",
-      "stalingrad",
-      "holocaust",
-      "pearl harbor",
-    ],
-    pillars: ["War & Conflict", "Politics & Government"],
-  },
-  {
-    slug: "cold-war",
-    title: "Cold War",
-    summary:
-      "Articles about nuclear brinkmanship, proxy conflicts, espionage, and the rivalry that shaped the late twentieth century.",
-    keywords: [
-      "cold war",
-      "soviet",
-      "nato",
-      "warsaw pact",
-      "berlin wall",
-      "cuban missile crisis",
-      "arms race",
-      "communist",
-    ],
-    pillars: ["Politics & Government", "War & Conflict"],
-  },
-  {
-    slug: "french-revolution",
-    title: "French Revolution",
-    summary:
-      "A hub for uprisings, leaders, and political shocks connected to the French Revolution and the Napoleonic age.",
-    keywords: [
-      "french revolution",
-      "robespierre",
-      "bastille",
-      "napoleon",
-      "directory",
-      "jacobin",
-      "bourbon",
-    ],
-    pillars: ["Politics & Government", "War & Conflict"],
-  },
-  {
-    slug: "roman-empire",
-    title: "Roman Empire",
-    summary:
-      "A hub for emperors, conquests, collapses, and political dramas from the Roman world.",
-    keywords: [
-      "roman empire",
-      "rome",
-      "roman",
-      "caesar",
-      "augustus",
-      "constantinople",
-      "byzantine",
-      "republic",
-    ],
-    pillars: ["Politics & Government", "War & Conflict"],
-  },
-  {
-    slug: "space-exploration",
-    title: "Space Exploration",
-    summary:
-      "Launches, missions, disasters, discoveries, and the people who pushed human exploration beyond Earth.",
-    keywords: [
-      "space",
-      "apollo",
-      "nasa",
-      "cosmos",
-      "moon landing",
-      "astronaut",
-      "satellite",
-      "mars",
-      "rocket",
-    ],
-    pillars: ["Science & Technology", "Exploration & Discovery"],
-  },
-  {
-    slug: "civil-rights",
-    title: "Civil Rights",
-    summary:
-      "A topic hub for protests, landmark rulings, reform movements, and the people who fought for equal rights.",
-    keywords: [
-      "civil rights",
-      "segregation",
-      "abolition",
-      "suffrage",
-      "voting rights",
-      "freedom riders",
-      "human rights",
-      "desegregation",
-    ],
-    pillars: ["Social & Human Rights", "Politics & Government"],
-  },
-  {
-    slug: "medical-breakthroughs",
-    title: "Medical Breakthroughs",
-    summary:
-      "Discoveries, vaccines, surgeries, and public health turning points that changed how people lived and survived.",
-    keywords: [
-      "vaccine",
-      "medicine",
-      "medical",
-      "epidemic",
-      "pandemic",
-      "surgery",
-      "penicillin",
-      "hospital",
-    ],
-    pillars: ["Health & Medicine", "Science & Technology"],
-  },
-  {
-    slug: "exploration-and-discovery",
-    title: "Exploration and Discovery",
-    summary:
-      "Voyages, expeditions, maps, and discoveries that expanded what people thought the world could be.",
-    keywords: [
-      "expedition",
-      "voyage",
-      "exploration",
-      "discovery",
-      "navigator",
-      "polar",
-      "atlantic",
-      "pacific",
-    ],
-    pillars: ["Exploration & Discovery", "Science & Technology"],
-  },
-];
+const TOPIC_HUBS = EVIDENCE_TOPIC_HUBS;
 
 function getTopicHubBySlug(slug) {
-  return TOPIC_HUBS.find((hub) => hub.slug === slug) || null;
-}
-
-function normalizeTopicMatchText(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return getEvidenceBasedTopicHubBySlug(slug);
 }
 
 function getTopicHubMatches(sourceText = "", limit = 3) {
-  const haystack = normalizeTopicMatchText(sourceText);
-  if (!haystack) return [];
-
-  return TOPIC_HUBS.filter((hub) =>
-    hub.keywords.some((keyword) => haystack.includes(normalizeTopicMatchText(keyword))),
-  ).slice(0, limit);
+  return getEvidenceBasedTopicHubMatches(sourceText, limit);
 }
 
 function buildTopicHubLinks(sourceText = "", heading = "Explore Related Topics") {
@@ -2739,19 +2591,10 @@ ${getSharedPageScripts({ pageType: "keyword-archive", pageSlug: slug })}
 }
 
 function scorePostForTopicHub(post, hub) {
-  const haystack = normalizeTopicMatchText(
-    [post?.title, post?.description, post?.slug, ...(post?.pillars || [])].join(" "),
-  );
-  if (!haystack) return 0;
-
-  let score = 0;
-  for (const keyword of hub.keywords) {
-    if (haystack.includes(normalizeTopicMatchText(keyword))) score += 3;
-  }
-  for (const pillar of hub.pillars || []) {
-    if (Array.isArray(post?.pillars) && post.pillars.includes(pillar)) score += 2;
-  }
-  return score;
+  // Pillars describe broad editorial categories and do not establish narrow
+  // topic membership. The shared scorer requires explicit relationship terms
+  // or historical-period evidence plus multiple matching terms.
+  return scoreContentForTopicHub(post, hub);
 }
 
 function getPostsForTopicHub(posts, hub, limit = 12) {

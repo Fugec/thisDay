@@ -6868,7 +6868,13 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
     if (entitiesRaw) {
       for (const e of JSON.parse(entitiesRaw)) {
         // Skip unlinked persons (profileLinkEligible false means no public /people/ page).
-        if (e?.url && !(e.type === "person" && e.profileLinkEligible === false)) {
+        const eligibleHistoryEntity =
+          e?.type !== "event" || e.historyLinkEligible === true;
+        if (
+          e?.url &&
+          eligibleHistoryEntity &&
+          !(e.type === "person" && e.profileLinkEligible === false)
+        ) {
           indexNowUrls.push(`https://thisday.info${e.url}`);
         }
       }
@@ -7371,6 +7377,9 @@ async function savePublishedPost(
       imageUrl: e.imageUrl || "",
       url: e.url,
       wikiUrl: e.wikiUrl || "",
+      ...(e.type === "event"
+        ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(e) }
+        : {}),
       ...(e.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
       ...(e.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
       ...(e.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
@@ -7614,6 +7623,36 @@ function normalizeEntityType(type) {
   if (value === "person") return "person";
   if (value === "event") return "event";
   return null;
+}
+
+function entityContentWordCount(entity) {
+  return (Array.isArray(entity?.bodySections) ? entity.bodySections : [])
+    .flatMap((section) =>
+      Array.isArray(section?.paragraphs) ? section.paragraphs : [],
+    )
+    .join(" ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function isHistoryEntityDiscoveryLinkEligible(entity) {
+  if (!entity || entity.type !== "event") return false;
+  const name = String(entity.name || "").replace(/\s+/g, " ").trim();
+  const slug = String(entity.slug || "").trim();
+  if (
+    !entity.url ||
+    !String(entity.url).startsWith("/history/") ||
+    !entity.wikiUrl ||
+    !name ||
+    name.length > 96 ||
+    /^article-\d+$/i.test(slug) ||
+    /(?:^|-)(?:launch-?){2,}(?:-|$)/i.test(slug)
+  ) {
+    return false;
+  }
+  if (entity.historyLinkEligible === true) return true;
+  if (entity.historyLinkEligible === false) return false;
+  return entityContentWordCount(entity) >= 300;
 }
 
 function wikiTitleFromUrl(wikiUrl) {
@@ -9161,6 +9200,9 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       imageUrl: e.imageUrl || "",
       url: e.url,
       wikiUrl: e.wikiUrl || "",
+      ...(e.type === "event"
+        ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(e) }
+        : {}),
       ...(e.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
       ...(e.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
       ...(e.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
@@ -9252,8 +9294,11 @@ function buildArticleEntityStrip(entityMeta) {
   if (!Array.isArray(entityMeta) || entityMeta.length === 0) return "";
   const people = entityMeta.filter((e) => e.type === "person" && e.slug && e.name && !e.skipStrip);
   if (people.length === 0) return "";
+  const historyEntity = entityMeta.find((entity) =>
+    isHistoryEntityDiscoveryLinkEligible(entity),
+  );
 
-  const chips = people.map((e) => {
+  const personChips = people.map((e) => {
     // A name can be shown for context, but links require a verified substantive profile.
     const inner =
       `<span class="person-circle">${e.imageUrl
@@ -9265,8 +9310,12 @@ function buildArticleEntityStrip(entityMeta) {
       ? `<a href="${esc(e.url)}" class="person-pill">${inner}</a>`
       : `<span class="person-pill">${inner}</span>`;
   }).join("");
+  const historyChip = historyEntity
+    ? `<a href="${esc(historyEntity.url)}" class="story-topic-pill" data-history-entity-link="1" aria-label="Explore event: ${esc(historyEntity.name)}"><span class="story-topic-label">Explore</span><span>${esc(historyEntity.name)}</span></a>`
+    : "";
+  const chips = personChips + historyChip;
 
-  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:15px;font-weight:600;white-space:nowrap}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
+  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;align-items:center;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:15px;font-weight:600;white-space:nowrap}.story-topic-pill{display:inline-flex;align-items:center;gap:.5rem;flex:0 0 auto;max-width:360px;padding:.55rem .8rem;border:1px solid var(--border,#cfe0cf);border-radius:999px;background:var(--bg-alt,#f2f7f2);color:var(--btn-bg,#1b3a2d)!important;text-decoration:none!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.story-topic-pill span:last-child{overflow:hidden;text-overflow:ellipsis}.story-topic-label{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted,#5c7a65)}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
 
   return `${css}<div class="entity-strip" data-entity-strip="1"><h2 class="h3">People in this story</h2><div class="entity-person-chips">${chips}</div></div>`;
 }

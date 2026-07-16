@@ -52,6 +52,7 @@ const WINDOW_DAYS = 90;
 const SEARCH_ANALYTICS_PAGE_SIZE = 25_000;
 const INSPECTION_DAILY_LIMIT = 2_000;
 const INSPECTION_INTERVAL_MS = 125;
+const INSPECTION_CONCURRENCY = 96;
 const MIN_HUMAN_IMPR = 10;
 const WINNABLE = [5, 20];
 
@@ -392,39 +393,72 @@ async function collectUrlInspection(token, urls, {
   generatedAt = new Date().toISOString(),
   fetchImpl = fetch,
   intervalMs = INSPECTION_INTERVAL_MS,
+  concurrency = INSPECTION_CONCURRENCY,
 } = {}) {
   const uniqueUrls = [...new Set(urls.map(normalizeInspectionUrl).filter(Boolean))]
     .slice(0, limit);
-  const results = [];
-  const errors = [];
-  for (let index = 0; index < uniqueUrls.length; index += 1) {
-    const url = uniqueUrls[index];
-    console.log(`GSC inspection: ${index + 1}/${uniqueUrls.length} ${url}`);
-    try {
-      const response = await inspectUrl(token, url, fetchImpl);
-      results.push({ url, ...response });
-    } catch (error) {
-      errors.push({
-        url,
-        status: Number(error.status || 0),
-        message: error.message,
-      });
-      if (Number(error.status) === 401 || Number(error.status) === 403) throw error;
+  const results = new Array(uniqueUrls.length);
+  const errors = new Array(uniqueUrls.length);
+  let cursor = 0;
+  let nextStartAt = Date.now();
+  let fatalError = null;
+
+  const acquireRateLimit = async () => {
+    if (intervalMs <= 0) return;
+    const now = Date.now();
+    const scheduledAt = Math.max(now, nextStartAt);
+    nextStartAt = scheduledAt + intervalMs;
+    if (scheduledAt > now) await delay(scheduledAt - now);
+  };
+
+  const worker = async () => {
+    while (!fatalError && cursor < uniqueUrls.length) {
+      const index = cursor;
+      cursor += 1;
+      const url = uniqueUrls[index];
+      await acquireRateLimit();
+      if (index === 0 || (index + 1) % 25 === 0 || index === uniqueUrls.length - 1) {
+        console.log(`GSC inspection: ${index + 1}/${uniqueUrls.length} ${url}`);
+      }
+      try {
+        const response = await inspectUrl(token, url, fetchImpl);
+        results[index] = { url, ...response };
+      } catch (error) {
+        errors[index] = {
+          url,
+          status: Number(error.status || 0),
+          message: error.message,
+        };
+        if (Number(error.status) === 401 || Number(error.status) === 403) {
+          fatalError = error;
+        }
+      }
     }
-    if (intervalMs > 0 && index < uniqueUrls.length - 1) await delay(intervalMs);
-  }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.max(1, Math.min(concurrency, uniqueUrls.length)) },
+      worker,
+    ),
+  );
+  if (fatalError) throw fatalError;
+  const completedResults = results.filter(Boolean);
+  const completedErrors = errors.filter(Boolean);
   return {
     export: {
       property: PROPERTY,
       generatedAt,
       requestedUrls: urls.length,
       uniqueUrls: uniqueUrls.length,
-      inspectedUrls: results.length,
-      failedUrls: errors.length,
+      inspectedUrls: completedResults.length,
+      failedUrls: completedErrors.length,
       inspectionLimit: limit,
+      requestIntervalMs: intervalMs,
+      concurrency,
     },
-    results,
-    errors,
+    results: completedResults,
+    errors: completedErrors,
   };
 }
 
@@ -443,6 +477,24 @@ function positionBand(position) {
   if (position <= 20) return "11-20";
   if (position <= 50) return "21-50";
   return "51+";
+}
+
+function pageTypeFromUrl(value) {
+  const url = normalizeInspectionUrl(value);
+  if (!url) return "unknown";
+  const path = new URL(url).pathname;
+  if (path === "/") return "home";
+  if (path === "/blog/") return "blog index";
+  if (path === "/blog/archive/") return "blog archive";
+  if (/^\/blog\/topic\/[^/]+\/$/.test(path)) return "blog hub";
+  if (/^\/blog\/.+\/$/.test(path)) return "blog article";
+  if (/^\/events\/[^/]+\/\d{1,2}\/$/.test(path)) return "events date";
+  if (/^\/quiz\/[^/]+\/\d{1,2}\/$/.test(path)) return "quiz date";
+  if (/^\/born\/[^/]+\/\d{1,2}\/$/.test(path)) return "born date";
+  if (/^\/died\/[^/]+\/\d{1,2}\/$/.test(path)) return "died date";
+  if (/^\/people\/[^/]+\/$/.test(path)) return "person";
+  if (/^\/history\/[^/]+\/$/.test(path)) return "history";
+  return "core/other";
 }
 
 function countBy(values, keyFn) {
@@ -642,6 +694,94 @@ function buildReport({
     for (const verdict of ["PASS", "NEUTRAL", "FAIL", "VERDICT_UNSPECIFIED", "UNKNOWN"]) {
       if (verdicts.get(verdict)) lines.push(`| ${verdict} | ${verdicts.get(verdict)} |`);
     }
+    lines.push("");
+    lines.push("### Coverage by page type");
+    lines.push("");
+    const coverageByType = new Map();
+    const indexingByUrl = new Map();
+    for (const entry of indexing.results) {
+      const status = entry.inspectionResult?.indexStatusResult || {};
+      const type = pageTypeFromUrl(entry.url);
+      const coverage = status.coverageState || "Unknown";
+      const stats = coverageByType.get(type) || {
+        inspected: 0,
+        indexed: 0,
+        crawledNotIndexed: 0,
+        discoveredNotIndexed: 0,
+        unknown: 0,
+        other: 0,
+      };
+      stats.inspected += 1;
+      if (coverage === "Submitted and indexed") stats.indexed += 1;
+      else if (coverage === "Crawled - currently not indexed") stats.crawledNotIndexed += 1;
+      else if (coverage === "Discovered - currently not indexed") stats.discoveredNotIndexed += 1;
+      else if (coverage === "URL is unknown to Google") stats.unknown += 1;
+      else stats.other += 1;
+      coverageByType.set(type, stats);
+      indexingByUrl.set(normalizeInspectionUrl(entry.url), coverage);
+    }
+    lines.push("| Page type | Inspected | Indexed | Crawled, not indexed | Discovered, not indexed | Unknown to Google | Other |");
+    lines.push("|---|--:|--:|--:|--:|--:|--:|");
+    for (const [type, stats] of [...coverageByType].sort((a, b) => a[0].localeCompare(b[0]))) {
+      lines.push(`| ${type} | ${stats.inspected} | ${stats.indexed} | ${stats.crawledNotIndexed} | ${stats.discoveredNotIndexed} | ${stats.unknown} | ${stats.other} |`);
+    }
+    lines.push("");
+    lines.push("### High-impression pages currently not indexed");
+    lines.push("");
+    lines.push("_These page-level metrics include anonymous and bot/agent impressions. They are investigation leads, not snippet-edit candidates._");
+    lines.push("");
+    const nonIndexedWithImpressions = analytics.pages.rows
+      .map((row) => {
+        const url = normalizeInspectionUrl(row.keys?.[0]);
+        return {
+          url,
+          impressions: Number(row.impressions || 0),
+          clicks: Number(row.clicks || 0),
+          position: Number(row.position || 0),
+          coverage: indexingByUrl.get(url) || "",
+        };
+      })
+      .filter((row) => (
+        row.url &&
+        row.impressions >= 10 &&
+        row.coverage &&
+        row.coverage !== "Submitted and indexed"
+      ))
+      .sort((a, b) => b.impressions - a.impressions)
+      .slice(0, 20);
+    if (!nonIndexedWithImpressions.length) {
+      lines.push("None.");
+    } else {
+      lines.push("| Page | Coverage | Impr | Clicks | Pos |");
+      lines.push("|---|---|--:|--:|--:|");
+      for (const row of nonIndexedWithImpressions) {
+        lines.push(`| ${markdownCell(row.url.replace(SITE, ""))} | ${markdownCell(row.coverage)} | ${row.impressions.toFixed(0)} | ${row.clicks.toFixed(0)} | ${row.position.toFixed(1)} |`);
+      }
+    }
+    lines.push("");
+    lines.push("### Technical exceptions");
+    lines.push("");
+    const routineCoverage = new Set([
+      "Submitted and indexed",
+      "Crawled - currently not indexed",
+      "Discovered - currently not indexed",
+      "URL is unknown to Google",
+    ]);
+    const exceptions = indexing.results
+      .map((entry) => ({
+        url: entry.url,
+        status: entry.inspectionResult?.indexStatusResult || {},
+      }))
+      .filter((entry) => !routineCoverage.has(entry.status.coverageState || ""));
+    if (!exceptions.length) {
+      lines.push("None.");
+    } else {
+      lines.push("| Page | Coverage | Google canonical |");
+      lines.push("|---|---|---|");
+      for (const entry of exceptions) {
+        lines.push(`| ${markdownCell(entry.url.replace(SITE, ""))} | ${markdownCell(entry.status.coverageState || "Unknown")} | ${markdownCell((entry.status.googleCanonical || "").replace(SITE, ""))} |`);
+      }
+    }
   }
   lines.push("");
 
@@ -784,6 +924,7 @@ export {
   isBotQuery,
   loadInspectionUrls,
   normalizeInspectionUrl,
+  pageTypeFromUrl,
   parseArgs,
   positionBand,
   queryAllSearchAnalyticsRows,

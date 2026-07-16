@@ -58,6 +58,7 @@ const REPAIR_ATTEMPT_TTL = 60 * 60 * 24; // 1 day (featured-image, amazon-covers
 // healable still re-links on the very next view. (2026-06-26)
 const ENTITY_STRIP_REPAIR_TTL = 60 * 60 * 24 * 7; // 7 days
 const REPAIR_ATTEMPT_LIMIT = 2; // per slug, per repair type, per TTL window
+const WIKIDATA_HUMAN_ENTITY_ID = "Q5";
 
 async function callPublicationGateAI(env, messages, options = {}) {
   // Local-test guard: the Workers AI 10k-neurons/day pool is ACCOUNT-wide,
@@ -4829,6 +4830,13 @@ async function maybeGenerateBlogPost(env, ctx) {
             const entity = JSON.parse(entityRaw);
             const freshWiki = await fetchWikipediaEntityData({ wikiUrl: entity.wikiUrl, term: entity.name, type: entity.type }).catch(() => ({}));
             if (!freshWiki.intro && !freshWiki.summary) continue;
+            if (freshWiki.wikidataEntityId) {
+              entity.wikidataEntityId = freshWiki.wikidataEntityId;
+            }
+            if (typeof freshWiki.wikidataInstanceOfHuman === "boolean") {
+              entity.wikidataInstanceOfHuman =
+                freshWiki.wikidataInstanceOfHuman;
+            }
             if (
               entity.type === "person" &&
               !hasRichWikipediaPersonProfile({ ...entity, ...freshWiki })
@@ -7398,8 +7406,7 @@ async function savePublishedPost(
     safeEntityMeta
       .filter((entity) =>
         entity?.type === "person" &&
-        entity.profileLinkEligible === true &&
-        entity.profileSubjectVerified === true,
+        hasVerifiedPersonProfileIdentity(entity),
       )
       .map((entity) => normalizeTopicMatchText(entity.name)),
   );
@@ -7751,8 +7758,7 @@ function blogEntityQualityEligible(entity) {
     return (
       entityContentWordCount(entity) >= 150 &&
       hasDirectWikipediaEntitySource(entity.wikiUrl) &&
-      entity.profileLinkEligible === true &&
-      entity.profileSubjectVerified === true
+      hasVerifiedPersonProfileIdentity(entity)
     );
   }
   return isHistoryEntityDiscoveryLinkEligible(entity);
@@ -8490,7 +8496,7 @@ function formatWikiDate(claim) {
   });
 }
 
-async function fetchWikidataLifeDates(pageTitle) {
+async function fetchWikidataPersonFacts(pageTitle) {
   if (!pageTitle) return {};
   const url =
     "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=pageprops&ppprop=wikibase_item&format=json&origin=*&titles=" +
@@ -8512,9 +8518,17 @@ async function fetchWikidataLifeDates(pageTitle) {
   if (!entityRes.ok) return {};
   const entityData = await entityRes.json();
   const claims = entityData?.entities?.[qid]?.claims || {};
+  const instanceOfHuman = (Array.isArray(claims.P31) ? claims.P31 : [])
+    .some(
+      (claim) =>
+        claim?.mainsnak?.datavalue?.value?.id ===
+        WIKIDATA_HUMAN_ENTITY_ID,
+    );
   return {
     birthDate: formatWikiDate(claims.P569?.[0]),
     deathDate: formatWikiDate(claims.P570?.[0]),
+    wikidataEntityId: qid,
+    wikidataInstanceOfHuman: instanceOfHuman,
   };
 }
 
@@ -8527,11 +8541,11 @@ async function fetchWikipediaEntityData(term, { retryOnEmpty = true, sourcePages
   const introUrl =
     "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts|pageprops&ppprop=disambiguation&exintro=1&explaintext=1&format=json&origin=*&titles=" +
     encodeURIComponent(pageTitle);
-  const [summaryRes, introRes, lifeDates] = await Promise.all([
+  const [summaryRes, introRes, personFacts] = await Promise.all([
     fetch(summaryUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } }).catch(() => null),
     fetch(introUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } }).catch(() => null),
     normalizeEntityType(term.type) === "person"
-      ? fetchWikidataLifeDates(pageTitle).catch(() => ({}))
+      ? fetchWikidataPersonFacts(pageTitle).catch(() => ({}))
       : Promise.resolve({}),
   ]);
   let summary = {};
@@ -8557,7 +8571,7 @@ async function fetchWikipediaEntityData(term, { retryOnEmpty = true, sourcePages
     pageTitle,
     resolvedPageTitle: resolvedPageTitle || pageTitle,
     isDisambiguation,
-    ...lifeDates,
+    ...personFacts,
   };
   if (normalizeEntityType(term.type) === "person" && result.isDisambiguation) {
     const sourceFallback = await fetchSourceEventPageEntityFallback(term, sourcePages);
@@ -8597,6 +8611,12 @@ function entityFactSentences(...values) {
 
 function hasRichWikipediaPersonProfile(entity) {
   if (normalizeEntityType(entity?.type) !== "person" || !entity?.wikiUrl || entity?.isDisambiguation) {
+    return false;
+  }
+  if (
+    entity.sourceEventPageFallback !== true &&
+    entity.wikidataInstanceOfHuman !== true
+  ) {
     return false;
   }
   // Keep single-letter initials (e.g. "J.K. Rowling" → j, k, rowling) so that an
@@ -8640,6 +8660,17 @@ function hasRichWikipediaPersonProfile(entity) {
   return (
     wordCount >= PERSON_ENTITY_MIN_SOURCE_WORDS &&
     sentenceCount >= PERSON_ENTITY_MIN_SOURCE_SENTENCES
+  );
+}
+
+function hasVerifiedPersonProfileIdentity(entity) {
+  return Boolean(
+    entity?.profileLinkEligible === true &&
+    entity?.profileSubjectVerified === true &&
+    (
+      entity?.sourceEventPageFallback === true ||
+      entity?.wikidataInstanceOfHuman === true
+    ),
   );
 }
 
@@ -9362,6 +9393,12 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       resolvedPageTitle: wikiData.resolvedPageTitle || "",
       birthDate: wikiData.birthDate || "",
       deathDate: wikiData.deathDate || "",
+      ...(wikiData.wikidataEntityId
+        ? { wikidataEntityId: wikiData.wikidataEntityId }
+        : {}),
+      ...(typeof wikiData.wikidataInstanceOfHuman === "boolean"
+        ? { wikidataInstanceOfHuman: wikiData.wikidataInstanceOfHuman }
+        : {}),
       relatedTopics: Array.isArray(pillars) ? pillars : [],
       relatedPosts: [slug],
       firstSeenAt: new Date().toISOString(),
@@ -9480,7 +9517,10 @@ async function recoverRecentEntityStrips(env, { maxPosts = 3, lookbackDays = 3 }
       continue;
     }
     if (people.length === 0) continue;
-    const needsRepair = people.some((p) => p.profileLinkEligible !== true || !p.imageUrl);
+    const needsRepair = people.some((p) =>
+      !hasVerifiedPersonProfileIdentity(p) ||
+      !p.imageUrl,
+    );
     if (!needsRepair) continue;
     try {
       await backfillEntitiesForEntry(env, entry);
@@ -9509,7 +9549,7 @@ function buildArticleEntityStrip(entityMeta) {
         : `<span class="person-circle-fallback" aria-hidden="true">${esc(String(e.name).slice(0, 1).toUpperCase())}</span>`
       }</span>` +
       `<span class="person-pill-name">${esc(e.name)}</span>`;
-    return e.profileLinkEligible === true && e.profileSubjectVerified === true && e.url
+    return hasVerifiedPersonProfileIdentity(e) && e.url
       ? `<a href="${esc(e.url)}" class="person-pill">${inner}</a>`
       : `<span class="person-pill">${inner}</span>`;
   }).join("");
@@ -9579,7 +9619,7 @@ function articleEntityStripNeedsProfileValidation(html, entityMetaRaw) {
   try {
     return JSON.parse(entityMetaRaw).some((entity) =>
       entity?.type === "person" &&
-      (entity?.profileLinkEligible !== true || entity?.profileSubjectVerified !== true),
+      !hasVerifiedPersonProfileIdentity(entity),
     );
   } catch {
     return true;
@@ -9778,8 +9818,13 @@ async function hydrateArticleEntityImages(env, entityMeta) {
         hasRichWikipediaPersonProfile(record)
       ) ? record : null;
 
-      // Legacy records did not store eligibility, so revalidate their source once.
-      if (!profile && anchoredWikiUrl) {
+      // Legacy records did not store Wikidata identity evidence, so revalidate
+      // their source once. A stored false result prevents repeated subrequests.
+      if (
+        !profile &&
+        anchoredWikiUrl &&
+        record?.wikidataInstanceOfHuman !== false
+      ) {
         const freshWiki = await fetchWikipediaEntityData({
           wikiUrl: anchoredWikiUrl,
           term: next.name,
@@ -9799,6 +9844,23 @@ async function hydrateArticleEntityImages(env, entityMeta) {
             profileSubjectVerified: true,
           };
           env.BLOG_AI_KV.put(key, JSON.stringify(profile)).catch(() => {});
+        } else if (
+          record &&
+          (
+            typeof candidate.wikidataInstanceOfHuman === "boolean" ||
+            candidate.isDisambiguation === true
+          )
+        ) {
+          const rejectedProfile = {
+            ...candidate,
+            profileLinkEligible: false,
+            profileSubjectVerified: false,
+            updatedAt: new Date().toISOString(),
+          };
+          env.BLOG_AI_KV.put(
+            key,
+            JSON.stringify(rejectedProfile),
+          ).catch(() => {});
         }
       }
 
@@ -14259,6 +14321,7 @@ function buildVerifiedArticleMentions(content, entityMeta = []) {
       name: entity.name,
       ...(entity.profileLinkEligible === true &&
       entity.profileSubjectVerified === true &&
+      entity.wikidataInstanceOfHuman === true &&
       /^https:\/\/en\.wikipedia\.org\/wiki\/[^?#]+$/i.test(String(entity.wikiUrl || ""))
         ? { sameAs: entity.wikiUrl }
         : {}),
@@ -14476,6 +14539,7 @@ function validateArticleStructuredDataForPublish(html, content, entityMeta = [])
     if (mention.sameAs && !(
       entity.profileLinkEligible === true &&
       entity.profileSubjectVerified === true &&
+      entity.wikidataInstanceOfHuman === true &&
       mention.sameAs === entity.wikiUrl
     )) {
       reasons.push(`schema person identity is not verified: ${mention.name}`);
@@ -16478,6 +16542,9 @@ export const __contentGenerationTestHooks = {
   CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
   generateEntityTimeline,
   fetchWikipediaEntityData,
+  hasRichWikipediaPersonProfile,
+  hasVerifiedPersonProfileIdentity,
+  blogEntityQualityEligible,
   filterGroundingIssues,
   verifyArticleGrounding,
 };

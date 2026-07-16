@@ -43,6 +43,7 @@ const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
+const WIKIDATA_HUMAN_ENTITY_ID = "Q5";
 const MAX_DATE_PERSON_PROFILES = 20;
 const WIKIMEDIA_THUMBNAIL_STEPS = [
   20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840,
@@ -941,7 +942,7 @@ function formatWikidataDate(claim) {
     .toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-async function fetchEntityLifeDates(type, pageTitle) {
+async function fetchEntityPersonFacts(type, pageTitle) {
   if (type !== "person" || !pageTitle) return {};
   const pageRes = await fetch(
     `https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=pageprops&ppprop=wikibase_item&format=json&origin=*&titles=${encodeURIComponent(pageTitle)}`,
@@ -959,16 +960,24 @@ async function fetchEntityLifeDates(type, pageTitle) {
   if (!entityRes?.ok) return {};
   const entityData = await entityRes.json();
   const claims = entityData?.entities?.[qid]?.claims || {};
+  const instanceOfHuman = (Array.isArray(claims.P31) ? claims.P31 : [])
+    .some(
+      (claim) =>
+        claim?.mainsnak?.datavalue?.value?.id ===
+        WIKIDATA_HUMAN_ENTITY_ID,
+    );
   return {
     birthDate: formatWikidataDate(claims.P569?.[0]),
     deathDate: formatWikidataDate(claims.P570?.[0]),
+    wikidataEntityId: qid,
+    wikidataInstanceOfHuman: instanceOfHuman,
   };
 }
 
 async function fetchEntityWikiHydration(entity, type) {
   const pageTitle = wikiTitleFromEntityUrl(entity.wikiUrl) || entity.name;
   if (!pageTitle) return {};
-  const [summaryRes, extractRes, lifeDates] = await Promise.all([
+  const [summaryRes, extractRes, personFacts] = await Promise.all([
     fetch(
       `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`,
       { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
@@ -977,7 +986,7 @@ async function fetchEntityWikiHydration(entity, type) {
       `https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exchars=6000&format=json&origin=*&titles=${encodeURIComponent(pageTitle)}`,
       { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } },
     ).catch(() => null),
-    fetchEntityLifeDates(type, pageTitle),
+    fetchEntityPersonFacts(type, pageTitle),
   ]);
 
   const summary = summaryRes?.ok ? await summaryRes.json() : {};
@@ -991,7 +1000,7 @@ async function fetchEntityWikiHydration(entity, type) {
     intro,
     description: summary.description || "",
     imageUrl: summary.originalimage?.source || summary.thumbnail?.source || "",
-    ...lifeDates,
+    ...personFacts,
   };
 }
 
@@ -1161,7 +1170,11 @@ function seoEntityQualityEligible(entity) {
       entityBodyWordCount(entity) >= MIN_PERSON_ENTITY_BODY_WORDS &&
       seoHasDirectWikipediaEntitySource(entity.wikiUrl) &&
       entity.profileLinkEligible === true &&
-      entity.profileSubjectVerified === true
+      entity.profileSubjectVerified === true &&
+      (
+        entity.sourceEventPageFallback === true ||
+        entity.wikidataInstanceOfHuman === true
+      )
     );
   }
   return seoHistoryEntityQualityEligible(entity);
@@ -1575,7 +1588,18 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
   const bodyWords = entityBodyWordCount(entity);
   const hasWikiMarkup = /={2,}[^=]+={2,}/.test(`${entity.intro || ""} ${entity.summary || ""}`);
   const hasIncompleteBody = type === "person" && hasIncompleteEntityParagraphs(entity);
-  const sparse = !entity.intro || !entity.summary || !entity.imageUrl || bodyWords < minWords || hasWikiMarkup || hasIncompleteBody;
+  const needsPersonIdentityVerification =
+    type === "person" &&
+    entity.sourceEventPageFallback !== true &&
+    typeof entity.wikidataInstanceOfHuman !== "boolean";
+  const sparse =
+    !entity.intro ||
+    !entity.summary ||
+    !entity.imageUrl ||
+    bodyWords < minWords ||
+    hasWikiMarkup ||
+    hasIncompleteBody ||
+    needsPersonIdentityVerification;
   if (!sparse || !entity.wikiUrl) return entity;
 
   const wiki = await fetchEntityWikiHydration(entity, type).catch(() => ({}));
@@ -1588,7 +1612,24 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
     imageUrl: entity.imageUrl || wiki.imageUrl || "",
     birthDate: entity.birthDate || wiki.birthDate || "",
     deathDate: entity.deathDate || wiki.deathDate || "",
+    ...(wiki.wikidataEntityId
+      ? { wikidataEntityId: wiki.wikidataEntityId }
+      : {}),
+    ...(typeof wiki.wikidataInstanceOfHuman === "boolean"
+      ? { wikidataInstanceOfHuman: wiki.wikidataInstanceOfHuman }
+      : {}),
   };
+  if (type === "person" && wiki.wikidataInstanceOfHuman === false) {
+    hydrated.profileLinkEligible = false;
+    hydrated.profileSubjectVerified = false;
+  } else if (
+    type === "person" &&
+    wiki.wikidataInstanceOfHuman === true &&
+    isLikelyWikipediaPersonEntity(hydrated)
+  ) {
+    hydrated.profileLinkEligible = true;
+    hydrated.profileSubjectVerified = true;
+  }
   if (bodyWords < minWords || hasWikiMarkup || hasIncompleteBody) {
     hydrated.bodySections = type === "person"
       ? rebuildPersonBodySections(hydrated)
@@ -1610,6 +1651,10 @@ async function hydrateSparseEntity(env, entity, type, ctx) {
     hydrated.imageUrl !== (entity.imageUrl || "") ||
     hydrated.birthDate !== (entity.birthDate || "") ||
     hydrated.deathDate !== (entity.deathDate || "") ||
+    hydrated.wikidataEntityId !== entity.wikidataEntityId ||
+    hydrated.wikidataInstanceOfHuman !== entity.wikidataInstanceOfHuman ||
+    hydrated.profileLinkEligible !== entity.profileLinkEligible ||
+    hydrated.profileSubjectVerified !== entity.profileSubjectVerified ||
     (!!entity.needsWikiRefresh && !hydrated.needsWikiRefresh);
   if (!improved) return hydrated;
 
@@ -1641,7 +1686,33 @@ function normalizeWikipediaPersonUrl(value) {
   }
 }
 
+function seoPersonNameMatchesResolvedTitle(entity) {
+  const tokens = (value) =>
+    String(value || "")
+      .replace(/\s*\([^)]*\)\s*$/, "")
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  const nameTokens = tokens(entity?.name);
+  const titleTokens = tokens(
+    entity?.summaryTitle ||
+    wikiTitleFromEntityUrl(entity?.wikiUrl),
+  );
+  if (!nameTokens.length || !titleTokens.length) return false;
+  const nameSet = new Set(nameTokens);
+  const titleSet = new Set(titleTokens);
+  const nameContainsTitle = titleTokens.every((token) => nameSet.has(token));
+  const titleContainsName = nameTokens.every((token) => titleSet.has(token));
+  return nameContainsTitle || titleContainsName;
+}
+
 function isLikelyWikipediaPersonEntity(entity) {
+  if (entity?.wikidataInstanceOfHuman !== true) return false;
+  if (!seoPersonNameMatchesResolvedTitle(entity)) return false;
   const text = [
     entity?.name,
     entity?.description,
@@ -1851,6 +1922,12 @@ async function createPersonEntityFromWikipediaRequest(env, slug, url) {
     deathDate: wiki.deathDate || personDateFromHomepageParams(url, "death"),
     summaryTitle: wiki.summaryTitle || wikiTitle,
     summaryType: wiki.summaryType || "",
+    ...(wiki.wikidataEntityId
+      ? { wikidataEntityId: wiki.wikidataEntityId }
+      : {}),
+    ...(typeof wiki.wikidataInstanceOfHuman === "boolean"
+      ? { wikidataInstanceOfHuman: wiki.wikidataInstanceOfHuman }
+      : {}),
   };
   if (!isLikelyWikipediaPersonEntity(entity)) return null;
   entity.profileLinkEligible = true;
@@ -1979,7 +2056,11 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   const verifiedSameAs =
     entity.wikiUrl &&
     (type !== "person" ||
-      (entity.profileLinkEligible === true && entity.profileSubjectVerified === true))
+      (
+        entity.profileLinkEligible === true &&
+        entity.profileSubjectVerified === true &&
+        entity.wikidataInstanceOfHuman === true
+      ))
       ? entity.wikiUrl
       : undefined;
   const jsonLd = JSON.stringify({
@@ -8474,4 +8555,9 @@ export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(handleScheduledEvent(env));
   },
+};
+
+export const __personIdentityTestHooks = {
+  isLikelyWikipediaPersonEntity,
+  seoEntityQualityEligible,
 };

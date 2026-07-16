@@ -6411,7 +6411,11 @@ async function generateAndStore(
   let eventImages = [];
   const MAX_CONTENT_ATTEMPTS = 3;
   const MAX_MALFORMED_RESPONSE_ATTEMPTS = 2;
-  const generateArticleContent = async (avoidTitles, stricterGrounding = false) => {
+  const generateArticleContent = async (
+    avoidTitles,
+    stricterGrounding = false,
+    groundingFeedback = [],
+  ) => {
     let lastError;
     for (let responseAttempt = 1; responseAttempt <= MAX_MALFORMED_RESPONSE_ATTEMPTS; responseAttempt++) {
       try {
@@ -6426,6 +6430,7 @@ async function generateAndStore(
           recentPillars,
           sourceMaterial,
           stricterGrounding,
+          groundingFeedback,
         );
       } catch (err) {
         lastError = err;
@@ -6451,6 +6456,7 @@ async function generateAndStore(
               recentPillars,
               sourceMaterial,
               stricterGrounding,
+              groundingFeedback,
             );
           } catch (fallbackErr) {
             console.warn(
@@ -6468,6 +6474,8 @@ async function generateAndStore(
   // message, so terminal throws carry the whole sequence — the 2026-07-05 post
   // mortem could not tell which gate failed on each attempt without wrangler tail.
   const attemptFailures = [];
+  let currentGroundingFeedback = [];
+  let generationGroundingRepairUsed = false;
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
     content =
       attempt === 1
@@ -6487,7 +6495,11 @@ async function generateAndStore(
         console.warn(
           `Blog AI: date validation failed for "${content?.title || "untitled"}" — ${dateValidation.reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await generateArticleContent(avoid);
+        content = await generateArticleContent(
+          avoid,
+          currentGroundingFeedback.length > 0,
+          currentGroundingFeedback,
+        );
         continue;
       }
 
@@ -6503,7 +6515,7 @@ async function generateAndStore(
         console.warn(
           `Blog AI: semantic publication contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await generateArticleContent(avoid, true);
+        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
         continue;
       }
       throw new Error(
@@ -6520,7 +6532,7 @@ async function generateAndStore(
         console.warn(
           `Blog AI: direct-citation contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await generateArticleContent(avoid, true);
+        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
         continue;
       }
       throw new Error(
@@ -6555,7 +6567,8 @@ async function generateAndStore(
             contextHook,
             recentPillars,
             sourceMaterial,
-            false,
+            Boolean(sourceMaterial) || currentGroundingFeedback.length > 0,
+            currentGroundingFeedback,
           );
           // Re-run the same per-iteration gates on the chunked result so a
           // recovered body is still date-validated and structurally complete
@@ -6590,7 +6603,11 @@ async function generateAndStore(
             `Blog AI: chunked article fallback failed — ${fallbackErr.message}.`,
           );
           if (attempt < MAX_CONTENT_ATTEMPTS) {
-            content = await generateArticleContent(avoid);
+            content = await generateArticleContent(
+              avoid,
+              currentGroundingFeedback.length > 0,
+              currentGroundingFeedback,
+            );
             continue;
           }
           throw new Error(`${err.message} [attempts: ${attemptFailures.join(" | ")}]`);
@@ -6599,7 +6616,11 @@ async function generateAndStore(
         console.warn(
           `Blog AI: incomplete generated content for "${content?.title || "untitled"}" - ${err.message}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await generateArticleContent(avoid);
+        content = await generateArticleContent(
+          avoid,
+          currentGroundingFeedback.length > 0,
+          currentGroundingFeedback,
+        );
         continue;
       } else {
         throw new Error(`${err.message} [attempts: ${attemptFailures.join(" | ")}]`);
@@ -6613,15 +6634,62 @@ async function generateAndStore(
     // stricter grounding; if the final attempt still fails, throw so the
     // fabricated article is NEVER published (cron/failsafe logs the failure).
     if (groundingSource) {
-      const grounding = verifyArticleGrounding(content, groundingSource);
+      let grounding = verifyArticleGrounding(content, groundingSource);
+      if (!grounding.ok && !generationGroundingRepairUsed) {
+        generationGroundingRepairUsed = true;
+        try {
+          const repaired = await repairGroundingContradictions(
+            env,
+            content,
+            grounding.reasons,
+            groundingSource,
+          );
+          if (repaired && repaired !== content) {
+            if (selectedEvent) {
+              attachSelectedEventSourcePages(repaired, selectedEvent);
+              enforceSelectedEventDate(repaired, selectedEvent);
+            }
+            const repairedSemantics = validateContentSemanticsForPublish(repaired);
+            const repairedCitations = validateDirectCitationsForPublish(repaired);
+            assertRequiredContentBlocks(repaired);
+            const repairedGrounding = verifyArticleGrounding(repaired, groundingSource);
+            if (
+              repairedSemantics.ok &&
+              repairedCitations.ok &&
+              repairedGrounding.ok
+            ) {
+              content = repaired;
+              grounding = repairedGrounding;
+              console.log(
+                `Blog AI: source-bound generation repair passed for "${content?.title || "untitled"}".`,
+              );
+            } else {
+              const repairReasons = [
+                ...(!repairedSemantics.ok ? repairedSemantics.reasons : []),
+                ...(!repairedCitations.ok ? repairedCitations.reasons : []),
+                ...(!repairedGrounding.ok ? repairedGrounding.reasons : []),
+              ];
+              console.warn(
+                `Blog AI: source-bound generation repair did not pass revalidation — ${repairReasons.join("; ").slice(0, 500)}`,
+              );
+              grounding = repairedGrounding.ok ? grounding : repairedGrounding;
+            }
+          }
+        } catch (err) {
+          console.warn(
+            `Blog AI: source-bound generation repair failed — ${err.message}`,
+          );
+        }
+      }
       if (!grounding.ok) {
         attemptFailures.push(`attempt ${attempt} grounding: ${grounding.reasons.join("; ")}`);
         if (attempt < MAX_CONTENT_ATTEMPTS) {
           const avoid = [...takenAllTime, content?.title].filter(Boolean);
+          currentGroundingFeedback = grounding.reasons;
           console.warn(
             `Blog AI: grounding gate failed for "${content?.title || "untitled"}" — ${grounding.reasons.join("; ")}. Regenerating with stricter grounding (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await generateArticleContent(avoid, true);
+          content = await generateArticleContent(avoid, true, currentGroundingFeedback);
           continue;
         }
         throw new Error(
@@ -6666,7 +6734,11 @@ async function generateAndStore(
           console.warn(
             `Blog AI: no valid image for "${content.title}". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await generateArticleContent(avoid);
+          content = await generateArticleContent(
+            avoid,
+            currentGroundingFeedback.length > 0,
+            currentGroundingFeedback,
+          );
           continue;
         }
 
@@ -6689,7 +6761,11 @@ async function generateAndStore(
           console.warn(
             `Blog AI: wiki image precheck failed for "${content.title}" (${wikiImageTotal}/3). Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await generateArticleContent(avoid);
+          content = await generateArticleContent(
+            avoid,
+            currentGroundingFeedback.length > 0,
+            currentGroundingFeedback,
+          );
           continue;
         }
 
@@ -10298,6 +10374,18 @@ function chunkedArticleFallbackEnabled(env) {
   return raw == null || !/^(0|false|off)$/i.test(String(raw).trim());
 }
 
+function groundingRetryFeedbackSection(reasons, maxChars = 2200) {
+  const list = (Array.isArray(reasons) ? reasons : [])
+    .map((reason) => String(reason || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  if (!list.length) return "";
+  const details = list.map((reason) => `- ${reason}`).join("\n").slice(0, maxChars);
+  return `A previous draft was rejected for these exact unsupported claims:
+${details}
+Do not repeat, soften, hedge, or paraphrase those claims. Replace each one with a directly supported source fact, or omit that point entirely.`;
+}
+
 function compactChunkedArticleBrief(brief) {
   return {
     title: brief?.title || "",
@@ -10342,9 +10430,9 @@ function chunkedArticleBodyFieldGuidance(field) {
     case "eyewitnessOrChronicle":
       return "Analyze what the supplied record confirms and what it leaves unresolved. Do not invent a witness, memoir, newspaper, decree, archive, or quote.";
     case "aftermathParagraphs":
-      return "Name specific actions, dates, people, institutions, responses, or confirmed limits in the record after the event.";
+      return "Name only actions, dates, people, institutions, responses, or limits explicitly confirmed by the source after the event. Do not infer reforms, debates, effects, or policy changes.";
     case "conclusionParagraphs":
-      return "Reframe the event with concrete facts already established by the article, not a generic reflection or new unsupported material.";
+      return "Reframe the event with concrete source facts already established by the article, not a preventive lesson, modern policy recommendation, generic reflection, or new unsupported material.";
     default:
       return "Keep the section source-grounded, specific, and non-repetitive.";
   }
@@ -10387,6 +10475,7 @@ Requirements:
 - Count both paragraphs before responding. If either paragraph is below ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 15} words, add source-grounded detail before returning.
 - Every paragraph must end with terminal punctuation.
 - Never place a raw URL in paragraph text. Refer to a source by name; URLs belong only in source metadata.
+- Do not convert chronology into causality. Never invent what the event led to, prevented, enabled, changed, created, ended, or made effective.
 - Do not use hyphens or em dashes in article body prose.`,
     1700,
     (parsed) => validateChunkedArticleBodyChunk(parsed, [field], label),
@@ -10520,6 +10609,7 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
   // 2026-07-05 "facts" sub-call) previously dropped the pipeline back to the
   // undershooting one-shot; one retry makes the chunked path resilient to it.
   let lastError;
+  let retryFeedback = "";
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const raw = await callAI(
@@ -10530,7 +10620,7 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
             content:
               "You are a source-grounded history article component writer. Return one valid JSON object only. No markdown, no prose outside JSON.",
           },
-          { role: "user", content: userPrompt },
+          { role: "user", content: `${userPrompt}${retryFeedback}` },
         ],
         {
           maxTokens,
@@ -10546,6 +10636,9 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
     } catch (err) {
       lastError = err;
       if (attempt < 2) {
+        retryFeedback =
+          `\n\nPREVIOUS RESPONSE REJECTED: ${String(err.message || err).slice(0, 900)}\n` +
+          "Correct that exact failure in the next JSON response. Do not repeat or paraphrase a rejected unsupported claim.";
         console.warn(`Blog: ${label} attempt ${attempt} failed (${err.message}) — retrying once.`);
       }
     }
@@ -10564,6 +10657,7 @@ async function generateArticleContentChunkedFallback(
   recentPillars = [],
   sourceMaterial = null,
   stricterGrounding = false,
+  groundingFeedback = [],
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -10579,11 +10673,12 @@ async function generateArticleContentChunkedFallback(
   const recentPillarSection = recentPillars.length > 0
     ? `Avoid making these recent categories the primary angle when possible: ${recentPillars.join(", ")}.\n`
     : "";
-  const contextHookSection = contextHook
+  const contextHookSection = contextHook && !sourceMaterial
     ? `Current-world hook to weave into conclusion or editorial note, not verbatim: ${contextHook}\n`
     : "";
+  const retryFeedback = groundingRetryFeedbackSection(groundingFeedback);
   const strictLine = stricterGrounding
-    ? "A previous draft failed grounding. Be conservative and omit any specific not supported by the source.\n"
+    ? "A previous draft failed grounding. Use only relationships, outcomes, and consequences explicitly stated by the source.\n"
     : "";
   const sharedContext = `Required event: ${forcedEvent ? `"${forcedEvent}"` : `a significant event from ${monthName} ${day}`}.
 Required date: ${monthName} ${day}. historicalDateISO month/day must match this date.
@@ -10591,9 +10686,14 @@ ${contextHookSection}${sourceSection}${avoidSection}${pillarSection}${recentPill
 Grounding rules:
 - Use only the source material for factual claims when it is supplied.
 - Do not invent a named person, quote, document, number, location, motive, casualty count, or consequence.
+- Do not write that one event led to, caused, triggered, prompted, prevented, enabled, ended, established, abolished, or changed another result unless the source explicitly states that relationship.
+- Chronology is not causality. If the source only says one thing happened and another happened later, describe them separately with neutral time words.
+- Do not invent gun-law changes, security reforms, mental-health effects, policy debates, institutional responses, public lessons, or better alternatives.
+- Quick Facts, analysis, aftermath, and conclusions must use source-supported facts instead of filling required space with inferred significance or legacy.
 - Keep recognition, arrest, death, departure, arrival, and capture dates and places distinct.
 - Do not use hyphens or em dashes in article body prose.
-- Every paragraph must end with normal terminal punctuation.`;
+- Every paragraph must end with normal terminal punctuation.
+${retryFeedback}`;
 
   console.warn(`Blog: trying chunked article fallback for ${monthName} ${day}.`);
 
@@ -10631,10 +10731,15 @@ Return JSON only with this shape:
   "amazonBookTopic":"3-7 word book topic",
   "amazonProductIdeas":[{"label":"3-6 words","searchQuery":"specific book or item search","type":"book"}],
   "contentRationale":"40+ words explaining specific value beyond Wikipedia",
-  "sourceFacts":["8-12 concise facts from the source to reuse without contradiction"]
+  "sourceFacts":["8-12 atomic facts copied or closely paraphrased from the source without adding an inference"]
 }
 
-Requirements: keyTerms must include at least one real named person connected to the event. imageUrl may be empty or a supported Wikimedia URL, never a placeholder. Never place a raw URL in quickFacts or any other visible prose field; URLs belong only in URL/source metadata fields.`,
+Requirements:
+- keyTerms must include at least one real named person connected to the event.
+- sourceFacts must preserve the source's actors, numbers, chronology, and relationship verbs exactly. A source fact may say "later" when the source says "later", but may not change that into "led to".
+- Do not put inferred significance, legacy, policy effects, security changes, mental-health effects, or moral lessons in sourceFacts.
+- imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
+- Never place a raw URL in quickFacts or any other visible prose field; URLs belong only in URL/source metadata fields.`,
     1500,
     (parsed) => {
       requireChunkArray(parsed, "keyTerms", { min: 1, label: "chunked article brief" });
@@ -10694,6 +10799,7 @@ Requirements:
 - Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
 - overviewParagraphs open with the strongest concrete fact.
 - Never place a raw URL in paragraph text. Refer to a source by name instead.
+- Do not convert chronology into causality or infer a motive, policy effect, institutional response, or preventive lesson.
 - eyewitnessOrChronicle must not invent a witness, memoir, newspaper, decree, archive, or quote. If the source names no account, analyze what the record confirms and leaves unresolved.`,
       2300,
       (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
@@ -10729,9 +10835,10 @@ Write only these body fields as JSON:
 Requirements:
 - Each array must contain exactly 2 paragraphs.
 - Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
-- Aftermath must name specific actions, dates, people, institutions, or confirmed limits in the record.
+- Aftermath must name only actions, dates, people, institutions, or limits explicitly confirmed by the source.
+- If the source does not state a broader consequence, do not claim one. Continue with documented chronology, legal proceedings, named responses, or limits in the record.
 - Never place a raw URL in paragraph text. Refer to a source by name instead.
-- Conclusion must reframe the event with a concrete fact, not a generic reflection.`,
+- Conclusion must reframe the event with a concrete source fact, not a modern policy lesson, preventive recommendation, or generic reflection.`,
       2300,
       (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
     );
@@ -10754,13 +10861,16 @@ ${JSON.stringify(compactBrief, null, 2)}
 
 Write only this JSON:
 {
-  "quickFacts":[{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
+  "quickFacts":[{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Source Detail","value":"..."},{"label":"Confirmed Outcome","value":"..."}],
   "didYouKnowFacts":["five distinct facts, 35-55 words each"]
 }
 
 Requirements:
 - quickFacts must contain exactly 6 populated label/value objects.
+- Every quick-fact value must be directly supported by the source. Do not use Significance, Legacy, Impact, or Lessons labels unless the source explicitly states the claimed consequence.
+- Prefer neutral labels such as Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome, choosing only labels supported by this event's source.
 - didYouKnowFacts must contain exactly 5 distinct source-grounded facts.
+- Did You Know facts may be surprising, but surprise must come from a source fact, not an inferred consequence, motive, coincidence, fate, or policy effect.
 - Never place a raw URL in a fact. Refer to a source by name instead.
 - Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.`,
     1600,
@@ -10792,17 +10902,20 @@ ${JSON.stringify({ ...bodyA, ...bodyB }, null, 2)}
 
 Write only this JSON:
 {
-  "analysisGood":[{"title":"3-5 words","detail":"60+ words, specific decision and why it worked"}],
-  "analysisBad":[{"title":"3-5 words","detail":"60+ words, specific failure and better alternative"}],
+  "analysisGood":[{"title":"3-5 words","detail":"60+ words evaluating a source-documented action, response, or strength of the record"}],
+  "analysisBad":[{"title":"3-5 words","detail":"60+ words evaluating a source-documented failure, limitation, or unresolved question"}],
   "editorialNote":"80+ words from the thisDay. team"
 }
 
 Requirements:
 - analysisGood must contain exactly 3 items.
 - analysisBad must contain exactly 3 items.
+- Analysis may interpret facts, but it must not invent causality, effectiveness, responsibility, policy change, prevention, or a better alternative.
+- Each analysis item must anchor every judgment in actions or limits explicitly present in the source. If the source cannot support "why it worked" or "what should have happened", do not make that claim.
+- Do not critique the article's writing, sourcing process, repetition, or credibility. Analyze the historical record only.
 - Never place a raw URL in analysis or editorial text. Refer to a source by name instead.
 - Every detail must include a concrete name, date, number, institution, place, or source.
-- editorialNote must be specific to this article and must not add unsupported facts.`,
+- editorialNote must be specific to this article, stay with source-supported details, and avoid preventive lessons or modern policy prescriptions.`,
     2200,
     (parsed) => {
       requireChunkArray(parsed, "analysisGood", { exact: 3, label: "chunked article analysis" });
@@ -10838,6 +10951,7 @@ async function callWorkersAI(
   recentPillars = [],
   sourceMaterial = null,
   stricterGrounding = false,
+  groundingFeedback = [],
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -10860,9 +10974,10 @@ async function callWorkersAI(
       ? `\n${avoidPillarLine}${avoidPillarLine && preferPillarLine ? "\n" : ""}${preferPillarLine}\n`
       : "";
 
-  const contextHookSection = contextHook
+  const contextHookSection = contextHook && !sourceMaterial
     ? `\nCURRENT-WORLD CONTEXT (mandatory): The following hook connects this historical event to today's world as of the publish date. You MUST weave at least one sentence from this angle into the article — specifically into the conclusionParagraphs or editorialNote. The sentence must feel grounded in the present, not generic. Do not quote the hook verbatim; use it as a lens:\n"${contextHook}"\n`
     : "";
+  const groundingFeedbackSection = groundingRetryFeedbackSection(groundingFeedback);
 
   const eventSelection = forcedEvent
     ? `You MUST write about this specific event: "${forcedEvent}". Do not choose a different event.`
@@ -11001,14 +11116,14 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     { "label": "Date", "value": "Month Day, Year" },
     { "label": "Location", "value": "Place" },
     { "label": "Key Figure", "value": "Name" },
-    { "label": "Significance", "value": "Why it matters" },
-    { "label": "Legacy", "value": "Long-term impact" }
+    { "label": "Source Detail", "value": "Concrete fact stated by the source" },
+    { "label": "Confirmed Outcome", "value": "Outcome explicitly stated by the source" }
   ],
   "didYouKnowFacts": [
     "A genuinely surprising lesser-known fact — something most people would not expect, 1 to 2 sentences, minimum 35 words. Must include a specific name, number, or place. Use one vivid claim plus one supporting detail.",
     "A detail that reframes the main story or reveals a hidden layer of complexity, 1 to 2 sentences, minimum 35 words. Do not recycle a detail from the first fact.",
-    "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 1 to 2 sentences, minimum 35 words.",
-    "A fact about a specific person involved — their background, motive, or fate — that most accounts skip, 1 to 2 sentences, minimum 35 words.",
+    "A second concrete source fact about a named action, place, date, institution, or record, 1 to 2 sentences, minimum 35 words. Do not infer a consequence or coincidence.",
+    "A fact about a specific person involved that the source explicitly states, 1 to 2 sentences, minimum 35 words. Do not infer motive or fate.",
     "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 1 to 2 sentences, minimum 35 words. Provide exactly FIVE facts in total and make every one distinct — never restate or paraphrase another fact."
   ],
   "overviewParagraphs": [
@@ -11022,23 +11137,22 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "eyewitnessQuote": "Use a direct or closely paraphrased quote only when that quote appears in SOURCE MATERIAL; otherwise use an empty string.",
   "eyewitnessQuoteSource": "Use the exact attribution from SOURCE MATERIAL for eyewitnessQuote; otherwise use an empty string.",
   "aftermathParagraphs": [
-    "Paragraph 1 (immediate aftermath; ~100 to 120 words): Describe the first days and weeks after the event with concrete actions, dates, and effects on people and institutions. Focus on specific, attributable changes on the ground.",
-    "Paragraph 2 (medium-term + long view synthesis; ~100 to 120 words): Combine medium-term consequences and the long historical assessment: reforms, responses, and how historians judge the legacy. Be specific and, where appropriate, opinionated."
+    "Paragraph 1 (immediate aftermath; ~100 to 120 words): Describe only the actions, dates, people, proceedings, and institutional responses explicitly stated by SOURCE MATERIAL.",
+    "Paragraph 2 (medium-term record; ~100 to 120 words): Continue with documented chronology or confirmed limits in the record. Do not infer reforms, debates, policy changes, or effects."
   ],
   "conclusionParagraphs": [
-    "Paragraph 1 (honest assessment; ~90 to 110 words): State plainly what the event changed and what remained unchanged. Name the specific people, institutions, or ideas that were different afterward, and name what surprised historians about the outcome. Avoid vague grandiosity.",
-    "Paragraph 2 (reframing close; ~80 to 100 words): End with a specific fact, contradiction, or detail that reframes everything the reader just learned — the kind of thing that makes someone put the article down and think. Not a call to reflection, not a generic statement about the importance of history. A concrete surprising detail that lands. The final sentence must be short, direct, and self-contained."
+    "Paragraph 1 (honest assessment; ~90 to 110 words): Synthesize only changes or limits explicitly stated by SOURCE MATERIAL. Do not add a preventive lesson, public-policy claim, or modern recommendation.",
+    "Paragraph 2 (reframing close; ~80 to 100 words): End with a specific source fact, contradiction, or documented detail. The final sentence must be short, direct, self-contained, and source-supported."
   ],
   "analysisGood": [
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who deserves credit and why. Describe the specific decision, action, or circumstance that worked, what the alternatives were, and why this outcome was not guaranteed. No generic praise." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard — specific, analytical, opinionated." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." }
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Evaluate a source-documented action, response, or strength of the record without inventing effectiveness, credit, causality, or alternatives." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." }
   ],
   "analysisBad": [
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who is responsible. Describe the specific failure, what the stakes were, and what a better decision would have looked like. Do not be vague or diplomatic." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." },
-    { "title": "Optional: a systemic or institutional failure", "detail": "Minimum 60 words. The failure that no single person owned but that shaped the outcome nonetheless." }
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Evaluate a source-documented failure, limitation, or unresolved question without inventing responsibility, prevention, or a better alternative." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." }
   ],
   "editorialNote": "Minimum 80 words. A frank, first-person-plural editorial reflection from the thisDay. team. Start with 'What strikes us about this is...' or 'We keep coming back to one thing:' or a similarly direct opening. Say something that the body of the article could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered and what actually happened. No hedging. No 'it is important to remember'. Say the thing.",
   "keyTerms": [
@@ -11069,6 +11183,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     ? `SOURCE MATERIAL, the single source of truth:\n"""\n${String(sourceMaterial).slice(0, 5500)}\n"""\n`
     : "";
   const compactContextHook = contextHook
+    && !sourceMaterial
     ? `Current-world hook to weave into conclusion or editorial note, not verbatim: ${contextHook}\n`
     : "";
   const compactAvoidSection = takenThisMonth.length > 0
@@ -11078,14 +11193,19 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
 
 Event: ${forcedEvent ? `"${forcedEvent}"` : `a significant event from ${monthName} ${day}`}
 Required date: ${monthName} ${day}. The historicalDate and historicalDateISO month/day must match this date.
-${compactContextHook}${compactSourceSection}${compactAvoidSection}${stricterGrounding ? "Previous draft failed grounding. Be conservative and omit any unsupported specific.\n" : ""}
+${compactContextHook}${compactSourceSection}${compactAvoidSection}${stricterGrounding ? "Previous draft failed grounding. Use only relationships, outcomes, and consequences explicitly stated by the source.\n" : ""}
 Grounding rules:
 - Use only SOURCE MATERIAL for factual claims when it is supplied. If a number, quote, person, document, place, motive, or consequence is not there, do not invent it.
 - Never copy http://, https://, or www. text into any visible prose field. URLs belong only in URL and source metadata fields.
 - Do not include any proper noun, year, treaty, law, massacre, conference, battle, aviation protocol, or named policy unless it appears in SOURCE MATERIAL.
 - If SOURCE MATERIAL is thin on aftermath, say what the record confirms and what remains unresolved. Never fill the gap with general knowledge.
+- Do not write that one event led to, caused, triggered, prompted, prevented, enabled, ended, established, abolished, or changed another result unless SOURCE MATERIAL explicitly states that relationship.
+- Chronology is not causality. When SOURCE MATERIAL only records that B happened after A, describe A and B separately and never claim A caused B.
+- Never invent gun-law changes, security reforms, mental-health effects, policy debates, institutional responses, public lessons, effectiveness claims, or better alternatives.
+- Quick Facts, Did You Know, analysis, aftermath, conclusions, and the editorial note must stay source-bound. Do not fill required space with inferred significance, legacy, prevention, or moral instruction.
 - Keep recognition, arrest, death, departure, arrival, and capture dates and places distinct.
 - If no named witness or document appears in SOURCE MATERIAL, leave eyewitnessQuote and eyewitnessQuoteSource empty and use eyewitnessOrChronicle to explain what the record confirms and what it leaves unresolved.
+${groundingFeedbackSection}
 
 Output exactly this JSON shape and no extra text:
 {
@@ -11107,7 +11227,7 @@ Output exactly this JSON shape and no extra text:
   "jsonLdUrl": "source URL",
   "organizerName": "key person or organization",
   "readingTimeMinutes": 8,
-  "quickFacts": [{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
+  "quickFacts": [{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Source Detail","value":"..."},{"label":"Confirmed Outcome","value":"..."}],
   "didYouKnowFacts": ["five distinct facts, 35-55 words each"],
   "overviewParagraphs": ["two paragraphs, 125-145 words each"],
   "eyewitnessOrChronicle": ["two paragraphs, 115-135 words each"],
@@ -11115,8 +11235,8 @@ Output exactly this JSON shape and no extra text:
   "eyewitnessQuoteSource": "",
   "aftermathParagraphs": ["two paragraphs, 120-145 words each"],
   "conclusionParagraphs": ["two paragraphs, 105-125 words each"],
-  "analysisGood": [{"title":"3-5 words","detail":"60+ words, specific decision and why it worked"}],
-  "analysisBad": [{"title":"3-5 words","detail":"60+ words, specific failure and better alternative"}],
+  "analysisGood": [{"title":"3-5 words","detail":"60+ words evaluating a source-documented action, response, or strength of the record"}],
+  "analysisBad": [{"title":"3-5 words","detail":"60+ words evaluating a source-documented failure, limitation, or unresolved question"}],
   "editorialNote": "80+ words from the thisDay. team",
   "keyTerms": [{"term":"exact article phrase","wikiUrl":"https://en.wikipedia.org/wiki/...","type":"person"}],
   "wikiUrl": "source URL",
@@ -11129,7 +11249,11 @@ Output exactly this JSON shape and no extra text:
 
 Field requirements:
 - quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 5 distinct facts.
+- Every Quick Fact must be directly supported. Do not use Significance, Legacy, Impact, or Lessons labels unless SOURCE MATERIAL explicitly states the claimed consequence. Prefer Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome.
+- Every Did You Know fact must come from SOURCE MATERIAL. Do not invent a surprising consequence, coincidence, motive, fate, or policy effect.
 - analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
+- Analysis must evaluate only source-documented actions or limitations. Do not invent why something worked, what it prevented, what changed because of it, who deserves credit beyond the source, or what a better alternative would have been.
+- Do not critique the article's writing, sourcing, repetition, or credibility inside analysisGood or analysisBad.
 - keyTerms must contain 5-8 entries and at least one real named person connected to the event.
 - imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
 - Body fields overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs must total 900-1250 words. This is a hard publication gate.
@@ -12036,6 +12160,8 @@ async function repairGroundingContradictions(env, content, reasons, source, call
     "Correct ONLY the contradicted facts listed in the audit, changing as few words as possible. " +
     "The supplied source material is authoritative; when the article and the source disagree, the source wins. " +
     "Do not rephrase, expand, or polish anything that is not contradicted. Preserve array lengths exactly. " +
+    "For an unsupported cause, outcome, prevention, effectiveness, responsibility, or institutional-change claim, do not evade the audit by adding may, might, could, likely, or apparently. Replace it with neutral chronology or another concrete fact explicitly stated by the source. " +
+    "Do not invent a policy lesson, security reform, mental-health effect, public debate, better alternative, or recommendation. " +
     "Never use hyphens or em dashes in article body fields. " +
     SOURCE_BOUND_REPAIR_RULES +
     "Return ONLY a JSON object containing the corrected fields.";

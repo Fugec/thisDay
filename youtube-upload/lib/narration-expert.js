@@ -1,12 +1,13 @@
 import { recordQuotaSignal } from "./tracker.js";
 import { resolveGroqModels, resolveHFTextModel, groqReasoningParams, reasoningCompletionBudget, capGroqMaxTokens } from "./model-resolver.js";
+import { isInterestingNarrationFact } from "./narration-selection.js";
 
 /**
  * Narration Expert — rewrites DYK / Quick Facts content items into engaging
  * documentary-style voiceover sentences before sending to ElevenLabs TTS.
  *
- * Uses the full article text as context so the AI can draw on additional
- * historical detail beyond the bullet points alone.
+ * Uses the full article text only to resolve context around the already
+ * selected facts. It must not introduce additional claims.
  *
  * Provider fallback chain (first available key wins):
  *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: llama-3.3-70b-versatile)
@@ -39,7 +40,7 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
         model,
         messages,
         max_tokens: maxTokens,
-        temperature: 0.5,
+        temperature: 0.25,
         ...groqReasoningParams(model),
       };
     },
@@ -61,7 +62,7 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
         model,
         messages,
         max_tokens: maxTokens,
-        temperature: 0.5,
+        temperature: 0.25,
         ...groqReasoningParams(model),
       };
     },
@@ -83,7 +84,7 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
         model,
         messages,
         max_tokens: maxTokens,
-        temperature: 0.5,
+        temperature: 0.25,
         ...groqReasoningParams(model),
       };
     },
@@ -105,7 +106,7 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
         model,
         messages,
         max_tokens: maxTokens,
-        temperature: 0.5,
+        temperature: 0.25,
         ...groqReasoningParams(model),
       };
     },
@@ -125,7 +126,7 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       model,
       messages,
       max_tokens: reasoningCompletionBudget(model, 1024),
-      temperature: 0.5,
+      temperature: 0.25,
       stream: false,
       ...groqReasoningParams(model),
     }),
@@ -145,7 +146,7 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       model,
       messages,
       max_tokens: reasoningCompletionBudget(model, 1024),
-      temperature: 0.5,
+      temperature: 0.25,
       stream: false,
       ...groqReasoningParams(model),
     }),
@@ -165,7 +166,7 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       model,
       messages,
       max_tokens: reasoningCompletionBudget(model, 1024),
-      temperature: 0.5,
+      temperature: 0.25,
       stream: false,
       ...groqReasoningParams(model),
     }),
@@ -185,7 +186,7 @@ function buildProviders(textModel, hfModelId, hfUrl) { return [
       model,
       messages,
       max_tokens: reasoningCompletionBudget(model, 1024),
-      temperature: 0.5,
+      temperature: 0.25,
       stream: false,
       ...groqReasoningParams(model),
     }),
@@ -204,23 +205,27 @@ You are a professional documentary scriptwriter specialising in history.
 Your task is to rewrite dry factual bullet points into vivid, engaging
 narration sentences for a 45-second YouTube Short voiceover, optimised for ElevenLabs TTS.
 
-You are provided with the full article text as background context — use it
-to add compelling details, but only rephrase what is supported by the sources.
+You are provided with the full article text only to resolve names and context.
+Do not add a claim, detail, explanation, or conclusion that is absent from the
+selected input fact.
 
 Style guide:
 - Write in a warm, authoritative documentary tone (think BBC/Netflix history docs)
 - Open with strong hooks: specific numbers, dramatic contrasts, or vivid imagery
 - Use active voice and present-tense verbs where they add urgency ("Soviet forces surround…")
-- Keep each item as ONE sentence or two short connected sentences — no lists
-- Prefer one vivid claim plus one supporting detail per item; do not pack in every source detail
+- Keep each item as ONE concise sentence
+- Preserve the selected fact's names, numbers, dates, places, and factual relationship exactly
+- Remove source-attribution clutter such as "as documented by", "according to", publication names, and report-writing process unless the source itself is the surprising fact
+- Delete generic commentary about significance, legacy, media attention, public reaction, thorough investigations, or why something matters
+- Every item must deliver one concrete, non-obvious historical fact immediately
 - Avoid starting consecutive items with the same word
-- If the article repeats itself, choose the freshest detail and cut duplicate context
 - Do not begin items with the calendar date or repeat the title date; the video card already shows it
 - If a fact starts with "On [Month] [day]" or "[Month] [day], [year]", remove that lead-in and start with the actor, number, or action
-- Do NOT invent facts not present in the original items or the article text
+- Do NOT add facts from the article context. Rewrite only the selected input item
+- Do not use filler transitions or conclusions: "this became", "this showed", "this highlighted", "this was significant", "the event shocked the nation", or "its legacy lives on"
 - Use contractions naturally ("didn't", "wasn't", "he'd") — stiff formal language kills TTS pacing
 - Grammar must be perfect — check plurals and verb agreement before returning
-- Each rewritten item must be under 350 characters (for TTS pacing)
+- Each rewritten item must be under 280 characters (for TTS pacing)
 - Return ONLY a JSON array of exactly N rewritten strings, no other text, no markdown`;
 
 // ---------------------------------------------------------------------------
@@ -252,7 +257,7 @@ async function callProvider(provider, apiKey, messages) {
 // Parse and validate the raw LLM response
 // ---------------------------------------------------------------------------
 
-function parseResponse(raw, expectedLength) {
+function parseResponse(raw, expectedLength, title) {
   const match = raw.match(/\[[\s\S]*\]/);
   if (!match) return null;
   let items;
@@ -264,7 +269,17 @@ function parseResponse(raw, expectedLength) {
   if (!Array.isArray(items) || items.length !== expectedLength) return null;
   if (!items.every((s) => typeof s === "string" && s.trim().length > 10))
     return null;
-  return items.map((s) => s.trim());
+  const cleaned = items.map((s) => s.trim());
+  if (
+    cleaned.some(
+      (item) =>
+        item.length > 280 ||
+        !isInterestingNarrationFact(item, title),
+    )
+  ) {
+    return null;
+  }
+  return cleaned;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,7 +350,7 @@ export async function polishNarrationItems(title, items, articleText = null) {
       continue;
     }
 
-    const polished = parseResponse(raw, items.length);
+    const polished = parseResponse(raw, items.length, title);
     if (!polished) {
       console.warn(
         `  ⚠ Narration expert (${provider.name}): invalid response — trying next provider\n    Got: ${raw.slice(0, 200)}`,

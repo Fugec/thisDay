@@ -18,6 +18,7 @@ CONFIGURATION.txt
 tests/
 package.json
 youtube-upload/test-*.js
+!youtube-upload/test-video-text.js
 
 # Wrangler build artifacts
 .wrangler/

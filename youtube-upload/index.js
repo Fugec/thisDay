@@ -41,7 +41,7 @@ import {
   updateIndexEntry,
   deleteIndexEntry,
 } from "./lib/kv.js";
-import { polishNarrationItems } from "./lib/narration-expert.js";
+import { selectInterestingNarrationFacts } from "./lib/narration-selection.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
 import { verifyKvReadWriteAccess } from "./lib/kv.js";
 import { checkVideoQuality } from "./lib/video-quality.js";
@@ -322,41 +322,57 @@ async function main() {
       let videoResult = null;
       try {
         // ── ElevenLabs TTS narration ───────────────────────────────────────────
-        // Source text priority: Did You Know bullets → Quick Facts rows → description
+        // Source text: current/legacy Did You Know and Quick Facts markup.
         console.log("  Fetching Did You Know / Quick Facts from KV...");
-        const dykItems = await getDidYouKnow(post.slug);
-        const quickFacts = dykItems ? null : await getQuickFacts(post.slug);
-        const contentItems = dykItems ?? quickFacts ?? null;
+        const [dykItems, quickFacts] = await Promise.all([
+          getDidYouKnow(post.slug),
+          getQuickFacts(post.slug),
+        ]);
+        const contentItems = [
+          ...(dykItems || []),
+          ...(quickFacts || []),
+        ];
 
-        if (contentItems) {
-          const source = dykItems ? "Did You Know" : "Quick Facts";
+        if (contentItems.length > 0) {
           console.log(
-            `  Using ${source} section (${contentItems.length} items).`,
+            `  Found ${dykItems?.length || 0} Did You Know and ${quickFacts?.length || 0} Quick Facts item(s).`,
           );
         } else {
           console.log(
-            "  No DYK/Quick Facts found — using description as fallback.",
+            "  No DYK/Quick Facts found — scanning article text for concrete facts.",
           );
         }
 
-        // ── Narration expert: polish DYK/Quick Facts for engaging TTS ─────────
-        // Uses full article text as context. Falls back to originals on any error.
+        // Deterministically select concrete source-backed facts. Article text is
+        // used only to fill gaps left by the two curated fact sections.
         const articleText = await getArticleText(post.slug).catch(() => null);
         const wikiArticleUrl = await getPostWikipediaUrl(post.slug).catch(
           () => null,
         );
-        const narrationItems = contentItems
-          ? await polishNarrationItems(
-              post.title,
-              contentItems,
-              articleText,
-            ).catch(() => contentItems)
-          : null;
+        const selectedNarrationItems = selectInterestingNarrationFacts(
+          post.title,
+          contentItems,
+          articleText,
+          { limit: 3 },
+        );
+        if (selectedNarrationItems.length > 0) {
+          console.log(
+            `  Selected ${selectedNarrationItems.length} high-interest narration fact(s):`,
+          );
+          selectedNarrationItems.forEach((item, index) =>
+            console.log(`    ${index + 1}. ${item}`),
+          );
+        } else {
+          console.warn(
+            "  ⚠ No high-interest source facts passed selection — using the headline only.",
+          );
+        }
+
+        const narrationItems = selectedNarrationItems;
 
         const script = buildNarrationScript(
           post,
-          narrationItems ?? contentItems,
-          articleText,
+          narrationItems,
         );
         const { path: narrPath, words: narrWords } = await generateNarration(
           post.slug,
@@ -406,12 +422,11 @@ async function main() {
             bgMusicPath,
             words: narrWords,
             useAiImage,
-            contentItems,
+            contentItems: selectedNarrationItems,
             wikiArticleUrl,
             narrationParts: buildNarrationParts(
               post,
-              narrationItems ?? contentItems,
-              articleText,
+              narrationItems,
             ),
             qualityHint,
           });

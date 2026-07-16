@@ -289,6 +289,39 @@ function decodeEntities(str) {
     .trim();
 }
 
+function uniqueTextItems(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = String(item || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function extractDidYouKnowFromHtml(raw) {
+  const html = String(raw || "");
+  const currentItems = [
+    ...html.matchAll(
+      /<p\b(?=[^>]*\bclass\s*=\s*["'][^"']*\bdyn-fact\b[^"']*["'])[^>]*>([\s\S]*?)<\/p>/gi,
+    ),
+  ]
+    .map((match) => decodeEntities(match[1].replace(/<[^>]+>/g, " ")))
+    .filter(Boolean);
+  if (currentItems.length > 0) return uniqueTextItems(currentItems).slice(0, 5);
+
+  const legacySection = html.match(
+    /class=["'][^"']*did-you-know[^"']*["'][^>]*>([\s\S]*?)(?:<\/section>|<\/div>\s*<\/div>)/i,
+  )?.[1];
+  if (!legacySection) return null;
+  const legacyItems = [...legacySection.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+    .map((match) => decodeEntities(match[1].replace(/<[^>]+>/g, " ")))
+    .filter(Boolean);
+  return legacyItems.length > 0
+    ? uniqueTextItems(legacyItems).slice(0, 5)
+    : null;
+}
+
 /**
  * Extracts "Did You Know?" bullet items from a post's HTML.
  * Returns an array of plain-text strings, or null if the section is absent.
@@ -300,17 +333,45 @@ function decodeEntities(str) {
 export async function getDidYouKnow(slug) {
   const raw = await kvGet(`post:${slug}`);
   if (!raw) return null;
+  return extractDidYouKnowFromHtml(raw);
+}
 
-  const dykMatch = raw.match(
-    /class="did-you-know[^"]*"[^>]*>([\s\S]*?)<\/div>/i,
-  );
-  if (!dykMatch) return null;
+export function extractQuickFactsFromHtml(raw) {
+  const html = String(raw || "");
+  const currentItems = [];
+  for (const match of html.matchAll(
+    /<div\b(?=[^>]*\bclass\s*=\s*["'][^"']*\bai-answer-item\b[^"']*["'])[^>]*>([\s\S]*?)<\/div>/gi,
+  )) {
+    const body = match[1];
+    const label = decodeEntities(
+      (body.match(/<strong[^>]*>([\s\S]*?)<\/strong>/i)?.[1] || "").replace(
+        /<[^>]+>/g,
+        " ",
+      ),
+    );
+    const value = decodeEntities(
+      (body.match(/<span[^>]*>([\s\S]*?)<\/span>/i)?.[1] || "").replace(
+        /<[^>]+>/g,
+        " ",
+      ),
+    );
+    if (label && value) currentItems.push(`${label}: ${value}`);
+  }
+  if (currentItems.length > 0) return uniqueTextItems(currentItems).slice(0, 8);
 
-  const items = [...dykMatch[1].matchAll(/<li>([\s\S]*?)<\/li>/gi)]
-    .map((m) => decodeEntities(m[1].replace(/<[^>]+>/g, "")))
+  const tableMatch = html.match(/Quick Facts<\/h3>([\s\S]*?)<\/table>/i);
+  if (!tableMatch) return null;
+  const rows = [...tableMatch[1].matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)]
+    .map((match) => {
+      const cells = [
+        ...match[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi),
+      ]
+        .map((cell) => decodeEntities(cell[1].replace(/<[^>]+>/g, " ")))
+        .filter(Boolean);
+      return cells.length >= 2 ? `${cells[0]}: ${cells[1]}` : null;
+    })
     .filter(Boolean);
-
-  return items.length > 0 ? items : null;
+  return rows.length > 0 ? uniqueTextItems(rows).slice(0, 8) : null;
 }
 
 /**
@@ -323,18 +384,5 @@ export async function getDidYouKnow(slug) {
 export async function getQuickFacts(slug) {
   const raw = await kvGet(`post:${slug}`);
   if (!raw) return null;
-
-  const tableMatch = raw.match(/Quick Facts<\/h3>([\s\S]*?)<\/table>/i);
-  if (!tableMatch) return null;
-
-  const rows = [...tableMatch[1].matchAll(/<tr>([\s\S]*?)<\/tr>/gi)]
-    .map((m) => {
-      const cells = [...m[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)]
-        .map((c) => decodeEntities(c[1].replace(/<[^>]+>/g, "")))
-        .filter(Boolean);
-      return cells.length >= 2 ? `${cells[0]}: ${cells[1]}` : null;
-    })
-    .filter(Boolean);
-
-  return rows.length > 0 ? rows : null;
+  return extractQuickFactsFromHtml(raw);
 }

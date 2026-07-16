@@ -10,6 +10,8 @@ import { join } from "node:path";
 
 import {
   buildMigrationPlan,
+  buildPersonIdentityAudit,
+  buildPersonIdentityAuditMarkdown,
   evaluateEntityIndexability,
   executeMigrationPlan,
   selectMigrationBatch,
@@ -367,6 +369,104 @@ test("person eligibility measures the body rendered from source facts, not disca
   assert.ok(
     evaluation.reasons.includes("rendered body below 150 words"),
   );
+});
+
+test("full person identity audit separates humans, non-human sources, and protected failures", () => {
+  const rows = [
+    {
+      type: "person",
+      slug: "verified-human",
+      url: "https://thisday.info/people/verified-human/",
+      wikiUrl: "https://en.wikipedia.org/wiki/Verified_Human",
+      currentIndexable: true,
+      googleCoverage: "URL is unknown to Google",
+      entityQualityGateVersion: 1,
+      indexQualityGateVersion: 1,
+      reasons: [],
+      sourceVerification: {
+        verified: true,
+        personIsHuman: true,
+        resolvedTitle: "Verified Human",
+        wikibaseItem: "Q1",
+        reasons: [],
+      },
+    },
+    {
+      type: "person",
+      slug: "ethnic-group",
+      url: "https://thisday.info/people/ethnic-group/",
+      wikiUrl: "https://en.wikipedia.org/wiki/Ethnic_group",
+      currentIndexable: true,
+      googleCoverage: "Submitted and indexed",
+      entityQualityGateVersion: null,
+      indexQualityGateVersion: null,
+      reasons: [],
+      sourceVerification: {
+        verified: false,
+        personIsHuman: false,
+        pageExists: true,
+        resolvedTitle: "Ethnic group",
+        wikibaseItem: "Q2",
+        reasons: ["Wikipedia person source is not a human biography"],
+      },
+    },
+    {
+      type: "person",
+      slug: "ambiguous-name",
+      url: "https://thisday.info/people/ambiguous-name/",
+      wikiUrl: "https://en.wikipedia.org/wiki/Ambiguous_name",
+      currentIndexable: false,
+      googleCoverage: "URL is unknown to Google",
+      entityQualityGateVersion: 1,
+      indexQualityGateVersion: 1,
+      reasons: [],
+      sourceVerification: {
+        verified: false,
+        personIsHuman: false,
+        disambiguation: true,
+        pageExists: true,
+        resolvedTitle: "Ambiguous name",
+        wikibaseItem: "Q3",
+        reasons: ["Wikipedia source resolves to a disambiguation page"],
+      },
+    },
+    {
+      type: "person",
+      slug: "missing-source",
+      url: "https://thisday.info/people/missing-source/",
+      wikiUrl: "",
+      currentIndexable: true,
+      googleCoverage: "URL is unknown to Google",
+      entityQualityGateVersion: null,
+      indexQualityGateVersion: null,
+      reasons: ["missing direct Wikipedia biography"],
+      sourceVerification: {
+        verified: false,
+        personIsHuman: false,
+        pageExists: false,
+        reasons: ["missing direct Wikipedia biography"],
+      },
+    },
+  ];
+
+  const audit = buildPersonIdentityAudit(
+    rows,
+    "2026-07-16T04:00:00.000Z",
+  );
+  assert.equal(audit.totalPeople, 4);
+  assert.equal(audit.verifiedHumans, 1);
+  assert.equal(audit.failures, 3);
+  assert.equal(audit.nonHumanWikidataEntities, 1);
+  assert.equal(audit.disambiguationSources, 1);
+  assert.equal(audit.missingWikipediaSources, 1);
+  assert.equal(audit.currentlyIndexableFailures, 2);
+  assert.equal(audit.googleIndexedFailures, 1);
+  assert.equal(audit.qualityMarkedFailures, 1);
+
+  const markdown = buildPersonIdentityAuditMarkdown(audit);
+  assert.match(markdown, /3 require identity\/source review/);
+  assert.match(markdown, /ethnic-group/);
+  assert.match(markdown, /must be protected/);
 });
 
 test("verification mode creates backups without writing KV", async () => {

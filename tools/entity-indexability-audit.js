@@ -11,6 +11,8 @@
  *   documentation/quality/entity-indexability-report.json
  *   documentation/quality/entity-migration-batch-plan.md
  *   documentation/quality/entity-migration-batch-plan.json
+ *   documentation/quality/person-identity-audit-<timestamp>/report.md
+ *   documentation/quality/person-identity-audit-<timestamp>/report.json
  */
 
 import {
@@ -60,6 +62,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     outputDir: DEFAULT_OUTPUT_DIR,
     limit: 0,
     planSize: 0,
+    verifyAllPeople: false,
     verifyPlan: "",
     applyPlan: "",
     confirmProductionWrite: false,
@@ -70,6 +73,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     if (arg === "--out-dir") options.outputDir = resolve(argv[++index] || "");
     else if (arg === "--limit") options.limit = Number(argv[++index]);
     else if (arg === "--plan-size") options.planSize = Number(argv[++index]);
+    else if (arg === "--verify-all-people") {
+      options.verifyAllPeople = true;
+    }
     else if (arg === "--verify-plan") {
       options.verifyPlan = resolve(argv[++index] || "");
     }
@@ -99,9 +105,12 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
   if (
     (options.verifyPlan || options.applyPlan) &&
-    (options.limit || options.planSize)
+    (options.limit || options.planSize || options.verifyAllPeople)
   ) {
     throw new Error("Audit/plan creation flags cannot be combined with plan execution.");
+  }
+  if (options.planSize && options.verifyAllPeople) {
+    throw new Error("--plan-size and --verify-all-people cannot be combined.");
   }
   if (options.applyPlan && !options.confirmProductionWrite) {
     throw new Error("--apply-plan requires --confirm-production-write.");
@@ -124,6 +133,9 @@ Options:
   --out-dir PATH   Local report directory.
   --limit N        Audit only the first N entity index entries.
   --plan-size N    Build an exact GET-only migration plan for N safe legacy entries.
+  --verify-all-people
+                   Verify every person source against Wikipedia and Wikidata
+                   and write a timestamped, read-only identity report.
   --verify-plan PATH
                    Re-read live KV, recheck sources and hashes, and create
                    local backups without writing production.
@@ -1262,6 +1274,145 @@ function buildReport(rows, generatedAt) {
   return lines.join("\n");
 }
 
+function personIdentityStatus(row) {
+  const verification = row.sourceVerification || {};
+  if (
+    verification.verified === true &&
+    verification.personIsHuman === true
+  ) {
+    return "verified human";
+  }
+  if (!row.wikiUrl) return "missing Wikipedia source";
+  if (verification.disambiguation === true) return "disambiguation";
+  if (
+    verification.personIsHuman === false &&
+    verification.wikibaseItem
+  ) {
+    return "non-human Wikidata entity";
+  }
+  if (verification.pageExists === false) return "missing source page";
+  if (verification.extractWordCount > 0 && verification.extractWordCount < 25) {
+    return "thin source page";
+  }
+  return "unverified source";
+}
+
+function buildPersonIdentityAudit(rows, generatedAt) {
+  const people = rows
+    .filter((row) => row.type === "person")
+    .map((row) => ({
+      ...row,
+      identityStatus: personIdentityStatus(row),
+    }));
+  const failures = people.filter(
+    (row) => row.identityStatus !== "verified human",
+  );
+  const countStatus = (status) =>
+    failures.filter((row) => row.identityStatus === status).length;
+  return {
+    generatedAt,
+    mode: "read-only person source identity audit",
+    productionWrites: 0,
+    publicEntityPageFetches: 0,
+    totalPeople: people.length,
+    verifiedHumans: people.length - failures.length,
+    failures: failures.length,
+    nonHumanWikidataEntities: countStatus("non-human Wikidata entity"),
+    disambiguationSources: countStatus("disambiguation"),
+    missingWikipediaSources: countStatus("missing Wikipedia source"),
+    missingSourcePages: countStatus("missing source page"),
+    thinSourcePages: countStatus("thin source page"),
+    otherUnverifiedSources: countStatus("unverified source"),
+    currentlyIndexableFailures:
+      failures.filter((row) => row.currentIndexable === true).length,
+    googleIndexedFailures:
+      failures.filter(
+        (row) => row.googleCoverage === "Submitted and indexed",
+      ).length,
+    qualityMarkedFailures:
+      failures.filter(
+        (row) =>
+          row.entityQualityGateVersion === QUALITY_GATE_VERSION ||
+          row.indexQualityGateVersion === QUALITY_GATE_VERSION,
+      ).length,
+    rows: people,
+  };
+}
+
+function buildPersonIdentityAuditMarkdown(audit) {
+  const failures = audit.rows.filter(
+    (row) => row.identityStatus !== "verified human",
+  );
+  const lines = [];
+  lines.push(
+    `# Person Source Identity Audit — ${audit.generatedAt.slice(0, 10)}`,
+  );
+  lines.push("");
+  lines.push(
+    "This audit is read-only. It used production KV GET requests, Wikipedia source resolution, and Wikidata `instance of: human (Q5)` claims. It did not fetch public entity pages or modify KV, URLs, robots directives, sitemaps, or content.",
+  );
+  lines.push("");
+  lines.push("## Summary");
+  lines.push("");
+  lines.push(`- ${audit.totalPeople} \`/people/\` records audited.`);
+  lines.push(`- ${audit.verifiedHumans} resolve to verified human subjects.`);
+  lines.push(`- ${audit.failures} require identity/source review.`);
+  lines.push(
+    `- ${audit.nonHumanWikidataEntities} resolve to non-human Wikidata entities.`,
+  );
+  lines.push(
+    `- ${audit.disambiguationSources} resolve to disambiguation pages.`,
+  );
+  lines.push(
+    `- ${audit.missingWikipediaSources} have no direct Wikipedia source.`,
+  );
+  lines.push(
+    `- ${audit.currentlyIndexableFailures} failing records currently have an indexable legacy flag.`,
+  );
+  lines.push(
+    `- ${audit.googleIndexedFailures} failing records are reported as indexed by Google and must be protected from automatic URL or robots changes.`,
+  );
+  lines.push(
+    `- ${audit.qualityMarkedFailures} failing records already carry a quality-gate marker and need priority review.`,
+  );
+  lines.push("");
+  lines.push("## Records requiring review");
+  lines.push("");
+  if (!failures.length) {
+    lines.push("None.");
+  } else {
+    lines.push(
+      "| URL | Status | Index flag | Google coverage | Quality marker | Resolved source | Wikidata | Reason(s) |",
+    );
+    lines.push("|---|---|---|---|---|---|---|---|");
+    for (const row of failures) {
+      const verification = row.sourceVerification || {};
+      const qualityMarker =
+        row.entityQualityGateVersion === QUALITY_GATE_VERSION ||
+        row.indexQualityGateVersion === QUALITY_GATE_VERSION
+          ? `v${QUALITY_GATE_VERSION}`
+          : "legacy";
+      lines.push(
+        `| ${markdownCell(row.url.replace(SITE, ""))} | ${markdownCell(row.identityStatus)} | ${row.currentIndexable ? "indexable" : "not indexable"} | ${markdownCell(row.googleCoverage)} | ${qualityMarker} | ${markdownCell(verification.resolvedTitle || verification.requestedTitle || "")} | ${markdownCell(verification.wikibaseItem || "")} | ${markdownCell((verification.reasons || row.reasons || []).join("; "))} |`,
+      );
+    }
+  }
+  lines.push("");
+  lines.push("## Safe next actions");
+  lines.push("");
+  lines.push(
+    "- Do not automatically noindex, redirect, delete, or reclassify any URL reported as indexed by Google.",
+  );
+  lines.push(
+    "- Review non-human `/people/` records individually and decide whether the correct outcome is an unlinked label, a history/entity page, a redirect, or removal from the entity index.",
+  );
+  lines.push(
+    "- Keep the Q5 guard active for every future person migration and add the same semantic requirement to person creation if the production worker does not already enforce it.",
+  );
+  lines.push("");
+  return lines.join("\n");
+}
+
 async function runAudit(options = {}) {
   const env = parseEnvFile(join(ROOT, "youtube-upload/.env"));
   const indexRaw = await readKvValue(env, "entity-index-v1");
@@ -1294,6 +1445,7 @@ async function runAudit(options = {}) {
         slug: entry.slug,
         name: entry.name || entity?.name || "",
         url,
+        wikiUrl: entity?.wikiUrl || entry?.wikiUrl || "",
         recordFound: Boolean(entity),
         currentIndexable: entry.indexable === true,
         recommendedEligible: evaluation.eligible,
@@ -1307,15 +1459,17 @@ async function runAudit(options = {}) {
         needsWikiRefresh: Boolean(entity?.needsWikiRefresh || entry.needsWikiRefresh),
         entityQualityGateVersion: entity?.qualityGateVersion || null,
         indexQualityGateVersion: entry?.qualityGateVersion || null,
+        profileLinkEligible: entity?.profileLinkEligible === true,
+        profileSubjectVerified: entity?.profileSubjectVerified === true,
       },
     };
   });
   const rows = auditedEntries.map(({ row }) => row);
   let sourceVerificationRequests = 0;
-  if (options.planSize) {
-    const sourceCandidates = auditedEntries.filter((entry) =>
-      isMigrationCandidate(entry),
-    );
+  if (options.planSize || options.verifyAllPeople) {
+    const sourceCandidates = options.verifyAllPeople
+      ? auditedEntries.filter(({ row }) => row.type === "person")
+      : auditedEntries.filter((entry) => isMigrationCandidate(entry));
     const verification = await verifyWikipediaSourcePages(sourceCandidates);
     sourceVerificationRequests = verification.requestCount;
     for (const candidate of sourceCandidates) {
@@ -1331,8 +1485,27 @@ async function runAudit(options = {}) {
           pageExists: false,
           disambiguation: false,
           extractWordCount: 0,
-          reasons: ["Wikipedia source could not be verified"],
+          wikibaseItem: "",
+          entityTypes: ["person"],
+          personIsHuman: false,
+          reasons: [
+            wikiUrl
+              ? "Wikipedia source could not be verified"
+              : "missing direct Wikipedia biography",
+          ],
         };
+      if (
+        options.verifyAllPeople &&
+        candidate.row.sourceVerification.verified !== true
+      ) {
+        candidate.row.recommendedEligible = false;
+        candidate.row.reasons = [
+          ...new Set([
+            ...candidate.row.reasons,
+            ...candidate.row.sourceVerification.reasons,
+          ]),
+        ];
+      }
     }
   }
 
@@ -1352,6 +1525,35 @@ async function runAudit(options = {}) {
       rows,
     }, null, 2)}\n`,
   );
+  let personIdentityAudit = null;
+  let personIdentityAuditDir = "";
+  let personIdentityAuditMarkdownPath = "";
+  let personIdentityAuditJsonPath = "";
+  if (options.verifyAllPeople) {
+    personIdentityAudit = buildPersonIdentityAudit(rows, generatedAt);
+    const stamp = generatedAt.replace(/[:.]/g, "-");
+    personIdentityAuditDir = join(
+      outputDir,
+      `person-identity-audit-${stamp}`,
+    );
+    mkdirSync(personIdentityAuditDir, { recursive: true });
+    personIdentityAuditMarkdownPath = join(
+      personIdentityAuditDir,
+      "report.md",
+    );
+    personIdentityAuditJsonPath = join(
+      personIdentityAuditDir,
+      "report.json",
+    );
+    writeFileSync(
+      personIdentityAuditMarkdownPath,
+      buildPersonIdentityAuditMarkdown(personIdentityAudit),
+    );
+    writeFileSync(
+      personIdentityAuditJsonPath,
+      `${JSON.stringify(personIdentityAudit, null, 2)}\n`,
+    );
+  }
   let migrationPlan = null;
   let migrationPlanDir = "";
   let migrationPlanMarkdownPath = "";
@@ -1394,6 +1596,10 @@ async function runAudit(options = {}) {
     migrationPlanMarkdownPath,
     migrationPlanJsonPath,
     sourceVerificationRequests,
+    personIdentityAudit,
+    personIdentityAuditDir,
+    personIdentityAuditMarkdownPath,
+    personIdentityAuditJsonPath,
   };
 }
 
@@ -1436,6 +1642,17 @@ async function main(argv = process.argv.slice(2)) {
     );
   }
   console.log(`Report: ${result.markdownPath}`);
+  if (result.personIdentityAudit) {
+    console.log(
+      `Verified human people: ${result.personIdentityAudit.verifiedHumans}/${result.personIdentityAudit.totalPeople}`,
+    );
+    console.log(
+      `Person records requiring review: ${result.personIdentityAudit.failures}`,
+    );
+    console.log(
+      `Person identity report: ${result.personIdentityAuditMarkdownPath}`,
+    );
+  }
   if (result.migrationPlan) {
     console.log(`Safe migration batch: ${result.migrationPlan.items.length}`);
     console.log(`Plan: ${result.migrationPlanMarkdownPath}`);
@@ -1455,6 +1672,8 @@ export {
   buildReport,
   buildMigrationPlan,
   buildMigrationPlanMarkdown,
+  buildPersonIdentityAudit,
+  buildPersonIdentityAuditMarkdown,
   entityBodyWordCount,
   evaluateEntityIndexability,
   executeMigrationPlan,

@@ -30,6 +30,7 @@ const INDEXING_CACHE_PATH = join(ROOT, "documentation/gsc/indexing-raw.json");
 const PERSON_MIN_WORDS = 150;
 const HISTORY_MIN_WORDS = 300;
 const QUALITY_GATE_VERSION = 1;
+const WIKIDATA_HUMAN_ENTITY_ID = "Q5";
 
 function parseEnvFile(path) {
   const output = {};
@@ -506,8 +507,14 @@ async function verifyWikipediaSourcePages(
   for (const { entity, entry } of auditedEntries) {
     const wikiUrl = entity?.wikiUrl || entry?.wikiUrl || "";
     const requestedTitle = wikipediaTitleFromUrl(wikiUrl);
+    const entityType = entity?.type || entry?.type || "";
     if (wikiUrl && requestedTitle) {
-      sources.set(wikiUrl, requestedTitle);
+      const source = sources.get(wikiUrl) || {
+        requestedTitle,
+        entityTypes: new Set(),
+      };
+      if (entityType) source.entityTypes.add(entityType);
+      sources.set(wikiUrl, source);
     }
   }
 
@@ -519,7 +526,7 @@ async function verifyWikipediaSourcePages(
   // would misclassify substantive pages as thin.
   for (let offset = 0; offset < sourceEntries.length; offset += 20) {
     const chunk = sourceEntries.slice(offset, offset + 20);
-    const requestedTitles = chunk.map(([, title]) => title);
+    const requestedTitles = chunk.map(([, source]) => source.requestedTitle);
     const params = new URLSearchParams({
       action: "query",
       format: "json",
@@ -562,7 +569,8 @@ async function verifyWikipediaSourcePages(
       return resolved;
     };
 
-    for (const [wikiUrl, requestedTitle] of chunk) {
+    for (const [wikiUrl, source] of chunk) {
+      const { requestedTitle } = source;
       const resolvedTitle = resolveTitle(requestedTitle);
       const page = pages.get(resolvedTitle);
       const pageExists = Boolean(page && page.missing !== true);
@@ -585,15 +593,80 @@ async function verifyWikipediaSourcePages(
         reasons.push("Wikipedia source summary is too thin");
       }
       results.set(wikiUrl, {
-        verified: reasons.length === 0,
+        verified: false,
         requestedTitle,
         resolvedTitle,
         pageExists,
         disambiguation,
         extractWordCount,
+        wikibaseItem: String(page?.pageprops?.wikibase_item || ""),
+        entityTypes: [...source.entityTypes],
+        personIsHuman: null,
         reasons,
       });
     }
+  }
+
+  const personResults = [...results.values()].filter((result) =>
+    result.entityTypes.includes("person"),
+  );
+  const wikidataIds = [...new Set(
+    personResults
+      .map((result) => result.wikibaseItem)
+      .filter(Boolean),
+  )];
+  const humanEntityIds = new Set();
+  for (let offset = 0; offset < wikidataIds.length; offset += 50) {
+    const ids = wikidataIds.slice(offset, offset + 50);
+    const params = new URLSearchParams({
+      action: "wbgetentities",
+      format: "json",
+      formatversion: "2",
+      props: "claims",
+      ids: ids.join("|"),
+    });
+    requestCount += 1;
+    const response = await fetchImpl(
+      `https://www.wikidata.org/w/api.php?${params}`,
+      {
+        headers: {
+          "User-Agent":
+            "thisDay.info entity migration audit (kapetanovic.armin@gmail.com)",
+        },
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Wikidata person verification failed: HTTP ${response.status}`,
+      );
+    }
+    const payload = await response.json();
+    for (const [id, entity] of Object.entries(payload.entities || {})) {
+      const instanceOfClaims = Array.isArray(entity?.claims?.P31)
+        ? entity.claims.P31
+        : [];
+      if (
+        instanceOfClaims.some(
+          (claim) =>
+            claim?.mainsnak?.datavalue?.value?.id ===
+              WIKIDATA_HUMAN_ENTITY_ID,
+        )
+      ) {
+        humanEntityIds.add(id);
+      }
+    }
+  }
+
+  for (const result of results.values()) {
+    if (result.entityTypes.includes("person")) {
+      result.personIsHuman = humanEntityIds.has(result.wikibaseItem);
+      if (!result.personIsHuman) {
+        result.reasons.push(
+          "Wikipedia person source is not a human biography",
+        );
+      }
+    }
+    result.verified = result.reasons.length === 0;
   }
 
   return { results, requestCount };
@@ -697,6 +770,7 @@ function buildMigrationPlan(
         "legacy entry is currently indexable",
         "record already passes the stronger quality gate",
         "Wikipedia source resolves to a substantive non-disambiguation page",
+        "person source is a Wikidata instance of human (Q5)",
         "migration does not change page robots or sitemap eligibility",
         "indexed failures are excluded",
       ],
@@ -727,6 +801,7 @@ function buildMigrationPlanMarkdown(plan) {
   lines.push(`- ${plan.items.length} legacy records selected.`);
   lines.push("- Every selected record already passes the stronger entity quality gate.");
   lines.push("- Every selected source resolves to a substantive, non-disambiguation Wikipedia page.");
+  lines.push("- Every selected person source is a Wikidata instance of human (Q5), not a group, organization, event, or concept.");
   lines.push("- Every selected page remains indexable before and after the proposed marker migration.");
   lines.push("- The plan adds only the versioned quality-gate fields required by the current Workers.");
   lines.push(`- ${plan.protectedIndexedFailures.length} indexed failures are excluded and remain protected.`);
@@ -820,6 +895,10 @@ function assertExactMigrationPlan(plan) {
     if (
       item.sourceVerification?.verified !== true ||
       item.sourceVerification?.disambiguation === true ||
+      (
+        item.type === "person" &&
+        item.sourceVerification?.personIsHuman !== true
+      ) ||
       item.eligibilityBefore !== true ||
       item.eligibilityAfter !== true ||
       item.robotsBefore !== item.robotsAfter
@@ -1353,7 +1432,7 @@ async function main(argv = process.argv.slice(2)) {
   console.log(`Production writes: 0; public page fetches: 0`);
   if (result.sourceVerificationRequests) {
     console.log(
-      `Wikipedia source-verification requests: ${result.sourceVerificationRequests}`,
+      `Wikipedia/Wikidata source-verification requests: ${result.sourceVerificationRequests}`,
     );
   }
   console.log(`Report: ${result.markdownPath}`);

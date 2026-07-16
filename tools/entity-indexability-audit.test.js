@@ -47,6 +47,7 @@ function auditEntry(
         pageExists: true,
         disambiguation: !sourceVerified,
         extractWordCount: sourceVerified ? 100 : 10,
+        personIsHuman: type === "person" ? sourceVerified : null,
         reasons: sourceVerified ? [] : ["disambiguation"],
       },
     },
@@ -108,6 +109,7 @@ function migrationFixture() {
         {
           verified: true,
           disambiguation: false,
+          personIsHuman: entity?.type === "person" ? true : null,
           reasons: [],
         },
       ]),
@@ -187,17 +189,26 @@ test("safe migration selection excludes source failures and indexed gate failure
   );
 });
 
-test("Wikipedia verification follows redirects and rejects disambiguation pages", async () => {
+test("source verification follows redirects and rejects disambiguation and non-human person pages", async () => {
   const entries = [
     {
       entity: {
+        type: "person",
         wikiUrl: "https://en.wikipedia.org/wiki/Safe_Source",
       },
       entry: {},
     },
     {
       entity: {
+        type: "person",
         wikiUrl: "https://en.wikipedia.org/wiki/Ambiguous_Source",
+      },
+      entry: {},
+    },
+    {
+      entity: {
+        type: "person",
+        wikiUrl: "https://en.wikipedia.org/wiki/Group_Source",
       },
       entry: {},
     },
@@ -205,6 +216,50 @@ test("Wikipedia verification follows redirects and rejects disambiguation pages"
   let requestedUrl = "";
   const fetchImpl = async (url) => {
     requestedUrl = String(url);
+    if (requestedUrl.startsWith("https://www.wikidata.org/")) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            entities: {
+              Q1: {
+                claims: {
+                  P31: [
+                    {
+                      mainsnak: {
+                        datavalue: { value: { id: "Q5" } },
+                      },
+                    },
+                  ],
+                },
+              },
+              Q2: {
+                claims: {
+                  P31: [
+                    {
+                      mainsnak: {
+                        datavalue: { value: { id: "Q4167410" } },
+                      },
+                    },
+                  ],
+                },
+              },
+              Q3: {
+                claims: {
+                  P31: [
+                    {
+                      mainsnak: {
+                        datavalue: { value: { id: "Q41710" } },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          };
+        },
+      };
+    }
     return {
       ok: true,
       async json() {
@@ -219,14 +274,24 @@ test("Wikipedia verification follows redirects and rejects disambiguation pages"
             pages: [
               {
                 title: "Resolved Safe Source",
+                pageprops: { wikibase_item: "Q1" },
                 extract:
                   "This verified source contains enough substantive introductory words to pass the minimum source evidence threshold without relying on a missing page, an ambiguous title, or a disambiguation marker in its MediaWiki metadata response.",
               },
               {
                 title: "Ambiguous Source",
-                pageprops: { disambiguation: "" },
+                pageprops: {
+                  disambiguation: "",
+                  wikibase_item: "Q2",
+                },
                 extract:
                   "Ambiguous Source may refer to several unrelated historical topics and people.",
+              },
+              {
+                title: "Group Source",
+                pageprops: { wikibase_item: "Q3" },
+                extract:
+                  "Group Source describes a large ethnic community with a shared history, language, culture, geographic origin, and modern diaspora rather than the life of one individual human subject.",
               },
             ],
           },
@@ -237,8 +302,7 @@ test("Wikipedia verification follows redirects and rejects disambiguation pages"
 
   const verification = await verifyWikipediaSourcePages(entries, fetchImpl);
 
-  assert.match(requestedUrl, /exlimit=max/);
-  assert.equal(verification.requestCount, 1);
+  assert.equal(verification.requestCount, 2);
   assert.equal(
     verification.results.get(
       "https://en.wikipedia.org/wiki/Safe_Source",
@@ -247,9 +311,27 @@ test("Wikipedia verification follows redirects and rejects disambiguation pages"
   );
   assert.equal(
     verification.results.get(
+      "https://en.wikipedia.org/wiki/Safe_Source",
+    ).personIsHuman,
+    true,
+  );
+  assert.equal(
+    verification.results.get(
       "https://en.wikipedia.org/wiki/Ambiguous_Source",
     ).verified,
     false,
+  );
+  assert.equal(
+    verification.results.get(
+      "https://en.wikipedia.org/wiki/Group_Source",
+    ).verified,
+    false,
+  );
+  assert.deepEqual(
+    verification.results.get(
+      "https://en.wikipedia.org/wiki/Group_Source",
+    ).reasons,
+    ["Wikipedia person source is not a human biography"],
   );
 });
 

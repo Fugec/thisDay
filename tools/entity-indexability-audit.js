@@ -16,6 +16,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -26,6 +27,7 @@ const DEFAULT_OUTPUT_DIR = join(ROOT, "documentation/quality");
 const INDEXING_CACHE_PATH = join(ROOT, "documentation/gsc/indexing-raw.json");
 const PERSON_MIN_WORDS = 150;
 const HISTORY_MIN_WORDS = 300;
+const QUALITY_GATE_VERSION = 1;
 
 function parseEnvFile(path) {
   const output = {};
@@ -54,12 +56,14 @@ function parseArgs(argv = process.argv.slice(2)) {
   const options = {
     outputDir: DEFAULT_OUTPUT_DIR,
     limit: 0,
+    planSize: 0,
     help: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--out-dir") options.outputDir = resolve(argv[++index] || "");
     else if (arg === "--limit") options.limit = Number(argv[++index]);
+    else if (arg === "--plan-size") options.planSize = Number(argv[++index]);
     else if (arg === "--help" || arg === "-h") options.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
@@ -68,6 +72,12 @@ function parseArgs(argv = process.argv.slice(2)) {
     (!Number.isInteger(options.limit) || options.limit < 1)
   ) {
     throw new Error("--limit must be a positive integer.");
+  }
+  if (
+    options.planSize &&
+    (!Number.isInteger(options.planSize) || options.planSize < 1 || options.planSize > 50)
+  ) {
+    throw new Error("--plan-size must be an integer from 1 to 50.");
   }
   return options;
 }
@@ -78,6 +88,7 @@ function printHelp() {
 Options:
   --out-dir PATH   Local report directory.
   --limit N        Audit only the first N entity index entries.
+  --plan-size N    Build an exact GET-only migration plan for N safe legacy entries.
   -h, --help       Show this help.
 
 All production operations are Cloudflare KV GET requests only.`);
@@ -227,6 +238,361 @@ function markdownCell(value) {
   return String(value ?? "").replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 }
 
+function sha256(value) {
+  return createHash("sha256").update(String(value ?? "")).digest("hex");
+}
+
+function googleCoverageRiskRank(value) {
+  const coverage = String(value || "");
+  if (coverage === "Submitted and indexed") return 3;
+  if (/crawled|discovered/i.test(coverage)) return 2;
+  if (/unknown|not inspected/i.test(coverage)) return 1;
+  return 2;
+}
+
+function isMigrationCandidate(
+  { row, entity, entry },
+  { requireSourceVerification = false } = {},
+) {
+  return Boolean(
+    row.recordFound &&
+    row.currentIndexable === true &&
+    row.recommendedEligible === true &&
+    (!requireSourceVerification || row.sourceVerification?.verified === true) &&
+    (
+      entity?.qualityGateVersion !== QUALITY_GATE_VERSION ||
+      entry?.qualityGateVersion !== QUALITY_GATE_VERSION ||
+      (row.type === "event" && entry?.historyLinkEligible !== true)
+    )
+  );
+}
+
+function selectMigrationBatch(
+  auditedEntries,
+  planSize,
+  { requireSourceVerification = false } = {},
+) {
+  if (!planSize) return [];
+  const candidates = auditedEntries
+    .filter((entry) =>
+      isMigrationCandidate(entry, { requireSourceVerification }),
+    )
+    .sort((left, right) =>
+      googleCoverageRiskRank(left.row.googleCoverage) -
+        googleCoverageRiskRank(right.row.googleCoverage) ||
+      left.row.url.localeCompare(right.row.url),
+    );
+
+  const byType = new Map([
+    ["person", candidates.filter(({ row }) => row.type === "person")],
+    ["event", candidates.filter(({ row }) => row.type === "event")],
+  ]);
+  const selected = [];
+  while (selected.length < planSize) {
+    let added = false;
+    for (const type of ["person", "event"]) {
+      const next = byType.get(type)?.shift();
+      if (!next) continue;
+      selected.push(next);
+      added = true;
+      if (selected.length >= planSize) break;
+    }
+    if (!added) break;
+  }
+  return selected;
+}
+
+function wikipediaTitleFromUrl(value) {
+  try {
+    const path = new URL(String(value || "")).pathname;
+    const encodedTitle = path.split("/wiki/")[1] || "";
+    return decodeURIComponent(encodedTitle).replace(/_/g, " ").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function verifyWikipediaSourcePages(
+  auditedEntries,
+  fetchImpl = fetch,
+) {
+  const sources = new Map();
+  for (const { entity, entry } of auditedEntries) {
+    const wikiUrl = entity?.wikiUrl || entry?.wikiUrl || "";
+    const requestedTitle = wikipediaTitleFromUrl(wikiUrl);
+    if (wikiUrl && requestedTitle) {
+      sources.set(wikiUrl, requestedTitle);
+    }
+  }
+
+  const results = new Map();
+  let requestCount = 0;
+  const sourceEntries = [...sources.entries()];
+  // MediaWiki's extracts module returns at most 20 pages per request for
+  // non-bot clients. Larger title batches silently omit later extracts and
+  // would misclassify substantive pages as thin.
+  for (let offset = 0; offset < sourceEntries.length; offset += 20) {
+    const chunk = sourceEntries.slice(offset, offset + 20);
+    const requestedTitles = chunk.map(([, title]) => title);
+    const params = new URLSearchParams({
+      action: "query",
+      format: "json",
+      formatversion: "2",
+      redirects: "1",
+      prop: "pageprops|extracts",
+      exintro: "1",
+      explaintext: "1",
+      exlimit: "max",
+      titles: requestedTitles.join("|"),
+    });
+    requestCount += 1;
+    const response = await fetchImpl(
+      `https://en.wikipedia.org/w/api.php?${params}`,
+      {
+        headers: {
+          "User-Agent":
+            "thisDay.info entity migration audit (kapetanovic.armin@gmail.com)",
+        },
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Wikipedia source verification failed: HTTP ${response.status}`,
+      );
+    }
+    const payload = await response.json();
+    const normalized = new Map(
+      (payload.query?.normalized || []).map((item) => [item.from, item.to]),
+    );
+    const redirects = new Map(
+      (payload.query?.redirects || []).map((item) => [item.from, item.to]),
+    );
+    const pages = new Map(
+      (payload.query?.pages || []).map((page) => [page.title, page]),
+    );
+    const resolveTitle = (title) => {
+      let resolved = normalized.get(title) || title;
+      resolved = redirects.get(resolved) || resolved;
+      return resolved;
+    };
+
+    for (const [wikiUrl, requestedTitle] of chunk) {
+      const resolvedTitle = resolveTitle(requestedTitle);
+      const page = pages.get(resolvedTitle);
+      const pageExists = Boolean(page && page.missing !== true);
+      const disambiguation = Boolean(
+        page?.pageprops &&
+        Object.prototype.hasOwnProperty.call(
+          page.pageprops,
+          "disambiguation",
+        ),
+      );
+      const extractWordCount = String(page?.extract || "")
+        .split(/\s+/)
+        .filter(Boolean).length;
+      const reasons = [];
+      if (!pageExists) reasons.push("Wikipedia source page is missing");
+      if (disambiguation) {
+        reasons.push("Wikipedia source resolves to a disambiguation page");
+      }
+      if (pageExists && extractWordCount < 25) {
+        reasons.push("Wikipedia source summary is too thin");
+      }
+      results.set(wikiUrl, {
+        verified: reasons.length === 0,
+        requestedTitle,
+        resolvedTitle,
+        pageExists,
+        disambiguation,
+        extractWordCount,
+        reasons,
+      });
+    }
+  }
+
+  return { results, requestCount };
+}
+
+function buildMigrationPlan(
+  auditedEntries,
+  fullIndex,
+  indexRaw,
+  planSize,
+  generatedAt,
+  { requireSourceVerification = false, sourceVerificationRequests = 0 } = {},
+) {
+  const selected = selectMigrationBatch(auditedEntries, planSize, {
+    requireSourceVerification,
+  });
+  const selectedById = new Map(
+    selected.map(({ row }) => [`${row.type}:${row.slug}`, true]),
+  );
+  const proposedIndex = fullIndex.map((entry) => {
+    const id = `${entry?.type}:${entry?.slug}`;
+    if (!selectedById.has(id)) return entry;
+    return {
+      ...entry,
+      indexable: true,
+      qualityGateVersion: QUALITY_GATE_VERSION,
+      ...(entry.type === "event" ? { historyLinkEligible: true } : {}),
+    };
+  });
+  const proposedIndexRaw = JSON.stringify(proposedIndex);
+  const protectedIndexedFailures = auditedEntries
+    .filter(({ row }) =>
+      row.currentIndexable === true &&
+      row.recommendedEligible === false &&
+      row.googleCoverage === "Submitted and indexed",
+    )
+    .map(({ row }) => ({
+      type: row.type,
+      slug: row.slug,
+      url: row.url,
+      reasons: row.reasons,
+    }));
+  const sourceRejectedCandidates = auditedEntries
+    .filter(({ row }) =>
+      row.currentIndexable === true &&
+      row.recommendedEligible === true &&
+      row.sourceVerification?.verified === false,
+    )
+    .map(({ row }) => ({
+      type: row.type,
+      slug: row.slug,
+      url: row.url,
+      sourceVerification: row.sourceVerification,
+    }));
+
+  const items = selected.map(({ row, entity, entry, entityRaw }) => {
+    const entityAfter = {
+      ...entity,
+      qualityGateVersion: QUALITY_GATE_VERSION,
+    };
+    const indexAfter = {
+      ...entry,
+      indexable: true,
+      qualityGateVersion: QUALITY_GATE_VERSION,
+      ...(row.type === "event" ? { historyLinkEligible: true } : {}),
+    };
+    const entityAfterRaw = JSON.stringify(entityAfter);
+    return {
+      type: row.type,
+      slug: row.slug,
+      name: row.name,
+      url: row.url,
+      googleCoverage: row.googleCoverage,
+      wordCount: row.wordCount,
+      reasons: row.reasons,
+      sourceVerification: row.sourceVerification || null,
+      eligibilityBefore: true,
+      eligibilityAfter: true,
+      robotsBefore: "index, follow, max-image-preview:large",
+      robotsAfter: "index, follow, max-image-preview:large",
+      entityKey: `entity-v1:${row.type}:${row.slug}`,
+      entityBeforeSha256: sha256(entityRaw),
+      entityAfterSha256: sha256(entityAfterRaw),
+      entityBefore: entity,
+      entityAfter,
+      indexBefore: entry,
+      indexAfter,
+    };
+  });
+
+  return {
+    generatedAt,
+    productionWrites: 0,
+    sourceVerificationRequests,
+    selectionPolicy: {
+      requestedSize: planSize,
+      selectedSize: items.length,
+      qualityGateVersion: QUALITY_GATE_VERSION,
+      requirements: [
+        "stored entity record exists",
+        "legacy entry is currently indexable",
+        "record already passes the stronger quality gate",
+        "Wikipedia source resolves to a substantive non-disambiguation page",
+        "migration does not change page robots or sitemap eligibility",
+        "indexed failures are excluded",
+      ],
+    },
+    protectedIndexedFailures,
+    sourceRejectedCandidates,
+    sharedIndex: {
+      key: "entity-index-v1",
+      beforeSha256: sha256(indexRaw),
+      afterSha256: sha256(proposedIndexRaw),
+      beforeEntryCount: fullIndex.length,
+      afterEntryCount: proposedIndex.length,
+      changedEntries: items.length,
+      proposedValue: proposedIndex,
+    },
+    items,
+  };
+}
+
+function buildMigrationPlanMarkdown(plan) {
+  const lines = [];
+  lines.push(`# Legacy Entity Migration Batch Plan — ${plan.generatedAt.slice(0, 10)}`);
+  lines.push("");
+  lines.push("This plan is GET-only. It made no production writes and does not authorize an apply operation.");
+  lines.push("");
+  lines.push("## Batch safety contract");
+  lines.push("");
+  lines.push(`- ${plan.items.length} legacy records selected.`);
+  lines.push("- Every selected record already passes the stronger entity quality gate.");
+  lines.push("- Every selected source resolves to a substantive, non-disambiguation Wikipedia page.");
+  lines.push("- Every selected page remains indexable before and after the proposed marker migration.");
+  lines.push("- The plan adds only the versioned quality-gate fields required by the current Workers.");
+  lines.push(`- ${plan.protectedIndexedFailures.length} indexed failures are excluded and remain protected.`);
+  lines.push(`- ${plan.sourceRejectedCandidates.length} deterministic-pass candidates were excluded after live source verification.`);
+  lines.push("- Any future apply must re-read each entity and the shared index, verify the recorded SHA-256 values, back up all values, and abort on any mismatch.");
+  lines.push("");
+  lines.push("## Proposed batch");
+  lines.push("");
+  lines.push("| URL | Type | Google coverage | Words | Proposed fields | Robots |");
+  lines.push("|---|---|---|--:|---|---|");
+  for (const item of plan.items) {
+    const fields = item.type === "event"
+      ? "qualityGateVersion=1; index.historyLinkEligible=true"
+      : "qualityGateVersion=1";
+    lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${item.type} | ${markdownCell(item.googleCoverage)} | ${item.wordCount} | ${fields} | unchanged: index,follow |`);
+  }
+  lines.push("");
+  lines.push("## Source-verification exclusions");
+  lines.push("");
+  if (!plan.sourceRejectedCandidates.length) {
+    lines.push("None.");
+  } else {
+    lines.push("| URL | Resolved source | Reason(s) |");
+    lines.push("|---|---|---|");
+    for (const item of plan.sourceRejectedCandidates) {
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${markdownCell(item.sourceVerification.resolvedTitle)} | ${markdownCell(item.sourceVerification.reasons.join("; "))} |`);
+    }
+  }
+  lines.push("");
+  lines.push("## Protected indexed failures");
+  lines.push("");
+  if (!plan.protectedIndexedFailures.length) {
+    lines.push("None.");
+  } else {
+    lines.push("| URL | Failure reason(s) |");
+    lines.push("|---|---|");
+    for (const item of plan.protectedIndexedFailures) {
+      lines.push(`| ${markdownCell(item.url.replace(SITE, ""))} | ${markdownCell(item.reasons.join("; "))} |`);
+    }
+  }
+  lines.push("");
+  lines.push("## Shared-index precondition");
+  lines.push("");
+  lines.push(`- Before SHA-256: \`${plan.sharedIndex.beforeSha256}\``);
+  lines.push(`- Proposed after SHA-256: \`${plan.sharedIndex.afterSha256}\``);
+  lines.push(`- Entry count remains ${plan.sharedIndex.beforeEntryCount}.`);
+  lines.push("");
+  lines.push("Full entity and index before/after JSON is stored in `entity-migration-batch-plan.json`.");
+  lines.push("");
+  return lines.join("\n");
+}
+
 function buildReport(rows, generatedAt) {
   const byType = countBy(rows, (row) => row.type);
   const eligibleByType = countBy(
@@ -316,7 +682,7 @@ async function runAudit(options = {}) {
     .filter((entry) => entry?.type && entry?.slug)
     .slice(0, options.limit || undefined);
   const indexing = loadIndexingCache();
-  const rows = await mapLimit(index, 8, async (entry, rowIndex) => {
+  const auditedEntries = await mapLimit(index, 8, async (entry, rowIndex) => {
     const key = `entity-v1:${entry.type}:${entry.slug}`;
     const raw = await readKvValue(env, key);
     let entity = null;
@@ -331,22 +697,54 @@ async function runAudit(options = {}) {
       console.log(`Read ${rowIndex + 1}/${index.length} entity records (GET only)…`);
     }
     return {
-      type: entry.type,
-      slug: entry.slug,
-      name: entry.name || entity?.name || "",
-      url,
-      recordFound: Boolean(entity),
-      currentIndexable: entry.indexable === true,
-      recommendedEligible: evaluation.eligible,
-      wordCount: evaluation.wordCount,
-      reasons: evaluation.reasons,
-      googleCoverage: indexing.get(url) || "Not inspected",
-      relatedPosts: Array.isArray(entity?.relatedPosts)
-        ? entity.relatedPosts.length
-        : (Array.isArray(entry.relatedPosts) ? entry.relatedPosts.length : 0),
-      needsWikiRefresh: Boolean(entity?.needsWikiRefresh || entry.needsWikiRefresh),
+      entry,
+      entity,
+      entityRaw: raw,
+      row: {
+        type: entry.type,
+        slug: entry.slug,
+        name: entry.name || entity?.name || "",
+        url,
+        recordFound: Boolean(entity),
+        currentIndexable: entry.indexable === true,
+        recommendedEligible: evaluation.eligible,
+        wordCount: evaluation.wordCount,
+        reasons: evaluation.reasons,
+        googleCoverage: indexing.get(url) || "Not inspected",
+        relatedPosts: Array.isArray(entity?.relatedPosts)
+          ? entity.relatedPosts.length
+          : (Array.isArray(entry.relatedPosts) ? entry.relatedPosts.length : 0),
+        needsWikiRefresh: Boolean(entity?.needsWikiRefresh || entry.needsWikiRefresh),
+        entityQualityGateVersion: entity?.qualityGateVersion || null,
+        indexQualityGateVersion: entry?.qualityGateVersion || null,
+      },
     };
   });
+  const rows = auditedEntries.map(({ row }) => row);
+  let sourceVerificationRequests = 0;
+  if (options.planSize) {
+    const sourceCandidates = auditedEntries.filter((entry) =>
+      isMigrationCandidate(entry),
+    );
+    const verification = await verifyWikipediaSourcePages(sourceCandidates);
+    sourceVerificationRequests = verification.requestCount;
+    for (const candidate of sourceCandidates) {
+      const wikiUrl =
+        candidate.entity?.wikiUrl ||
+        candidate.entry?.wikiUrl ||
+        "";
+      candidate.row.sourceVerification =
+        verification.results.get(wikiUrl) || {
+          verified: false,
+          requestedTitle: wikipediaTitleFromUrl(wikiUrl),
+          resolvedTitle: "",
+          pageExists: false,
+          disambiguation: false,
+          extractWordCount: 0,
+          reasons: ["Wikipedia source could not be verified"],
+        };
+    }
+  }
 
   const generatedAt = new Date().toISOString();
   const outputDir = options.outputDir || DEFAULT_OUTPUT_DIR;
@@ -354,8 +752,57 @@ async function runAudit(options = {}) {
   const markdownPath = join(outputDir, "entity-indexability-report.md");
   const jsonPath = join(outputDir, "entity-indexability-report.json");
   writeFileSync(markdownPath, buildReport(rows, generatedAt));
-  writeFileSync(jsonPath, `${JSON.stringify({ generatedAt, productionWrites: 0, publicPageFetches: 0, rows }, null, 2)}\n`);
-  return { rows, markdownPath, jsonPath };
+  writeFileSync(
+    jsonPath,
+    `${JSON.stringify({
+      generatedAt,
+      productionWrites: 0,
+      publicEntityPageFetches: 0,
+      wikipediaSourceVerificationRequests: sourceVerificationRequests,
+      rows,
+    }, null, 2)}\n`,
+  );
+  let migrationPlan = null;
+  let migrationPlanMarkdownPath = "";
+  let migrationPlanJsonPath = "";
+  if (options.planSize) {
+    migrationPlan = buildMigrationPlan(
+      auditedEntries,
+      fullIndex,
+      indexRaw,
+      options.planSize,
+      generatedAt,
+      {
+        requireSourceVerification: true,
+        sourceVerificationRequests,
+      },
+    );
+    migrationPlanMarkdownPath = join(
+      outputDir,
+      "entity-migration-batch-plan.md",
+    );
+    migrationPlanJsonPath = join(
+      outputDir,
+      "entity-migration-batch-plan.json",
+    );
+    writeFileSync(
+      migrationPlanMarkdownPath,
+      buildMigrationPlanMarkdown(migrationPlan),
+    );
+    writeFileSync(
+      migrationPlanJsonPath,
+      `${JSON.stringify(migrationPlan, null, 2)}\n`,
+    );
+  }
+  return {
+    rows,
+    markdownPath,
+    jsonPath,
+    migrationPlan,
+    migrationPlanMarkdownPath,
+    migrationPlanJsonPath,
+    sourceVerificationRequests,
+  };
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -370,7 +817,16 @@ async function main(argv = process.argv.slice(2)) {
   console.log(`Entities: ${result.rows.length}`);
   console.log(`Pass proposed gate: ${result.rows.filter((row) => row.recommendedEligible).length}`);
   console.log(`Production writes: 0; public page fetches: 0`);
+  if (result.sourceVerificationRequests) {
+    console.log(
+      `Wikipedia source-verification requests: ${result.sourceVerificationRequests}`,
+    );
+  }
   console.log(`Report: ${result.markdownPath}`);
+  if (result.migrationPlan) {
+    console.log(`Safe migration batch: ${result.migrationPlan.items.length}`);
+    console.log(`Plan: ${result.migrationPlanMarkdownPath}`);
+  }
 }
 
 const isCli = process.argv[1] &&
@@ -384,9 +840,13 @@ if (isCli) {
 
 export {
   buildReport,
+  buildMigrationPlan,
+  buildMigrationPlanMarkdown,
   entityBodyWordCount,
   evaluateEntityIndexability,
   historySlugQualityIssue,
   isDirectWikipediaArticleUrl,
   runAudit,
+  selectMigrationBatch,
+  verifyWikipediaSourcePages,
 };

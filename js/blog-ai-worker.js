@@ -312,6 +312,7 @@ const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
+const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const ARTICLE_HERO_CSS =
   `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
 const ENTITY_STRIP_BLOCK_RE =
@@ -7635,6 +7636,19 @@ function entityContentWordCount(entity) {
     .filter(Boolean).length;
 }
 
+function hasDirectWikipediaEntitySource(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return (
+      ["en.wikipedia.org", "www.en.wikipedia.org"].includes(url.hostname.toLowerCase()) &&
+      /^\/wiki\/[^/]+/.test(url.pathname) &&
+      !/:/.test(decodeURIComponent(url.pathname.slice("/wiki/".length)))
+    );
+  } catch {
+    return false;
+  }
+}
+
 function isHistoryEntityDiscoveryLinkEligible(entity) {
   if (!entity || entity.type !== "event") return false;
   const name = String(entity.name || "").replace(/\s+/g, " ").trim();
@@ -7642,7 +7656,7 @@ function isHistoryEntityDiscoveryLinkEligible(entity) {
   if (
     !entity.url ||
     !String(entity.url).startsWith("/history/") ||
-    !entity.wikiUrl ||
+    !hasDirectWikipediaEntitySource(entity.wikiUrl) ||
     !name ||
     name.length > 96 ||
     /^article-\d+$/i.test(slug) ||
@@ -7653,6 +7667,19 @@ function isHistoryEntityDiscoveryLinkEligible(entity) {
   if (entity.historyLinkEligible === true) return true;
   if (entity.historyLinkEligible === false) return false;
   return entityContentWordCount(entity) >= 300;
+}
+
+function blogEntityQualityEligible(entity) {
+  if (!entity || entity.needsWikiRefresh) return false;
+  if (entity.type === "person") {
+    return (
+      entityContentWordCount(entity) >= 150 &&
+      hasDirectWikipediaEntitySource(entity.wikiUrl) &&
+      entity.profileLinkEligible === true &&
+      entity.profileSubjectVerified === true
+    );
+  }
+  return isHistoryEntityDiscoveryLinkEligible(entity);
 }
 
 function wikiTitleFromUrl(wikiUrl) {
@@ -9041,6 +9068,7 @@ async function upsertEntityRecord(env, draftEntity) {
     firstSeenAt: existing?.firstSeenAt || draftEntity.firstSeenAt,
     updatedAt: new Date().toISOString(),
   };
+  if (!existing) entity.qualityGateVersion = BLOG_ENTITY_QUALITY_GATE_VERSION;
   // Clear stale refresh flag whenever we now have real data; set it only when still empty
   if (mergedIntro || mergedSummary) {
     delete entity.needsWikiRefresh;
@@ -9058,6 +9086,11 @@ async function upsertEntityIndex(env, entities) {
   const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
   for (const entity of entities) {
     const prev = byId.get(`${entity.type}:${entity.slug}`) || {};
+    const usesQualityGate =
+      entity.qualityGateVersion === BLOG_ENTITY_QUALITY_GATE_VERSION;
+    const historyLinkEligible =
+      entity.type === "event" &&
+      isHistoryEntityDiscoveryLinkEligible(entity);
     byId.set(`${entity.type}:${entity.slug}`, {
       type: entity.type,
       slug: entity.slug,
@@ -9068,9 +9101,13 @@ async function upsertEntityIndex(env, entities) {
       summary: entity.summary || entity.description || "",
       relatedPosts: entity.relatedPosts || [],
       updatedAt: entity.updatedAt,
-      indexable: (Array.isArray(entity.bodySections) ? entity.bodySections : [])
-        .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
-        .join(" ").split(/\s+/).filter(Boolean).length >= 150,
+      indexable: usesQualityGate
+        ? blogEntityQualityEligible(entity)
+        : entityContentWordCount(entity) >= 150,
+      ...(usesQualityGate
+        ? { qualityGateVersion: BLOG_ENTITY_QUALITY_GATE_VERSION }
+        : {}),
+      ...(entity.type === "event" ? { historyLinkEligible } : {}),
       ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
     });
   }

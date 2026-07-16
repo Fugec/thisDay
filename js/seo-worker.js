@@ -42,6 +42,7 @@ const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
+const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
 const WIKIMEDIA_THUMBNAIL_STEPS = [
   20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840,
 ];
@@ -1119,6 +1120,52 @@ function entityBodyWordCount(entity) {
     .filter(Boolean).length;
 }
 
+function seoHasDirectWikipediaEntitySource(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return (
+      ["en.wikipedia.org", "www.en.wikipedia.org"].includes(url.hostname.toLowerCase()) &&
+      /^\/wiki\/[^/]+/.test(url.pathname) &&
+      !/:/.test(decodeURIComponent(url.pathname.slice("/wiki/".length)))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function seoHistoryEntityQualityEligible(entity) {
+  const name = String(entity?.name || "").replace(/\s+/g, " ").trim();
+  const slug = String(entity?.slug || "").trim();
+  const relatedPosts = Array.isArray(entity?.relatedPosts)
+    ? entity.relatedPosts
+    : [];
+  return Boolean(
+    entity &&
+    entity.type === "event" &&
+    !entity.needsWikiRefresh &&
+    entityBodyWordCount(entity) >= 300 &&
+    seoHasDirectWikipediaEntitySource(entity.wikiUrl) &&
+    name &&
+    name.length <= 96 &&
+    relatedPosts.length >= 1 &&
+    !/^article-\d+$/i.test(slug) &&
+    !/(?:^|-)(?:launch-?){2,}(?:-|$)/i.test(slug),
+  );
+}
+
+function seoEntityQualityEligible(entity) {
+  if (!entity || entity.needsWikiRefresh) return false;
+  if (entity.type === "person") {
+    return (
+      entityBodyWordCount(entity) >= MIN_PERSON_ENTITY_BODY_WORDS &&
+      seoHasDirectWikipediaEntitySource(entity.wikiUrl) &&
+      entity.profileLinkEligible === true &&
+      entity.profileSubjectVerified === true
+    );
+  }
+  return seoHistoryEntityQualityEligible(entity);
+}
+
 function hasIncompleteEntityParagraphs(entity) {
   return (Array.isArray(entity?.bodySections) ? entity.bodySections : []).some((section) =>
     (Array.isArray(section?.paragraphs) ? section.paragraphs : []).some((paragraph) => {
@@ -1135,7 +1182,13 @@ async function updateEntityIndexEntry(env, entity) {
   if (!env.BLOG_AI_KV || !entity?.type || !entity?.slug) return;
   const raw = await env.BLOG_AI_KV.get("entity-index-v1").catch(() => null);
   const index = raw ? JSON.parse(raw) : [];
+  const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
+  const id = `${entity.type}:${entity.slug}`;
+  const existing = byId.get(id);
   const minWords = entity.type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
+  const usesQualityGate =
+    entity.qualityGateVersion === SEO_ENTITY_QUALITY_GATE_VERSION ||
+    existing?.qualityGateVersion === SEO_ENTITY_QUALITY_GATE_VERSION;
   const nextEntry = {
     type: entity.type,
     slug: entity.slug,
@@ -1146,12 +1199,17 @@ async function updateEntityIndexEntry(env, entity) {
     summary: entity.summary || entity.description || "",
     relatedPosts: Array.isArray(entity.relatedPosts) ? entity.relatedPosts : [],
     updatedAt: entity.updatedAt || new Date().toISOString(),
-    indexable: entityBodyWordCount(entity) >= minWords,
+    indexable: usesQualityGate
+      ? seoEntityQualityEligible(entity)
+      : entityBodyWordCount(entity) >= minWords,
+    ...(usesQualityGate
+      ? { qualityGateVersion: SEO_ENTITY_QUALITY_GATE_VERSION }
+      : {}),
+    ...(entity.type === "event"
+      ? { historyLinkEligible: seoHistoryEntityQualityEligible(entity) }
+      : {}),
     ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
   };
-  const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
-  const id = `${nextEntry.type}:${nextEntry.slug}`;
-  const existing = byId.get(id);
   const merged = { ...(existing || {}), ...nextEntry };
   // Only write when the entry actually changed. handleEntityPage calls this on
   // every entity page view; an unconditional put() rewrites the whole index on
@@ -1182,6 +1240,9 @@ async function refreshEntityIndexFromStoredEntities(env, index, typeFilter = "pe
     try {
       const entity = JSON.parse(raw);
       const minWords = entity.type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
+      const usesQualityGate =
+        entity.qualityGateVersion === SEO_ENTITY_QUALITY_GATE_VERSION ||
+        entry.qualityGateVersion === SEO_ENTITY_QUALITY_GATE_VERSION;
       const next = {
         ...entry,
         name: entity.name || entry.name,
@@ -1191,7 +1252,15 @@ async function refreshEntityIndexFromStoredEntities(env, index, typeFilter = "pe
         summary: entity.summary || entity.description || entry.summary || "",
         relatedPosts: Array.isArray(entity.relatedPosts) ? entity.relatedPosts : (entry.relatedPosts || []),
         updatedAt: entity.updatedAt || entry.updatedAt,
-        indexable: entityBodyWordCount(entity) >= minWords,
+        indexable: usesQualityGate
+          ? seoEntityQualityEligible(entity)
+          : entityBodyWordCount(entity) >= minWords,
+        ...(usesQualityGate
+          ? { qualityGateVersion: SEO_ENTITY_QUALITY_GATE_VERSION }
+          : {}),
+        ...(entity.type === "event"
+          ? { historyLinkEligible: seoHistoryEntityQualityEligible(entity) }
+          : {}),
       };
       if (next.indexable) delete next.needsWikiRefresh;
       if (JSON.stringify(next) !== JSON.stringify(entry)) changed = true;
@@ -1768,6 +1837,7 @@ async function createPersonEntityFromWikipediaRequest(env, slug, url) {
     relatedTopics: ["Famous Persons"],
     updatedAt: new Date().toISOString(),
     source: "homepage-on-this-day",
+    qualityGateVersion: SEO_ENTITY_QUALITY_GATE_VERSION,
   };
   const wiki = await fetchEntityWikiHydration(baseEntity, "person").catch(() => ({}));
   const entity = {
@@ -1896,7 +1966,12 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     : `${url.origin}/images/logo.png`;
   const bodySectionWords = entityBodyWordCount(entity);
   const minEntityWords = type === "person" ? MIN_PERSON_ENTITY_BODY_WORDS : MIN_EVENT_ENTITY_BODY_WORDS;
-  const robotsMeta = bodySectionWords >= minEntityWords
+  const usesQualityGate =
+    entity.qualityGateVersion === SEO_ENTITY_QUALITY_GATE_VERSION;
+  const entityPageIndexable = usesQualityGate
+    ? seoEntityQualityEligible(entity)
+    : bodySectionWords >= minEntityWords;
+  const robotsMeta = entityPageIndexable
     ? "index, follow, max-image-preview:large"
     : "noindex, follow";
   const schemaType = type === "person" ? "Person" : "Event";

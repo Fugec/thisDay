@@ -43,6 +43,7 @@ const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
+const MAX_DATE_PERSON_PROFILES = 20;
 const WIKIMEDIA_THUMBNAIL_STEPS = [
   20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840,
 ];
@@ -76,7 +77,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v46/born-v27) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v46/born-v28) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v30 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
@@ -3125,6 +3126,41 @@ function wikiRichScore(item) {
   return s;
 }
 
+function datePersonProfileScore(item) {
+  const page = item?.pages?.[0];
+  if (!page || page.type !== "standard") return 0;
+  const extractWords = String(page.extract || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  const directWikipediaUrl = /^https:\/\/en\.wikipedia\.org\/wiki\/[^?#]+$/i.test(
+    page.content_urls?.desktop?.page || "",
+  );
+  if (!directWikipediaUrl || extractWords < 25) return 0;
+  return (
+    8 +
+    (page.originalimage?.source ? 4 : page.thumbnail?.source ? 2 : 0) +
+    (page.description ? 2 : 0) +
+    Math.min(extractWords / 20, 8)
+  );
+}
+
+function selectDatePersonProfiles(items, featured, limit = MAX_DATE_PERSON_PROFILES) {
+  const maxProfiles = Math.max(1, Number(limit) || MAX_DATE_PERSON_PROFILES);
+  const remaining = (Array.isArray(items) ? items : [])
+    .filter((item) => item && item !== featured && datePersonProfileScore(item) > 0)
+    .sort((left, right) => {
+      const scoreDiff = datePersonProfileScore(right) - datePersonProfileScore(left);
+      if (scoreDiff) return scoreDiff;
+      const yearDiff = (parseInt(left?.year, 10) || 0) - (parseInt(right?.year, 10) || 0);
+      if (yearDiff) return yearDiff;
+      return String(left?.text || "").localeCompare(String(right?.text || ""));
+    });
+  return featured
+    ? [featured, ...remaining.slice(0, maxProfiles - 1)]
+    : remaining.slice(0, maxProfiles);
+}
+
 // Returns an array of 2-3 original editorial paragraphs for the featured event.
 // All text is authored by thisDay.info — safe to render as HTML without escaping.
 function workerCommentary(year, text) {
@@ -4300,14 +4336,28 @@ function serveEventsDateSitemap(siteUrl) {
 }
 
 async function servePeopleSitemap(siteUrl, env) {
+  const [blogIndex, entityRaw] = await Promise.all([
+    env.BLOG_AI_KV?.get("index", { type: "json" }).catch(() => null),
+    env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null),
+  ]);
+  const supportedDateRoutes = buildPublishedDateRouteMap(blogIndex);
+  // Fail open if the blog index is temporarily unavailable. With a healthy
+  // index, advertise only date routes that have an editorial story supporting
+  // the otherwise programmatic people list.
+  const filterProgrammaticDateRoutes = supportedDateRoutes.size > 0;
   let urls = "";
   for (let m = 0; m < 12; m++) {
     for (let d = 1; d <= DAYS_IN_MONTH[m]; d++) {
+      if (
+        filterProgrammaticDateRoutes &&
+        !supportedDateRoutes.has(dateRouteKey(MONTHS_ALL[m], d))
+      ) {
+        continue;
+      }
       urls += `  <url>\n    <loc>${siteUrl}/born/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
       urls += `  <url>\n    <loc>${siteUrl}/died/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
     }
   }
-  const entityRaw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
   const entityIndex = await refreshEntityIndexFromStoredEntities(env, entityRaw ? JSON.parse(entityRaw) : [], "person");
   for (const person of entityIndex.filter((entry) => entry?.type === "person" && entry.indexable && entry.url)) {
     urls += `  <url>\n    <loc>${siteUrl}${person.url}</loc>\n  </url>\n`;
@@ -4380,17 +4430,55 @@ function buildRelatedBlogCard(entry, heading = "Related Story") {
   </div>`;
 }
 
+function dateRouteKey(monthName, day) {
+  const normalizedMonth = String(monthName || "").toLowerCase();
+  const normalizedDay = parseInt(day, 10);
+  return MONTH_NUM_MAP[normalizedMonth] &&
+    normalizedDay >= 1 &&
+    normalizedDay <= DAYS_IN_MONTH[MONTH_NUM_MAP[normalizedMonth] - 1]
+    ? `${normalizedMonth}-${normalizedDay}`
+    : "";
+}
+
+function blogEntryDateRouteKey(entry) {
+  const slug = String(entry?.slug || "")
+    .replace(/^\/+|\/+$/g, "")
+    .split("/")
+    .pop();
+  const slugMatch = slug?.match(/^(\d{1,2})-([a-z]+)-\d{4}$/i);
+  if (slugMatch) {
+    const key = dateRouteKey(slugMatch[2], slugMatch[1]);
+    if (key) return key;
+  }
+
+  for (const value of [
+    entry?.publishedAt,
+    entry?.datePublished,
+    entry?.publicationDate,
+  ]) {
+    const isoMatch = String(value || "").match(/^\d{4}-(\d{2})-(\d{2})/);
+    if (!isoMatch) continue;
+    const monthName = MONTHS_ALL[parseInt(isoMatch[1], 10) - 1];
+    const key = dateRouteKey(monthName, isoMatch[2]);
+    if (key) return key;
+  }
+  return "";
+}
+
+function buildPublishedDateRouteMap(index) {
+  const routes = new Map();
+  for (const entry of Array.isArray(index) ? index : []) {
+    const key = blogEntryDateRouteKey(entry);
+    if (key && !routes.has(key)) routes.set(key, entry);
+  }
+  return routes;
+}
+
 async function findMatchingDateBlogEntry(env, monthName, day) {
   if (!env?.BLOG_AI_KV) return null;
   try {
     const index = await env.BLOG_AI_KV.get("index", { type: "json" });
-    if (!Array.isArray(index) || !index.length) return null;
-    const currentYear = new Date().getUTCFullYear();
-    const candidates = [`${day}-${monthName}-${currentYear}`, `${day}-${monthName}-${currentYear - 1}`];
-    for (const slug of candidates) {
-      const match = index.find((entry) => entry?.slug === slug);
-      if (match) return match;
-    }
+    return buildPublishedDateRouteMap(index).get(dateRouteKey(monthName, day)) || null;
   } catch (_) {
     /* ignore */
   }
@@ -4457,12 +4545,15 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   };
   const hasImage = (p) => !!(p?.pages?.[0]?.thumbnail?.source || p?.pages?.[0]?.originalimage?.source);
   const bornScore = (b) => countDyk(b) * 10 + wikiRichScore(b);
-  const birthsWithImg = births.filter(hasImage);
-  const featuredPool = birthsWithImg.length ? birthsWithImg : births;
+  const substantiveBirths = births.filter((birth) => datePersonProfileScore(birth) > 0);
+  const featuredCandidates = substantiveBirths.length ? substantiveBirths : births;
+  const birthsWithImg = featuredCandidates.filter(hasImage);
+  const featuredPool = birthsWithImg.length ? birthsWithImg : featuredCandidates;
   const featured = featuredPool.length
     ? featuredPool.reduce((best, b) => bornScore(b) >= bornScore(best) ? b : best, featuredPool[0])
     : null;
-  const othersB = births.filter((b) => b !== featured);
+  const displayedBirths = selectDatePersonProfiles(births, featured);
+  const othersB = displayedBirths.filter((b) => b !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featRemainder = featured ? featured.text.substring(featured.text.indexOf(",") + 1).trim() : "";
@@ -4488,7 +4579,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     ? `${featName} & Other Famous Birthdays on ${mDisplay} ${day}`
     : `Famous Birthdays on ${mDisplay} ${day}`;
   const pageDesc = truncateForMeta(
-    `Discover famous people born on ${mDisplay} ${day} throughout history. ${births.length} notable birthdays including ${births
+    `Explore ${displayedBirths.length} notable people born on ${mDisplay} ${day}, selected from ${births.length} historical records, including ${displayedBirths
       .slice(0, 3)
       .map((b) => b.text.split(",")[0])
       .join(", ")}.`,
@@ -4522,22 +4613,22 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   // Intro paragraph — original content for SEO depth
   const introLine =
     births.length > 0
-      ? `${mDisplay} ${day} has seen ${births.length} notable people enter the world across recorded history${eraRange ? ` — from ${eraRange}` : ""}. Below are the most significant names born on this date.`
+      ? `${mDisplay} ${day} has ${births.length} recorded notable births across history${eraRange ? ` — from ${eraRange}` : ""}. This focused page highlights ${displayedBirths.length} people with the strongest available profile context.`
       : `Explore notable people born on ${mDisplay} ${day} throughout history.`;
 
   const topEvents = (eventsData?.events || []).slice(0, 3);
 
   // Schema — ItemList with jobTitle
   const personListSchema =
-    births.length > 0
+    displayedBirths.length > 0
       ? JSON.stringify({
           "@context": "https://schema.org",
           "@id": `${canonical}#birthdays`,
           "@type": "ItemList",
           name: `Famous Birthdays on ${mDisplay} ${day}`,
           url: canonical,
-          numberOfItems: births.length,
-          itemListElement: births.slice(0, 20).map((b, i) => {
+          numberOfItems: displayedBirths.length,
+          itemListElement: displayedBirths.map((b, i) => {
             const jobTitle = b.text.includes(",")
               ? b.text.slice(b.text.indexOf(",") + 1).trim()
               : "";
@@ -4563,9 +4654,9 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     name: pageTitle.replace(" | thisDay.info", ""),
     description: pageDesc,
     url: canonical,
-    mainEntityId: births.length > 0 ? `${canonical}#birthdays` : null,
+    mainEntityId: displayedBirths.length > 0 ? `${canonical}#birthdays` : null,
     about: { "@type": "Thing", name: `Birthdays on ${mDisplay} ${day}` },
-    mentions: buildPersonMentions(births, "birthDate"),
+    mentions: buildPersonMentions(displayedBirths, "birthDate"),
   });
 
   const breadcrumbSchema = buildBreadcrumbSchema([
@@ -4613,15 +4704,10 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 </div>`;
   };
 
-  const visibleBirths = othersB.slice(0, 20);
-  const hiddenBirths = othersB.slice(20);
-
   let visibleTlHtml = "";
-  visibleBirths.forEach((b, i) => {
+  othersB.forEach((b, i) => {
     visibleTlHtml += renderBornTlItem(b, i);
   });
-
-  const hiddenTlHtml = hiddenBirths.map((b, i) => renderBornTlItem(b, i + visibleBirths.length)).join("");
 
   // Events snippet — left-border accent style
   const eventsSnippetHtml = topEvents
@@ -4681,7 +4767,7 @@ ${siteNav()}
   </nav>
   <h1 class="mb-2">Famous Birthdays on ${escapeHtml(mDisplay)} ${day}</h1>
   ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-    <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} people</span>
+    <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} source records</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>`}
   ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
@@ -4697,7 +4783,7 @@ ${siteNav()}
       <p class="article-hero-meta">By <a href="/about/" rel="author">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
       <div class="article-hero-pill-row">
         <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-person-heart me-1"></i>Famous Birthdays</span>
-        <span class="article-hero-pill"><i class="bi bi-people me-1"></i>${births.length} people</span>
+        <span class="article-hero-pill"><i class="bi bi-people me-1"></i>${births.length} source records</span>
         ${eraRange ? `<span class="article-hero-pill"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
       </div>
     </div>
@@ -4710,9 +4796,7 @@ ${siteNav()}
     ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${othersB.length > 0 ? `
-    <div class="tl-wrap">${visibleTlHtml}</div>
-    ${hiddenTlHtml ? `<div id="births-more" style="display:none"><div class="tl-wrap">${hiddenTlHtml}</div></div>
-    <button onclick="var m=document.getElementById('births-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${othersB.length} birthdays':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${othersB.length} birthdays</button>` : ""}` : ""}
+    <div class="tl-wrap">${visibleTlHtml}</div>` : ""}
     </div>
   </div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
@@ -4772,12 +4856,15 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   };
   const hasImgD = (p) => !!(p?.pages?.[0]?.thumbnail?.source || p?.pages?.[0]?.originalimage?.source);
   const diedScore = (d) => countDykD(d) * 10 + wikiRichScore(d);
-  const deathsWithImg = deaths.filter(hasImgD);
-  const featuredPoolD = deathsWithImg.length ? deathsWithImg : deaths;
+  const substantiveDeaths = deaths.filter((death) => datePersonProfileScore(death) > 0);
+  const featuredCandidatesD = substantiveDeaths.length ? substantiveDeaths : deaths;
+  const deathsWithImg = featuredCandidatesD.filter(hasImgD);
+  const featuredPoolD = deathsWithImg.length ? deathsWithImg : featuredCandidatesD;
   const featured = featuredPoolD.length
     ? featuredPoolD.reduce((best, d) => diedScore(d) >= diedScore(best) ? d : best, featuredPoolD[0])
     : null;
-  const othersD = deaths.filter((d) => d !== featured);
+  const displayedDeaths = selectDatePersonProfiles(deaths, featured);
+  const othersD = displayedDeaths.filter((d) => d !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featRemainder = featured ? featured.text.substring(featured.text.indexOf(",") + 1).trim() : "";
@@ -4803,7 +4890,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     ? `${featName} & Others Who Died on ${mDisplay} ${day}`
     : `Notable Deaths on ${mDisplay} ${day}`;
   const pageDesc = truncateForMeta(
-    `Discover notable people who died on ${mDisplay} ${day} throughout history. ${deaths.length} recorded deaths including ${deaths
+    `Explore ${displayedDeaths.length} notable people who died on ${mDisplay} ${day}, selected from ${deaths.length} historical records, including ${displayedDeaths
       .slice(0, 3)
       .map((d) => d.text.split(",")[0])
       .join(", ")}.`,
@@ -4837,22 +4924,22 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   // Intro paragraph — original content for SEO depth
   const introLine =
     deaths.length > 0
-      ? `${mDisplay} ${day} has seen ${deaths.length} notable figures pass away throughout recorded history${eraRange ? ` — from ${eraRange}` : ""}. Below are the most significant names who died on this date.`
+      ? `${mDisplay} ${day} has ${deaths.length} recorded notable deaths across history${eraRange ? ` — from ${eraRange}` : ""}. This focused page highlights ${displayedDeaths.length} people with the strongest available profile context.`
       : `Explore notable people who died on ${mDisplay} ${day} throughout history.`;
 
   const topEvents = (eventsData?.events || []).slice(0, 3);
 
   // Schema — ItemList with jobTitle
   const personListSchema =
-    deaths.length > 0
+    displayedDeaths.length > 0
       ? JSON.stringify({
           "@context": "https://schema.org",
           "@id": `${canonical}#deaths`,
           "@type": "ItemList",
           name: `Notable Deaths on ${mDisplay} ${day}`,
           url: canonical,
-          numberOfItems: deaths.length,
-          itemListElement: deaths.slice(0, 20).map((d, i) => {
+          numberOfItems: displayedDeaths.length,
+          itemListElement: displayedDeaths.map((d, i) => {
             const jobTitle = d.text.includes(",")
               ? d.text.slice(d.text.indexOf(",") + 1).trim()
               : "";
@@ -4878,9 +4965,9 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     name: pageTitle.replace(" | thisDay.info", ""),
     description: pageDesc,
     url: canonical,
-    mainEntityId: deaths.length > 0 ? `${canonical}#deaths` : null,
+    mainEntityId: displayedDeaths.length > 0 ? `${canonical}#deaths` : null,
     about: { "@type": "Thing", name: `Deaths on ${mDisplay} ${day}` },
-    mentions: buildPersonMentions(deaths, "deathDate"),
+    mentions: buildPersonMentions(displayedDeaths, "deathDate"),
   });
 
   const breadcrumbSchema = buildBreadcrumbSchema([
@@ -4928,15 +5015,10 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 </div>`;
   };
 
-  const visibleDeaths = othersD.slice(0, 20);
-  const hiddenDeaths = othersD.slice(20);
-
   let visibleDiedTlHtml = "";
-  visibleDeaths.forEach((d, i) => {
+  othersD.forEach((d, i) => {
     visibleDiedTlHtml += renderDiedTlItem(d, i);
   });
-
-  const hiddenDiedTlHtml = hiddenDeaths.map((d, i) => renderDiedTlItem(d, i + visibleDeaths.length)).join("");
 
   // Events snippet — consistent style with born page
   const eventsSnippetHtml = topEvents
@@ -4996,7 +5078,7 @@ ${siteNav()}
   </nav>
   <h1 class="mb-2">Notable Deaths on ${escapeHtml(mDisplay)} ${day}</h1>
   ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-    <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
+    <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} source records</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
   </div>`}
   ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
@@ -5012,7 +5094,7 @@ ${siteNav()}
       <p class="article-hero-meta">By <a href="/about/" rel="author">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>
       <div class="article-hero-pill-row">
         <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-flower1 me-1"></i>Notable Deaths</span>
-        <span class="article-hero-pill"><i class="bi bi-people me-1"></i>${deaths.length} people</span>
+        <span class="article-hero-pill"><i class="bi bi-people me-1"></i>${deaths.length} source records</span>
         ${eraRange ? `<span class="article-hero-pill"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
       </div>
     </div>
@@ -5025,9 +5107,7 @@ ${siteNav()}
     ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${othersD.length > 0 ? `
-    <div class="tl-wrap">${visibleDiedTlHtml}</div>
-    ${hiddenDiedTlHtml ? `<div id="deaths-more" style="display:none"><div class="tl-wrap">${hiddenDiedTlHtml}</div></div>
-    <button onclick="var m=document.getElementById('deaths-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${othersD.length} deaths':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${othersD.length} deaths</button>` : ""}` : ""}
+    <div class="tl-wrap">${visibleDiedTlHtml}</div>` : ""}
     </div>
   </div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   <div class="ad-unit">
@@ -5253,7 +5333,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v27-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v28-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -5347,7 +5427,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v26-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v27-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";

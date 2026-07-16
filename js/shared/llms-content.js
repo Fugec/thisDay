@@ -96,7 +96,7 @@ Legacy \`/generated/\` URLs redirect permanently to the canonical \`/events/\` r
 - [LLMs Full](https://thisday.info/llms-full.txt) - Expanded AI-readable content graph with archive and hub routes.
 - [Main Sitemap](https://thisday.info/sitemap.xml) - Primary sitemap including blog content.
 - [Date Pages Sitemap](https://thisday.info/sitemap-generated.xml) - Daily \`/events/\` and \`/quiz/\` pages.
-- [People Sitemap](https://thisday.info/sitemap-people.xml) - \`/born/\`, \`/died/\`, and discoverable \`/people/{person-slug}/\` pages where present.
+- [People Sitemap](https://thisday.info/sitemap-people.xml) - Editorially supported \`/born/\` and \`/died/\` date pages plus discoverable \`/people/{person-slug}/\` pages where present. All canonical date URLs remain directly accessible.
 - [News Sitemap](https://thisday.info/news-sitemap.xml) - Recent article discovery feed.
 - [RSS Feed](https://thisday.info/rss.xml) - Blog feed.
 - [Feed Alias](https://thisday.info/feed.xml) - Alias for \`/rss.xml\`.

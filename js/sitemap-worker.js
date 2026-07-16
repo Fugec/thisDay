@@ -221,7 +221,7 @@ function buildSitemapIndex(latestPostLastmod) {
   // lastmod only when it is consistently accurate.
   //   - main:       newer of latest post / site-structure date
   //   - generated:  static date-route set (/events, /quiz) — structural only
-  //   - people:     fixed 366×2 born/died date set — structural only
+  //   - people:     editorially supported born/died routes + person entities
   //   - entities:   created/updated when posts publish → tracks post freshness
   //   - news:       latest published post
   const mainSitemapLastmod = pickNewerDate(latestPostLastmod, SITE_STRUCTURE_LASTMOD);

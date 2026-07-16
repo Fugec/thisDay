@@ -1230,6 +1230,75 @@ function validateContentSemanticsForPublish(content) {
     );
   }
 
+  const visibleUrlValidation = validateVisibleProseForPublish(content);
+  reasons.push(...visibleUrlValidation.reasons);
+
+  return { ok: reasons.length === 0, reasons };
+}
+
+function visibleArticleProseEntries(content = {}) {
+  const entries = [];
+  const add = (field, value) => {
+    if (typeof value === "string" && value.trim()) entries.push({ field, value });
+  };
+  for (const field of [
+    "title",
+    "eventTitle",
+    "description",
+    "ogDescription",
+    "twitterDescription",
+    "imageAlt",
+    "jsonLdName",
+    "jsonLdDescription",
+    "editorialNote",
+    "eyewitnessQuote",
+    "eyewitnessQuoteSource",
+  ]) {
+    add(field, content?.[field]);
+  }
+  for (const field of [
+    "didYouKnowFacts",
+    "overviewParagraphs",
+    "eyewitnessOrChronicle",
+    "aftermathParagraphs",
+    "conclusionParagraphs",
+  ]) {
+    (Array.isArray(content?.[field]) ? content[field] : []).forEach((value, index) =>
+      add(`${field}[${index}]`, value),
+    );
+  }
+  (Array.isArray(content?.quickFacts) ? content.quickFacts : []).forEach((fact, index) => {
+    add(`quickFacts[${index}].label`, fact?.label);
+    add(`quickFacts[${index}].value`, fact?.value);
+  });
+  for (const field of ["analysisGood", "analysisBad"]) {
+    (Array.isArray(content?.[field]) ? content[field] : []).forEach((item, index) => {
+      add(`${field}[${index}].title`, item?.title);
+      add(`${field}[${index}].detail`, item?.detail);
+    });
+  }
+  (Array.isArray(content?.timeline) ? content.timeline : []).forEach((item, index) => {
+    add(`timeline[${index}].date`, item?.date);
+    add(`timeline[${index}].label`, item?.label);
+  });
+  return entries;
+}
+
+function rawUrlsInVisibleText(value) {
+  const text = plainText(value);
+  return [...text.matchAll(/\b(?:https?:\/\/|www\.)[^\s<>"']+/gi)]
+    .map((match) => match[0].replace(/[),.;!?]+$/, ""))
+    .filter(Boolean);
+}
+
+function validateVisibleProseForPublish(content) {
+  const reasons = [];
+  for (const { field, value } of visibleArticleProseEntries(content)) {
+    const urls = rawUrlsInVisibleText(value);
+    if (urls.length > 0) {
+      reasons.push(`${field} contains a raw visible URL: ${urls[0]}`);
+    }
+  }
   return { ok: reasons.length === 0, reasons };
 }
 
@@ -3408,7 +3477,7 @@ export default {
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace(
           "</head>",
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}.dyn-slider-btn{display:none;align-items:center;justify-content:center;width:42px;height:42px;border:1.5px solid var(--border);border-radius:999px;background:var(--bg);color:var(--text);font-size:20px;font-weight:400;cursor:pointer;transition:background .15s,border-color .15s,color .15s;flex-shrink:0;line-height:1}.dyn-slider-btn:hover{background:var(--bg-alt);border-color:var(--btn-bg);color:var(--btn-bg)}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}@media(min-width:768px){.dyn-slider-btn{display:inline-flex}}@media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}</style></head>`,
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}.dyn-slider-btn{display:none;align-items:center;justify-content:center;width:42px;height:42px;border:1.5px solid var(--border);border-radius:999px;background:var(--bg);color:var(--text);font-size:20px;font-weight:400;cursor:pointer;transition:background .15s,border-color .15s,color .15s;flex-shrink:0;line-height:1}.dyn-slider-btn:hover{background:var(--bg-alt);border-color:var(--btn-bg);color:var(--btn-bg)}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}.dyn-slide .dyn-fact a,.dyn-slide .dyn-fact a:visited,.dyn-slide .dyn-fact a:hover,.dyn-slide .dyn-fact a:focus{color:#fff!important;text-decoration:underline;text-underline-offset:2px}@media(min-width:768px){.dyn-slider-btn{display:inline-flex}}@media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}</style></head>`,
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml
@@ -5158,12 +5227,14 @@ const WRITING_REWRITE_RULES =
   "- Preserve paragraph-local facts. Keep every supported clause, qualifier, example, name, place, date, and number. During a rewrite, introduce no new entity, characterization, comparison, source, or cross-reference.\n" +
   "- Prefer concrete, slightly less predictable verbs when they are exact. Do not reach for a thesaurus, purple prose, or an image the source does not support.\n" +
   "- Cut generic clauses, restatements, announcement sentences, and any phrase that could be pasted into an article about a different event.\n" +
+  "- Never place a raw URL in visible prose. Keep source URLs only in structured source fields; refer to a source by its descriptive name in sentences.\n" +
   "- Do not invent quotes, numbers, motives, causal links, or suspiciously exact claims. If a claim is not supported, attribute it, soften it, or remove it.\n";
 
 const SOURCE_BOUND_REPAIR_RULES =
   "SOURCE-BOUND REPAIR RULES:\n" +
   "- When authoritative source material is supplied, every new proper noun, named institution, named document, report, quote, victim name, expert name, publication year, and exact statistic must already appear in the article fields or source material.\n" +
   "- If a weak sentence needs an anchor but the source does not provide one, make the sentence more modest, use an existing date, place, or number, or cut the claim. Never invent a report, institution, expert, victim, study, legal filing, or source.\n" +
+  "- Never copy a URL into article prose. URLs belong only in source metadata and rendered descriptive links.\n" +
   "- Never introduce, raise, or change a casualty, death, injury, or fatality count. Keep the article's existing casualty figures exactly as written. A person's age, a year, a street number, a distance, or a count of buildings is never a casualty figure. Do not convert any such number into a death or injury toll.\n";
 
 // Source-grounding context for repair/enrichment prompts. Capped well below the
@@ -9114,6 +9185,17 @@ function assertRequiredContentBlocks(content) {
   }
 }
 
+function visibleRawUrlsInRenderedHtml(html) {
+  const body = String(html || "").match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] || "";
+  const visibleText = body
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<template\b[^>]*>[\s\S]*?<\/template\s*>/gi, " ")
+    .replace(/<!--([\s\S]*?)-->/g, " ")
+    .replace(/<[^>]+>/g, " ");
+  return rawUrlsInVisibleText(visibleText);
+}
+
 /**
  * Tier 1 — hard structural check. Throws if any required element generated
  * entirely from local draft content is missing. These never depend on external
@@ -9142,6 +9224,10 @@ function assertArticleStructure(html) {
   if (quickFactCount < 6) missing.push("six rendered key facts");
   if (didYouKnowCount < 5) missing.push("five rendered did-you-know cards");
   if (analysisItemCount < 6) missing.push("six rendered analysis items");
+  const visibleRawUrls = visibleRawUrlsInRenderedHtml(source);
+  if (visibleRawUrls.length > 0) {
+    missing.push(`no raw URLs in visible article text (found ${visibleRawUrls[0]})`);
+  }
   if (missing.length > 0) {
     throw new Error(`Article structure check failed: missing ${missing.join(", ")}`);
   }
@@ -9923,6 +10009,7 @@ Requirements:
 - Absolute minimum is ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS} words, but aim for at least ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 25} words to leave margin.
 - Count both paragraphs before responding. If either paragraph is below ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 15} words, add source-grounded detail before returning.
 - Every paragraph must end with terminal punctuation.
+- Never place a raw URL in paragraph text. Refer to a source by name; URLs belong only in source metadata.
 - Do not use hyphens or em dashes in article body prose.`,
     1700,
     (parsed) => validateChunkedArticleBodyChunk(parsed, [field], label),
@@ -10170,7 +10257,7 @@ Return JSON only with this shape:
   "sourceFacts":["8-12 concise facts from the source to reuse without contradiction"]
 }
 
-Requirements: keyTerms must include at least one real named person connected to the event. imageUrl may be empty or a supported Wikimedia URL, never a placeholder.`,
+Requirements: keyTerms must include at least one real named person connected to the event. imageUrl may be empty or a supported Wikimedia URL, never a placeholder. Never place a raw URL in quickFacts or any other visible prose field; URLs belong only in URL/source metadata fields.`,
     1500,
     (parsed) => {
       requireChunkArray(parsed, "keyTerms", { min: 1, label: "chunked article brief" });
@@ -10229,6 +10316,7 @@ Requirements:
 - Each array must contain exactly 2 paragraphs.
 - Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
 - overviewParagraphs open with the strongest concrete fact.
+- Never place a raw URL in paragraph text. Refer to a source by name instead.
 - eyewitnessOrChronicle must not invent a witness, memoir, newspaper, decree, archive, or quote. If the source names no account, analyze what the record confirms and leaves unresolved.`,
       2300,
       (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
@@ -10265,6 +10353,7 @@ Requirements:
 - Each array must contain exactly 2 paragraphs.
 - Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
 - Aftermath must name specific actions, dates, people, institutions, or confirmed limits in the record.
+- Never place a raw URL in paragraph text. Refer to a source by name instead.
 - Conclusion must reframe the event with a concrete fact, not a generic reflection.`,
       2300,
       (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
@@ -10295,6 +10384,7 @@ Write only this JSON:
 Requirements:
 - quickFacts must contain exactly 6 populated label/value objects.
 - didYouKnowFacts must contain exactly 5 distinct source-grounded facts.
+- Never place a raw URL in a fact. Refer to a source by name instead.
 - Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.`,
     1600,
     (parsed) => {
@@ -10333,6 +10423,7 @@ Write only this JSON:
 Requirements:
 - analysisGood must contain exactly 3 items.
 - analysisBad must contain exactly 3 items.
+- Never place a raw URL in analysis or editorial text. Refer to a source by name instead.
 - Every detail must include a concrete name, date, number, institution, place, or source.
 - editorialNote must be specific to this article and must not add unsupported facts.`,
     2200,
@@ -10440,6 +10531,8 @@ ${avoidSection}
 The article must be substantial without being padded. Target 1,050 to 1,250 words of body content across overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs combined. The absolute floor is ${MIN_REAL_ARTICLE_BODY_WORDS} body words. A precise, complete ${MIN_REAL_ARTICLE_BODY_WORDS} word article is better than a repetitive 1,500 word article. Every paragraph must earn its place with new historical depth, not filler.
 
 HARD RULE — COMPLETE EVERY FIELD: You have enough token budget to finish the entire response. Every paragraph must be a complete thought ending with terminal punctuation (period, exclamation mark, or question mark). Never end a paragraph or field mid-sentence. If you are running out of content ideas, write a shorter but fully complete paragraph rather than cutting off mid-sentence. An incomplete sentence anywhere in the JSON is a critical error.
+
+HARD RULE — NO RAW URLS IN VISIBLE PROSE: Never put http://, https://, or www. text in quickFacts, didYouKnowFacts, body paragraphs, analysis, timeline labels, quotes, or editorial notes. URL values belong only in dedicated URL and source metadata fields. In prose, refer to a source by its descriptive name without printing its address.
 
 VOICE AND PERSONALITY — this is the most important instruction:
 Write like a passionate history obsessive who has spent weeks researching this event and genuinely cannot believe more people do not know about it. You have opinions. You find things surprising, tragic, infuriating, or inspiring, and you say so. You are not a textbook. You are not a Wikipedia summary. You are a storyteller who happens to know an enormous amount of history.
@@ -10611,6 +10704,7 @@ Required date: ${monthName} ${day}. The historicalDate and historicalDateISO mon
 ${compactContextHook}${compactSourceSection}${compactAvoidSection}${stricterGrounding ? "Previous draft failed grounding. Be conservative and omit any unsupported specific.\n" : ""}
 Grounding rules:
 - Use only SOURCE MATERIAL for factual claims when it is supplied. If a number, quote, person, document, place, motive, or consequence is not there, do not invent it.
+- Never copy http://, https://, or www. text into any visible prose field. URLs belong only in URL and source metadata fields.
 - Do not include any proper noun, year, treaty, law, massacre, conference, battle, aviation protocol, or named policy unless it appears in SOURCE MATERIAL.
 - If SOURCE MATERIAL is thin on aftermath, say what the record confirms and what remains unresolved. Never fill the gap with general knowledge.
 - Keep recognition, arrest, death, departure, arrival, and capture dates and places distinct.
@@ -10669,6 +10763,7 @@ Writing rules:
 - Lead with the strongest concrete fact in the first two sentences. Facts before mood.
 - Every paragraph needs a specific name, date, number, place, institution, source, or quote.
 - No rhetorical questions, no first-person singular narrator, no fake witness voice.
+- No raw URLs in quick facts, Did You Know facts, body paragraphs, analysis, timeline labels, quotes, or editorial notes.
 - No hyphens or em dashes inside article body fields. Use commas or periods.
 - No filler phrases: significant event, pivotal moment, changed history, lasting impact, cannot be overstated, it is important to remember, dark chapter.
 - Do not repeat the same fact across sections. Repeated facts with different wording are still repetition.
@@ -13878,6 +13973,7 @@ ${breadcrumbJsonLd}
       .dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}
       .dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}
       .dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}
+      .dyn-slide .dyn-fact a,.dyn-slide .dyn-fact a:visited,.dyn-slide .dyn-fact a:hover,.dyn-slide .dyn-fact a:focus{color:#fff!important;text-decoration:underline;text-underline-offset:2px}
       .dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}
       @media(min-width:768px){.dyn-slider-btn{display:inline-flex}}
       @media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}

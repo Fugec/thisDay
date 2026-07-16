@@ -7795,7 +7795,44 @@ function truncateSourceExtract(value, maxChars = 9000) {
     : prefix.replace(/\s+\S*$/, "").trim();
 }
 
-async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000, fetchImpl = fetch) {
+const WIKIPEDIA_REFERENCE_DISCOVERY_TIMEOUT_MS = 5_000;
+const INDEPENDENT_REFERENCE_DOCUMENT_TIMEOUT_MS = 5_000;
+const INDEPENDENT_SOURCE_CANDIDATE_BUDGET_MS = 12_000;
+const WIKIPEDIA_SOURCE_EXPANSION_TIMEOUT_MS = 6_000;
+
+function sourceFetchTimeoutMs(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(1, Math.floor(parsed))
+    : fallback;
+}
+
+async function withSourceFetchTimeout(task, timeoutMs, label = "Source fetch") {
+  const durationMs = sourceFetchTimeoutMs(timeoutMs, 5_000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`${label} timed out after ${durationMs}ms`));
+  }, durationMs);
+  try {
+    return await task(controller.signal);
+  } catch (err) {
+    if (controller.signal.aborted) {
+      const timeoutError = new Error(`${label} timed out after ${durationMs}ms`);
+      timeoutError.name = "TimeoutError";
+      throw timeoutError;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchExpandedWikipediaSourcePage(
+  page,
+  maxChars = 9000,
+  fetchImpl = fetch,
+  options = {},
+) {
   const normalized = normalizeSourcePage(page);
   if (!normalized) return null;
   const pageTitle = wikiTitleFromUrl(normalized.pageUrl) || normalized.pageTitle;
@@ -7804,24 +7841,31 @@ async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000, fetchImpl
     "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exsectionformat=plain&format=json&origin=*&titles=" +
     encodeURIComponent(pageTitle);
   try {
-    const response = await fetchImpl(url, {
-      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
-    });
-    if (!response.ok) return normalized;
-    const data = await response.json();
-    const resultPage = Object.values(data?.query?.pages || {})[0];
-    if (!resultPage || resultPage.missing !== undefined) return normalized;
-    const expandedExtract = truncateSourceExtract(resultPage.extract, maxChars);
-    const currentWords = String(normalized.extract || "").split(/\s+/).filter(Boolean).length;
-    const expandedWords = expandedExtract.split(/\s+/).filter(Boolean).length;
-    if (expandedWords <= currentWords) return normalized;
-    const resolvedTitle = String(resultPage.title || normalized.pageTitle).trim();
-    return {
-      ...normalized,
-      pageTitle: resolvedTitle,
-      pageUrl: wikiUrlFromTitle(resolvedTitle) || normalized.pageUrl,
-      extract: expandedExtract,
-    };
+    const timeoutMs = sourceFetchTimeoutMs(
+      options?.timeoutMs,
+      WIKIPEDIA_SOURCE_EXPANSION_TIMEOUT_MS,
+    );
+    return await withSourceFetchTimeout(async (signal) => {
+      const response = await fetchImpl(url, {
+        headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+        signal,
+      });
+      if (!response.ok) return normalized;
+      const data = await response.json();
+      const resultPage = Object.values(data?.query?.pages || {})[0];
+      if (!resultPage || resultPage.missing !== undefined) return normalized;
+      const expandedExtract = truncateSourceExtract(resultPage.extract, maxChars);
+      const currentWords = String(normalized.extract || "").split(/\s+/).filter(Boolean).length;
+      const expandedWords = expandedExtract.split(/\s+/).filter(Boolean).length;
+      if (expandedWords <= currentWords) return normalized;
+      const resolvedTitle = String(resultPage.title || normalized.pageTitle).trim();
+      return {
+        ...normalized,
+        pageTitle: resolvedTitle,
+        pageUrl: wikiUrlFromTitle(resolvedTitle) || normalized.pageUrl,
+        extract: expandedExtract,
+      };
+    }, timeoutMs, `Wikipedia source expansion for ${pageTitle}`);
   } catch (err) {
     console.warn(`Wikipedia source expansion failed for ${pageTitle}: ${err.message}`);
     return normalized;
@@ -7940,7 +7984,11 @@ function citationLabelFromWikitext(wikitext, url) {
   return "";
 }
 
-async function fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImpl = fetch) {
+async function fetchWikipediaExternalReferenceCandidates(
+  selectedEvent,
+  fetchImpl = fetch,
+  options = {},
+) {
   const pageTitle =
     wikiTitleFromUrl(selectedEvent?.wikiUrl) ||
     selectedEvent?.sourcePageTitle ||
@@ -7950,17 +7998,24 @@ async function fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImp
   const apiUrl =
     "https://en.wikipedia.org/w/api.php?action=parse&redirects=1&prop=externallinks%7Cwikitext&format=json&formatversion=2&origin=*&page=" +
     encodeURIComponent(pageTitle);
-  let response;
+  let data;
   try {
-    response = await fetchImpl(apiUrl, {
-      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
-    });
+    const timeoutMs = sourceFetchTimeoutMs(
+      options?.timeoutMs,
+      WIKIPEDIA_REFERENCE_DISCOVERY_TIMEOUT_MS,
+    );
+    data = await withSourceFetchTimeout(async (signal) => {
+      const response = await fetchImpl(apiUrl, {
+        headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+        signal,
+      });
+      if (!response?.ok) return null;
+      return response.json().catch(() => null);
+    }, timeoutMs, `Wikipedia reference discovery for ${pageTitle}`);
   } catch (err) {
     console.warn(`Independent citation discovery failed for ${pageTitle}: ${err.message}`);
     return [];
   }
-  if (!response?.ok) return [];
-  const data = await response.json().catch(() => null);
   const links = Array.isArray(data?.parse?.externallinks) ? data.parse.externallinks : [];
   const wikitext = String(data?.parse?.wikitext || "");
   const evidence = [
@@ -8070,36 +8125,69 @@ function verifyIndependentSourceDocument(selectedEvent, candidate, html, finalUr
   });
 }
 
-async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch) {
+async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch, options = {}) {
   const existing = normalizeSourcePages(selectedEvent?.sourcePages || []).find(
     (page) => page.verifiedIndependent === true && isDirectCitationUrl(page.pageUrl),
   );
   if (existing) return existing;
-  const candidates = await fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImpl);
+  const candidateBudgetMs = sourceFetchTimeoutMs(
+    options?.candidateBudgetMs,
+    INDEPENDENT_SOURCE_CANDIDATE_BUDGET_MS,
+  );
+  const deadline = Date.now() + candidateBudgetMs;
+  const referenceListTimeoutMs = Math.min(
+    sourceFetchTimeoutMs(
+      options?.referenceListTimeoutMs,
+      WIKIPEDIA_REFERENCE_DISCOVERY_TIMEOUT_MS,
+    ),
+    candidateBudgetMs,
+  );
+  const candidates = await fetchWikipediaExternalReferenceCandidates(
+    selectedEvent,
+    fetchImpl,
+    { timeoutMs: referenceListTimeoutMs },
+  );
   for (const candidate of candidates.slice(0, INDEPENDENT_REFERENCE_FETCH_LIMIT)) {
-    try {
-      const response = await fetchImpl(candidate.pageUrl, {
-        redirect: "follow",
-        headers: {
-          "User-Agent": WIKIPEDIA_USER_AGENT,
-          Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
-          Range: "bytes=0-131071",
-        },
-      });
-      if (!response?.ok) continue;
-      const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
-      if (contentType && !/(?:text\/html|application\/xhtml\+xml|text\/plain)/.test(contentType)) {
-        continue;
-      }
-      const contentLength = Number.parseInt(response.headers?.get?.("content-length"), 10);
-      if (Number.isFinite(contentLength) && contentLength > 3_000_000) continue;
-      const html = String(await response.text()).slice(0, 140000);
-      const verified = verifyIndependentSourceDocument(
-        selectedEvent,
-        candidate,
-        html,
-        response.url || candidate.pageUrl,
+    const remainingBudgetMs = deadline - Date.now();
+    if (remainingBudgetMs <= 0) {
+      console.warn(
+        `Independent citation discovery budget exhausted for ${selectedEvent?.sourcePageTitle || selectedEvent?.eventTitle || "event"}`,
       );
+      break;
+    }
+    try {
+      const timeoutMs = Math.min(
+        sourceFetchTimeoutMs(
+          options?.documentTimeoutMs,
+          INDEPENDENT_REFERENCE_DOCUMENT_TIMEOUT_MS,
+        ),
+        remainingBudgetMs,
+      );
+      const verified = await withSourceFetchTimeout(async (signal) => {
+        const response = await fetchImpl(candidate.pageUrl, {
+          redirect: "follow",
+          headers: {
+            "User-Agent": WIKIPEDIA_USER_AGENT,
+            Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
+            Range: "bytes=0-131071",
+          },
+          signal,
+        });
+        if (!response?.ok) return null;
+        const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
+        if (contentType && !/(?:text\/html|application\/xhtml\+xml|text\/plain)/.test(contentType)) {
+          return null;
+        }
+        const contentLength = Number.parseInt(response.headers?.get?.("content-length"), 10);
+        if (Number.isFinite(contentLength) && contentLength > 3_000_000) return null;
+        const html = String(await response.text()).slice(0, 140000);
+        return verifyIndependentSourceDocument(
+          selectedEvent,
+          candidate,
+          html,
+          response.url || candidate.pageUrl,
+        );
+      }, timeoutMs, `Independent citation candidate ${candidate.pageUrl}`);
       if (verified) return verified;
     } catch (err) {
       console.warn(`Independent citation candidate failed (${candidate.pageUrl}): ${err.message}`);
@@ -8108,7 +8196,7 @@ async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch) {
   return null;
 }
 
-async function selectSourceReadyCandidate(candidates, fetchImpl = fetch) {
+async function selectSourceReadyCandidate(candidates, fetchImpl = fetch, options = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
   for (const candidate of list.slice(0, SOURCE_READY_EVENT_CANDIDATE_LIMIT)) {
     const selectedEvent = {
@@ -8121,7 +8209,7 @@ async function selectSourceReadyCandidate(candidates, fetchImpl = fetch) {
       wikiUrl: candidate.pageUrl,
       sourcePages: candidate.sourcePages || [],
     };
-    const citation = await discoverIndependentCitation(selectedEvent, fetchImpl);
+    const citation = await discoverIndependentCitation(selectedEvent, fetchImpl, options);
     if (!citation) continue;
     return {
       ...candidate,
@@ -8131,7 +8219,7 @@ async function selectSourceReadyCandidate(candidates, fetchImpl = fetch) {
   return null;
 }
 
-async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch) {
+async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch, options = {}) {
   if (!selectedEvent) return selectedEvent;
   const sourcePages = normalizeSourcePages(selectedEvent.sourcePages || []);
   if (!sourcePages.length) return selectedEvent;
@@ -8144,7 +8232,9 @@ async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch) 
   });
   const expanded = await Promise.all(
     wikipediaPages.slice(0, 2).map((page) =>
-      fetchExpandedWikipediaSourcePage(page, 9000, fetchImpl),
+      fetchExpandedWikipediaSourcePage(page, 9000, fetchImpl, {
+        timeoutMs: options?.wikipediaExpansionTimeoutMs,
+      }),
     ),
   );
   const merged = normalizeSourcePages([

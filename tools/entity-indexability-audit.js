@@ -656,7 +656,7 @@ function buildMigrationPlanMarkdown(plan) {
   lines.push(`- Proposed after SHA-256: \`${plan.sharedIndex.afterSha256}\``);
   lines.push(`- Entry count remains ${plan.sharedIndex.beforeEntryCount}.`);
   lines.push("");
-  lines.push("Full entity and index before/after JSON is stored in `entity-migration-batch-plan.json`.");
+  lines.push("Full entity and index before/after JSON is stored in the timestamped `plan.json` beside this report.");
   lines.push("");
   return lines.join("\n");
 }
@@ -798,9 +798,11 @@ async function executeMigrationPlan(
     throw new Error("Production entity migration requires explicit confirmation.");
   }
   const resolvedPlanPath = resolve(planPath || "");
+  let planRaw;
   let plan;
   try {
-    plan = JSON.parse(readFileSync(resolvedPlanPath, "utf8"));
+    planRaw = readFileSync(resolvedPlanPath, "utf8");
+    plan = JSON.parse(planRaw);
   } catch {
     throw new Error(`Entity migration plan could not be read: ${resolvedPlanPath}`);
   }
@@ -861,6 +863,8 @@ async function executeMigrationPlan(
   const backupDir = join(operationDir, "backups");
   mkdirSync(backupDir, { recursive: true });
   const resultPath = join(operationDir, "result.json");
+  const planSnapshotPath = join(operationDir, "plan.json");
+  writeFileSync(planSnapshotPath, planRaw);
   const indexBackupPath = join(backupDir, "entity-index-v1.json");
   writeFileSync(indexBackupPath, liveIndexRaw);
   if (sha256(readFileSync(indexBackupPath, "utf8")) !== plan.sharedIndex.beforeSha256) {
@@ -880,6 +884,7 @@ async function executeMigrationPlan(
   const result = {
     startedAt: generatedAt.toISOString(),
     planPath: resolvedPlanPath,
+    planSnapshotPath,
     mode: apply
       ? "confirmed production entity migration"
       : "verification-only dry run",
@@ -1150,6 +1155,7 @@ async function runAudit(options = {}) {
     }, null, 2)}\n`,
   );
   let migrationPlan = null;
+  let migrationPlanDir = "";
   let migrationPlanMarkdownPath = "";
   let migrationPlanJsonPath = "";
   if (options.planSize) {
@@ -1164,14 +1170,14 @@ async function runAudit(options = {}) {
         sourceVerificationRequests,
       },
     );
-    migrationPlanMarkdownPath = join(
+    const planStamp = generatedAt.replace(/[:.]/g, "-");
+    migrationPlanDir = join(
       outputDir,
-      "entity-migration-batch-plan.md",
+      `entity-migration-plan-${planStamp}`,
     );
-    migrationPlanJsonPath = join(
-      outputDir,
-      "entity-migration-batch-plan.json",
-    );
+    mkdirSync(migrationPlanDir, { recursive: true });
+    migrationPlanMarkdownPath = join(migrationPlanDir, "plan.md");
+    migrationPlanJsonPath = join(migrationPlanDir, "plan.json");
     writeFileSync(
       migrationPlanMarkdownPath,
       buildMigrationPlanMarkdown(migrationPlan),
@@ -1186,6 +1192,7 @@ async function runAudit(options = {}) {
     markdownPath,
     jsonPath,
     migrationPlan,
+    migrationPlanDir,
     migrationPlanMarkdownPath,
     migrationPlanJsonPath,
     sourceVerificationRequests,

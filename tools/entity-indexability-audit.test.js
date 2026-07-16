@@ -267,6 +267,10 @@ test("verification mode creates backups without writing KV", async () => {
   assert.equal(result.productionWrites, 0);
   assert.equal(result.backupsCreated, 3);
   assert.equal(result.readyForConfirmedApply, true);
+  assert.deepEqual(
+    JSON.parse(readFileSync(result.planSnapshotPath, "utf8")),
+    fixture.plan,
+  );
   const report = JSON.parse(readFileSync(result.resultPath, "utf8"));
   assert.equal(report.mode, "verification-only dry run");
   assert.equal(report.productionWrites, 0);

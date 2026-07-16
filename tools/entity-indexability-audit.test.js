@@ -10,6 +10,7 @@ import { join } from "node:path";
 
 import {
   buildMigrationPlan,
+  evaluateEntityIndexability,
   executeMigrationPlan,
   selectMigrationBatch,
   verifyWikipediaSourcePages,
@@ -249,6 +250,40 @@ test("Wikipedia verification follows redirects and rejects disambiguation pages"
       "https://en.wikipedia.org/wiki/Ambiguous_Source",
     ).verified,
     false,
+  );
+});
+
+test("person eligibility measures the body rendered from source facts, not discarded legacy prose", () => {
+  const legacyParagraph =
+    "This legacy paragraph contains many words about historical context, career achievements, institutional influence, public service, international cooperation, professional recognition, later life, and broad legacy claims that the current person renderer does not use when it reconstructs the visible biography from source facts. ".repeat(
+      5,
+    );
+  const entity = {
+    type: "person",
+    slug: "thin-rendered-person",
+    name: "Thin Rendered Person",
+    wikiUrl: "https://en.wikipedia.org/wiki/Thin_Rendered_Person",
+    profileLinkEligible: true,
+    profileSubjectVerified: true,
+    intro:
+      "Thin Rendered Person was a Canadian medical practitioner and administrator who served in public health. He became the first leader of an international organization and received several professional honors.",
+    summary:
+      "Thin Rendered Person worked as a psychiatrist, military medical officer, and international civil servant.",
+    bodySections: [
+      {
+        heading: "Early Life and Background",
+        paragraphs: [legacyParagraph],
+      },
+    ],
+  };
+
+  const evaluation = evaluateEntityIndexability(entity);
+
+  assert.ok(evaluation.storedWordCount > 150);
+  assert.ok(evaluation.wordCount < 150);
+  assert.equal(evaluation.eligible, false);
+  assert.ok(
+    evaluation.reasons.includes("rendered body below 150 words"),
   );
 });
 

@@ -208,6 +208,122 @@ function entityBodyWordCount(entity) {
     .filter(Boolean).length;
 }
 
+function splitCompleteAuditSentences(value) {
+  const clean = String(value || "").replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  const protectedText = clean.replace(
+    /\b(?:(?:Dr|Gen|Jr|Lt|Mr|Mrs|Ms|Prof|Sgt|Sr|St|U\.S|U\.K)|[A-Z])\./g,
+    (match) => match.replace(/\./g, "\u0001"),
+  );
+  return protectedText
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.replace(/\u0001/g, ".").trim())
+    .filter((sentence) => /[.!?]["'”’)\]]*$/.test(sentence));
+}
+
+function personRenderedBodyWordCount(entity) {
+  const seen = new Set();
+  const sentences = [];
+  const addSentences = (value) => {
+    for (const sentence of splitCompleteAuditSentences(value)) {
+      const clean = sentence.replace(/\s+/g, " ").trim();
+      const key = clean
+        .toLowerCase()
+        .replace(/\([^)]*\)/g, "")
+        .replace(/\b\d{3,4}\b/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (clean.length < 35 || seen.has(key)) continue;
+      seen.add(key);
+      sentences.push(clean);
+    }
+  };
+  addSentences(entity?.intro);
+  addSentences(entity?.summary);
+  for (const card of Array.isArray(entity?.overviewCards)
+    ? entity.overviewCards
+    : []) {
+    addSentences(card?.value);
+  }
+
+  const name = entity?.name || "This person";
+  const lifeLine =
+    entity?.birthDate && entity?.deathDate
+      ? `${name} lived from ${entity.birthDate} to ${entity.deathDate}.`
+      : entity?.birthDate
+        ? `${name} was born on ${entity.birthDate}.`
+        : entity?.deathDate
+          ? `${name} died on ${entity.deathDate}.`
+          : "";
+  if (lifeLine) {
+    if (sentences.length && !/\b(born|died|b\.|d\.)\b/i.test(sentences[0])) {
+      sentences[0] = `${lifeLine} ${sentences[0]}`;
+    } else if (!sentences.length) {
+      sentences.push(lifeLine);
+    }
+  }
+
+  const paragraphs = [];
+  let current = [];
+  let words = 0;
+  for (const sentence of sentences) {
+    const count = sentence.split(/\s+/).filter(Boolean).length;
+    if (current.length && words + count > 150) {
+      paragraphs.push(current.join(" "));
+      current = [sentence];
+      words = count;
+    } else {
+      current.push(sentence);
+      words += count;
+    }
+  }
+  if (current.length) paragraphs.push(current.join(" "));
+  const renderedWords = paragraphs
+    .filter(
+      (paragraph) =>
+        paragraph.split(/\s+/).filter(Boolean).length >= 18,
+    )
+    .join(" ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+  if (renderedWords > 0) return renderedWords;
+
+  // Mirrors the entity renderer's fallback to intro/summary when no complete
+  // fact paragraphs can be reconstructed.
+  return String(entity?.intro || entity?.summary || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function substantiveStoredBodyWordCount(entity) {
+  const sections = (Array.isArray(entity?.bodySections)
+    ? entity.bodySections
+    : []).filter((section) => {
+    const heading = String(section?.heading || "").toLowerCase();
+    const text = (Array.isArray(section?.paragraphs)
+      ? section.paragraphs
+      : [])
+      .join(" ")
+      .toLowerCase();
+    return !(
+      heading.includes("biographical notes") ||
+      text.includes("is included here because") ||
+      text.includes("the page is designed to give readers") ||
+      text.includes("for thisday readers, the point is navigation") ||
+      text.includes("is described in the source record as")
+    );
+  });
+  return entityBodyWordCount({ bodySections: sections });
+}
+
+function renderedEntityBodyWordCount(entity, type) {
+  return type === "person"
+    ? personRenderedBodyWordCount(entity)
+    : substantiveStoredBodyWordCount(entity);
+}
+
 function isDirectWikipediaArticleUrl(value) {
   try {
     const url = new URL(String(value || ""));
@@ -234,12 +350,13 @@ function historySlugQualityIssue(slug) {
 
 function evaluateEntityIndexability(entity, indexEntry = {}) {
   const type = entity?.type || indexEntry?.type || "";
-  const wordCount = entityBodyWordCount(entity);
+  const storedWordCount = entityBodyWordCount(entity);
+  const wordCount = renderedEntityBodyWordCount(entity, type);
   const reasons = [];
   if (!entity) reasons.push("missing stored entity record");
   if (type === "person") {
     if (wordCount < PERSON_MIN_WORDS) {
-      reasons.push(`body below ${PERSON_MIN_WORDS} words`);
+      reasons.push(`rendered body below ${PERSON_MIN_WORDS} words`);
     }
     if (!isDirectWikipediaArticleUrl(entity?.wikiUrl || indexEntry?.wikiUrl)) {
       reasons.push("missing direct Wikipedia biography");
@@ -255,7 +372,7 @@ function evaluateEntityIndexability(entity, indexEntry = {}) {
       .replace(/\s+/g, " ")
       .trim();
     if (wordCount < HISTORY_MIN_WORDS) {
-      reasons.push(`body below ${HISTORY_MIN_WORDS} words`);
+      reasons.push(`rendered body below ${HISTORY_MIN_WORDS} words`);
     }
     if (!isDirectWikipediaArticleUrl(entity?.wikiUrl || indexEntry?.wikiUrl)) {
       reasons.push("missing direct Wikipedia event/source page");
@@ -277,6 +394,7 @@ function evaluateEntityIndexability(entity, indexEntry = {}) {
     eligible: reasons.length === 0,
     reasons,
     wordCount,
+    storedWordCount,
   };
 }
 
@@ -1101,6 +1219,7 @@ async function runAudit(options = {}) {
         currentIndexable: entry.indexable === true,
         recommendedEligible: evaluation.eligible,
         wordCount: evaluation.wordCount,
+        storedWordCount: evaluation.storedWordCount,
         reasons: evaluation.reasons,
         googleCoverage: indexing.get(url) || "Not inspected",
         relatedPosts: Array.isArray(entity?.relatedPosts)

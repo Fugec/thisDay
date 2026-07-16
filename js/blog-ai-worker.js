@@ -11385,6 +11385,225 @@ function articleGroundingText(content) {
   return collectGroundingStrings(groundedFields).join("\n");
 }
 
+const GROUNDING_CLAIM_HEDGE_PATTERN =
+  /\b(?:apparently|arguably|could|likely|may|might|perhaps|possibly|probably|seems?|suggests?)\b/i;
+const GROUNDING_SUPPORT_STOPWORDS = new Set([
+  "about", "after", "again", "against", "also", "among", "another", "around",
+  "article", "because", "before", "being", "between", "both", "caused", "causes",
+  "causing", "could", "during", "event", "first", "from", "government", "historic",
+  "historical", "history", "into", "later", "more", "most", "other", "resulted",
+  "resulting", "same", "such", "than", "that", "their", "them", "then", "there",
+  "these", "they", "this", "through", "under", "upon", "were", "when", "where",
+  "which", "while", "with", "would", "year", "years",
+]);
+
+const GROUNDING_CLAIM_RISK_RULES = [
+  {
+    label: "order attribution",
+    claim:
+      /\b(?:authori[sz](?:e[ds]?|ing)|command(?:ed|s|ing)?|direct(?:ed|s|ing)?|order(?:ed|s|ing)?)\b/i,
+    support:
+      /\b(?:authori[sz](?:e[ds]?|ing)|command(?:ed|s|ing)?|direct(?:ed|s|ing)?|order(?:ed|s|ing)?)\b/i,
+  },
+  {
+    label: "perpetrator attribution",
+    claim:
+      /\b(?:assassinat(?:e[ds]?|ing)|carried out (?:the )?(?:assassination|attack|bombing|execution|killing|massacre|murder|raid|shooting)|execut(?:e[ds]?|ing)|kill(?:ed|s|ing)?|murder(?:ed|s|ing)?)\b/i,
+    support:
+      /\b(?:assassinat(?:e[ds]?|ing)|carried out (?:the )?(?:assassination|attack|bombing|execution|killing|massacre|murder|raid|shooting)|execut(?:e[ds]?|ing)|kill(?:ed|s|ing)?|murder(?:ed|s|ing)?)\b/i,
+  },
+  {
+    label: "parent relationship",
+    claim: /\b(?:child|daughter|father|mother|parent|son)\b/i,
+    support: /\b(?:child|daughter|father|mother|parent|son)\b/i,
+  },
+  {
+    label: "sibling relationship",
+    claim: /\b(?:brother|sibling|sister)\b/i,
+    support: /\b(?:brother|sibling|sister)\b/i,
+  },
+  {
+    label: "extended-family relationship",
+    claim: /\b(?:aunt|cousin|nephew|niece|uncle)\b/i,
+    support: /\b(?:aunt|cousin|nephew|niece|uncle)\b/i,
+  },
+  {
+    label: "marital relationship",
+    claim: /\b(?:husband|marri(?:age|ed)|spouse|wife)\b/i,
+    support: /\b(?:husband|marri(?:age|ed)|spouse|wife)\b/i,
+  },
+  {
+    label: "succession relationship",
+    claim: /\b(?:predecessor|replac(?:e[ds]?|ing)|succeeded (?:as|by)|successor)\b/i,
+    support: /\b(?:predecessor|replac(?:e[ds]?|ing)|succeeded (?:as|by)|successor)\b/i,
+  },
+  {
+    label: "causal claim",
+    claim:
+      /\b(?:because(?:\s+of)?|brought about|caus(?:e[ds]?|ing)|due to|gave rise to|leads? to|led to|prompt(?:ed|s|ing)?|result(?:ed|s|ing)? in|spark(?:ed|s|ing)?|trigger(?:ed|s|ing)?)\b/i,
+    support:
+      /\b(?:because(?:\s+of)?|brought about|caus(?:e[ds]?|ing)|due to|gave rise to|leads? to|led to|prompt(?:ed|s|ing)?|result(?:ed|s|ing)? in|spark(?:ed|s|ing)?|trigger(?:ed|s|ing)?)\b/i,
+  },
+  {
+    label: "coercive outcome",
+    claim: /\b(?:compel(?:led|s|ling)?|forc(?:e[ds]?|ing))\b/i,
+    support: /\b(?:compel(?:led|s|ling)?|forc(?:e[ds]?|ing))\b/i,
+  },
+  {
+    label: "enabling outcome",
+    claim: /\b(?:allow(?:ed|s|ing)?|enabl(?:e[ds]?|ing))\b/i,
+    support: /\b(?:allow(?:ed|s|ing)?|enabl(?:e[ds]?|ing))\b/i,
+  },
+  {
+    label: "preventive outcome",
+    claim: /\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b/i,
+    support: /\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b/i,
+  },
+  {
+    label: "institutional outcome",
+    claim:
+      /\b(?:abolish(?:ed|es|ing)?|creat(?:e[ds]?|ing)|dissolv(?:e[ds]?|ing)|establish(?:ed|es|ing)?|found(?:ed|ing))\b/i,
+    support:
+      /\b(?:abolish(?:ed|es|ing)?|creat(?:e[ds]?|ing)|dissolv(?:e[ds]?|ing)|establish(?:ed|es|ing)?|found(?:ed|ing))\b/i,
+  },
+  {
+    label: "ending outcome",
+    claim: /\b(?:conclud(?:e[ds]?|ing)|end(?:ed|s|ing)|terminat(?:e[ds]?|ing))\b/i,
+    support: /\b(?:conclud(?:e[ds]?|ing)|end(?:ed|s|ing)|terminat(?:e[ds]?|ing))\b/i,
+  },
+];
+
+function collectGroundingClaimEntries(value, path = "", out = []) {
+  if (typeof value === "string") {
+    const text = value.replace(/\s+/g, " ").trim();
+    if (text) out.push({ field: path, text });
+    return out;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectGroundingClaimEntries(item, `${path}[${index}]`, out),
+    );
+    return out;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (/url|image|searchquery|type/i.test(key)) continue;
+      collectGroundingClaimEntries(item, path ? `${path}.${key}` : key, out);
+    }
+  }
+  return out;
+}
+
+function groundingClaimEntries(content) {
+  return collectGroundingClaimEntries({
+    title: content?.title,
+    eventTitle: content?.eventTitle,
+    description: content?.description,
+    quickFacts: content?.quickFacts,
+    didYouKnowFacts: content?.didYouKnowFacts,
+    overviewParagraphs: content?.overviewParagraphs,
+    eyewitnessOrChronicle: content?.eyewitnessOrChronicle,
+    eyewitnessQuote: content?.eyewitnessQuote,
+    eyewitnessQuoteSource: content?.eyewitnessQuoteSource,
+    aftermathParagraphs: content?.aftermathParagraphs,
+    conclusionParagraphs: content?.conclusionParagraphs,
+    analysisGood: content?.analysisGood,
+    analysisBad: content?.analysisBad,
+    editorialNote: content?.editorialNote,
+    timeline: content?.timeline,
+  });
+}
+
+function groundingSupportStem(token) {
+  const value = String(token || "");
+  if (value.length >= 7 && /(?:ing|ers|ies)$/.test(value)) {
+    return value.replace(/(?:ing|ers|ies)$/, "");
+  }
+  if (value.length >= 6 && /(?:ed|es)$/.test(value)) {
+    return value.replace(/(?:ed|es)$/, "");
+  }
+  if (value.length >= 5 && /s$/.test(value)) return value.slice(0, -1);
+  return value;
+}
+
+function groundingSupportTokens(value) {
+  return new Set(
+    normalizeForCompare(value)
+      .split(/\s+/)
+      .map((token) => token.replace(/[^a-z0-9]/g, ""))
+      .filter((token) =>
+        token.length >= 4 &&
+        !/^\d+$/.test(token) &&
+        !GROUNDING_SUPPORT_STOPWORDS.has(token),
+      )
+      .map(groundingSupportStem)
+      .filter((token) => token.length >= 3),
+  );
+}
+
+function groundingProperAnchors(value) {
+  const anchors = new Set();
+  for (const match of String(value || "").matchAll(/\b[A-Z][A-Za-z'’.-]{2,}\b/g)) {
+    const token = normalizeForCompare(match[0]).replace(/[^a-z0-9]/g, "");
+    if (
+      token.length >= 3 &&
+      !GROUNDING_SUPPORT_STOPWORDS.has(token) &&
+      !SUBJECT_STOPWORDS.has(token)
+    ) {
+      anchors.add(groundingSupportStem(token));
+    }
+  }
+  return anchors;
+}
+
+function groundingClaimHasSourceSupport(claim, sourceSentence) {
+  const claimTokens = groundingSupportTokens(claim);
+  const sourceTokens = groundingSupportTokens(sourceSentence);
+  const shared = tokenMatches(claimTokens, sourceTokens);
+  const anchors = groundingProperAnchors(claim);
+  const sharedAnchors = tokenMatches(anchors, sourceTokens);
+  const minimumShared = claimTokens.size >= 5 ? 2 : 1;
+  return (
+    shared.length >= minimumShared &&
+    (anchors.size === 0 || sharedAnchors.length > 0)
+  );
+}
+
+function unsupportedGroundingClaims(content, sourceMaterial) {
+  const sourceSentences = splitSentences(sourceMaterial).filter(Boolean);
+  if (sourceSentences.length === 0) return [];
+  const findings = [];
+  const seen = new Set();
+
+  for (const entry of groundingClaimEntries(content)) {
+    for (const sentence of splitSentences(entry.text)) {
+      if (!sentence || GROUNDING_CLAIM_HEDGE_PATTERN.test(sentence)) continue;
+      for (const rule of GROUNDING_CLAIM_RISK_RULES) {
+        if (!rule.claim.test(sentence)) continue;
+        rule.claim.lastIndex = 0;
+        const key = `${rule.label}|${normalizeForCompare(sentence)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const supported = sourceSentences.some((sourceSentence) => {
+          rule.support.lastIndex = 0;
+          return (
+            rule.support.test(sourceSentence) &&
+            groundingClaimHasSourceSupport(sentence, sourceSentence)
+          );
+        });
+        if (!supported) {
+          findings.push({
+            field: entry.field,
+            label: rule.label,
+            sentence: sentence.slice(0, 240),
+          });
+        }
+      }
+    }
+  }
+  return findings.slice(0, 8);
+}
+
 /**
  * Deterministic grounding gate. Returns { ok, reasons[] }. A no-op (ok:true)
  * when no source is available (e.g. a manually forced event), so admin force
@@ -11397,6 +11616,7 @@ function verifyArticleGrounding(content, source) {
   }
   const articleText = articleGroundingText(content);
   const articleLower = articleText.toLowerCase();
+  const sourceMaterial = sourceMaterialForGrounding(source);
 
   // 1) Subject match — the article must name the source's canonical subject.
   const subjectTokens = sourceSubjectTokens(source);
@@ -11413,7 +11633,7 @@ function verifyArticleGrounding(content, source) {
   // are disjoint. Absence is never a contradiction (keeps false positives low).
   const articleTolls = extractDeathTolls(articleText);
   const sourceTolls = extractDeathTolls(
-    `${source.text || ""} ${source.sourceExtract || ""}`,
+    sourceMaterial,
   );
   if (
     articleTolls.length > 0 &&
@@ -11422,6 +11642,17 @@ function verifyArticleGrounding(content, source) {
   ) {
     reasons.push(
       `casualty number contradiction: article says ${articleTolls.join("/")} but source says ${sourceTolls.join("/")}`,
+    );
+  }
+
+  // 3) High-risk relationship, responsibility, causality, and outcome claims
+  // must have a source sentence using the same claim family plus overlapping
+  // named subjects/objects. This is intentionally narrower than semantic AI
+  // review: it catches unsupported hard assertions without treating omissions
+  // or clearly hedged interpretation as factual contradictions.
+  for (const finding of unsupportedGroundingClaims(content, sourceMaterial)) {
+    reasons.push(
+      `unsupported ${finding.label} in ${finding.field}: "${finding.sentence}"`,
     );
   }
 
@@ -11483,6 +11714,7 @@ async function verifyFinalArticleGrounding(env, content, source) {
               `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
               `FINAL ARTICLE:\n${articleText}\n\n` +
               "Start with the headline and central event claim. Reject a command-style or imperative headline with no historical actor. Reject any headline or body claim that assigns an action, order, execution, killing, relationship, title, or identity to a person when the source assigns it to someone else or does not support that attribution. Distinguish who ordered an act, who carried it out, and who was its target. " +
+              "Reject an asserted cause, motive, forced response, enabled result, prevented result, institutional creation or abolition, or other concrete outcome unless the source explicitly supports that connection. Chronology alone is not causality: 'B happened after A' does not prove that A caused B. Verify family, marital, and succession relationships exactly rather than accepting that both names merely appear in the source. " +
               "Reject ONLY clear factual contradictions: conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
               "Audit each of the exactly five Did You Know facts separately. Reject any Did You Know fact whose central claim is not directly supported by the authoritative source material, even when the source does not explicitly contradict it. Identify a rejected fact by its array index. " +
               "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +

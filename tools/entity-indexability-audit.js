@@ -29,10 +29,57 @@ const SITE = "https://thisday.info";
 const BLOG_KV_NAMESPACE = "5173c34a7bd04cde9988c0e89d77bb6e";
 const DEFAULT_OUTPUT_DIR = join(ROOT, "documentation/quality");
 const INDEXING_CACHE_PATH = join(ROOT, "documentation/gsc/indexing-raw.json");
+const GSC_PAGES_PATH = join(ROOT, "documentation/gsc/pages-raw.json");
 const PERSON_MIN_WORDS = 150;
 const HISTORY_MIN_WORDS = 300;
 const QUALITY_GATE_VERSION = 1;
 const WIKIDATA_HUMAN_ENTITY_ID = "Q5";
+const PROTECTED_PERSON_REMEDIATION_SLUGS = new Set([
+  "african-american",
+  "warren-anderson",
+]);
+const PERSON_REMEDIATION_DISPOSITIONS = new Map([
+  [
+    "crimean-tatars",
+    {
+      action: "noindex-and-review-history-reclassification",
+      futureTarget: "/history/crimean-tatars/",
+      articleStripAction: "unlink-stale-person-pill",
+      rationale:
+        "The source is a substantive ethnic-group page, not a human biography.",
+    },
+  ],
+  [
+    "dave-ulmer",
+    {
+      action: "noindex-invalid-profile-source",
+      futureTarget: "",
+      articleStripAction: "keep-unlinked-context-label",
+      rationale:
+        "The requested biography redirects to Geocaching rather than a Dave Ulmer biography.",
+    },
+  ],
+  [
+    "enigma-machine",
+    {
+      action: "noindex-and-review-history-reclassification",
+      futureTarget: "/history/enigma-machine/",
+      articleStripAction: "unlink-stale-person-pill",
+      rationale:
+        "The source is a cipher-device page, not a human biography.",
+    },
+  ],
+  [
+    "hugo-theorell",
+    {
+      action: "noindex-until-authoritative-expansion",
+      futureTarget: "/people/hugo-theorell/",
+      articleStripAction: "none",
+      rationale:
+        "The Wikidata identity is human, but the available Wikipedia source summary is too thin for the quality gate.",
+    },
+  ],
+]);
 
 function parseEnvFile(path) {
   const output = {};
@@ -63,6 +110,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     limit: 0,
     planSize: 0,
     verifyAllPeople: false,
+    personRemediationPlan: false,
     verifyPlan: "",
     applyPlan: "",
     confirmProductionWrite: false,
@@ -75,6 +123,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === "--plan-size") options.planSize = Number(argv[++index]);
     else if (arg === "--verify-all-people") {
       options.verifyAllPeople = true;
+    }
+    else if (arg === "--person-remediation-plan") {
+      options.personRemediationPlan = true;
     }
     else if (arg === "--verify-plan") {
       options.verifyPlan = resolve(argv[++index] || "");
@@ -105,12 +156,24 @@ function parseArgs(argv = process.argv.slice(2)) {
   }
   if (
     (options.verifyPlan || options.applyPlan) &&
-    (options.limit || options.planSize || options.verifyAllPeople)
+    (
+      options.limit ||
+      options.planSize ||
+      options.verifyAllPeople ||
+      options.personRemediationPlan
+    )
   ) {
     throw new Error("Audit/plan creation flags cannot be combined with plan execution.");
   }
-  if (options.planSize && options.verifyAllPeople) {
-    throw new Error("--plan-size and --verify-all-people cannot be combined.");
+  if (
+    Number(Boolean(options.planSize)) +
+      Number(options.verifyAllPeople) +
+      Number(options.personRemediationPlan) >
+    1
+  ) {
+    throw new Error(
+      "--plan-size, --verify-all-people, and --person-remediation-plan cannot be combined.",
+    );
   }
   if (options.applyPlan && !options.confirmProductionWrite) {
     throw new Error("--apply-plan requires --confirm-production-write.");
@@ -136,6 +199,10 @@ Options:
   --verify-all-people
                    Verify every person source against Wikipedia and Wikidata
                    and write a timestamped, read-only identity report.
+  --person-remediation-plan
+                   Build an exact zero-write review plan for the four
+                   Google-unknown indexable person failures. The two
+                   Google-indexed protected URLs are always excluded.
   --verify-plan PATH
                    Re-read live KV, recheck sources and hashes, and create
                    local backups without writing production.
@@ -422,6 +489,37 @@ function loadIndexingCache() {
     entry.url,
     entry.inspectionResult?.indexStatusResult?.coverageState || "Unknown",
   ]));
+}
+
+function loadGscPageMetrics() {
+  let document;
+  try {
+    document = JSON.parse(readFileSync(GSC_PAGES_PATH, "utf8"));
+  } catch {
+    return {
+      generatedAt: "",
+      availableStartDate: "",
+      availableEndDate: "",
+      metrics: new Map(),
+    };
+  }
+  const metrics = new Map();
+  for (const row of Array.isArray(document.rows) ? document.rows : []) {
+    const url = String(row?.keys?.[0] || "");
+    if (!url) continue;
+    metrics.set(url, {
+      clicks: Number(row.clicks) || 0,
+      impressions: Number(row.impressions) || 0,
+      ctr: Number(row.ctr) || 0,
+      position: Number(row.position) || 0,
+    });
+  }
+  return {
+    generatedAt: String(document.export?.generatedAt || ""),
+    availableStartDate: String(document.export?.availableStartDate || ""),
+    availableEndDate: String(document.export?.availableEndDate || ""),
+    metrics,
+  };
 }
 
 function countBy(values, keyFn) {
@@ -862,6 +960,266 @@ function buildMigrationPlanMarkdown(plan) {
   lines.push(`- Entry count remains ${plan.sharedIndex.beforeEntryCount}.`);
   lines.push("");
   lines.push("Full entity and index before/after JSON is stored in the timestamped `plan.json` beside this report.");
+  lines.push("");
+  return lines.join("\n");
+}
+
+function buildPersonRemediationPlan(
+  auditedEntries,
+  fullIndex,
+  indexRaw,
+  generatedAt,
+  gscExport = {},
+) {
+  const auditedPeopleBySlug = new Map(
+    auditedEntries
+      .filter(({ row }) => row.type === "person")
+      .map((entry) => [entry.row.slug, entry]),
+  );
+  const targetSlugs = [...PERSON_REMEDIATION_DISPOSITIONS.keys()];
+  const items = targetSlugs.map((slug) => {
+    if (PROTECTED_PERSON_REMEDIATION_SLUGS.has(slug)) {
+      throw new Error(`Protected person remediation target is forbidden: ${slug}`);
+    }
+    const candidate = auditedPeopleBySlug.get(slug);
+    if (!candidate) {
+      throw new Error(`Missing remediation target in live entity index: ${slug}`);
+    }
+    const { row, entity, entry, entityRaw } = candidate;
+    if (
+      row.currentIndexable !== true ||
+      row.googleCoverage !== "URL is unknown to Google" ||
+      row.sourceVerification?.verified !== false
+    ) {
+      throw new Error(
+        `Unsafe remediation target ${slug}: expected an indexable, Google-unknown, source-rejected person record.`,
+      );
+    }
+    const disposition = PERSON_REMEDIATION_DISPOSITIONS.get(slug);
+    const sourceVerification = row.sourceVerification;
+    const performance =
+      gscExport.metrics?.get(row.url) ||
+      { clicks: 0, impressions: 0, ctr: 0, position: 0 };
+    if (performance.clicks > 0 || performance.impressions > 0) {
+      throw new Error(
+        `Unsafe remediation target ${slug}: GSC reports ${performance.clicks} clicks and ${performance.impressions} impressions.`,
+      );
+    }
+    if (
+      disposition.action === "noindex-until-authoritative-expansion" &&
+      sourceVerification.personIsHuman !== true
+    ) {
+      throw new Error(
+        `Unsafe remediation target ${slug}: authoritative expansion is reserved for a verified human identity.`,
+      );
+    }
+    if (
+      disposition.action !== "noindex-until-authoritative-expansion" &&
+      sourceVerification.personIsHuman !== false
+    ) {
+      throw new Error(
+        `Unsafe remediation target ${slug}: non-biography disposition requires explicit non-human identity evidence.`,
+      );
+    }
+
+    const entityAfter =
+      disposition.action === "noindex-until-authoritative-expansion"
+        ? {
+            ...entity,
+            needsWikiRefresh: true,
+          }
+        : {
+            ...entity,
+            profileLinkEligible: false,
+            profileSubjectVerified: false,
+            ...(sourceVerification.wikibaseItem
+              ? { wikidataEntityId: sourceVerification.wikibaseItem }
+              : {}),
+            wikidataInstanceOfHuman: false,
+            ...(sourceVerification.disambiguation === true
+              ? { isDisambiguation: true }
+              : {}),
+          };
+    const indexAfter = {
+      ...entry,
+      indexable: false,
+      ...(disposition.action === "noindex-until-authoritative-expansion"
+        ? { needsWikiRefresh: true }
+        : {}),
+    };
+    const entityAfterRaw = JSON.stringify(entityAfter);
+    return {
+      type: "person",
+      slug,
+      name: row.name,
+      url: row.url,
+      googleCoverage: row.googleCoverage,
+      gscPerformance: performance,
+      identityStatus:
+        sourceVerification.personIsHuman === true
+          ? "verified human with thin source"
+          : "non-human or wrong-subject source",
+      sourceVerification,
+      action: disposition.action,
+      rationale: disposition.rationale,
+      futureTarget: disposition.futureTarget,
+      articleStripAction: disposition.articleStripAction,
+      robotsBefore: "index, follow, max-image-preview:large",
+      robotsAfter: "noindex, follow",
+      sitemapBefore: true,
+      sitemapAfter: false,
+      entityKey: `entity-v1:person:${slug}`,
+      entityBeforeSha256: sha256(entityRaw),
+      entityAfterSha256: sha256(entityAfterRaw),
+      entityWriteRequired: sha256(entityRaw) !== sha256(entityAfterRaw),
+      entityBefore: entity,
+      entityAfter,
+      indexBefore: entry,
+      indexAfter,
+    };
+  });
+
+  const targetSet = new Set(items.map(({ slug }) => slug));
+  const proposedIndex = fullIndex.map((entry) => {
+    if (entry?.type !== "person" || !targetSet.has(entry.slug)) return entry;
+    return items.find(({ slug }) => slug === entry.slug).indexAfter;
+  });
+  const proposedIndexRaw = JSON.stringify(proposedIndex);
+  const protectedItems = auditedEntries
+    .filter(({ row }) =>
+      row.type === "person" &&
+      PROTECTED_PERSON_REMEDIATION_SLUGS.has(row.slug),
+    )
+    .map(({ row, entityRaw, entry }) => ({
+      slug: row.slug,
+      url: row.url,
+      googleCoverage: row.googleCoverage,
+      entityKey: `entity-v1:person:${row.slug}`,
+      entitySha256: sha256(entityRaw),
+      indexBefore: entry,
+      expectedLegacyIndexable: true,
+      indexStateMatchesProtection: entry?.indexable === true,
+      proposedChange: null,
+    }));
+  if (protectedItems.length !== PROTECTED_PERSON_REMEDIATION_SLUGS.size) {
+    throw new Error("Both Google-indexed protected person records must be present.");
+  }
+
+  const proposedWriteKeys = [
+    ...items
+      .filter(({ entityWriteRequired }) => entityWriteRequired)
+      .map(({ entityKey }) => entityKey),
+    ...(proposedIndexRaw !== indexRaw ? ["entity-index-v1"] : []),
+  ];
+  const blockingIssues = protectedItems
+    .filter(({ indexStateMatchesProtection }) => !indexStateMatchesProtection)
+    .map(
+      ({ slug }) =>
+        `protected legacy index flag drifted before plan creation: ${slug}`,
+    );
+  return {
+    generatedAt,
+    mode: "review-only remediation dry run",
+    productionWrites: 0,
+    applySupported: false,
+    readyForReview: blockingIssues.length === 0,
+    blockingIssues,
+    publicEntityPageFetches: 0,
+    targetSlugs,
+    protectedSlugs: [...PROTECTED_PERSON_REMEDIATION_SLUGS],
+    safetyContract: [
+      "only the four explicitly reviewed Google-unknown person failures are included",
+      "African American and Warren Anderson are excluded from every proposed write",
+      "any protected legacy index-flag drift blocks plan approval",
+      "GSC reports zero clicks and zero impressions for every selected URL",
+      "no redirect or history-page migration is authorized",
+      "the plan cannot be passed to the migration apply command",
+      "production KV writes remain zero",
+    ],
+    gscExport: {
+      generatedAt: gscExport.generatedAt || "",
+      availableStartDate: gscExport.availableStartDate || "",
+      availableEndDate: gscExport.availableEndDate || "",
+    },
+    proposedWriteKeys,
+    proposedWriteCount: proposedWriteKeys.length,
+    protectedItems,
+    sharedIndex: {
+      key: "entity-index-v1",
+      beforeSha256: sha256(indexRaw),
+      afterSha256: sha256(proposedIndexRaw),
+      beforeEntryCount: fullIndex.length,
+      afterEntryCount: proposedIndex.length,
+      changedEntries: items.length,
+      proposedValue: proposedIndex,
+    },
+    items,
+  };
+}
+
+function buildPersonRemediationPlanMarkdown(plan) {
+  const lines = [];
+  lines.push(
+    `# Indexable Person Failure Remediation Plan — ${plan.generatedAt.slice(0, 10)}`,
+  );
+  lines.push("");
+  lines.push(
+    "This is a review-only, GET-only dry run. It made zero production writes, cannot be used by the migration apply command, and does not authorize redirects, deletions, reclassification, or KV changes.",
+  );
+  lines.push("");
+  if (!plan.readyForReview) {
+    lines.push("## Blocked");
+    lines.push("");
+    for (const issue of plan.blockingIssues) lines.push(`- ${issue}.`);
+    lines.push(
+      "- Restore or explicitly accept the protected live state before producing an approval-ready remediation plan.",
+    );
+    lines.push("");
+  }
+  lines.push("## Safety contract");
+  lines.push("");
+  for (const rule of plan.safetyContract) lines.push(`- ${rule}.`);
+  lines.push("");
+  lines.push(
+    `- GSC performance window: ${plan.gscExport.availableStartDate || "unavailable"} through ${plan.gscExport.availableEndDate || "unavailable"}.`,
+  );
+  lines.push(`- Proposed future write keys: ${plan.proposedWriteCount}.`);
+  lines.push("");
+  lines.push("## Four Google-unknown review targets");
+  lines.push("");
+  lines.push(
+    "| URL | Identity result | Proposed review action | GSC | Robots | Future target | Article strip |",
+  );
+  lines.push("|---|---|---|---|---|---|---|");
+  for (const item of plan.items) {
+    lines.push(
+      `| ${markdownCell(item.url.replace(SITE, ""))} | ${markdownCell(item.identityStatus)} | ${markdownCell(item.action)} | ${item.gscPerformance.clicks} clicks; ${item.gscPerformance.impressions} impressions | index,follow → noindex,follow | ${markdownCell(item.futureTarget || "none")} | ${markdownCell(item.articleStripAction)} |`,
+    );
+  }
+  lines.push("");
+  lines.push("## Protected Google-indexed URLs");
+  lines.push("");
+  lines.push(
+    "| URL | Coverage | Entity hash | Legacy index flag | Protection state | Proposed change |",
+  );
+  lines.push("|---|---|---|---|---|---|");
+  for (const item of plan.protectedItems) {
+    lines.push(
+      `| ${markdownCell(item.url.replace(SITE, ""))} | ${markdownCell(item.googleCoverage)} | \`${item.entitySha256}\` | ${item.indexBefore?.indexable === true ? "indexable" : "not indexable"} | ${item.indexStateMatchesProtection ? "matches protected baseline" : "DRIFTED"} | none |`,
+    );
+  }
+  lines.push("");
+  lines.push("## Shared-index precondition");
+  lines.push("");
+  lines.push(`- Before SHA-256: \`${plan.sharedIndex.beforeSha256}\`.`);
+  lines.push(`- Review proposal SHA-256: \`${plan.sharedIndex.afterSha256}\`.`);
+  lines.push(
+    `- Entry count remains ${plan.sharedIndex.beforeEntryCount}; ${plan.sharedIndex.changedEntries} entries would change only after separate approval and a new apply-capable plan.`,
+  );
+  lines.push("");
+  lines.push(
+    "Full before/after entity and shared-index JSON is stored in `plan.json` beside this report.",
+  );
   lines.push("");
   return lines.join("\n");
 }
@@ -1466,10 +1824,19 @@ async function runAudit(options = {}) {
   });
   const rows = auditedEntries.map(({ row }) => row);
   let sourceVerificationRequests = 0;
-  if (options.planSize || options.verifyAllPeople) {
+  if (
+    options.planSize ||
+    options.verifyAllPeople ||
+    options.personRemediationPlan
+  ) {
     const sourceCandidates = options.verifyAllPeople
       ? auditedEntries.filter(({ row }) => row.type === "person")
-      : auditedEntries.filter((entry) => isMigrationCandidate(entry));
+      : options.personRemediationPlan
+        ? auditedEntries.filter(({ row }) =>
+            row.type === "person" &&
+            PERSON_REMEDIATION_DISPOSITIONS.has(row.slug),
+          )
+        : auditedEntries.filter((entry) => isMigrationCandidate(entry));
     const verification = await verifyWikipediaSourcePages(sourceCandidates);
     sourceVerificationRequests = verification.requestCount;
     for (const candidate of sourceCandidates) {
@@ -1587,6 +1954,42 @@ async function runAudit(options = {}) {
       `${JSON.stringify(migrationPlan, null, 2)}\n`,
     );
   }
+  let personRemediationPlan = null;
+  let personRemediationPlanDir = "";
+  let personRemediationPlanMarkdownPath = "";
+  let personRemediationPlanJsonPath = "";
+  if (options.personRemediationPlan) {
+    const gscExport = loadGscPageMetrics();
+    personRemediationPlan = buildPersonRemediationPlan(
+      auditedEntries,
+      fullIndex,
+      indexRaw,
+      generatedAt,
+      gscExport,
+    );
+    const planStamp = generatedAt.replace(/[:.]/g, "-");
+    personRemediationPlanDir = join(
+      outputDir,
+      `person-remediation-plan-${planStamp}`,
+    );
+    mkdirSync(personRemediationPlanDir, { recursive: true });
+    personRemediationPlanMarkdownPath = join(
+      personRemediationPlanDir,
+      "plan.md",
+    );
+    personRemediationPlanJsonPath = join(
+      personRemediationPlanDir,
+      "plan.json",
+    );
+    writeFileSync(
+      personRemediationPlanMarkdownPath,
+      buildPersonRemediationPlanMarkdown(personRemediationPlan),
+    );
+    writeFileSync(
+      personRemediationPlanJsonPath,
+      `${JSON.stringify(personRemediationPlan, null, 2)}\n`,
+    );
+  }
   return {
     rows,
     markdownPath,
@@ -1600,6 +2003,10 @@ async function runAudit(options = {}) {
     personIdentityAuditDir,
     personIdentityAuditMarkdownPath,
     personIdentityAuditJsonPath,
+    personRemediationPlan,
+    personRemediationPlanDir,
+    personRemediationPlanMarkdownPath,
+    personRemediationPlanJsonPath,
   };
 }
 
@@ -1657,6 +2064,15 @@ async function main(argv = process.argv.slice(2)) {
     console.log(`Safe migration batch: ${result.migrationPlan.items.length}`);
     console.log(`Plan: ${result.migrationPlanMarkdownPath}`);
   }
+  if (result.personRemediationPlan) {
+    console.log(
+      `Person remediation review targets: ${result.personRemediationPlan.items.length}`,
+    );
+    console.log(
+      `Protected person URLs excluded: ${result.personRemediationPlan.protectedItems.length}`,
+    );
+    console.log(`Plan: ${result.personRemediationPlanMarkdownPath}`);
+  }
 }
 
 const isCli = process.argv[1] &&
@@ -1672,6 +2088,8 @@ export {
   buildReport,
   buildMigrationPlan,
   buildMigrationPlanMarkdown,
+  buildPersonRemediationPlan,
+  buildPersonRemediationPlanMarkdown,
   buildPersonIdentityAudit,
   buildPersonIdentityAuditMarkdown,
   entityBodyWordCount,

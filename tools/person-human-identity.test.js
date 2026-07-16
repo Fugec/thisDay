@@ -240,3 +240,59 @@ test("SEO person creation and quality gates require Wikidata Q5", () => {
     false,
   );
 });
+
+test("protected legacy person URLs cannot be changed by SEO hydration", async () => {
+  const index = [
+    {
+      type: "person",
+      slug: "african-american",
+      name: "African American",
+      url: "/people/african-american/",
+      indexable: true,
+    },
+    {
+      type: "person",
+      slug: "warren-anderson",
+      name: "Warren Anderson",
+      url: "/people/warren-anderson/",
+      indexable: true,
+    },
+  ];
+  const writes = [];
+  const env = {
+    BLOG_AI_KV: {
+      get: async (key) => {
+        if (key === "entity-index-v1") return JSON.stringify(index);
+        return JSON.stringify({
+          type: "person",
+          slug: key.endsWith("warren-anderson")
+            ? "warren-anderson"
+            : "african-american",
+          name: "Protected legacy person",
+          wikiUrl: "https://en.wikipedia.org/wiki/Protected",
+          wikidataInstanceOfHuman: false,
+          profileLinkEligible: false,
+          profileSubjectVerified: false,
+          bodySections: [],
+        });
+      },
+      put: async (...args) => writes.push(args),
+    },
+  };
+
+  await seoHooks.updateEntityIndexEntry(env, {
+    type: "person",
+    slug: "warren-anderson",
+    name: "Warren Anderson",
+    bodySections: [],
+    wikidataInstanceOfHuman: false,
+  });
+  const refreshed = await seoHooks.refreshEntityIndexFromStoredEntities(
+    env,
+    index,
+    "person",
+  );
+
+  assert.deepEqual(refreshed, index);
+  assert.deepEqual(writes, []);
+});

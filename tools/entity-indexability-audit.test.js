@@ -10,6 +10,8 @@ import { join } from "node:path";
 
 import {
   buildMigrationPlan,
+  buildPersonRemediationPlan,
+  buildPersonRemediationPlanMarkdown,
   buildPersonIdentityAudit,
   buildPersonIdentityAuditMarkdown,
   evaluateEntityIndexability,
@@ -467,6 +469,240 @@ test("full person identity audit separates humans, non-human sources, and protec
   assert.match(markdown, /3 require identity\/source review/);
   assert.match(markdown, /ethnic-group/);
   assert.match(markdown, /must be protected/);
+});
+
+test("person remediation plan includes only four Google-unknown failures", () => {
+  const makeEntry = (
+    slug,
+    {
+      coverage = "URL is unknown to Google",
+      personIsHuman = false,
+      wikibaseItem = `Q-${slug}`,
+    } = {},
+  ) => {
+    const candidate = auditEntry("person", slug, {
+      recommendedEligible: false,
+      googleCoverage: coverage,
+      sourceVerified: false,
+    });
+    candidate.row.sourceVerification = {
+      verified: false,
+      requestedTitle: slug,
+      resolvedTitle: slug,
+      pageExists: true,
+      disambiguation: false,
+      extractWordCount: personIsHuman ? 21 : 300,
+      wikibaseItem,
+      entityTypes: ["person"],
+      personIsHuman,
+      reasons: personIsHuman
+        ? ["Wikipedia source summary is too thin"]
+        : ["Wikipedia person source is not a human biography"],
+    };
+    candidate.entity = {
+      type: "person",
+      slug,
+      name: slug,
+      wikiUrl: `https://en.wikipedia.org/wiki/${slug}`,
+      profileLinkEligible: true,
+      profileSubjectVerified: true,
+      ...(personIsHuman
+        ? {
+            wikidataEntityId: wikibaseItem,
+            wikidataInstanceOfHuman: true,
+          }
+        : {}),
+    };
+    candidate.entityRaw = JSON.stringify(candidate.entity);
+    candidate.entry = {
+      type: "person",
+      slug,
+      name: slug,
+      url: `/people/${slug}/`,
+      indexable: true,
+    };
+    return candidate;
+  };
+  const auditedEntries = [
+    makeEntry("african-american", {
+      coverage: "Submitted and indexed",
+    }),
+    makeEntry("crimean-tatars", { wikibaseItem: "Q117458" }),
+    makeEntry("dave-ulmer", { wikibaseItem: "Q14930" }),
+    makeEntry("enigma-machine", { wikibaseItem: "Q150758" }),
+    makeEntry("hugo-theorell", {
+      personIsHuman: true,
+      wikibaseItem: "Q156480",
+    }),
+    makeEntry("warren-anderson", {
+      coverage: "Submitted and indexed",
+    }),
+  ];
+  const fullIndex = auditedEntries.map(({ entry }) => entry);
+  const indexRaw = JSON.stringify(fullIndex);
+  const metrics = new Map(
+    auditedEntries.map(({ row }) => [
+      row.url,
+      { clicks: 0, impressions: 0, ctr: 0, position: 0 },
+    ]),
+  );
+
+  const plan = buildPersonRemediationPlan(
+    auditedEntries,
+    fullIndex,
+    indexRaw,
+    "2026-07-16T20:00:00.000Z",
+    {
+      generatedAt: "2026-07-16T14:05:31.935Z",
+      availableStartDate: "2026-04-18",
+      availableEndDate: "2026-07-14",
+      metrics,
+    },
+  );
+
+  assert.equal(plan.productionWrites, 0);
+  assert.equal(plan.applySupported, false);
+  assert.equal(plan.readyForReview, true);
+  assert.deepEqual(plan.blockingIssues, []);
+  assert.deepEqual(
+    plan.items.map(({ slug }) => slug),
+    [
+      "crimean-tatars",
+      "dave-ulmer",
+      "enigma-machine",
+      "hugo-theorell",
+    ],
+  );
+  assert.deepEqual(
+    plan.protectedItems.map(({ slug }) => slug).sort(),
+    ["african-american", "warren-anderson"],
+  );
+  assert.ok(plan.items.every((item) => item.indexAfter.indexable === false));
+  assert.ok(plan.items.every((item) => item.robotsAfter === "noindex, follow"));
+  assert.ok(plan.items.every((item) => item.sitemapAfter === false));
+  assert.equal(
+    plan.items.find(({ slug }) => slug === "hugo-theorell")
+      .entityAfter.needsWikiRefresh,
+    true,
+  );
+  assert.equal(
+    plan.items.find(({ slug }) => slug === "enigma-machine")
+      .entityAfter.wikidataInstanceOfHuman,
+    false,
+  );
+  assert.equal(plan.sharedIndex.changedEntries, 4);
+  assert.equal(plan.sharedIndex.beforeEntryCount, plan.sharedIndex.afterEntryCount);
+  assert.deepEqual(
+    plan.sharedIndex.proposedValue
+      .filter(({ slug }) =>
+        ["african-american", "warren-anderson"].includes(slug),
+      )
+      .map(({ slug, indexable }) => ({ slug, indexable })),
+    [
+      { slug: "african-american", indexable: true },
+      { slug: "warren-anderson", indexable: true },
+    ],
+  );
+
+  const markdown = buildPersonRemediationPlanMarkdown(plan);
+  assert.match(markdown, /review-only, GET-only dry run/);
+  assert.match(markdown, /crimean-tatars/);
+  assert.match(markdown, /african-american/);
+  assert.match(markdown, /Proposed change \|/);
+
+  const driftedEntries = auditedEntries.map((candidate) =>
+    candidate.row.slug === "warren-anderson"
+      ? {
+          ...candidate,
+          entry: {
+            ...candidate.entry,
+            indexable: false,
+          },
+        }
+      : candidate,
+  );
+  const driftedIndex = driftedEntries.map(({ entry }) => entry);
+  const driftedPlan = buildPersonRemediationPlan(
+    driftedEntries,
+    driftedIndex,
+    JSON.stringify(driftedIndex),
+    "2026-07-16T20:05:00.000Z",
+    { metrics },
+  );
+  assert.equal(driftedPlan.readyForReview, false);
+  assert.deepEqual(driftedPlan.blockingIssues, [
+    "protected legacy index flag drifted before plan creation: warren-anderson",
+  ]);
+  assert.match(
+    buildPersonRemediationPlanMarkdown(driftedPlan),
+    /Protection state[\s\S]*DRIFTED/,
+  );
+});
+
+test("person remediation plan refuses a target with GSC impressions", () => {
+  const slugs = [
+    "crimean-tatars",
+    "dave-ulmer",
+    "enigma-machine",
+    "hugo-theorell",
+  ];
+  const targets = slugs.map((slug) => {
+    const candidate = auditEntry("person", slug, {
+      recommendedEligible: false,
+      googleCoverage: "URL is unknown to Google",
+      sourceVerified: false,
+    });
+    const personIsHuman = slug === "hugo-theorell";
+    candidate.row.sourceVerification = {
+      verified: false,
+      personIsHuman,
+      wikibaseItem: `Q-${slug}`,
+      reasons: [
+        personIsHuman
+          ? "Wikipedia source summary is too thin"
+          : "Wikipedia person source is not a human biography",
+      ],
+    };
+    candidate.entityRaw = JSON.stringify(candidate.entity);
+    return candidate;
+  });
+  const protectedEntries = [
+    auditEntry("person", "african-american", {
+      recommendedEligible: false,
+      googleCoverage: "Submitted and indexed",
+      sourceVerified: false,
+    }),
+    auditEntry("person", "warren-anderson", {
+      recommendedEligible: false,
+      googleCoverage: "Submitted and indexed",
+      sourceVerified: false,
+    }),
+  ];
+  const auditedEntries = [...targets, ...protectedEntries];
+  const fullIndex = auditedEntries.map(({ entry }) => entry);
+  const metrics = new Map(
+    targets.map(({ row }) => [
+      row.url,
+      {
+        clicks: 0,
+        impressions: row.slug === "dave-ulmer" ? 1 : 0,
+        ctr: 0,
+        position: 0,
+      },
+    ]),
+  );
+
+  assert.throws(
+    () =>
+      buildPersonRemediationPlan(
+        auditedEntries,
+        fullIndex,
+        JSON.stringify(fullIndex),
+        "2026-07-16T20:00:00.000Z",
+        { metrics },
+      ),
+    /GSC reports 0 clicks and 1 impressions/,
+  );
 });
 
 test("verification mode creates backups without writing KV", async () => {

@@ -44,6 +44,10 @@ const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
 const WIKIDATA_HUMAN_ENTITY_ID = "Q5";
+const PROTECTED_LEGACY_PERSON_SLUGS = new Set([
+  "african-american",
+  "warren-anderson",
+]);
 const MAX_DATE_PERSON_PROFILES = 20;
 const WIKIMEDIA_THUMBNAIL_STEPS = [
   20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840,
@@ -1194,6 +1198,12 @@ function hasIncompleteEntityParagraphs(entity) {
 
 async function updateEntityIndexEntry(env, entity) {
   if (!env.BLOG_AI_KV || !entity?.type || !entity?.slug) return;
+  if (
+    entity.type === "person" &&
+    PROTECTED_LEGACY_PERSON_SLUGS.has(entity.slug)
+  ) {
+    return;
+  }
   const raw = await env.BLOG_AI_KV.get("entity-index-v1").catch(() => null);
   const index = raw ? JSON.parse(raw) : [];
   const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
@@ -1242,6 +1252,13 @@ async function refreshEntityIndexFromStoredEntities(env, index, typeFilter = "pe
   let changed = false;
   const refreshed = [];
   for (const entry of index) {
+    if (
+      entry?.type === "person" &&
+      PROTECTED_LEGACY_PERSON_SLUGS.has(entry.slug)
+    ) {
+      refreshed.push(entry);
+      continue;
+    }
     if (entry?.type !== typeFilter || !entry.slug) {
       refreshed.push(entry);
       continue;
@@ -8560,4 +8577,6 @@ export default {
 export const __personIdentityTestHooks = {
   isLikelyWikipediaPersonEntity,
   seoEntityQualityEligible,
+  updateEntityIndexEntry,
+  refreshEntityIndexFromStoredEntities,
 };

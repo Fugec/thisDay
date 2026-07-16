@@ -334,7 +334,7 @@ function isProxyableArticleImageUrl(imageUrl) {
   }
 }
 
-function wikimediaImageFileKey(imageUrl) {
+function wikimediaImageFileName(imageUrl) {
   try {
     const parsed = new URL(String(imageUrl || ""), "https://thisday.info");
     const source = parsed.pathname === "/image-proxy"
@@ -342,11 +342,14 @@ function wikimediaImageFileKey(imageUrl) {
       : String(imageUrl || "");
     const sourceUrl = new URL(source);
     return decodeURIComponent(sourceUrl.pathname.split("/").pop() || "")
-      .replace(/^\d+px-/i, "")
-      .toLowerCase();
+      .replace(/^\d+px-/i, "");
   } catch {
     return "";
   }
+}
+
+function wikimediaImageFileKey(imageUrl) {
+  return wikimediaImageFileName(imageUrl).toLowerCase();
 }
 
 function buildSocialPreviewImageUrl(imageUrl) {
@@ -4932,6 +4935,10 @@ const COMMONS_MATCH_STOPWORDS = new Set([
   "file", "jpg", "jpeg", "png", "webp", "gif", "svg", "image", "photo",
   "portrait", "wikipedia", "commons",
 ]);
+const FEATURED_IMAGE_SUBJECT_STOPWORDS = new Set([
+  "air", "armed", "army", "force", "forces", "historic", "historical",
+  "history", "military", "national", "official", "state",
+]);
 
 function commonsMatchTokens(text) {
   return String(text || "")
@@ -4952,6 +4959,154 @@ function commonsResultIsRelevant(fileTitle, ...topics) {
   const topicTokens = topics.flatMap(commonsMatchTokens);
   if (topicTokens.length === 0) return false;
   return topicTokens.some((t) => fileTokens.has(t));
+}
+
+function tokenMatches(left, right) {
+  const rightSet = right instanceof Set ? right : new Set(right);
+  return [...left].filter((token) => rightSet.has(token));
+}
+
+function featuredImageMatchTokens(value) {
+  return commonsMatchTokens(value).filter(
+    (token) => !FEATURED_IMAGE_SUBJECT_STOPWORDS.has(token),
+  );
+}
+
+function featuredImageContentText(content) {
+  const keyTerms = Array.isArray(content?.keyTerms)
+    ? content.keyTerms.map((term) => term?.term || "")
+    : [];
+  const sourcePageTitles = sourcePagesFromContent(content).map((page) => page.pageTitle || "");
+  return [
+    content?.title,
+    content?.eventTitle,
+    content?.sourceEventHeadline,
+    content?.sourcePageTitle,
+    content?.description,
+    content?.keywords,
+    ...keyTerms,
+    ...sourcePageTitles,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function featuredImageSourcePage(content, imageUrl) {
+  const imageKey = wikimediaImageFileKey(imageUrl);
+  if (!imageKey) return null;
+  return sourcePagesFromContent(content).find(
+    (page) => wikimediaImageFileKey(page.imageUrl) === imageKey,
+  ) || null;
+}
+
+function featuredImageSubjectEvidence(
+  content,
+  imageUrl,
+  { trustedPageTitle = "" } = {},
+) {
+  const fileName = wikimediaImageFileName(imageUrl);
+  const fileTokens = new Set(featuredImageMatchTokens(fileName));
+  const contentTokens = new Set(featuredImageMatchTokens(featuredImageContentText(content)));
+  const directMatches = tokenMatches(fileTokens, contentTokens);
+  const sourcePage = featuredImageSourcePage(content, imageUrl);
+  const pageTitle = String(trustedPageTitle || sourcePage?.pageTitle || "").trim();
+  const pageTokens = new Set(featuredImageMatchTokens(pageTitle));
+  const pageMatches = tokenMatches(pageTokens, contentTokens);
+  const sourcePageMatches =
+    Boolean(pageTitle) &&
+    pageTokens.size > 0 &&
+    pageMatches.length > 0 &&
+    (Boolean(trustedPageTitle) || Boolean(sourcePage));
+
+  return {
+    eligible: directMatches.length > 0 || sourcePageMatches,
+    fileName,
+    fileTokens: [...fileTokens],
+    directMatches,
+    pageTitle,
+    pageMatches,
+    sourcePageMatches,
+  };
+}
+
+function featuredImageAltEvidence(imageAlt, subjectEvidence) {
+  const value = String(imageAlt || "").replace(/\s+/g, " ").trim();
+  const altTokens = new Set(featuredImageMatchTokens(value));
+  const fileMatches = tokenMatches(altTokens, subjectEvidence?.fileTokens || []);
+  const pageMatches = tokenMatches(
+    altTokens,
+    new Set(featuredImageMatchTokens(subjectEvidence?.pageTitle || "")),
+  );
+  return {
+    eligible:
+      value.length >= 5 &&
+      altTokens.size >= 1 &&
+      (fileMatches.length > 0 || pageMatches.length > 0),
+    value,
+    fileMatches,
+    pageMatches,
+  };
+}
+
+function groundedFeaturedImageAlt(imageUrl, subjectEvidence) {
+  let label = wikimediaImageFileName(imageUrl)
+    .replace(/(?:\.(?:jpe?g|png|webp|gif|svg|tiff?|webm))+$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b(?:cropped?|edited?|edit|restored|original|hq|high resolution)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (commonsMatchTokens(label).length === 0) {
+    label = String(subjectEvidence?.pageTitle || "").replace(/\s+/g, " ").trim();
+  }
+  if (!label) return "";
+  if (label.length > 125) {
+    const shortened = label.slice(0, 125);
+    label = shortened.slice(0, shortened.lastIndexOf(" ")).trim() || shortened.trim();
+  }
+  return label;
+}
+
+function prepareFeaturedImageForPublish(
+  content,
+  imageUrl,
+  { trustedPageTitle = "" } = {},
+) {
+  const reasons = [];
+  if (!isProxyableArticleImageUrl(imageUrl)) {
+    reasons.push("featured image is not a supported Wikimedia asset");
+  }
+  if (isLowValueFeaturedImage(imageUrl)) {
+    reasons.push("featured image is a logo, flag, seal, map, coat of arms, or other low-value asset");
+  }
+  const subjectEvidence = featuredImageSubjectEvidence(content, imageUrl, {
+    trustedPageTitle,
+  });
+  if (!subjectEvidence.eligible) {
+    reasons.push("featured image filename/source page does not match the article subject");
+  }
+  if (reasons.length > 0) {
+    return { ok: false, reasons, repairedAlt: false, subjectEvidence };
+  }
+
+  const currentAlt = featuredImageAltEvidence(content?.imageAlt, subjectEvidence);
+  if (currentAlt.eligible) {
+    content.imageAlt = currentAlt.value;
+    return { ok: true, reasons: [], repairedAlt: false, subjectEvidence };
+  }
+
+  const groundedAlt = groundedFeaturedImageAlt(imageUrl, subjectEvidence);
+  const repairedAlt = featuredImageAltEvidence(groundedAlt, subjectEvidence);
+  if (!repairedAlt.eligible) {
+    return {
+      ok: false,
+      reasons: ["featured image alt text cannot be grounded in the selected Wikimedia file"],
+      repairedAlt: false,
+      subjectEvidence,
+    };
+  }
+  content.imageAlt = repairedAlt.value;
+  return { ok: true, reasons: [], repairedAlt: true, subjectEvidence };
 }
 
 async function fetchWikipediaImage(
@@ -5074,7 +5229,16 @@ function isLowValueFeaturedImage(url) {
   const value = String(url || "").toLowerCase();
   if (!value) return true;
   if (!isProxyableArticleImageUrl(value)) return true;
-  return /(?:^|[\/_.%-])(logo|wordmark|icon|symbol|emblem|seal|flag|map|coa)(?:[\/_.%-]|$)/i.test(value);
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    // The raw URL still provides enough evidence for the low-value check.
+  }
+  return (
+    /(?:^|[\/_.%-])(logo|wordmark|icon|symbol|emblem|seal|flag|map|coa|crest|insignia)(?:[\/_.%-]|$)/i.test(decoded) ||
+    /(?:^|[\/_.%-])coat[_.%-]+of[_.%-]+arms(?:[\/_.%-]|$)/i.test(decoded)
+  );
 }
 
 async function isWorkingImageUrl(url) {
@@ -5116,14 +5280,21 @@ async function resolveWorkingImageForContent(content) {
   const checked = new Set();
   const firstWorking = async (candidates) => {
     for (const candidate of candidates) {
-      if (!candidate || checked.has(candidate)) continue;
-      checked.add(candidate);
+      const imageUrl = typeof candidate === "string" ? candidate : candidate?.imageUrl;
+      const trustedPageTitle =
+        typeof candidate === "object" ? candidate?.trustedPageTitle || "" : "";
+      if (!imageUrl || checked.has(imageUrl)) continue;
+      checked.add(imageUrl);
+      const subjectEvidence = featuredImageSubjectEvidence(content, imageUrl, {
+        trustedPageTitle,
+      });
       if (
-        !isLowValueFeaturedImage(candidate) &&
-        isProxyableArticleImageUrl(candidate) &&
-        await isWorkingImageUrl(candidate)
+        subjectEvidence.eligible &&
+        !isLowValueFeaturedImage(imageUrl) &&
+        isProxyableArticleImageUrl(imageUrl) &&
+        await isWorkingImageUrl(imageUrl)
       ) {
-        return candidate;
+        return imageUrl;
       }
     }
     return null;
@@ -5134,12 +5305,18 @@ async function resolveWorkingImageForContent(content) {
   // fallback when the model omits imageUrl or a later Wikipedia API call fails.
   const storedImage = await firstWorking([
     content?.imageUrl,
-    ...sourcePagesFromContent(content).map((page) => page.imageUrl),
+    ...sourcePagesFromContent(content).map((page) => ({
+      imageUrl: page.imageUrl,
+      trustedPageTitle: page.pageTitle,
+    })),
   ]);
   if (storedImage) return storedImage;
 
   const wikiImage = await fetchWikipediaImage(content?.eventTitle, content?.wikiUrl);
-  const workingWikiImage = await firstWorking([wikiImage]);
+  const workingWikiImage = await firstWorking([{
+    imageUrl: wikiImage,
+    trustedPageTitle: wikiTitleFromUrl(content?.wikiUrl) || content?.eventTitle,
+  }]);
   if (workingWikiImage) return workingWikiImage;
 
   // Try wikipedia URL title variant as a backup (decoded slug can differ from eventTitle).
@@ -5153,7 +5330,10 @@ async function resolveWorkingImageForContent(content) {
           " ",
         );
         const slugImage = await fetchWikipediaImage(slugTitle, null);
-        const workingSlugImage = await firstWorking([slugImage]);
+        const workingSlugImage = await firstWorking([{
+          imageUrl: slugImage,
+          trustedPageTitle: slugTitle,
+        }]);
         if (workingSlugImage) return workingSlugImage;
       }
     } catch {
@@ -7104,6 +7284,26 @@ async function savePublishedPost(
     throw new Error(`Refusing to publish ${slug}: no working featured image`);
   }
   content.imageUrl = finalFeaturedImage;
+  const featuredImageValidation = prepareFeaturedImageForPublish(
+    content,
+    finalFeaturedImage,
+    {
+      trustedPageTitle:
+        wikiTitleFromUrl(content.wikiUrl) ||
+        content.sourcePageTitle ||
+        content.eventTitle,
+    },
+  );
+  if (!featuredImageValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: featured-image subject/alt contract failed — ${featuredImageValidation.reasons.join("; ")}`,
+    );
+  }
+  if (featuredImageValidation.repairedAlt) {
+    console.log(
+      `Blog: grounded featured-image alt text from Wikimedia filename for ${slug}`,
+    );
+  }
   await hydrateContentAssetsForPublish(content, safePillars).catch((err) => {
     console.warn(`Article asset hydration failed for ${slug}: ${err.message}`);
   });
@@ -9210,6 +9410,7 @@ function assertArticleStructure(html) {
     ["article shell", /<article\b/i],
     ["hero image area", /article-hero-wrap/i],
     ["featured hero image", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\bsrc="\/image-proxy\?src=/i],
+    ["featured image alt text", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\balt="[^"]{5,}"/i],
     ["short answer card", /ai-answer-card/i],
     ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
     ["analysis section", /<h2 class="h3">Our Take:/i],
@@ -11727,7 +11928,7 @@ async function validateEyewitnessQuote(env, content) {
 
 /**
  * Extracts current SEO meta values from stored HTML, calls AI to improve only
- * description / ogDescription / twitterDescription / keywords / imageAlt,
+ * description / ogDescription / twitterDescription / keywords,
  * then does targeted string replacements on the HTML.
  * Returns { updatedHtml, changed: string[], newDescription: string|null }.
  */
@@ -11747,10 +11948,6 @@ async function patchSEOMeta(html, _slug, env) {
   const currentKeywords = getMeta(
     /<meta name="keywords" content="([^"]*?)"\s*\/>/,
   );
-  const currentImageAlt = getMeta(
-    /<meta name="twitter:image:alt" content="([^"]*?)"\s*\/>/,
-  );
-
   // Pull event context from first JSON-LD block
   let eventName = "",
     eventDate = "",
@@ -11778,7 +11975,6 @@ async function patchSEOMeta(html, _slug, env) {
     ogDescription: currentOgDesc,
     twitterDescription: currentTwitterDesc,
     keywords: currentKeywords,
-    imageAlt: currentImageAlt,
   };
 
   const improved = await reviewSEOMetaOnly(minContent, env);
@@ -11820,13 +12016,6 @@ async function patchSEOMeta(html, _slug, env) {
     improved.twitterDescription,
     /<meta name="twitter:description" content="[^"]*?"\s*\/>/,
     `<meta name="twitter:description" content="${esc(improved.twitterDescription)}" />`,
-  );
-
-  patch(
-    currentImageAlt,
-    improved.imageAlt,
-    /<meta name="twitter:image:alt" content="[^"]*?"\s*\/>/,
-    `<meta name="twitter:image:alt" content="${esc(improved.imageAlt)}" />`,
   );
 
   // keywords + article:tag block
@@ -12149,19 +12338,18 @@ async function patchBodyParagraphs(html, env) {
 }
 
 /**
- * Focused SEO-only AI call — improves only the 5 meta fields.
+ * Focused SEO-only AI call — improves only the 4 text meta fields.
  * No paragraph rewriting. Falls back to original on any error.
  */
 async function reviewSEOMetaOnly(content, env) {
   if (!hasAnyTextAIProvider(env)) return content;
 
   const systemPrompt =
-    "You are a senior SEO editor. Improve only these 5 fields for a historical blog post:\n" +
+    "You are a senior SEO editor. Improve only these 4 fields for a historical blog post:\n" +
     "- description: 120–155 chars, open with a specific, curiosity-driven hook (a striking number, named figure, or consequence) — do NOT start with a bare year; weave the year and location in naturally; end on a complete clause, never a dangling preposition or mid-phrase '...'\n" +
     "- ogDescription: 100–130 chars, curiosity-driven, makes people click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
-    "- keywords: 5–8 comma-separated, specific — year, location, person names, historical context\n" +
-    "- imageAlt: vivid 8–15 word phrase describing what is visible in the image\n\n" +
+    "- keywords: 5–8 comma-separated, specific — year, location, person names, historical context\n\n" +
     "Rules: output ONLY valid JSON with the fields that need improvement. Omit unchanged fields. " +
     "Never use generic filler such as 'dramatic and unexpected', 'remarkable event', 'turning point', 'important moment', or 'history of [country]'. " +
     "Do not change title, content, or any other field.";
@@ -12172,8 +12360,7 @@ async function reviewSEOMetaOnly(content, env) {
     `description: ${content.description}\n` +
     `ogDescription: ${content.ogDescription || ""}\n` +
     `twitterDescription: ${content.twitterDescription || ""}\n` +
-    `keywords: ${content.keywords || ""}\n` +
-    `imageAlt: ${content.imageAlt || ""}\n\n` +
+    `keywords: ${content.keywords || ""}\n\n` +
     `Return ONLY JSON with improved fields, e.g. {"description":"...","keywords":"..."}`;
 
   let raw;
@@ -12212,7 +12399,6 @@ async function reviewSEOMetaOnly(content, env) {
     "ogDescription",
     "twitterDescription",
     "keywords",
-    "imageAlt",
   ];
   const improved = { ...content };
   for (const f of ALLOWED) {
@@ -12236,7 +12422,6 @@ async function reviewSEOMetaOnly(content, env) {
  * Checks and fixes:
  *   - Meta description length and keyword richness (120–155 chars)
  *   - OG / Twitter description quality
- *   - imageAlt descriptiveness
  *   - keywords relevance and specificity
  *   - Sentence length across all paragraph arrays (flags if avg > 20 words)
  *   - Content clarity, active voice, and readability signals
@@ -12343,7 +12528,6 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     "- ogDescription: 100–130 chars, curiosity-driven, give readers a reason to click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
     "- keywords: 5–8 specific terms including year, location, key people, historical context\n" +
-    "- imageAlt: vivid 8–15 word description of what is visible in the image\n" +
     "- eventTitle: concise canonical event label with an active verb when possible\n" +
     "- title: keep format 'CTA headline — Month Day, Year'. Improve dull card headlines with a specific verb and concrete hook.\n\n" +
     SOURCE_BOUND_REPAIR_RULES +
@@ -12358,8 +12542,7 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     `description: ${content.description || ""}\n` +
     `ogDescription: ${content.ogDescription || ""}\n` +
     `twitterDescription: ${content.twitterDescription || ""}\n` +
-    `keywords: ${content.keywords || ""}\n` +
-    `imageAlt: ${content.imageAlt || ""}`;
+    `keywords: ${content.keywords || ""}`;
 
   let seoRaw;
   try {
@@ -12406,7 +12589,6 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     "ogDescription",
     "twitterDescription",
     "keywords",
-    "imageAlt",
   ];
 
   let changed = 0;

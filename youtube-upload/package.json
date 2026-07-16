@@ -10,7 +10,8 @@
     "test": "node tests/e2e.js",
     "test:meta": "node tests/test-meta.js",
     "generate": "node tests/generate-video.js",
-    "test:unit": "node test-history-expert.js && node test-narration-expert.js && node test-blog-quiz-expert.js",
+    "test:unit": "node test-video-text.js && node test-history-expert.js && node test-narration-expert.js && node test-blog-quiz-expert.js",
+    "test:video-text": "node test-video-text.js",
     "social-cron": "node scripts/social-cron.js",
     "test:social": "node tests/test-social.js"
   },

@@ -58,6 +58,7 @@ const REPAIR_ATTEMPT_TTL = 60 * 60 * 24; // 1 day (featured-image, amazon-covers
 // healable still re-links on the very next view. (2026-06-26)
 const ENTITY_STRIP_REPAIR_TTL = 60 * 60 * 24 * 7; // 7 days
 const REPAIR_ATTEMPT_LIMIT = 2; // per slug, per repair type, per TTL window
+const WIKIDATA_HUMAN_ENTITY_ID = "Q5";
 
 async function callPublicationGateAI(env, messages, options = {}) {
   // Local-test guard: the Workers AI 10k-neurons/day pool is ACCOUNT-wide,
@@ -312,6 +313,7 @@ const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
+const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const ARTICLE_HERO_CSS =
   `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
 const ENTITY_STRIP_BLOCK_RE =
@@ -334,7 +336,7 @@ function isProxyableArticleImageUrl(imageUrl) {
   }
 }
 
-function wikimediaImageFileKey(imageUrl) {
+function wikimediaImageFileName(imageUrl) {
   try {
     const parsed = new URL(String(imageUrl || ""), "https://thisday.info");
     const source = parsed.pathname === "/image-proxy"
@@ -342,11 +344,14 @@ function wikimediaImageFileKey(imageUrl) {
       : String(imageUrl || "");
     const sourceUrl = new URL(source);
     return decodeURIComponent(sourceUrl.pathname.split("/").pop() || "")
-      .replace(/^\d+px-/i, "")
-      .toLowerCase();
+      .replace(/^\d+px-/i, "");
   } catch {
     return "";
   }
+}
+
+function wikimediaImageFileKey(imageUrl) {
+  return wikimediaImageFileName(imageUrl).toLowerCase();
 }
 
 function buildSocialPreviewImageUrl(imageUrl) {
@@ -1230,6 +1235,75 @@ function validateContentSemanticsForPublish(content) {
     );
   }
 
+  const visibleUrlValidation = validateVisibleProseForPublish(content);
+  reasons.push(...visibleUrlValidation.reasons);
+
+  return { ok: reasons.length === 0, reasons };
+}
+
+function visibleArticleProseEntries(content = {}) {
+  const entries = [];
+  const add = (field, value) => {
+    if (typeof value === "string" && value.trim()) entries.push({ field, value });
+  };
+  for (const field of [
+    "title",
+    "eventTitle",
+    "description",
+    "ogDescription",
+    "twitterDescription",
+    "imageAlt",
+    "jsonLdName",
+    "jsonLdDescription",
+    "editorialNote",
+    "eyewitnessQuote",
+    "eyewitnessQuoteSource",
+  ]) {
+    add(field, content?.[field]);
+  }
+  for (const field of [
+    "didYouKnowFacts",
+    "overviewParagraphs",
+    "eyewitnessOrChronicle",
+    "aftermathParagraphs",
+    "conclusionParagraphs",
+  ]) {
+    (Array.isArray(content?.[field]) ? content[field] : []).forEach((value, index) =>
+      add(`${field}[${index}]`, value),
+    );
+  }
+  (Array.isArray(content?.quickFacts) ? content.quickFacts : []).forEach((fact, index) => {
+    add(`quickFacts[${index}].label`, fact?.label);
+    add(`quickFacts[${index}].value`, fact?.value);
+  });
+  for (const field of ["analysisGood", "analysisBad"]) {
+    (Array.isArray(content?.[field]) ? content[field] : []).forEach((item, index) => {
+      add(`${field}[${index}].title`, item?.title);
+      add(`${field}[${index}].detail`, item?.detail);
+    });
+  }
+  (Array.isArray(content?.timeline) ? content.timeline : []).forEach((item, index) => {
+    add(`timeline[${index}].date`, item?.date);
+    add(`timeline[${index}].label`, item?.label);
+  });
+  return entries;
+}
+
+function rawUrlsInVisibleText(value) {
+  const text = plainText(value);
+  return [...text.matchAll(/\b(?:https?:\/\/|www\.)[^\s<>"']+/gi)]
+    .map((match) => match[0].replace(/[),.;!?]+$/, ""))
+    .filter(Boolean);
+}
+
+function validateVisibleProseForPublish(content) {
+  const reasons = [];
+  for (const { field, value } of visibleArticleProseEntries(content)) {
+    const urls = rawUrlsInVisibleText(value);
+    if (urls.length > 0) {
+      reasons.push(`${field} contains a raw visible URL: ${urls[0]}`);
+    }
+  }
   return { ok: reasons.length === 0, reasons };
 }
 
@@ -3408,7 +3482,7 @@ export default {
         // Always inject correct green palette + Bootstrap overrides — covers old blue-palette posts
         patchedHtml = patchedHtml.replace(
           "</head>",
-          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}.dyn-slider-btn{display:none;align-items:center;justify-content:center;width:42px;height:42px;border:1.5px solid var(--border);border-radius:999px;background:var(--bg);color:var(--text);font-size:20px;font-weight:400;cursor:pointer;transition:background .15s,border-color .15s,color .15s;flex-shrink:0;line-height:1}.dyn-slider-btn:hover{background:var(--bg-alt);border-color:var(--btn-bg);color:var(--btn-bg)}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}@media(min-width:768px){.dyn-slider-btn{display:inline-flex}}@media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}</style></head>`,
+          `<style>:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08)}body{color:var(--text)!important;background:#fff!important;font-family:Lora,serif!important}.btn-primary,.btn-primary:focus{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.btn-primary:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.btn-outline-primary{color:var(--btn-bg)!important;border-color:var(--btn-bg)!important}.btn-outline-primary:hover{background:var(--btn-bg)!important;color:#fff!important}.text-primary{color:var(--btn-bg)!important}a:not(.btn):not([class*="nav"]):not(.brand):not(.list-group-item):not(.mobile-menu-link){color:var(--btn-bg)}.pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:.75rem}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg)!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none!important;transition:background .15s ease,border-color .15s ease,color .15s ease}.pillar-pill:hover{background:#e7f0e7;border-color:var(--btn-bg)}.pillar-pill-featured{background:var(--btn-bg)!important;border-color:var(--btn-bg)!important;color:#fff!important}.pillar-pill-featured:hover{background:var(--btn-hover)!important;border-color:var(--btn-hover)!important}.dyn-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;margin:18px 0}.dyn-slider-btn{display:none;align-items:center;justify-content:center;width:42px;height:42px;border:1.5px solid var(--border);border-radius:999px;background:var(--bg);color:var(--text);font-size:20px;font-weight:400;cursor:pointer;transition:background .15s,border-color .15s,color .15s;flex-shrink:0;line-height:1}.dyn-slider-btn:hover{background:var(--bg-alt);border-color:var(--btn-bg);color:var(--btn-bg)}.dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--accent);margin:0;line-height:1.6}.dyn-slide .dyn-fact{font-size:15px;font-weight:400;color:#fff;margin:0;line-height:1.6}.dyn-slide .dyn-fact a,.dyn-slide .dyn-fact a:visited,.dyn-slide .dyn-fact a:hover,.dyn-slide .dyn-fact a:focus{color:#fff!important;text-decoration:underline;text-underline-offset:2px}@media(min-width:768px){.dyn-slider-btn{display:inline-flex}}@media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}</style></head>`,
         );
         // Patch old CSS variable aliases used in early posts
         patchedHtml = patchedHtml
@@ -4756,6 +4830,13 @@ async function maybeGenerateBlogPost(env, ctx) {
             const entity = JSON.parse(entityRaw);
             const freshWiki = await fetchWikipediaEntityData({ wikiUrl: entity.wikiUrl, term: entity.name, type: entity.type }).catch(() => ({}));
             if (!freshWiki.intro && !freshWiki.summary) continue;
+            if (freshWiki.wikidataEntityId) {
+              entity.wikidataEntityId = freshWiki.wikidataEntityId;
+            }
+            if (typeof freshWiki.wikidataInstanceOfHuman === "boolean") {
+              entity.wikidataInstanceOfHuman =
+                freshWiki.wikidataInstanceOfHuman;
+            }
             if (
               entity.type === "person" &&
               !hasRichWikipediaPersonProfile({ ...entity, ...freshWiki })
@@ -4863,6 +4944,10 @@ const COMMONS_MATCH_STOPWORDS = new Set([
   "file", "jpg", "jpeg", "png", "webp", "gif", "svg", "image", "photo",
   "portrait", "wikipedia", "commons",
 ]);
+const FEATURED_IMAGE_SUBJECT_STOPWORDS = new Set([
+  "air", "armed", "army", "force", "forces", "historic", "historical",
+  "history", "military", "national", "official", "state",
+]);
 
 function commonsMatchTokens(text) {
   return String(text || "")
@@ -4883,6 +4968,154 @@ function commonsResultIsRelevant(fileTitle, ...topics) {
   const topicTokens = topics.flatMap(commonsMatchTokens);
   if (topicTokens.length === 0) return false;
   return topicTokens.some((t) => fileTokens.has(t));
+}
+
+function tokenMatches(left, right) {
+  const rightSet = right instanceof Set ? right : new Set(right);
+  return [...left].filter((token) => rightSet.has(token));
+}
+
+function featuredImageMatchTokens(value) {
+  return commonsMatchTokens(value).filter(
+    (token) => !FEATURED_IMAGE_SUBJECT_STOPWORDS.has(token),
+  );
+}
+
+function featuredImageContentText(content) {
+  const keyTerms = Array.isArray(content?.keyTerms)
+    ? content.keyTerms.map((term) => term?.term || "")
+    : [];
+  const sourcePageTitles = sourcePagesFromContent(content).map((page) => page.pageTitle || "");
+  return [
+    content?.title,
+    content?.eventTitle,
+    content?.sourceEventHeadline,
+    content?.sourcePageTitle,
+    content?.description,
+    content?.keywords,
+    ...keyTerms,
+    ...sourcePageTitles,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function featuredImageSourcePage(content, imageUrl) {
+  const imageKey = wikimediaImageFileKey(imageUrl);
+  if (!imageKey) return null;
+  return sourcePagesFromContent(content).find(
+    (page) => wikimediaImageFileKey(page.imageUrl) === imageKey,
+  ) || null;
+}
+
+function featuredImageSubjectEvidence(
+  content,
+  imageUrl,
+  { trustedPageTitle = "" } = {},
+) {
+  const fileName = wikimediaImageFileName(imageUrl);
+  const fileTokens = new Set(featuredImageMatchTokens(fileName));
+  const contentTokens = new Set(featuredImageMatchTokens(featuredImageContentText(content)));
+  const directMatches = tokenMatches(fileTokens, contentTokens);
+  const sourcePage = featuredImageSourcePage(content, imageUrl);
+  const pageTitle = String(trustedPageTitle || sourcePage?.pageTitle || "").trim();
+  const pageTokens = new Set(featuredImageMatchTokens(pageTitle));
+  const pageMatches = tokenMatches(pageTokens, contentTokens);
+  const sourcePageMatches =
+    Boolean(pageTitle) &&
+    pageTokens.size > 0 &&
+    pageMatches.length > 0 &&
+    (Boolean(trustedPageTitle) || Boolean(sourcePage));
+
+  return {
+    eligible: directMatches.length > 0 || sourcePageMatches,
+    fileName,
+    fileTokens: [...fileTokens],
+    directMatches,
+    pageTitle,
+    pageMatches,
+    sourcePageMatches,
+  };
+}
+
+function featuredImageAltEvidence(imageAlt, subjectEvidence) {
+  const value = String(imageAlt || "").replace(/\s+/g, " ").trim();
+  const altTokens = new Set(featuredImageMatchTokens(value));
+  const fileMatches = tokenMatches(altTokens, subjectEvidence?.fileTokens || []);
+  const pageMatches = tokenMatches(
+    altTokens,
+    new Set(featuredImageMatchTokens(subjectEvidence?.pageTitle || "")),
+  );
+  return {
+    eligible:
+      value.length >= 5 &&
+      altTokens.size >= 1 &&
+      (fileMatches.length > 0 || pageMatches.length > 0),
+    value,
+    fileMatches,
+    pageMatches,
+  };
+}
+
+function groundedFeaturedImageAlt(imageUrl, subjectEvidence) {
+  let label = wikimediaImageFileName(imageUrl)
+    .replace(/(?:\.(?:jpe?g|png|webp|gif|svg|tiff?|webm))+$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b(?:cropped?|edited?|edit|restored|original|hq|high resolution)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (commonsMatchTokens(label).length === 0) {
+    label = String(subjectEvidence?.pageTitle || "").replace(/\s+/g, " ").trim();
+  }
+  if (!label) return "";
+  if (label.length > 125) {
+    const shortened = label.slice(0, 125);
+    label = shortened.slice(0, shortened.lastIndexOf(" ")).trim() || shortened.trim();
+  }
+  return label;
+}
+
+function prepareFeaturedImageForPublish(
+  content,
+  imageUrl,
+  { trustedPageTitle = "" } = {},
+) {
+  const reasons = [];
+  if (!isProxyableArticleImageUrl(imageUrl)) {
+    reasons.push("featured image is not a supported Wikimedia asset");
+  }
+  if (isLowValueFeaturedImage(imageUrl)) {
+    reasons.push("featured image is a logo, flag, seal, map, coat of arms, or other low-value asset");
+  }
+  const subjectEvidence = featuredImageSubjectEvidence(content, imageUrl, {
+    trustedPageTitle,
+  });
+  if (!subjectEvidence.eligible) {
+    reasons.push("featured image filename/source page does not match the article subject");
+  }
+  if (reasons.length > 0) {
+    return { ok: false, reasons, repairedAlt: false, subjectEvidence };
+  }
+
+  const currentAlt = featuredImageAltEvidence(content?.imageAlt, subjectEvidence);
+  if (currentAlt.eligible) {
+    content.imageAlt = currentAlt.value;
+    return { ok: true, reasons: [], repairedAlt: false, subjectEvidence };
+  }
+
+  const groundedAlt = groundedFeaturedImageAlt(imageUrl, subjectEvidence);
+  const repairedAlt = featuredImageAltEvidence(groundedAlt, subjectEvidence);
+  if (!repairedAlt.eligible) {
+    return {
+      ok: false,
+      reasons: ["featured image alt text cannot be grounded in the selected Wikimedia file"],
+      repairedAlt: false,
+      subjectEvidence,
+    };
+  }
+  content.imageAlt = repairedAlt.value;
+  return { ok: true, reasons: [], repairedAlt: true, subjectEvidence };
 }
 
 async function fetchWikipediaImage(
@@ -5005,7 +5238,16 @@ function isLowValueFeaturedImage(url) {
   const value = String(url || "").toLowerCase();
   if (!value) return true;
   if (!isProxyableArticleImageUrl(value)) return true;
-  return /(?:^|[\/_.%-])(logo|wordmark|icon|symbol|emblem|seal|flag|map|coa)(?:[\/_.%-]|$)/i.test(value);
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    // The raw URL still provides enough evidence for the low-value check.
+  }
+  return (
+    /(?:^|[\/_.%-])(logo|wordmark|icon|symbol|emblem|seal|flag|map|coa|crest|insignia)(?:[\/_.%-]|$)/i.test(decoded) ||
+    /(?:^|[\/_.%-])coat[_.%-]+of[_.%-]+arms(?:[\/_.%-]|$)/i.test(decoded)
+  );
 }
 
 async function isWorkingImageUrl(url) {
@@ -5047,14 +5289,21 @@ async function resolveWorkingImageForContent(content) {
   const checked = new Set();
   const firstWorking = async (candidates) => {
     for (const candidate of candidates) {
-      if (!candidate || checked.has(candidate)) continue;
-      checked.add(candidate);
+      const imageUrl = typeof candidate === "string" ? candidate : candidate?.imageUrl;
+      const trustedPageTitle =
+        typeof candidate === "object" ? candidate?.trustedPageTitle || "" : "";
+      if (!imageUrl || checked.has(imageUrl)) continue;
+      checked.add(imageUrl);
+      const subjectEvidence = featuredImageSubjectEvidence(content, imageUrl, {
+        trustedPageTitle,
+      });
       if (
-        !isLowValueFeaturedImage(candidate) &&
-        isProxyableArticleImageUrl(candidate) &&
-        await isWorkingImageUrl(candidate)
+        subjectEvidence.eligible &&
+        !isLowValueFeaturedImage(imageUrl) &&
+        isProxyableArticleImageUrl(imageUrl) &&
+        await isWorkingImageUrl(imageUrl)
       ) {
-        return candidate;
+        return imageUrl;
       }
     }
     return null;
@@ -5065,12 +5314,18 @@ async function resolveWorkingImageForContent(content) {
   // fallback when the model omits imageUrl or a later Wikipedia API call fails.
   const storedImage = await firstWorking([
     content?.imageUrl,
-    ...sourcePagesFromContent(content).map((page) => page.imageUrl),
+    ...sourcePagesFromContent(content).map((page) => ({
+      imageUrl: page.imageUrl,
+      trustedPageTitle: page.pageTitle,
+    })),
   ]);
   if (storedImage) return storedImage;
 
   const wikiImage = await fetchWikipediaImage(content?.eventTitle, content?.wikiUrl);
-  const workingWikiImage = await firstWorking([wikiImage]);
+  const workingWikiImage = await firstWorking([{
+    imageUrl: wikiImage,
+    trustedPageTitle: wikiTitleFromUrl(content?.wikiUrl) || content?.eventTitle,
+  }]);
   if (workingWikiImage) return workingWikiImage;
 
   // Try wikipedia URL title variant as a backup (decoded slug can differ from eventTitle).
@@ -5084,7 +5339,10 @@ async function resolveWorkingImageForContent(content) {
           " ",
         );
         const slugImage = await fetchWikipediaImage(slugTitle, null);
-        const workingSlugImage = await firstWorking([slugImage]);
+        const workingSlugImage = await firstWorking([{
+          imageUrl: slugImage,
+          trustedPageTitle: slugTitle,
+        }]);
         if (workingSlugImage) return workingSlugImage;
       }
     } catch {
@@ -5158,12 +5416,14 @@ const WRITING_REWRITE_RULES =
   "- Preserve paragraph-local facts. Keep every supported clause, qualifier, example, name, place, date, and number. During a rewrite, introduce no new entity, characterization, comparison, source, or cross-reference.\n" +
   "- Prefer concrete, slightly less predictable verbs when they are exact. Do not reach for a thesaurus, purple prose, or an image the source does not support.\n" +
   "- Cut generic clauses, restatements, announcement sentences, and any phrase that could be pasted into an article about a different event.\n" +
+  "- Never place a raw URL in visible prose. Keep source URLs only in structured source fields; refer to a source by its descriptive name in sentences.\n" +
   "- Do not invent quotes, numbers, motives, causal links, or suspiciously exact claims. If a claim is not supported, attribute it, soften it, or remove it.\n";
 
 const SOURCE_BOUND_REPAIR_RULES =
   "SOURCE-BOUND REPAIR RULES:\n" +
   "- When authoritative source material is supplied, every new proper noun, named institution, named document, report, quote, victim name, expert name, publication year, and exact statistic must already appear in the article fields or source material.\n" +
   "- If a weak sentence needs an anchor but the source does not provide one, make the sentence more modest, use an existing date, place, or number, or cut the claim. Never invent a report, institution, expert, victim, study, legal filing, or source.\n" +
+  "- Never copy a URL into article prose. URLs belong only in source metadata and rendered descriptive links.\n" +
   "- Never introduce, raise, or change a casualty, death, injury, or fatality count. Keep the article's existing casualty figures exactly as written. A person's age, a year, a street number, a distance, or a count of buildings is never a casualty figure. Do not convert any such number into a death or injury toll.\n";
 
 // Source-grounding context for repair/enrichment prompts. Capped well below the
@@ -6159,7 +6419,11 @@ async function generateAndStore(
   let eventImages = [];
   const MAX_CONTENT_ATTEMPTS = 3;
   const MAX_MALFORMED_RESPONSE_ATTEMPTS = 2;
-  const generateArticleContent = async (avoidTitles, stricterGrounding = false) => {
+  const generateArticleContent = async (
+    avoidTitles,
+    stricterGrounding = false,
+    groundingFeedback = [],
+  ) => {
     let lastError;
     for (let responseAttempt = 1; responseAttempt <= MAX_MALFORMED_RESPONSE_ATTEMPTS; responseAttempt++) {
       try {
@@ -6174,6 +6438,7 @@ async function generateAndStore(
           recentPillars,
           sourceMaterial,
           stricterGrounding,
+          groundingFeedback,
         );
       } catch (err) {
         lastError = err;
@@ -6199,6 +6464,7 @@ async function generateAndStore(
               recentPillars,
               sourceMaterial,
               stricterGrounding,
+              groundingFeedback,
             );
           } catch (fallbackErr) {
             console.warn(
@@ -6216,6 +6482,8 @@ async function generateAndStore(
   // message, so terminal throws carry the whole sequence — the 2026-07-05 post
   // mortem could not tell which gate failed on each attempt without wrangler tail.
   const attemptFailures = [];
+  let currentGroundingFeedback = [];
+  let generationGroundingRepairUsed = false;
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
     content =
       attempt === 1
@@ -6235,7 +6503,11 @@ async function generateAndStore(
         console.warn(
           `Blog AI: date validation failed for "${content?.title || "untitled"}" — ${dateValidation.reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await generateArticleContent(avoid);
+        content = await generateArticleContent(
+          avoid,
+          currentGroundingFeedback.length > 0,
+          currentGroundingFeedback,
+        );
         continue;
       }
 
@@ -6251,7 +6523,7 @@ async function generateAndStore(
         console.warn(
           `Blog AI: semantic publication contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await generateArticleContent(avoid, true);
+        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
         continue;
       }
       throw new Error(
@@ -6268,7 +6540,7 @@ async function generateAndStore(
         console.warn(
           `Blog AI: direct-citation contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await generateArticleContent(avoid, true);
+        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
         continue;
       }
       throw new Error(
@@ -6303,7 +6575,8 @@ async function generateAndStore(
             contextHook,
             recentPillars,
             sourceMaterial,
-            false,
+            Boolean(sourceMaterial) || currentGroundingFeedback.length > 0,
+            currentGroundingFeedback,
           );
           // Re-run the same per-iteration gates on the chunked result so a
           // recovered body is still date-validated and structurally complete
@@ -6338,7 +6611,11 @@ async function generateAndStore(
             `Blog AI: chunked article fallback failed — ${fallbackErr.message}.`,
           );
           if (attempt < MAX_CONTENT_ATTEMPTS) {
-            content = await generateArticleContent(avoid);
+            content = await generateArticleContent(
+              avoid,
+              currentGroundingFeedback.length > 0,
+              currentGroundingFeedback,
+            );
             continue;
           }
           throw new Error(`${err.message} [attempts: ${attemptFailures.join(" | ")}]`);
@@ -6347,7 +6624,11 @@ async function generateAndStore(
         console.warn(
           `Blog AI: incomplete generated content for "${content?.title || "untitled"}" - ${err.message}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
-        content = await generateArticleContent(avoid);
+        content = await generateArticleContent(
+          avoid,
+          currentGroundingFeedback.length > 0,
+          currentGroundingFeedback,
+        );
         continue;
       } else {
         throw new Error(`${err.message} [attempts: ${attemptFailures.join(" | ")}]`);
@@ -6361,15 +6642,62 @@ async function generateAndStore(
     // stricter grounding; if the final attempt still fails, throw so the
     // fabricated article is NEVER published (cron/failsafe logs the failure).
     if (groundingSource) {
-      const grounding = verifyArticleGrounding(content, groundingSource);
+      let grounding = verifyArticleGrounding(content, groundingSource);
+      if (!grounding.ok && !generationGroundingRepairUsed) {
+        generationGroundingRepairUsed = true;
+        try {
+          const repaired = await repairGroundingContradictions(
+            env,
+            content,
+            grounding.reasons,
+            groundingSource,
+          );
+          if (repaired && repaired !== content) {
+            if (selectedEvent) {
+              attachSelectedEventSourcePages(repaired, selectedEvent);
+              enforceSelectedEventDate(repaired, selectedEvent);
+            }
+            const repairedSemantics = validateContentSemanticsForPublish(repaired);
+            const repairedCitations = validateDirectCitationsForPublish(repaired);
+            assertRequiredContentBlocks(repaired);
+            const repairedGrounding = verifyArticleGrounding(repaired, groundingSource);
+            if (
+              repairedSemantics.ok &&
+              repairedCitations.ok &&
+              repairedGrounding.ok
+            ) {
+              content = repaired;
+              grounding = repairedGrounding;
+              console.log(
+                `Blog AI: source-bound generation repair passed for "${content?.title || "untitled"}".`,
+              );
+            } else {
+              const repairReasons = [
+                ...(!repairedSemantics.ok ? repairedSemantics.reasons : []),
+                ...(!repairedCitations.ok ? repairedCitations.reasons : []),
+                ...(!repairedGrounding.ok ? repairedGrounding.reasons : []),
+              ];
+              console.warn(
+                `Blog AI: source-bound generation repair did not pass revalidation — ${repairReasons.join("; ").slice(0, 500)}`,
+              );
+              grounding = repairedGrounding.ok ? grounding : repairedGrounding;
+            }
+          }
+        } catch (err) {
+          console.warn(
+            `Blog AI: source-bound generation repair failed — ${err.message}`,
+          );
+        }
+      }
       if (!grounding.ok) {
         attemptFailures.push(`attempt ${attempt} grounding: ${grounding.reasons.join("; ")}`);
         if (attempt < MAX_CONTENT_ATTEMPTS) {
           const avoid = [...takenAllTime, content?.title].filter(Boolean);
+          currentGroundingFeedback = grounding.reasons;
           console.warn(
             `Blog AI: grounding gate failed for "${content?.title || "untitled"}" — ${grounding.reasons.join("; ")}. Regenerating with stricter grounding (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await generateArticleContent(avoid, true);
+          content = await generateArticleContent(avoid, true, currentGroundingFeedback);
           continue;
         }
         throw new Error(
@@ -6414,7 +6742,11 @@ async function generateAndStore(
           console.warn(
             `Blog AI: no valid image for "${content.title}". Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await generateArticleContent(avoid);
+          content = await generateArticleContent(
+            avoid,
+            currentGroundingFeedback.length > 0,
+            currentGroundingFeedback,
+          );
           continue;
         }
 
@@ -6437,7 +6769,11 @@ async function generateAndStore(
           console.warn(
             `Blog AI: wiki image precheck failed for "${content.title}" (${wikiImageTotal}/3). Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
           );
-          content = await generateArticleContent(avoid);
+          content = await generateArticleContent(
+            avoid,
+            currentGroundingFeedback.length > 0,
+            currentGroundingFeedback,
+          );
           continue;
         }
 
@@ -6617,7 +6953,13 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
     if (entitiesRaw) {
       for (const e of JSON.parse(entitiesRaw)) {
         // Skip unlinked persons (profileLinkEligible false means no public /people/ page).
-        if (e?.url && !(e.type === "person" && e.profileLinkEligible === false)) {
+        const eligibleHistoryEntity =
+          e?.type !== "event" || e.historyLinkEligible === true;
+        if (
+          e?.url &&
+          eligibleHistoryEntity &&
+          !(e.type === "person" && e.profileLinkEligible === false)
+        ) {
           indexNowUrls.push(`https://thisday.info${e.url}`);
         }
       }
@@ -7033,6 +7375,26 @@ async function savePublishedPost(
     throw new Error(`Refusing to publish ${slug}: no working featured image`);
   }
   content.imageUrl = finalFeaturedImage;
+  const featuredImageValidation = prepareFeaturedImageForPublish(
+    content,
+    finalFeaturedImage,
+    {
+      trustedPageTitle:
+        wikiTitleFromUrl(content.wikiUrl) ||
+        content.sourcePageTitle ||
+        content.eventTitle,
+    },
+  );
+  if (!featuredImageValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: featured-image subject/alt contract failed — ${featuredImageValidation.reasons.join("; ")}`,
+    );
+  }
+  if (featuredImageValidation.repairedAlt) {
+    console.log(
+      `Blog: grounded featured-image alt text from Wikimedia filename for ${slug}`,
+    );
+  }
   await hydrateContentAssetsForPublish(content, safePillars).catch((err) => {
     console.warn(`Article asset hydration failed for ${slug}: ${err.message}`);
   });
@@ -7044,8 +7406,7 @@ async function savePublishedPost(
     safeEntityMeta
       .filter((entity) =>
         entity?.type === "person" &&
-        entity.profileLinkEligible === true &&
-        entity.profileSubjectVerified === true,
+        hasVerifiedPersonProfileIdentity(entity),
       )
       .map((entity) => normalizeTopicMatchText(entity.name)),
   );
@@ -7100,6 +7461,9 @@ async function savePublishedPost(
       imageUrl: e.imageUrl || "",
       url: e.url,
       wikiUrl: e.wikiUrl || "",
+      ...(e.type === "event"
+        ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(e) }
+        : {}),
       ...(e.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
       ...(e.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
       ...(e.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
@@ -7345,6 +7709,61 @@ function normalizeEntityType(type) {
   return null;
 }
 
+function entityContentWordCount(entity) {
+  return (Array.isArray(entity?.bodySections) ? entity.bodySections : [])
+    .flatMap((section) =>
+      Array.isArray(section?.paragraphs) ? section.paragraphs : [],
+    )
+    .join(" ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function hasDirectWikipediaEntitySource(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return (
+      ["en.wikipedia.org", "www.en.wikipedia.org"].includes(url.hostname.toLowerCase()) &&
+      /^\/wiki\/[^/]+/.test(url.pathname) &&
+      !/:/.test(decodeURIComponent(url.pathname.slice("/wiki/".length)))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isHistoryEntityDiscoveryLinkEligible(entity) {
+  if (!entity || entity.type !== "event") return false;
+  const name = String(entity.name || "").replace(/\s+/g, " ").trim();
+  const slug = String(entity.slug || "").trim();
+  if (
+    !entity.url ||
+    !String(entity.url).startsWith("/history/") ||
+    !hasDirectWikipediaEntitySource(entity.wikiUrl) ||
+    !name ||
+    name.length > 96 ||
+    /^article-\d+$/i.test(slug) ||
+    /(?:^|-)(?:launch-?){2,}(?:-|$)/i.test(slug)
+  ) {
+    return false;
+  }
+  if (entity.historyLinkEligible === true) return true;
+  if (entity.historyLinkEligible === false) return false;
+  return entityContentWordCount(entity) >= 300;
+}
+
+function blogEntityQualityEligible(entity) {
+  if (!entity || entity.needsWikiRefresh) return false;
+  if (entity.type === "person") {
+    return (
+      entityContentWordCount(entity) >= 150 &&
+      hasDirectWikipediaEntitySource(entity.wikiUrl) &&
+      hasVerifiedPersonProfileIdentity(entity)
+    );
+  }
+  return isHistoryEntityDiscoveryLinkEligible(entity);
+}
+
 function wikiTitleFromUrl(wikiUrl) {
   try {
     const parsed = new URL(wikiUrl);
@@ -7458,7 +7877,44 @@ function truncateSourceExtract(value, maxChars = 9000) {
     : prefix.replace(/\s+\S*$/, "").trim();
 }
 
-async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000, fetchImpl = fetch) {
+const WIKIPEDIA_REFERENCE_DISCOVERY_TIMEOUT_MS = 5_000;
+const INDEPENDENT_REFERENCE_DOCUMENT_TIMEOUT_MS = 5_000;
+const INDEPENDENT_SOURCE_CANDIDATE_BUDGET_MS = 12_000;
+const WIKIPEDIA_SOURCE_EXPANSION_TIMEOUT_MS = 6_000;
+
+function sourceFetchTimeoutMs(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.max(1, Math.floor(parsed))
+    : fallback;
+}
+
+async function withSourceFetchTimeout(task, timeoutMs, label = "Source fetch") {
+  const durationMs = sourceFetchTimeoutMs(timeoutMs, 5_000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`${label} timed out after ${durationMs}ms`));
+  }, durationMs);
+  try {
+    return await task(controller.signal);
+  } catch (err) {
+    if (controller.signal.aborted) {
+      const timeoutError = new Error(`${label} timed out after ${durationMs}ms`);
+      timeoutError.name = "TimeoutError";
+      throw timeoutError;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchExpandedWikipediaSourcePage(
+  page,
+  maxChars = 9000,
+  fetchImpl = fetch,
+  options = {},
+) {
   const normalized = normalizeSourcePage(page);
   if (!normalized) return null;
   const pageTitle = wikiTitleFromUrl(normalized.pageUrl) || normalized.pageTitle;
@@ -7467,24 +7923,31 @@ async function fetchExpandedWikipediaSourcePage(page, maxChars = 9000, fetchImpl
     "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts&explaintext=1&exsectionformat=plain&format=json&origin=*&titles=" +
     encodeURIComponent(pageTitle);
   try {
-    const response = await fetchImpl(url, {
-      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
-    });
-    if (!response.ok) return normalized;
-    const data = await response.json();
-    const resultPage = Object.values(data?.query?.pages || {})[0];
-    if (!resultPage || resultPage.missing !== undefined) return normalized;
-    const expandedExtract = truncateSourceExtract(resultPage.extract, maxChars);
-    const currentWords = String(normalized.extract || "").split(/\s+/).filter(Boolean).length;
-    const expandedWords = expandedExtract.split(/\s+/).filter(Boolean).length;
-    if (expandedWords <= currentWords) return normalized;
-    const resolvedTitle = String(resultPage.title || normalized.pageTitle).trim();
-    return {
-      ...normalized,
-      pageTitle: resolvedTitle,
-      pageUrl: wikiUrlFromTitle(resolvedTitle) || normalized.pageUrl,
-      extract: expandedExtract,
-    };
+    const timeoutMs = sourceFetchTimeoutMs(
+      options?.timeoutMs,
+      WIKIPEDIA_SOURCE_EXPANSION_TIMEOUT_MS,
+    );
+    return await withSourceFetchTimeout(async (signal) => {
+      const response = await fetchImpl(url, {
+        headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+        signal,
+      });
+      if (!response.ok) return normalized;
+      const data = await response.json();
+      const resultPage = Object.values(data?.query?.pages || {})[0];
+      if (!resultPage || resultPage.missing !== undefined) return normalized;
+      const expandedExtract = truncateSourceExtract(resultPage.extract, maxChars);
+      const currentWords = String(normalized.extract || "").split(/\s+/).filter(Boolean).length;
+      const expandedWords = expandedExtract.split(/\s+/).filter(Boolean).length;
+      if (expandedWords <= currentWords) return normalized;
+      const resolvedTitle = String(resultPage.title || normalized.pageTitle).trim();
+      return {
+        ...normalized,
+        pageTitle: resolvedTitle,
+        pageUrl: wikiUrlFromTitle(resolvedTitle) || normalized.pageUrl,
+        extract: expandedExtract,
+      };
+    }, timeoutMs, `Wikipedia source expansion for ${pageTitle}`);
   } catch (err) {
     console.warn(`Wikipedia source expansion failed for ${pageTitle}: ${err.message}`);
     return normalized;
@@ -7603,7 +8066,11 @@ function citationLabelFromWikitext(wikitext, url) {
   return "";
 }
 
-async function fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImpl = fetch) {
+async function fetchWikipediaExternalReferenceCandidates(
+  selectedEvent,
+  fetchImpl = fetch,
+  options = {},
+) {
   const pageTitle =
     wikiTitleFromUrl(selectedEvent?.wikiUrl) ||
     selectedEvent?.sourcePageTitle ||
@@ -7613,17 +8080,24 @@ async function fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImp
   const apiUrl =
     "https://en.wikipedia.org/w/api.php?action=parse&redirects=1&prop=externallinks%7Cwikitext&format=json&formatversion=2&origin=*&page=" +
     encodeURIComponent(pageTitle);
-  let response;
+  let data;
   try {
-    response = await fetchImpl(apiUrl, {
-      headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
-    });
+    const timeoutMs = sourceFetchTimeoutMs(
+      options?.timeoutMs,
+      WIKIPEDIA_REFERENCE_DISCOVERY_TIMEOUT_MS,
+    );
+    data = await withSourceFetchTimeout(async (signal) => {
+      const response = await fetchImpl(apiUrl, {
+        headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+        signal,
+      });
+      if (!response?.ok) return null;
+      return response.json().catch(() => null);
+    }, timeoutMs, `Wikipedia reference discovery for ${pageTitle}`);
   } catch (err) {
     console.warn(`Independent citation discovery failed for ${pageTitle}: ${err.message}`);
     return [];
   }
-  if (!response?.ok) return [];
-  const data = await response.json().catch(() => null);
   const links = Array.isArray(data?.parse?.externallinks) ? data.parse.externallinks : [];
   const wikitext = String(data?.parse?.wikitext || "");
   const evidence = [
@@ -7733,36 +8207,69 @@ function verifyIndependentSourceDocument(selectedEvent, candidate, html, finalUr
   });
 }
 
-async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch) {
+async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch, options = {}) {
   const existing = normalizeSourcePages(selectedEvent?.sourcePages || []).find(
     (page) => page.verifiedIndependent === true && isDirectCitationUrl(page.pageUrl),
   );
   if (existing) return existing;
-  const candidates = await fetchWikipediaExternalReferenceCandidates(selectedEvent, fetchImpl);
+  const candidateBudgetMs = sourceFetchTimeoutMs(
+    options?.candidateBudgetMs,
+    INDEPENDENT_SOURCE_CANDIDATE_BUDGET_MS,
+  );
+  const deadline = Date.now() + candidateBudgetMs;
+  const referenceListTimeoutMs = Math.min(
+    sourceFetchTimeoutMs(
+      options?.referenceListTimeoutMs,
+      WIKIPEDIA_REFERENCE_DISCOVERY_TIMEOUT_MS,
+    ),
+    candidateBudgetMs,
+  );
+  const candidates = await fetchWikipediaExternalReferenceCandidates(
+    selectedEvent,
+    fetchImpl,
+    { timeoutMs: referenceListTimeoutMs },
+  );
   for (const candidate of candidates.slice(0, INDEPENDENT_REFERENCE_FETCH_LIMIT)) {
-    try {
-      const response = await fetchImpl(candidate.pageUrl, {
-        redirect: "follow",
-        headers: {
-          "User-Agent": WIKIPEDIA_USER_AGENT,
-          Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
-          Range: "bytes=0-131071",
-        },
-      });
-      if (!response?.ok) continue;
-      const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
-      if (contentType && !/(?:text\/html|application\/xhtml\+xml|text\/plain)/.test(contentType)) {
-        continue;
-      }
-      const contentLength = Number.parseInt(response.headers?.get?.("content-length"), 10);
-      if (Number.isFinite(contentLength) && contentLength > 3_000_000) continue;
-      const html = String(await response.text()).slice(0, 140000);
-      const verified = verifyIndependentSourceDocument(
-        selectedEvent,
-        candidate,
-        html,
-        response.url || candidate.pageUrl,
+    const remainingBudgetMs = deadline - Date.now();
+    if (remainingBudgetMs <= 0) {
+      console.warn(
+        `Independent citation discovery budget exhausted for ${selectedEvent?.sourcePageTitle || selectedEvent?.eventTitle || "event"}`,
       );
+      break;
+    }
+    try {
+      const timeoutMs = Math.min(
+        sourceFetchTimeoutMs(
+          options?.documentTimeoutMs,
+          INDEPENDENT_REFERENCE_DOCUMENT_TIMEOUT_MS,
+        ),
+        remainingBudgetMs,
+      );
+      const verified = await withSourceFetchTimeout(async (signal) => {
+        const response = await fetchImpl(candidate.pageUrl, {
+          redirect: "follow",
+          headers: {
+            "User-Agent": WIKIPEDIA_USER_AGENT,
+            Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1",
+            Range: "bytes=0-131071",
+          },
+          signal,
+        });
+        if (!response?.ok) return null;
+        const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
+        if (contentType && !/(?:text\/html|application\/xhtml\+xml|text\/plain)/.test(contentType)) {
+          return null;
+        }
+        const contentLength = Number.parseInt(response.headers?.get?.("content-length"), 10);
+        if (Number.isFinite(contentLength) && contentLength > 3_000_000) return null;
+        const html = String(await response.text()).slice(0, 140000);
+        return verifyIndependentSourceDocument(
+          selectedEvent,
+          candidate,
+          html,
+          response.url || candidate.pageUrl,
+        );
+      }, timeoutMs, `Independent citation candidate ${candidate.pageUrl}`);
       if (verified) return verified;
     } catch (err) {
       console.warn(`Independent citation candidate failed (${candidate.pageUrl}): ${err.message}`);
@@ -7771,7 +8278,7 @@ async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch) {
   return null;
 }
 
-async function selectSourceReadyCandidate(candidates, fetchImpl = fetch) {
+async function selectSourceReadyCandidate(candidates, fetchImpl = fetch, options = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
   for (const candidate of list.slice(0, SOURCE_READY_EVENT_CANDIDATE_LIMIT)) {
     const selectedEvent = {
@@ -7784,7 +8291,7 @@ async function selectSourceReadyCandidate(candidates, fetchImpl = fetch) {
       wikiUrl: candidate.pageUrl,
       sourcePages: candidate.sourcePages || [],
     };
-    const citation = await discoverIndependentCitation(selectedEvent, fetchImpl);
+    const citation = await discoverIndependentCitation(selectedEvent, fetchImpl, options);
     if (!citation) continue;
     return {
       ...candidate,
@@ -7794,7 +8301,7 @@ async function selectSourceReadyCandidate(candidates, fetchImpl = fetch) {
   return null;
 }
 
-async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch) {
+async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch, options = {}) {
   if (!selectedEvent) return selectedEvent;
   const sourcePages = normalizeSourcePages(selectedEvent.sourcePages || []);
   if (!sourcePages.length) return selectedEvent;
@@ -7807,7 +8314,9 @@ async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch) 
   });
   const expanded = await Promise.all(
     wikipediaPages.slice(0, 2).map((page) =>
-      fetchExpandedWikipediaSourcePage(page, 9000, fetchImpl),
+      fetchExpandedWikipediaSourcePage(page, 9000, fetchImpl, {
+        timeoutMs: options?.wikipediaExpansionTimeoutMs,
+      }),
     ),
   );
   const merged = normalizeSourcePages([
@@ -7987,7 +8496,7 @@ function formatWikiDate(claim) {
   });
 }
 
-async function fetchWikidataLifeDates(pageTitle) {
+async function fetchWikidataPersonFacts(pageTitle) {
   if (!pageTitle) return {};
   const url =
     "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=pageprops&ppprop=wikibase_item&format=json&origin=*&titles=" +
@@ -8009,9 +8518,17 @@ async function fetchWikidataLifeDates(pageTitle) {
   if (!entityRes.ok) return {};
   const entityData = await entityRes.json();
   const claims = entityData?.entities?.[qid]?.claims || {};
+  const instanceOfHuman = (Array.isArray(claims.P31) ? claims.P31 : [])
+    .some(
+      (claim) =>
+        claim?.mainsnak?.datavalue?.value?.id ===
+        WIKIDATA_HUMAN_ENTITY_ID,
+    );
   return {
     birthDate: formatWikiDate(claims.P569?.[0]),
     deathDate: formatWikiDate(claims.P570?.[0]),
+    wikidataEntityId: qid,
+    wikidataInstanceOfHuman: instanceOfHuman,
   };
 }
 
@@ -8024,11 +8541,11 @@ async function fetchWikipediaEntityData(term, { retryOnEmpty = true, sourcePages
   const introUrl =
     "https://en.wikipedia.org/w/api.php?action=query&redirects=1&prop=extracts|pageprops&ppprop=disambiguation&exintro=1&explaintext=1&format=json&origin=*&titles=" +
     encodeURIComponent(pageTitle);
-  const [summaryRes, introRes, lifeDates] = await Promise.all([
+  const [summaryRes, introRes, personFacts] = await Promise.all([
     fetch(summaryUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } }).catch(() => null),
     fetch(introUrl, { headers: { "User-Agent": WIKIPEDIA_USER_AGENT } }).catch(() => null),
     normalizeEntityType(term.type) === "person"
-      ? fetchWikidataLifeDates(pageTitle).catch(() => ({}))
+      ? fetchWikidataPersonFacts(pageTitle).catch(() => ({}))
       : Promise.resolve({}),
   ]);
   let summary = {};
@@ -8054,7 +8571,7 @@ async function fetchWikipediaEntityData(term, { retryOnEmpty = true, sourcePages
     pageTitle,
     resolvedPageTitle: resolvedPageTitle || pageTitle,
     isDisambiguation,
-    ...lifeDates,
+    ...personFacts,
   };
   if (normalizeEntityType(term.type) === "person" && result.isDisambiguation) {
     const sourceFallback = await fetchSourceEventPageEntityFallback(term, sourcePages);
@@ -8094,6 +8611,12 @@ function entityFactSentences(...values) {
 
 function hasRichWikipediaPersonProfile(entity) {
   if (normalizeEntityType(entity?.type) !== "person" || !entity?.wikiUrl || entity?.isDisambiguation) {
+    return false;
+  }
+  if (
+    entity.sourceEventPageFallback !== true &&
+    entity.wikidataInstanceOfHuman !== true
+  ) {
     return false;
   }
   // Keep single-letter initials (e.g. "J.K. Rowling" → j, k, rowling) so that an
@@ -8137,6 +8660,17 @@ function hasRichWikipediaPersonProfile(entity) {
   return (
     wordCount >= PERSON_ENTITY_MIN_SOURCE_WORDS &&
     sentenceCount >= PERSON_ENTITY_MIN_SOURCE_SENTENCES
+  );
+}
+
+function hasVerifiedPersonProfileIdentity(entity) {
+  return Boolean(
+    entity?.profileLinkEligible === true &&
+    entity?.profileSubjectVerified === true &&
+    (
+      entity?.sourceEventPageFallback === true ||
+      entity?.wikidataInstanceOfHuman === true
+    ),
   );
 }
 
@@ -8731,6 +9265,7 @@ async function upsertEntityRecord(env, draftEntity) {
     firstSeenAt: existing?.firstSeenAt || draftEntity.firstSeenAt,
     updatedAt: new Date().toISOString(),
   };
+  if (!existing) entity.qualityGateVersion = BLOG_ENTITY_QUALITY_GATE_VERSION;
   // Clear stale refresh flag whenever we now have real data; set it only when still empty
   if (mergedIntro || mergedSummary) {
     delete entity.needsWikiRefresh;
@@ -8748,6 +9283,11 @@ async function upsertEntityIndex(env, entities) {
   const byId = new Map(index.map((entry) => [`${entry.type}:${entry.slug}`, entry]));
   for (const entity of entities) {
     const prev = byId.get(`${entity.type}:${entity.slug}`) || {};
+    const usesQualityGate =
+      entity.qualityGateVersion === BLOG_ENTITY_QUALITY_GATE_VERSION;
+    const historyLinkEligible =
+      entity.type === "event" &&
+      isHistoryEntityDiscoveryLinkEligible(entity);
     byId.set(`${entity.type}:${entity.slug}`, {
       type: entity.type,
       slug: entity.slug,
@@ -8758,9 +9298,13 @@ async function upsertEntityIndex(env, entities) {
       summary: entity.summary || entity.description || "",
       relatedPosts: entity.relatedPosts || [],
       updatedAt: entity.updatedAt,
-      indexable: (Array.isArray(entity.bodySections) ? entity.bodySections : [])
-        .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
-        .join(" ").split(/\s+/).filter(Boolean).length >= 150,
+      indexable: usesQualityGate
+        ? blogEntityQualityEligible(entity)
+        : entityContentWordCount(entity) >= 150,
+      ...(usesQualityGate
+        ? { qualityGateVersion: BLOG_ENTITY_QUALITY_GATE_VERSION }
+        : {}),
+      ...(entity.type === "event" ? { historyLinkEligible } : {}),
       ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
     });
   }
@@ -8849,6 +9393,12 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       resolvedPageTitle: wikiData.resolvedPageTitle || "",
       birthDate: wikiData.birthDate || "",
       deathDate: wikiData.deathDate || "",
+      ...(wikiData.wikidataEntityId
+        ? { wikidataEntityId: wikiData.wikidataEntityId }
+        : {}),
+      ...(typeof wikiData.wikidataInstanceOfHuman === "boolean"
+        ? { wikidataInstanceOfHuman: wikiData.wikidataInstanceOfHuman }
+        : {}),
       relatedTopics: Array.isArray(pillars) ? pillars : [],
       relatedPosts: [slug],
       firstSeenAt: new Date().toISOString(),
@@ -8890,6 +9440,9 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       imageUrl: e.imageUrl || "",
       url: e.url,
       wikiUrl: e.wikiUrl || "",
+      ...(e.type === "event"
+        ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(e) }
+        : {}),
       ...(e.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
       ...(e.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
       ...(e.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
@@ -8964,7 +9517,10 @@ async function recoverRecentEntityStrips(env, { maxPosts = 3, lookbackDays = 3 }
       continue;
     }
     if (people.length === 0) continue;
-    const needsRepair = people.some((p) => p.profileLinkEligible !== true || !p.imageUrl);
+    const needsRepair = people.some((p) =>
+      !hasVerifiedPersonProfileIdentity(p) ||
+      !p.imageUrl,
+    );
     if (!needsRepair) continue;
     try {
       await backfillEntitiesForEntry(env, entry);
@@ -8981,8 +9537,11 @@ function buildArticleEntityStrip(entityMeta) {
   if (!Array.isArray(entityMeta) || entityMeta.length === 0) return "";
   const people = entityMeta.filter((e) => e.type === "person" && e.slug && e.name && !e.skipStrip);
   if (people.length === 0) return "";
+  const historyEntity = entityMeta.find((entity) =>
+    isHistoryEntityDiscoveryLinkEligible(entity),
+  );
 
-  const chips = people.map((e) => {
+  const personChips = people.map((e) => {
     // A name can be shown for context, but links require a verified substantive profile.
     const inner =
       `<span class="person-circle">${e.imageUrl
@@ -8990,12 +9549,16 @@ function buildArticleEntityStrip(entityMeta) {
         : `<span class="person-circle-fallback" aria-hidden="true">${esc(String(e.name).slice(0, 1).toUpperCase())}</span>`
       }</span>` +
       `<span class="person-pill-name">${esc(e.name)}</span>`;
-    return e.profileLinkEligible === true && e.profileSubjectVerified === true && e.url
+    return hasVerifiedPersonProfileIdentity(e) && e.url
       ? `<a href="${esc(e.url)}" class="person-pill">${inner}</a>`
       : `<span class="person-pill">${inner}</span>`;
   }).join("");
+  const historyChip = historyEntity
+    ? `<a href="${esc(historyEntity.url)}" class="story-topic-pill" data-history-entity-link="1" aria-label="Explore event: ${esc(historyEntity.name)}"><span class="story-topic-label">Explore</span><span>${esc(historyEntity.name)}</span></a>`
+    : "";
+  const chips = personChips + historyChip;
 
-  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:15px;font-weight:600;white-space:nowrap}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
+  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;align-items:center;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:15px;font-weight:600;white-space:nowrap}.story-topic-pill{display:inline-flex;align-items:center;gap:.5rem;flex:0 0 auto;max-width:360px;padding:.55rem .8rem;border:1px solid var(--border,#cfe0cf);border-radius:999px;background:var(--bg-alt,#f2f7f2);color:var(--btn-bg,#1b3a2d)!important;text-decoration:none!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.story-topic-pill span:last-child{overflow:hidden;text-overflow:ellipsis}.story-topic-label{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted,#5c7a65)}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
 
   return `${css}<div class="entity-strip" data-entity-strip="1"><h2 class="h3">People in this story</h2><div class="entity-person-chips">${chips}</div></div>`;
 }
@@ -9056,7 +9619,7 @@ function articleEntityStripNeedsProfileValidation(html, entityMetaRaw) {
   try {
     return JSON.parse(entityMetaRaw).some((entity) =>
       entity?.type === "person" &&
-      (entity?.profileLinkEligible !== true || entity?.profileSubjectVerified !== true),
+      !hasVerifiedPersonProfileIdentity(entity),
     );
   } catch {
     return true;
@@ -9114,6 +9677,17 @@ function assertRequiredContentBlocks(content) {
   }
 }
 
+function visibleRawUrlsInRenderedHtml(html) {
+  const body = String(html || "").match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/i)?.[1] || "";
+  const visibleText = body
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<template\b[^>]*>[\s\S]*?<\/template\s*>/gi, " ")
+    .replace(/<!--([\s\S]*?)-->/g, " ")
+    .replace(/<[^>]+>/g, " ");
+  return rawUrlsInVisibleText(visibleText);
+}
+
 /**
  * Tier 1 — hard structural check. Throws if any required element generated
  * entirely from local draft content is missing. These never depend on external
@@ -9128,6 +9702,7 @@ function assertArticleStructure(html) {
     ["article shell", /<article\b/i],
     ["hero image area", /article-hero-wrap/i],
     ["featured hero image", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\bsrc="\/image-proxy\?src=/i],
+    ["featured image alt text", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\balt="[^"]{5,}"/i],
     ["short answer card", /ai-answer-card/i],
     ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
     ["analysis section", /<h2 class="h3">Our Take:/i],
@@ -9142,6 +9717,10 @@ function assertArticleStructure(html) {
   if (quickFactCount < 6) missing.push("six rendered key facts");
   if (didYouKnowCount < 5) missing.push("five rendered did-you-know cards");
   if (analysisItemCount < 6) missing.push("six rendered analysis items");
+  const visibleRawUrls = visibleRawUrlsInRenderedHtml(source);
+  if (visibleRawUrls.length > 0) {
+    missing.push(`no raw URLs in visible article text (found ${visibleRawUrls[0]})`);
+  }
   if (missing.length > 0) {
     throw new Error(`Article structure check failed: missing ${missing.join(", ")}`);
   }
@@ -9239,8 +9818,13 @@ async function hydrateArticleEntityImages(env, entityMeta) {
         hasRichWikipediaPersonProfile(record)
       ) ? record : null;
 
-      // Legacy records did not store eligibility, so revalidate their source once.
-      if (!profile && anchoredWikiUrl) {
+      // Legacy records did not store Wikidata identity evidence, so revalidate
+      // their source once. A stored false result prevents repeated subrequests.
+      if (
+        !profile &&
+        anchoredWikiUrl &&
+        record?.wikidataInstanceOfHuman !== false
+      ) {
         const freshWiki = await fetchWikipediaEntityData({
           wikiUrl: anchoredWikiUrl,
           term: next.name,
@@ -9260,6 +9844,23 @@ async function hydrateArticleEntityImages(env, entityMeta) {
             profileSubjectVerified: true,
           };
           env.BLOG_AI_KV.put(key, JSON.stringify(profile)).catch(() => {});
+        } else if (
+          record &&
+          (
+            typeof candidate.wikidataInstanceOfHuman === "boolean" ||
+            candidate.isDisambiguation === true
+          )
+        ) {
+          const rejectedProfile = {
+            ...candidate,
+            profileLinkEligible: false,
+            profileSubjectVerified: false,
+            updatedAt: new Date().toISOString(),
+          };
+          env.BLOG_AI_KV.put(
+            key,
+            JSON.stringify(rejectedProfile),
+          ).catch(() => {});
         }
       }
 
@@ -9835,6 +10436,18 @@ function chunkedArticleFallbackEnabled(env) {
   return raw == null || !/^(0|false|off)$/i.test(String(raw).trim());
 }
 
+function groundingRetryFeedbackSection(reasons, maxChars = 2200) {
+  const list = (Array.isArray(reasons) ? reasons : [])
+    .map((reason) => String(reason || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  if (!list.length) return "";
+  const details = list.map((reason) => `- ${reason}`).join("\n").slice(0, maxChars);
+  return `A previous draft was rejected for these exact unsupported claims:
+${details}
+Do not repeat, soften, hedge, or paraphrase those claims. Replace each one with a directly supported source fact, or omit that point entirely.`;
+}
+
 function compactChunkedArticleBrief(brief) {
   return {
     title: brief?.title || "",
@@ -9879,9 +10492,9 @@ function chunkedArticleBodyFieldGuidance(field) {
     case "eyewitnessOrChronicle":
       return "Analyze what the supplied record confirms and what it leaves unresolved. Do not invent a witness, memoir, newspaper, decree, archive, or quote.";
     case "aftermathParagraphs":
-      return "Name specific actions, dates, people, institutions, responses, or confirmed limits in the record after the event.";
+      return "Name only actions, dates, people, institutions, responses, or limits explicitly confirmed by the source after the event. Do not infer reforms, debates, effects, or policy changes.";
     case "conclusionParagraphs":
-      return "Reframe the event with concrete facts already established by the article, not a generic reflection or new unsupported material.";
+      return "Reframe the event with concrete source facts already established by the article, not a preventive lesson, modern policy recommendation, generic reflection, or new unsupported material.";
     default:
       return "Keep the section source-grounded, specific, and non-repetitive.";
   }
@@ -9923,6 +10536,8 @@ Requirements:
 - Absolute minimum is ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS} words, but aim for at least ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 25} words to leave margin.
 - Count both paragraphs before responding. If either paragraph is below ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 15} words, add source-grounded detail before returning.
 - Every paragraph must end with terminal punctuation.
+- Never place a raw URL in paragraph text. Refer to a source by name; URLs belong only in source metadata.
+- Do not convert chronology into causality. Never invent what the event led to, prevented, enabled, changed, created, ended, or made effective.
 - Do not use hyphens or em dashes in article body prose.`,
     1700,
     (parsed) => validateChunkedArticleBodyChunk(parsed, [field], label),
@@ -10056,6 +10671,7 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
   // 2026-07-05 "facts" sub-call) previously dropped the pipeline back to the
   // undershooting one-shot; one retry makes the chunked path resilient to it.
   let lastError;
+  let retryFeedback = "";
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const raw = await callAI(
@@ -10066,7 +10682,7 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
             content:
               "You are a source-grounded history article component writer. Return one valid JSON object only. No markdown, no prose outside JSON.",
           },
-          { role: "user", content: userPrompt },
+          { role: "user", content: `${userPrompt}${retryFeedback}` },
         ],
         {
           maxTokens,
@@ -10082,6 +10698,9 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
     } catch (err) {
       lastError = err;
       if (attempt < 2) {
+        retryFeedback =
+          `\n\nPREVIOUS RESPONSE REJECTED: ${String(err.message || err).slice(0, 900)}\n` +
+          "Correct that exact failure in the next JSON response. Do not repeat or paraphrase a rejected unsupported claim.";
         console.warn(`Blog: ${label} attempt ${attempt} failed (${err.message}) — retrying once.`);
       }
     }
@@ -10100,6 +10719,7 @@ async function generateArticleContentChunkedFallback(
   recentPillars = [],
   sourceMaterial = null,
   stricterGrounding = false,
+  groundingFeedback = [],
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -10115,11 +10735,12 @@ async function generateArticleContentChunkedFallback(
   const recentPillarSection = recentPillars.length > 0
     ? `Avoid making these recent categories the primary angle when possible: ${recentPillars.join(", ")}.\n`
     : "";
-  const contextHookSection = contextHook
+  const contextHookSection = contextHook && !sourceMaterial
     ? `Current-world hook to weave into conclusion or editorial note, not verbatim: ${contextHook}\n`
     : "";
+  const retryFeedback = groundingRetryFeedbackSection(groundingFeedback);
   const strictLine = stricterGrounding
-    ? "A previous draft failed grounding. Be conservative and omit any specific not supported by the source.\n"
+    ? "A previous draft failed grounding. Use only relationships, outcomes, and consequences explicitly stated by the source.\n"
     : "";
   const sharedContext = `Required event: ${forcedEvent ? `"${forcedEvent}"` : `a significant event from ${monthName} ${day}`}.
 Required date: ${monthName} ${day}. historicalDateISO month/day must match this date.
@@ -10127,9 +10748,14 @@ ${contextHookSection}${sourceSection}${avoidSection}${pillarSection}${recentPill
 Grounding rules:
 - Use only the source material for factual claims when it is supplied.
 - Do not invent a named person, quote, document, number, location, motive, casualty count, or consequence.
+- Do not write that one event led to, caused, triggered, prompted, prevented, enabled, ended, established, abolished, or changed another result unless the source explicitly states that relationship.
+- Chronology is not causality. If the source only says one thing happened and another happened later, describe them separately with neutral time words.
+- Do not invent gun-law changes, security reforms, mental-health effects, policy debates, institutional responses, public lessons, or better alternatives.
+- Quick Facts, analysis, aftermath, and conclusions must use source-supported facts instead of filling required space with inferred significance or legacy.
 - Keep recognition, arrest, death, departure, arrival, and capture dates and places distinct.
 - Do not use hyphens or em dashes in article body prose.
-- Every paragraph must end with normal terminal punctuation.`;
+- Every paragraph must end with normal terminal punctuation.
+${retryFeedback}`;
 
   console.warn(`Blog: trying chunked article fallback for ${monthName} ${day}.`);
 
@@ -10167,10 +10793,15 @@ Return JSON only with this shape:
   "amazonBookTopic":"3-7 word book topic",
   "amazonProductIdeas":[{"label":"3-6 words","searchQuery":"specific book or item search","type":"book"}],
   "contentRationale":"40+ words explaining specific value beyond Wikipedia",
-  "sourceFacts":["8-12 concise facts from the source to reuse without contradiction"]
+  "sourceFacts":["8-12 atomic facts copied or closely paraphrased from the source without adding an inference"]
 }
 
-Requirements: keyTerms must include at least one real named person connected to the event. imageUrl may be empty or a supported Wikimedia URL, never a placeholder.`,
+Requirements:
+- keyTerms must include at least one real named person connected to the event.
+- sourceFacts must preserve the source's actors, numbers, chronology, and relationship verbs exactly. A source fact may say "later" when the source says "later", but may not change that into "led to".
+- Do not put inferred significance, legacy, policy effects, security changes, mental-health effects, or moral lessons in sourceFacts.
+- imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
+- Never place a raw URL in quickFacts or any other visible prose field; URLs belong only in URL/source metadata fields.`,
     1500,
     (parsed) => {
       requireChunkArray(parsed, "keyTerms", { min: 1, label: "chunked article brief" });
@@ -10229,6 +10860,8 @@ Requirements:
 - Each array must contain exactly 2 paragraphs.
 - Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
 - overviewParagraphs open with the strongest concrete fact.
+- Never place a raw URL in paragraph text. Refer to a source by name instead.
+- Do not convert chronology into causality or infer a motive, policy effect, institutional response, or preventive lesson.
 - eyewitnessOrChronicle must not invent a witness, memoir, newspaper, decree, archive, or quote. If the source names no account, analyze what the record confirms and leaves unresolved.`,
       2300,
       (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
@@ -10264,8 +10897,10 @@ Write only these body fields as JSON:
 Requirements:
 - Each array must contain exactly 2 paragraphs.
 - Each paragraph should be 120-160 words, source-grounded, and non-repetitive. Never fewer than 115 words.
-- Aftermath must name specific actions, dates, people, institutions, or confirmed limits in the record.
-- Conclusion must reframe the event with a concrete fact, not a generic reflection.`,
+- Aftermath must name only actions, dates, people, institutions, or limits explicitly confirmed by the source.
+- If the source does not state a broader consequence, do not claim one. Continue with documented chronology, legal proceedings, named responses, or limits in the record.
+- Never place a raw URL in paragraph text. Refer to a source by name instead.
+- Conclusion must reframe the event with a concrete source fact, not a modern policy lesson, preventive recommendation, or generic reflection.`,
       2300,
       (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
     );
@@ -10288,13 +10923,17 @@ ${JSON.stringify(compactBrief, null, 2)}
 
 Write only this JSON:
 {
-  "quickFacts":[{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
+  "quickFacts":[{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Source Detail","value":"..."},{"label":"Confirmed Outcome","value":"..."}],
   "didYouKnowFacts":["five distinct facts, 35-55 words each"]
 }
 
 Requirements:
 - quickFacts must contain exactly 6 populated label/value objects.
+- Every quick-fact value must be directly supported by the source. Do not use Significance, Legacy, Impact, or Lessons labels unless the source explicitly states the claimed consequence.
+- Prefer neutral labels such as Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome, choosing only labels supported by this event's source.
 - didYouKnowFacts must contain exactly 5 distinct source-grounded facts.
+- Did You Know facts may be surprising, but surprise must come from a source fact, not an inferred consequence, motive, coincidence, fate, or policy effect.
+- Never place a raw URL in a fact. Refer to a source by name instead.
 - Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.`,
     1600,
     (parsed) => {
@@ -10325,16 +10964,20 @@ ${JSON.stringify({ ...bodyA, ...bodyB }, null, 2)}
 
 Write only this JSON:
 {
-  "analysisGood":[{"title":"3-5 words","detail":"60+ words, specific decision and why it worked"}],
-  "analysisBad":[{"title":"3-5 words","detail":"60+ words, specific failure and better alternative"}],
+  "analysisGood":[{"title":"3-5 words","detail":"60+ words evaluating a source-documented action, response, or strength of the record"}],
+  "analysisBad":[{"title":"3-5 words","detail":"60+ words evaluating a source-documented failure, limitation, or unresolved question"}],
   "editorialNote":"80+ words from the thisDay. team"
 }
 
 Requirements:
 - analysisGood must contain exactly 3 items.
 - analysisBad must contain exactly 3 items.
+- Analysis may interpret facts, but it must not invent causality, effectiveness, responsibility, policy change, prevention, or a better alternative.
+- Each analysis item must anchor every judgment in actions or limits explicitly present in the source. If the source cannot support "why it worked" or "what should have happened", do not make that claim.
+- Do not critique the article's writing, sourcing process, repetition, or credibility. Analyze the historical record only.
+- Never place a raw URL in analysis or editorial text. Refer to a source by name instead.
 - Every detail must include a concrete name, date, number, institution, place, or source.
-- editorialNote must be specific to this article and must not add unsupported facts.`,
+- editorialNote must be specific to this article, stay with source-supported details, and avoid preventive lessons or modern policy prescriptions.`,
     2200,
     (parsed) => {
       requireChunkArray(parsed, "analysisGood", { exact: 3, label: "chunked article analysis" });
@@ -10370,6 +11013,7 @@ async function callWorkersAI(
   recentPillars = [],
   sourceMaterial = null,
   stricterGrounding = false,
+  groundingFeedback = [],
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -10392,9 +11036,10 @@ async function callWorkersAI(
       ? `\n${avoidPillarLine}${avoidPillarLine && preferPillarLine ? "\n" : ""}${preferPillarLine}\n`
       : "";
 
-  const contextHookSection = contextHook
+  const contextHookSection = contextHook && !sourceMaterial
     ? `\nCURRENT-WORLD CONTEXT (mandatory): The following hook connects this historical event to today's world as of the publish date. You MUST weave at least one sentence from this angle into the article — specifically into the conclusionParagraphs or editorialNote. The sentence must feel grounded in the present, not generic. Do not quote the hook verbatim; use it as a lens:\n"${contextHook}"\n`
     : "";
+  const groundingFeedbackSection = groundingRetryFeedbackSection(groundingFeedback);
 
   const eventSelection = forcedEvent
     ? `You MUST write about this specific event: "${forcedEvent}". Do not choose a different event.`
@@ -10440,6 +11085,8 @@ ${avoidSection}
 The article must be substantial without being padded. Target 1,050 to 1,250 words of body content across overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs combined. The absolute floor is ${MIN_REAL_ARTICLE_BODY_WORDS} body words. A precise, complete ${MIN_REAL_ARTICLE_BODY_WORDS} word article is better than a repetitive 1,500 word article. Every paragraph must earn its place with new historical depth, not filler.
 
 HARD RULE — COMPLETE EVERY FIELD: You have enough token budget to finish the entire response. Every paragraph must be a complete thought ending with terminal punctuation (period, exclamation mark, or question mark). Never end a paragraph or field mid-sentence. If you are running out of content ideas, write a shorter but fully complete paragraph rather than cutting off mid-sentence. An incomplete sentence anywhere in the JSON is a critical error.
+
+HARD RULE — NO RAW URLS IN VISIBLE PROSE: Never put http://, https://, or www. text in quickFacts, didYouKnowFacts, body paragraphs, analysis, timeline labels, quotes, or editorial notes. URL values belong only in dedicated URL and source metadata fields. In prose, refer to a source by its descriptive name without printing its address.
 
 VOICE AND PERSONALITY — this is the most important instruction:
 Write like a passionate history obsessive who has spent weeks researching this event and genuinely cannot believe more people do not know about it. You have opinions. You find things surprising, tragic, infuriating, or inspiring, and you say so. You are not a textbook. You are not a Wikipedia summary. You are a storyteller who happens to know an enormous amount of history.
@@ -10531,14 +11178,14 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     { "label": "Date", "value": "Month Day, Year" },
     { "label": "Location", "value": "Place" },
     { "label": "Key Figure", "value": "Name" },
-    { "label": "Significance", "value": "Why it matters" },
-    { "label": "Legacy", "value": "Long-term impact" }
+    { "label": "Source Detail", "value": "Concrete fact stated by the source" },
+    { "label": "Confirmed Outcome", "value": "Outcome explicitly stated by the source" }
   ],
   "didYouKnowFacts": [
     "A genuinely surprising lesser-known fact — something most people would not expect, 1 to 2 sentences, minimum 35 words. Must include a specific name, number, or place. Use one vivid claim plus one supporting detail.",
     "A detail that reframes the main story or reveals a hidden layer of complexity, 1 to 2 sentences, minimum 35 words. Do not recycle a detail from the first fact.",
-    "A fact that connects the event to something unexpected — a consequence, a coincidence, or a strange footnote, 1 to 2 sentences, minimum 35 words.",
-    "A fact about a specific person involved — their background, motive, or fate — that most accounts skip, 1 to 2 sentences, minimum 35 words.",
+    "A second concrete source fact about a named action, place, date, institution, or record, 1 to 2 sentences, minimum 35 words. Do not infer a consequence or coincidence.",
+    "A fact about a specific person involved that the source explicitly states, 1 to 2 sentences, minimum 35 words. Do not infer motive or fate.",
     "A concrete number, statistic, or measurable detail that conveys the scale or stakes, 1 to 2 sentences, minimum 35 words. Provide exactly FIVE facts in total and make every one distinct — never restate or paraphrase another fact."
   ],
   "overviewParagraphs": [
@@ -10552,23 +11199,22 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
   "eyewitnessQuote": "Use a direct or closely paraphrased quote only when that quote appears in SOURCE MATERIAL; otherwise use an empty string.",
   "eyewitnessQuoteSource": "Use the exact attribution from SOURCE MATERIAL for eyewitnessQuote; otherwise use an empty string.",
   "aftermathParagraphs": [
-    "Paragraph 1 (immediate aftermath; ~100 to 120 words): Describe the first days and weeks after the event with concrete actions, dates, and effects on people and institutions. Focus on specific, attributable changes on the ground.",
-    "Paragraph 2 (medium-term + long view synthesis; ~100 to 120 words): Combine medium-term consequences and the long historical assessment: reforms, responses, and how historians judge the legacy. Be specific and, where appropriate, opinionated."
+    "Paragraph 1 (immediate aftermath; ~100 to 120 words): Describe only the actions, dates, people, proceedings, and institutional responses explicitly stated by SOURCE MATERIAL.",
+    "Paragraph 2 (medium-term record; ~100 to 120 words): Continue with documented chronology or confirmed limits in the record. Do not infer reforms, debates, policy changes, or effects."
   ],
   "conclusionParagraphs": [
-    "Paragraph 1 (honest assessment; ~90 to 110 words): State plainly what the event changed and what remained unchanged. Name the specific people, institutions, or ideas that were different afterward, and name what surprised historians about the outcome. Avoid vague grandiosity.",
-    "Paragraph 2 (reframing close; ~80 to 100 words): End with a specific fact, contradiction, or detail that reframes everything the reader just learned — the kind of thing that makes someone put the article down and think. Not a call to reflection, not a generic statement about the importance of history. A concrete surprising detail that lands. The final sentence must be short, direct, and self-contained."
+    "Paragraph 1 (honest assessment; ~90 to 110 words): Synthesize only changes or limits explicitly stated by SOURCE MATERIAL. Do not add a preventive lesson, public-policy claim, or modern recommendation.",
+    "Paragraph 2 (reframing close; ~80 to 100 words): End with a specific source fact, contradiction, or documented detail. The final sentence must be short, direct, self-contained, and source-supported."
   ],
   "analysisGood": [
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who deserves credit and why. Describe the specific decision, action, or circumstance that worked, what the alternatives were, and why this outcome was not guaranteed. No generic praise." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard — specific, analytical, opinionated." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." }
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Evaluate a source-documented action, response, or strength of the record without inventing effectiveness, credit, causality, or alternatives." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." }
   ],
   "analysisBad": [
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Name who is responsible. Describe the specific failure, what the stakes were, and what a better decision would have looked like. Do not be vague or diplomatic." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same standard." },
-    { "title": "Optional: a systemic or institutional failure", "detail": "Minimum 60 words. The failure that no single person owned but that shaped the outcome nonetheless." }
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Evaluate a source-documented failure, limitation, or unresolved question without inventing responsibility, prevention, or a better alternative." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." }
   ],
   "editorialNote": "Minimum 80 words. A frank, first-person-plural editorial reflection from the thisDay. team. Start with 'What strikes us about this is...' or 'We keep coming back to one thing:' or a similarly direct opening. Say something that the body of the article could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered and what actually happened. No hedging. No 'it is important to remember'. Say the thing.",
   "keyTerms": [
@@ -10599,6 +11245,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     ? `SOURCE MATERIAL, the single source of truth:\n"""\n${String(sourceMaterial).slice(0, 5500)}\n"""\n`
     : "";
   const compactContextHook = contextHook
+    && !sourceMaterial
     ? `Current-world hook to weave into conclusion or editorial note, not verbatim: ${contextHook}\n`
     : "";
   const compactAvoidSection = takenThisMonth.length > 0
@@ -10608,13 +11255,19 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
 
 Event: ${forcedEvent ? `"${forcedEvent}"` : `a significant event from ${monthName} ${day}`}
 Required date: ${monthName} ${day}. The historicalDate and historicalDateISO month/day must match this date.
-${compactContextHook}${compactSourceSection}${compactAvoidSection}${stricterGrounding ? "Previous draft failed grounding. Be conservative and omit any unsupported specific.\n" : ""}
+${compactContextHook}${compactSourceSection}${compactAvoidSection}${stricterGrounding ? "Previous draft failed grounding. Use only relationships, outcomes, and consequences explicitly stated by the source.\n" : ""}
 Grounding rules:
 - Use only SOURCE MATERIAL for factual claims when it is supplied. If a number, quote, person, document, place, motive, or consequence is not there, do not invent it.
+- Never copy http://, https://, or www. text into any visible prose field. URLs belong only in URL and source metadata fields.
 - Do not include any proper noun, year, treaty, law, massacre, conference, battle, aviation protocol, or named policy unless it appears in SOURCE MATERIAL.
 - If SOURCE MATERIAL is thin on aftermath, say what the record confirms and what remains unresolved. Never fill the gap with general knowledge.
+- Do not write that one event led to, caused, triggered, prompted, prevented, enabled, ended, established, abolished, or changed another result unless SOURCE MATERIAL explicitly states that relationship.
+- Chronology is not causality. When SOURCE MATERIAL only records that B happened after A, describe A and B separately and never claim A caused B.
+- Never invent gun-law changes, security reforms, mental-health effects, policy debates, institutional responses, public lessons, effectiveness claims, or better alternatives.
+- Quick Facts, Did You Know, analysis, aftermath, conclusions, and the editorial note must stay source-bound. Do not fill required space with inferred significance, legacy, prevention, or moral instruction.
 - Keep recognition, arrest, death, departure, arrival, and capture dates and places distinct.
 - If no named witness or document appears in SOURCE MATERIAL, leave eyewitnessQuote and eyewitnessQuoteSource empty and use eyewitnessOrChronicle to explain what the record confirms and what it leaves unresolved.
+${groundingFeedbackSection}
 
 Output exactly this JSON shape and no extra text:
 {
@@ -10636,7 +11289,7 @@ Output exactly this JSON shape and no extra text:
   "jsonLdUrl": "source URL",
   "organizerName": "key person or organization",
   "readingTimeMinutes": 8,
-  "quickFacts": [{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Significance","value":"..."},{"label":"Legacy","value":"..."}],
+  "quickFacts": [{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Source Detail","value":"..."},{"label":"Confirmed Outcome","value":"..."}],
   "didYouKnowFacts": ["five distinct facts, 35-55 words each"],
   "overviewParagraphs": ["two paragraphs, 125-145 words each"],
   "eyewitnessOrChronicle": ["two paragraphs, 115-135 words each"],
@@ -10644,8 +11297,8 @@ Output exactly this JSON shape and no extra text:
   "eyewitnessQuoteSource": "",
   "aftermathParagraphs": ["two paragraphs, 120-145 words each"],
   "conclusionParagraphs": ["two paragraphs, 105-125 words each"],
-  "analysisGood": [{"title":"3-5 words","detail":"60+ words, specific decision and why it worked"}],
-  "analysisBad": [{"title":"3-5 words","detail":"60+ words, specific failure and better alternative"}],
+  "analysisGood": [{"title":"3-5 words","detail":"60+ words evaluating a source-documented action, response, or strength of the record"}],
+  "analysisBad": [{"title":"3-5 words","detail":"60+ words evaluating a source-documented failure, limitation, or unresolved question"}],
   "editorialNote": "80+ words from the thisDay. team",
   "keyTerms": [{"term":"exact article phrase","wikiUrl":"https://en.wikipedia.org/wiki/...","type":"person"}],
   "wikiUrl": "source URL",
@@ -10658,7 +11311,11 @@ Output exactly this JSON shape and no extra text:
 
 Field requirements:
 - quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 5 distinct facts.
+- Every Quick Fact must be directly supported. Do not use Significance, Legacy, Impact, or Lessons labels unless SOURCE MATERIAL explicitly states the claimed consequence. Prefer Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome.
+- Every Did You Know fact must come from SOURCE MATERIAL. Do not invent a surprising consequence, coincidence, motive, fate, or policy effect.
 - analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
+- Analysis must evaluate only source-documented actions or limitations. Do not invent why something worked, what it prevented, what changed because of it, who deserves credit beyond the source, or what a better alternative would have been.
+- Do not critique the article's writing, sourcing, repetition, or credibility inside analysisGood or analysisBad.
 - keyTerms must contain 5-8 entries and at least one real named person connected to the event.
 - imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
 - Body fields overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs must total 900-1250 words. This is a hard publication gate.
@@ -10669,6 +11326,7 @@ Writing rules:
 - Lead with the strongest concrete fact in the first two sentences. Facts before mood.
 - Every paragraph needs a specific name, date, number, place, institution, source, or quote.
 - No rhetorical questions, no first-person singular narrator, no fake witness voice.
+- No raw URLs in quick facts, Did You Know facts, body paragraphs, analysis, timeline labels, quotes, or editorial notes.
 - No hyphens or em dashes inside article body fields. Use commas or periods.
 - No filler phrases: significant event, pivotal moment, changed history, lasting impact, cannot be overstated, it is important to remember, dark chapter.
 - Do not repeat the same fact across sections. Repeated facts with different wording are still repetition.
@@ -11089,6 +11747,283 @@ function articleGroundingText(content) {
   return collectGroundingStrings(groundedFields).join("\n");
 }
 
+const GROUNDING_CLAIM_HEDGE_PATTERN =
+  /\b(?:apparently|arguably|could|likely|may|might|perhaps|possibly|probably|seems?|suggests?)\b/i;
+const GROUNDING_SUPPORT_STOPWORDS = new Set([
+  "about", "after", "again", "against", "also", "among", "another", "around",
+  "article", "because", "before", "being", "between", "both", "caused", "causes",
+  "causing", "could", "during", "event", "first", "from", "government", "historic",
+  "historical", "history", "into", "later", "more", "most", "other", "resulted",
+  "resulting", "same", "such", "than", "that", "their", "them", "then", "there",
+  "these", "they", "this", "through", "under", "upon", "were", "when", "where",
+  "which", "while", "with", "would", "year", "years",
+]);
+
+const GROUNDING_CLAIM_RISK_RULES = [
+  {
+    label: "order attribution",
+    claim:
+      /\b(?:authori[sz](?:e[ds]?|ing)|command(?:ed|s|ing)?|direct(?:ed|s|ing)?|order(?:ed|s|ing)?)\b/i,
+    support:
+      /\b(?:authori[sz](?:e[ds]?|ing)|command(?:ed|s|ing)?|direct(?:ed|s|ing)?|order(?:ed|s|ing)?)\b/i,
+  },
+  {
+    label: "perpetrator attribution",
+    claim:
+      /\b(?:assassinat(?:e[ds]?|ing)|carried out (?:the )?(?:assassination|attack|bombing|execution|killing|massacre|murder|raid|shooting)|execut(?:e[ds]?|ing)|kill(?:ed|s|ing)?|murder(?:ed|s|ing)?)\b/i,
+    support:
+      /\b(?:assassinat(?:e[ds]?|ing)|carried out (?:the )?(?:assassination|attack|bombing|execution|killing|massacre|murder|raid|shooting)|execut(?:e[ds]?|ing)|kill(?:ed|s|ing)?|murder(?:ed|s|ing)?)\b/i,
+  },
+  {
+    label: "parent relationship",
+    claim: /\b(?:child|daughter|father|mother|parent|son)\b/i,
+    support: /\b(?:child|daughter|father|mother|parent|son)\b/i,
+  },
+  {
+    label: "sibling relationship",
+    claim: /\b(?:brother|sibling|sister)\b/i,
+    support: /\b(?:brother|sibling|sister)\b/i,
+  },
+  {
+    label: "extended-family relationship",
+    claim: /\b(?:aunt|cousin|nephew|niece|uncle)\b/i,
+    support: /\b(?:aunt|cousin|nephew|niece|uncle)\b/i,
+  },
+  {
+    label: "marital relationship",
+    claim: /\b(?:husband|marri(?:age|ed)|spouse|wife)\b/i,
+    support: /\b(?:husband|marri(?:age|ed)|spouse|wife)\b/i,
+  },
+  {
+    label: "succession relationship",
+    claim: /\b(?:predecessor|replac(?:e[ds]?|ing)|succeeded (?:as|by)|successor)\b/i,
+    support: /\b(?:predecessor|replac(?:e[ds]?|ing)|succeeded (?:as|by)|successor)\b/i,
+  },
+  {
+    label: "causal claim",
+    claim:
+      /\b(?:because(?:\s+of)?|brought about|caus(?:e[ds]?|ing)|due to|gave rise to|leads? to|led to|prompt(?:ed|s|ing)?|result(?:ed|s|ing)? in|spark(?:ed|s|ing)?|trigger(?:ed|s|ing)?)\b/i,
+    support:
+      /\b(?:because(?:\s+of)?|brought about|caus(?:e[ds]?|ing)|due to|gave rise to|leads? to|led to|prompt(?:ed|s|ing)?|result(?:ed|s|ing)? in|spark(?:ed|s|ing)?|trigger(?:ed|s|ing)?)\b/i,
+  },
+  {
+    label: "coercive outcome",
+    claim: /\b(?:compel(?:led|s|ling)?|forc(?:e[ds]?|ing))\b/i,
+    support: /\b(?:compel(?:led|s|ling)?|forc(?:e[ds]?|ing))\b/i,
+  },
+  {
+    label: "enabling outcome",
+    claim: /\b(?:allow(?:ed|s|ing)?|enabl(?:e[ds]?|ing))\b/i,
+    support: /\b(?:allow(?:ed|s|ing)?|enabl(?:e[ds]?|ing))\b/i,
+  },
+  {
+    label: "preventive outcome",
+    claim: /\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b/i,
+    support: /\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b/i,
+  },
+  {
+    label: "institutional outcome",
+    claim:
+      /\b(?:abolish(?:ed|es|ing)?|creat(?:e[ds]?|ing)|dissolv(?:e[ds]?|ing)|establish(?:ed|es|ing)?|found(?:ed|ing))\b/i,
+    support:
+      /\b(?:abolish(?:ed|es|ing)?|creat(?:e[ds]?|ing)|dissolv(?:e[ds]?|ing)|establish(?:ed|es|ing)?|found(?:ed|ing))\b/i,
+  },
+  {
+    label: "ending outcome",
+    claim: /\b(?:conclud(?:e[ds]?|ing)|end(?:ed|s|ing)|terminat(?:e[ds]?|ing))\b/i,
+    support: /\b(?:conclud(?:e[ds]?|ing)|end(?:ed|s|ing)|terminat(?:e[ds]?|ing))\b/i,
+  },
+];
+
+// A source can state a direct casualty outcome with a plain predicate while an
+// article uses equivalent causal syntax: "the arson killed 36 people" supports
+// "the attack resulted in 36 deaths." Keep this equivalence deliberately
+// narrow. It does not apply to policy, motive, prevention, security changes, or
+// other downstream consequences.
+const GROUNDING_DIRECT_CASUALTY_OUTCOME_RULES = [
+  {
+    claim: /\b(?:death|deaths|died|fatalit(?:y|ies)|kill(?:ed|s|ing)?)\b/i,
+    support: /\b(?:death|deaths|died|fatalit(?:y|ies)|kill(?:ed|s|ing)?)\b/i,
+  },
+  {
+    claim: /\b(?:injur(?:ed|ies|ing|y)?|wound(?:ed|s|ing)?)\b/i,
+    support: /\b(?:injur(?:ed|ies|ing|y)?|wound(?:ed|s|ing)?)\b/i,
+  },
+];
+
+function collectGroundingClaimEntries(value, path = "", out = []) {
+  if (typeof value === "string") {
+    const text = value.replace(/\s+/g, " ").trim();
+    if (text) out.push({ field: path, text });
+    return out;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectGroundingClaimEntries(item, `${path}[${index}]`, out),
+    );
+    return out;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (/url|image|searchquery|type/i.test(key)) continue;
+      collectGroundingClaimEntries(item, path ? `${path}.${key}` : key, out);
+    }
+  }
+  return out;
+}
+
+function groundingClaimEntries(content) {
+  return collectGroundingClaimEntries({
+    title: content?.title,
+    eventTitle: content?.eventTitle,
+    description: content?.description,
+    quickFacts: content?.quickFacts,
+    didYouKnowFacts: content?.didYouKnowFacts,
+    overviewParagraphs: content?.overviewParagraphs,
+    eyewitnessOrChronicle: content?.eyewitnessOrChronicle,
+    eyewitnessQuote: content?.eyewitnessQuote,
+    eyewitnessQuoteSource: content?.eyewitnessQuoteSource,
+    aftermathParagraphs: content?.aftermathParagraphs,
+    conclusionParagraphs: content?.conclusionParagraphs,
+    analysisGood: content?.analysisGood,
+    analysisBad: content?.analysisBad,
+    editorialNote: content?.editorialNote,
+    timeline: content?.timeline,
+  });
+}
+
+function groundingSupportStem(token) {
+  const value = String(token || "");
+  if (value.length >= 7 && /(?:ing|ers|ies)$/.test(value)) {
+    return value.replace(/(?:ing|ers|ies)$/, "");
+  }
+  if (value.length >= 6 && /(?:ed|es)$/.test(value)) {
+    return value.replace(/(?:ed|es)$/, "");
+  }
+  if (value.length >= 5 && /s$/.test(value)) return value.slice(0, -1);
+  return value;
+}
+
+function groundingSupportTokens(value) {
+  return new Set(
+    normalizeForCompare(value)
+      .split(/\s+/)
+      .map((token) => token.replace(/[^a-z0-9]/g, ""))
+      .filter((token) =>
+        token.length >= 4 &&
+        !/^\d+$/.test(token) &&
+        !GROUNDING_SUPPORT_STOPWORDS.has(token),
+      )
+      .map(groundingSupportStem)
+      .filter((token) => token.length >= 3),
+  );
+}
+
+function groundingProperAnchors(value) {
+  const anchors = new Set();
+  for (const match of String(value || "").matchAll(/\b[A-Z][A-Za-z'’.-]{2,}\b/g)) {
+    const token = normalizeForCompare(match[0]).replace(/[^a-z0-9]/g, "");
+    if (
+      token.length >= 3 &&
+      !GROUNDING_SUPPORT_STOPWORDS.has(token) &&
+      !SUBJECT_STOPWORDS.has(token)
+    ) {
+      anchors.add(groundingSupportStem(token));
+    }
+  }
+  return anchors;
+}
+
+function groundingClaimHasSourceSupport(claim, sourceSentence) {
+  const claimTokens = groundingSupportTokens(claim);
+  const sourceTokens = groundingSupportTokens(sourceSentence);
+  const shared = tokenMatches(claimTokens, sourceTokens);
+  const anchors = groundingProperAnchors(claim);
+  const sharedAnchors = tokenMatches(anchors, sourceTokens);
+  const minimumShared = claimTokens.size >= 5 ? 2 : 1;
+  return (
+    shared.length >= minimumShared &&
+    (anchors.size === 0 || sharedAnchors.length > 0)
+  );
+}
+
+function groundingClaimNumbers(value) {
+  return Array.from(
+    String(value || "").matchAll(/\b\d[\d,]*(?:\.\d+)?\b/g),
+    (match) => match[0].replace(/,/g, ""),
+  );
+}
+
+function groundingDirectCasualtyOutcomeHasSupport(claim, sourceEvidence) {
+  const matchedOutcomeRules = GROUNDING_DIRECT_CASUALTY_OUTCOME_RULES.filter(
+    (rule) => rule.claim.test(claim),
+  );
+  if (matchedOutcomeRules.length === 0) return false;
+  if (
+    !matchedOutcomeRules.every((rule) => {
+      rule.support.lastIndex = 0;
+      return rule.support.test(sourceEvidence);
+    })
+  ) {
+    return false;
+  }
+
+  // Exact numbers are part of a casualty claim's identity. Do not let a
+  // semantically similar sentence support different dates or tolls.
+  const sourceNumbers = new Set(groundingClaimNumbers(sourceEvidence));
+  if (
+    groundingClaimNumbers(claim).some((number) => !sourceNumbers.has(number))
+  ) {
+    return false;
+  }
+  return groundingClaimHasSourceSupport(claim, sourceEvidence);
+}
+
+function unsupportedGroundingClaims(content, sourceMaterial) {
+  const sourceSentences = splitSentences(sourceMaterial).filter(Boolean);
+  if (sourceSentences.length === 0) return [];
+  const adjacentSourceWindows = sourceSentences.map((sentence, index) =>
+    index + 1 < sourceSentences.length
+      ? `${sentence} ${sourceSentences[index + 1]}`
+      : sentence,
+  );
+  const findings = [];
+  const seen = new Set();
+
+  for (const entry of groundingClaimEntries(content)) {
+    for (const sentence of splitSentences(entry.text)) {
+      if (!sentence || GROUNDING_CLAIM_HEDGE_PATTERN.test(sentence)) continue;
+      for (const rule of GROUNDING_CLAIM_RISK_RULES) {
+        if (!rule.claim.test(sentence)) continue;
+        rule.claim.lastIndex = 0;
+        const key = `${rule.label}|${normalizeForCompare(sentence)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const supported = sourceSentences.some((sourceSentence) => {
+          rule.support.lastIndex = 0;
+          return (
+            rule.support.test(sourceSentence) &&
+            groundingClaimHasSourceSupport(sentence, sourceSentence)
+          );
+        }) || (
+          rule.label === "causal claim" &&
+          adjacentSourceWindows.some((sourceEvidence) =>
+            groundingDirectCasualtyOutcomeHasSupport(sentence, sourceEvidence),
+          )
+        );
+        if (!supported) {
+          findings.push({
+            field: entry.field,
+            label: rule.label,
+            sentence: sentence.slice(0, 240),
+          });
+        }
+      }
+    }
+  }
+  return findings.slice(0, 8);
+}
+
 /**
  * Deterministic grounding gate. Returns { ok, reasons[] }. A no-op (ok:true)
  * when no source is available (e.g. a manually forced event), so admin force
@@ -11101,6 +12036,7 @@ function verifyArticleGrounding(content, source) {
   }
   const articleText = articleGroundingText(content);
   const articleLower = articleText.toLowerCase();
+  const sourceMaterial = sourceMaterialForGrounding(source);
 
   // 1) Subject match — the article must name the source's canonical subject.
   const subjectTokens = sourceSubjectTokens(source);
@@ -11117,7 +12053,7 @@ function verifyArticleGrounding(content, source) {
   // are disjoint. Absence is never a contradiction (keeps false positives low).
   const articleTolls = extractDeathTolls(articleText);
   const sourceTolls = extractDeathTolls(
-    `${source.text || ""} ${source.sourceExtract || ""}`,
+    sourceMaterial,
   );
   if (
     articleTolls.length > 0 &&
@@ -11126,6 +12062,17 @@ function verifyArticleGrounding(content, source) {
   ) {
     reasons.push(
       `casualty number contradiction: article says ${articleTolls.join("/")} but source says ${sourceTolls.join("/")}`,
+    );
+  }
+
+  // 3) High-risk relationship, responsibility, causality, and outcome claims
+  // must have a source sentence using the same claim family plus overlapping
+  // named subjects/objects. This is intentionally narrower than semantic AI
+  // review: it catches unsupported hard assertions without treating omissions
+  // or clearly hedged interpretation as factual contradictions.
+  for (const finding of unsupportedGroundingClaims(content, sourceMaterial)) {
+    reasons.push(
+      `unsupported ${finding.label} in ${finding.field}: "${finding.sentence}"`,
     );
   }
 
@@ -11187,6 +12134,7 @@ async function verifyFinalArticleGrounding(env, content, source) {
               `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
               `FINAL ARTICLE:\n${articleText}\n\n` +
               "Start with the headline and central event claim. Reject a command-style or imperative headline with no historical actor. Reject any headline or body claim that assigns an action, order, execution, killing, relationship, title, or identity to a person when the source assigns it to someone else or does not support that attribution. Distinguish who ordered an act, who carried it out, and who was its target. " +
+              "Reject an asserted cause, motive, forced response, enabled result, prevented result, institutional creation or abolition, or other concrete outcome unless the source explicitly supports that connection. Chronology alone is not causality: 'B happened after A' does not prove that A caused B. Verify family, marital, and succession relationships exactly rather than accepting that both names merely appear in the source. " +
               "Reject ONLY clear factual contradictions: conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
               "Audit each of the exactly five Did You Know facts separately. Reject any Did You Know fact whose central claim is not directly supported by the authoritative source material, even when the source does not explicitly contradict it. Identify a rejected fact by its array index. " +
               "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +
@@ -11274,6 +12222,8 @@ async function repairGroundingContradictions(env, content, reasons, source, call
     "Correct ONLY the contradicted facts listed in the audit, changing as few words as possible. " +
     "The supplied source material is authoritative; when the article and the source disagree, the source wins. " +
     "Do not rephrase, expand, or polish anything that is not contradicted. Preserve array lengths exactly. " +
+    "For an unsupported cause, outcome, prevention, effectiveness, responsibility, or institutional-change claim, do not evade the audit by adding may, might, could, likely, or apparently. Replace it with neutral chronology or another concrete fact explicitly stated by the source. " +
+    "Do not invent a policy lesson, security reform, mental-health effect, public debate, better alternative, or recommendation. " +
     "Never use hyphens or em dashes in article body fields. " +
     SOURCE_BOUND_REPAIR_RULES +
     "Return ONLY a JSON object containing the corrected fields.";
@@ -11632,7 +12582,7 @@ async function validateEyewitnessQuote(env, content) {
 
 /**
  * Extracts current SEO meta values from stored HTML, calls AI to improve only
- * description / ogDescription / twitterDescription / keywords / imageAlt,
+ * description / ogDescription / twitterDescription / keywords,
  * then does targeted string replacements on the HTML.
  * Returns { updatedHtml, changed: string[], newDescription: string|null }.
  */
@@ -11652,10 +12602,6 @@ async function patchSEOMeta(html, _slug, env) {
   const currentKeywords = getMeta(
     /<meta name="keywords" content="([^"]*?)"\s*\/>/,
   );
-  const currentImageAlt = getMeta(
-    /<meta name="twitter:image:alt" content="([^"]*?)"\s*\/>/,
-  );
-
   // Pull event context from first JSON-LD block
   let eventName = "",
     eventDate = "",
@@ -11683,7 +12629,6 @@ async function patchSEOMeta(html, _slug, env) {
     ogDescription: currentOgDesc,
     twitterDescription: currentTwitterDesc,
     keywords: currentKeywords,
-    imageAlt: currentImageAlt,
   };
 
   const improved = await reviewSEOMetaOnly(minContent, env);
@@ -11725,13 +12670,6 @@ async function patchSEOMeta(html, _slug, env) {
     improved.twitterDescription,
     /<meta name="twitter:description" content="[^"]*?"\s*\/>/,
     `<meta name="twitter:description" content="${esc(improved.twitterDescription)}" />`,
-  );
-
-  patch(
-    currentImageAlt,
-    improved.imageAlt,
-    /<meta name="twitter:image:alt" content="[^"]*?"\s*\/>/,
-    `<meta name="twitter:image:alt" content="${esc(improved.imageAlt)}" />`,
   );
 
   // keywords + article:tag block
@@ -12054,19 +12992,18 @@ async function patchBodyParagraphs(html, env) {
 }
 
 /**
- * Focused SEO-only AI call — improves only the 5 meta fields.
+ * Focused SEO-only AI call — improves only the 4 text meta fields.
  * No paragraph rewriting. Falls back to original on any error.
  */
 async function reviewSEOMetaOnly(content, env) {
   if (!hasAnyTextAIProvider(env)) return content;
 
   const systemPrompt =
-    "You are a senior SEO editor. Improve only these 5 fields for a historical blog post:\n" +
+    "You are a senior SEO editor. Improve only these 4 fields for a historical blog post:\n" +
     "- description: 120–155 chars, open with a specific, curiosity-driven hook (a striking number, named figure, or consequence) — do NOT start with a bare year; weave the year and location in naturally; end on a complete clause, never a dangling preposition or mid-phrase '...'\n" +
     "- ogDescription: 100–130 chars, curiosity-driven, makes people click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
-    "- keywords: 5–8 comma-separated, specific — year, location, person names, historical context\n" +
-    "- imageAlt: vivid 8–15 word phrase describing what is visible in the image\n\n" +
+    "- keywords: 5–8 comma-separated, specific — year, location, person names, historical context\n\n" +
     "Rules: output ONLY valid JSON with the fields that need improvement. Omit unchanged fields. " +
     "Never use generic filler such as 'dramatic and unexpected', 'remarkable event', 'turning point', 'important moment', or 'history of [country]'. " +
     "Do not change title, content, or any other field.";
@@ -12077,8 +13014,7 @@ async function reviewSEOMetaOnly(content, env) {
     `description: ${content.description}\n` +
     `ogDescription: ${content.ogDescription || ""}\n` +
     `twitterDescription: ${content.twitterDescription || ""}\n` +
-    `keywords: ${content.keywords || ""}\n` +
-    `imageAlt: ${content.imageAlt || ""}\n\n` +
+    `keywords: ${content.keywords || ""}\n\n` +
     `Return ONLY JSON with improved fields, e.g. {"description":"...","keywords":"..."}`;
 
   let raw;
@@ -12117,7 +13053,6 @@ async function reviewSEOMetaOnly(content, env) {
     "ogDescription",
     "twitterDescription",
     "keywords",
-    "imageAlt",
   ];
   const improved = { ...content };
   for (const f of ALLOWED) {
@@ -12141,7 +13076,6 @@ async function reviewSEOMetaOnly(content, env) {
  * Checks and fixes:
  *   - Meta description length and keyword richness (120–155 chars)
  *   - OG / Twitter description quality
- *   - imageAlt descriptiveness
  *   - keywords relevance and specificity
  *   - Sentence length across all paragraph arrays (flags if avg > 20 words)
  *   - Content clarity, active voice, and readability signals
@@ -12248,7 +13182,6 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     "- ogDescription: 100–130 chars, curiosity-driven, give readers a reason to click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
     "- keywords: 5–8 specific terms including year, location, key people, historical context\n" +
-    "- imageAlt: vivid 8–15 word description of what is visible in the image\n" +
     "- eventTitle: concise canonical event label with an active verb when possible\n" +
     "- title: keep format 'CTA headline — Month Day, Year'. Improve dull card headlines with a specific verb and concrete hook.\n\n" +
     SOURCE_BOUND_REPAIR_RULES +
@@ -12263,8 +13196,7 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     `description: ${content.description || ""}\n` +
     `ogDescription: ${content.ogDescription || ""}\n` +
     `twitterDescription: ${content.twitterDescription || ""}\n` +
-    `keywords: ${content.keywords || ""}\n` +
-    `imageAlt: ${content.imageAlt || ""}`;
+    `keywords: ${content.keywords || ""}`;
 
   let seoRaw;
   try {
@@ -12311,7 +13243,6 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     "ogDescription",
     "twitterDescription",
     "keywords",
-    "imageAlt",
   ];
 
   let changed = 0;
@@ -13390,6 +14321,7 @@ function buildVerifiedArticleMentions(content, entityMeta = []) {
       name: entity.name,
       ...(entity.profileLinkEligible === true &&
       entity.profileSubjectVerified === true &&
+      entity.wikidataInstanceOfHuman === true &&
       /^https:\/\/en\.wikipedia\.org\/wiki\/[^?#]+$/i.test(String(entity.wikiUrl || ""))
         ? { sameAs: entity.wikiUrl }
         : {}),
@@ -13607,6 +14539,7 @@ function validateArticleStructuredDataForPublish(html, content, entityMeta = [])
     if (mention.sameAs && !(
       entity.profileLinkEligible === true &&
       entity.profileSubjectVerified === true &&
+      entity.wikidataInstanceOfHuman === true &&
       mention.sameAs === entity.wikiUrl
     )) {
       reasons.push(`schema person identity is not verified: ${mention.name}`);
@@ -13878,6 +14811,7 @@ ${breadcrumbJsonLd}
       .dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}
       .dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}
       .dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}
+      .dyn-slide .dyn-fact a,.dyn-slide .dyn-fact a:visited,.dyn-slide .dyn-fact a:hover,.dyn-slide .dyn-fact a:focus{color:#fff!important;text-decoration:underline;text-underline-offset:2px}
       .dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}
       @media(min-width:768px){.dyn-slider-btn{display:inline-flex}}
       @media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}
@@ -15608,6 +16542,9 @@ export const __contentGenerationTestHooks = {
   CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
   generateEntityTimeline,
   fetchWikipediaEntityData,
+  hasRichWikipediaPersonProfile,
+  hasVerifiedPersonProfileIdentity,
+  blogEntityQualityEligible,
   filterGroundingIssues,
   verifyArticleGrounding,
 };

@@ -9,7 +9,7 @@ import "dotenv/config";
 import { getPostIndex, getDidYouKnow, getQuickFacts, getArticleText, getPostWikipediaUrl } from "./lib/kv.js";
 import { generateVideo } from "./lib/video.js";
 import { generateNarration, buildNarrationScript, buildNarrationParts } from "./lib/elevenlabs.js";
-import { polishNarrationItems } from "./lib/narration-expert.js";
+import { selectInterestingNarrationFacts } from "./lib/narration-selection.js";
 import { getMusicPath } from "./lib/music.js";
 
 function getTodaySlug() {
@@ -39,13 +39,17 @@ async function main() {
     getArticleText(slug).catch(() => null),
     getPostWikipediaUrl(slug),
   ]);
-  const rawItems = dyk ?? qf ?? null;
-  const contentItems = rawItems
-    ? await polishNarrationItems(post.title, rawItems, articleText).catch(() => rawItems)
-    : null;
-  const narrationItems = contentItems;
+  const rawItems = [...(dyk || []), ...(qf || [])];
+  const selectedItems = selectInterestingNarrationFacts(
+    post.title,
+    rawItems,
+    articleText,
+    { limit: 3 },
+  );
+  const contentItems = selectedItems;
+  const narrationItems = selectedItems;
 
-  const script = buildNarrationScript(post, narrationItems ?? contentItems, articleText);
+  const script = buildNarrationScript(post, narrationItems);
   console.log(`Narration script: "${script}"`);
 
   const { path: narrationPath, words } = await generateNarration(slug, script);
@@ -57,9 +61,9 @@ async function main() {
     bgMusicPath,
     words,
     useAiImage,
-    contentItems,
+    contentItems: selectedItems,
     wikiArticleUrl: wikiUrl,
-    narrationParts: buildNarrationParts(post, narrationItems ?? contentItems, articleText),
+    narrationParts: buildNarrationParts(post, narrationItems),
   });
 
   console.log(`\n✓ Preview video ready: ${videoResult.path}`);

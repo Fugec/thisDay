@@ -323,11 +323,13 @@ function isBotQuery(query) {
 function loadGscCache(gscDir) {
   const pagesDoc = readJson(join(gscDir, "pages-raw.json"), {});
   const queryPageDoc = readJson(join(gscDir, "query-page-raw.json"), {});
+  const indexingDoc = readJson(join(gscDir, "indexing-raw.json"), {});
   const weeklyPath = join(gscDir, "weekly-report.md");
   const weekly = existsSync(weeklyPath) ? readFileSync(weeklyPath, "utf8") : "";
   const reportDate = weekly.match(/^# .*?(\d{4}-\d{2}-\d{2})/m)?.[1] || "unknown";
   const windowMatch = weekly.match(/Window:\s+\*\*(\d{4}-\d{2}-\d{2})\s+→\s+(\d{4}-\d{2}-\d{2})\*\*/);
   const byUrl = new Map();
+  const indexingByUrl = new Map();
 
   for (const row of Array.isArray(pagesDoc.rows) ? pagesDoc.rows : []) {
     const url = normalizeUrl(row?.keys?.[0]);
@@ -385,12 +387,35 @@ function loadGscCache(gscDir) {
     stats.botQueries.sort((a, b) => b.impressions - a.impressions);
   }
 
+  for (const entry of Array.isArray(indexingDoc.results) ? indexingDoc.results : []) {
+    const url = normalizeUrl(entry?.url || entry?.inspectionUrl);
+    if (!url) continue;
+    const status = entry?.inspectionResult?.indexStatusResult || {};
+    indexingByUrl.set(url, {
+      observed: true,
+      verdict: String(status.verdict || "UNKNOWN"),
+      coverageState: String(status.coverageState || ""),
+      robotsTxtState: String(status.robotsTxtState || ""),
+      indexingState: String(status.indexingState || ""),
+      pageFetchState: String(status.pageFetchState || ""),
+      lastCrawlTime: String(status.lastCrawlTime || ""),
+      googleCanonical: normalizeUrl(status.googleCanonical) || String(status.googleCanonical || ""),
+      userCanonical: normalizeUrl(status.userCanonical) || String(status.userCanonical || ""),
+      crawledAs: String(status.crawledAs || ""),
+    });
+  }
+
   return {
     available: byUrl.size > 0,
     reportDate,
     windowStart: windowMatch?.[1] || "unknown",
     windowEnd: windowMatch?.[2] || reportDate,
     byUrl,
+    indexingAvailable: indexingByUrl.size > 0,
+    indexingGeneratedAt: String(indexingDoc?.export?.generatedAt || ""),
+    indexingRequestedUrls: Number(indexingDoc?.export?.requestedUrls || 0),
+    indexingFailedUrls: Number(indexingDoc?.export?.failedUrls || 0),
+    indexingByUrl,
   };
 }
 
@@ -1445,6 +1470,14 @@ function attachMeasurement(items, gsc, backlinks) {
       humanQueries: [],
       botQueries: [],
     };
+    item.indexing = gsc.indexingByUrl?.get(item.url) || {
+      observed: false,
+      verdict: null,
+      coverageState: null,
+      lastCrawlTime: null,
+      googleCanonical: null,
+      userCanonical: null,
+    };
     item.backlinks = backlinks.available
       ? backlinks.byUrl.get(item.url) || { backlinks: 0, referringDomains: 0 }
       : null;
@@ -1646,10 +1679,14 @@ function reportMarkdown(items, context) {
   lines.push(`| Generated date templates | ${items.filter((item) => item.type.endsWith("_date")).length} pages | Classified per URL using route/template and GSC evidence; no production page fetches. |`);
   lines.push(`| Dynamic hub templates | ${items.filter((item) => item.type === "blog_hub").length} pages | Hub article counts come from the read-only blog index; rendered routes were not fetched. |`);
   lines.push(`| GSC traffic | ${context.gsc.available ? `${context.gsc.byUrl.size} observed URLs, ${context.gsc.windowStart} → ${context.gsc.windowEnd}` : "Unavailable"} | ${context.gscCurrent ? "Current." : `Cached export is stale (report ${context.gsc.reportDate}); anonymous-query totals exceed query-page rows.`} |`);
-  lines.push(`| GSC indexing status | Unavailable | Search Analytics observation is not the same as current URL Inspection/Pages indexing state. |`);
+  lines.push(`| GSC indexing status | ${context.gsc.indexingAvailable ? `${context.gsc.indexingByUrl.size} URL Inspection results` : "Unavailable"} | ${context.gsc.indexingAvailable ? `${context.gscIndexingCurrent ? "Current" : "Stale"} export generated ${context.gsc.indexingGeneratedAt || "at an unknown time"}; URL Inspection reports Google's indexed version, not a live-page test.` : "Search Analytics observation is not the same as current URL Inspection/Pages indexing state."} |`);
   lines.push(`| Backlinks | ${context.backlinks.available ? `${context.backlinks.byUrl.size} URLs from supplied export` : "Unavailable"} | ${context.backlinks.available ? "Counts depend on the supplied export." : "No Search Console Links or third-party backlink export was supplied."} |`);
   lines.push("");
-  lines.push("Because current GSC indexing and backlinks are incomplete, every classification is a recommendation for review, not authorization to change production.");
+  if (!context.gscIndexingCurrent || !context.backlinks.available) {
+    lines.push("Because current GSC indexing and/or backlinks are incomplete, every classification is a recommendation for review, not authorization to change production.");
+  } else {
+    lines.push("Current measurement inputs are available, but classifications remain review recommendations and do not authorize production changes.");
+  }
   lines.push("");
   lines.push("## Classification summary");
   lines.push("");
@@ -2326,7 +2363,17 @@ async function runAudit(options = {}) {
   const gscDate = /^\d{4}-\d{2}-\d{2}$/.test(gsc.reportDate) ? new Date(`${gsc.reportDate}T00:00:00Z`) : null;
   const gscAgeDays = gscDate ? Math.floor((now - gscDate) / 86_400_000) : Infinity;
   const gscCurrent = gscAgeDays <= 14;
-  for (const item of items) classifyItem(item, { gscCurrent, backlinksAvailable: backlinks.available });
+  const indexingDate = gsc.indexingGeneratedAt ? new Date(gsc.indexingGeneratedAt) : null;
+  const gscIndexingAgeDays = indexingDate && Number.isFinite(indexingDate.getTime())
+    ? Math.floor((now - indexingDate) / 86_400_000)
+    : Infinity;
+  const gscIndexingCurrent = gsc.indexingAvailable && gscIndexingAgeDays <= 14;
+  for (const item of items) {
+    classifyItem(item, {
+      gscCurrent: gscCurrent && gscIndexingCurrent,
+      backlinksAvailable: backlinks.available,
+    });
+  }
 
   const context = {
     generatedAt: now.toISOString(),
@@ -2338,6 +2385,8 @@ async function runAudit(options = {}) {
     gsc,
     gscCurrent,
     gscAgeDays: Number.isFinite(gscAgeDays) ? gscAgeDays : null,
+    gscIndexingCurrent,
+    gscIndexingAgeDays: Number.isFinite(gscIndexingAgeDays) ? gscIndexingAgeDays : null,
     backlinks,
     warnings,
   };
@@ -2369,7 +2418,14 @@ async function runAudit(options = {}) {
   const jsonPath = join(outputDir, "inventory-quality-report.json");
   writeFileSync(markdownPath, reportMarkdown(items, context));
   writeFileSync(csvPath, reportCsv(items));
-  writeFileSync(jsonPath, JSON.stringify({ context: { ...context, gsc: { ...gsc, byUrl: undefined }, backlinks: { ...backlinks, byUrl: undefined } }, items: items.map(serializableItem) }, null, 2));
+  writeFileSync(jsonPath, JSON.stringify({
+    context: {
+      ...context,
+      gsc: { ...gsc, byUrl: undefined, indexingByUrl: undefined },
+      backlinks: { ...backlinks, byUrl: undefined },
+    },
+    items: items.map(serializableItem),
+  }, null, 2));
 
   return { items, context, paths: { markdownPath, csvPath, jsonPath }, repairPlan };
 }

@@ -98,6 +98,7 @@ export const EVIDENCE_TOPIC_HUBS = [
     explicitPhrases: ["roman empire", "western roman empire", "eastern roman empire"],
     anchors: ["roman emperor", "emperor of rome", "roman legion", "pax romana", "fall of rome"],
     keywords: ["rome", "roman", "augustus", "caesar", "constantinople", "byzantine"],
+    excludedPhrases: ["holy roman empire"],
     yearRange: [1, 1453],
     minimumKeywordMatches: 2,
     pillars: ["Politics & Government", "War & Conflict"],
@@ -145,9 +146,10 @@ export const EVIDENCE_TOPIC_HUBS = [
     title: "Medical Breakthroughs",
     summary:
       "Discoveries, vaccines, surgeries, and public health turning points that changed how people lived and survived.",
-    explicitPhrases: ["medical breakthrough", "public health"],
-    anchors: ["vaccine", "vaccination", "penicillin", "surgery", "epidemic", "pandemic"],
+    explicitPhrases: ["medical breakthrough"],
+    anchors: ["public health", "vaccine", "vaccination", "penicillin", "surgery", "epidemic", "pandemic"],
     keywords: ["medicine", "medical", "hospital", "disease", "treatment", "physician"],
+    minimumKeywordMatchesWithAnchor: 1,
     minimumKeywordMatches: 2,
     pillars: ["Health & Medicine", "Science & Technology"],
   },
@@ -159,6 +161,7 @@ export const EVIDENCE_TOPIC_HUBS = [
     explicitPhrases: ["exploration and discovery", "age of discovery", "age of exploration"],
     anchors: ["expedition", "voyage", "explorer", "navigator", "polar exploration", "circumnavigation"],
     keywords: ["discovery", "atlantic", "pacific", "cartography", "charted"],
+    excludedPhrases: ["northern expedition", "military expedition"],
     minimumKeywordMatches: 2,
     pillars: ["Exploration & Discovery", "Science & Technology"],
   },
@@ -232,15 +235,23 @@ export function topicHubEvidenceForContent(content, hub) {
   if (!hub) return { eligible: false, score: 0, year: null, matches: [] };
   const haystack = normalizeTopicEvidenceText(contentEvidenceStrings(content).join(" "));
   if (!haystack) return { eligible: false, score: 0, year: null, matches: [] };
+  const excludedMatches = (hub.excludedPhrases || []).filter((term) =>
+    containsTopicPhrase(haystack, term),
+  );
+  const evidenceHaystack = (hub.excludedPhrases || []).reduce((value, term) => {
+    const phrase = normalizeTopicEvidenceText(term);
+    if (!phrase) return value;
+    return ` ${value} `.replaceAll(` ${phrase} `, " ").replace(/\s+/g, " ").trim();
+  }, haystack);
 
   const explicitMatches = (hub.explicitPhrases || []).filter((term) =>
-    containsTopicPhrase(haystack, term),
+    containsTopicPhrase(evidenceHaystack, term),
   );
   const anchorMatches = (hub.anchors || []).filter((term) =>
-    containsTopicPhrase(haystack, term),
+    containsTopicPhrase(evidenceHaystack, term),
   );
   const keywordMatches = (hub.keywords || []).filter((term) =>
-    containsTopicPhrase(haystack, term),
+    containsTopicPhrase(evidenceHaystack, term),
   );
   const year = historicalYearFromContent(content);
   const hasYearRange = Array.isArray(hub.yearRange) && hub.yearRange.length === 2;
@@ -248,10 +259,23 @@ export function topicHubEvidenceForContent(content, hub) {
     !hasYearRange ||
     (Number.isInteger(year) && year >= hub.yearRange[0] && year <= hub.yearRange[1]);
   const minimumKeywordMatches = Math.max(2, Number(hub.minimumKeywordMatches) || 2);
+  const minimumKeywordMatchesWithAnchor = Math.max(
+    0,
+    Number(hub.minimumKeywordMatchesWithAnchor) || 0,
+  );
   const eligible =
     explicitMatches.length > 0 ||
-    (yearMatches && anchorMatches.length > 0) ||
-    (yearMatches && keywordMatches.length >= minimumKeywordMatches);
+    (
+      excludedMatches.length === 0 &&
+      (
+        (
+          yearMatches &&
+          anchorMatches.length > 0 &&
+          keywordMatches.length >= minimumKeywordMatchesWithAnchor
+        ) ||
+        (yearMatches && keywordMatches.length >= minimumKeywordMatches)
+      )
+    );
   const score = eligible
     ? explicitMatches.length * 20 +
       anchorMatches.length * 8 +
@@ -263,6 +287,7 @@ export function topicHubEvidenceForContent(content, hub) {
     eligible,
     score,
     year,
+    excludedMatches,
     matches: [...new Set([...explicitMatches, ...anchorMatches, ...keywordMatches])],
   };
 }

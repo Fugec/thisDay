@@ -7454,23 +7454,7 @@ async function savePublishedPost(
   }
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, checkedHtml);
   if (safeEntityMeta.length > 0) {
-    const lightweightEntities = safeEntityMeta.map((e) => ({
-      type: e.type,
-      slug: e.slug,
-      name: e.name,
-      imageUrl: e.imageUrl || "",
-      url: e.url,
-      wikiUrl: e.wikiUrl || "",
-      ...(e.type === "event"
-        ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(e) }
-        : {}),
-      ...(e.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
-      ...(e.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
-      ...(e.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
-      ...(e.profileSubjectVerified === false ? { profileSubjectVerified: false } : {}),
-      ...(e.skipImageRepair ? { skipImageRepair: true } : {}),
-      ...(e.skipStrip ? { skipStrip: true } : {}),
-    }));
+    const lightweightEntities = compactArticleEntityMeta(safeEntityMeta);
     await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(lightweightEntities)).catch(() => {});
   }
 
@@ -8699,6 +8683,11 @@ function unlinkedArticlePerson(term) {
     wikiUrl: "",
     profileLinkEligible: false,
     profileSubjectVerified: false,
+    ...(term?.wikidataEntityId ? { wikidataEntityId: term.wikidataEntityId } : {}),
+    ...(typeof term?.wikidataInstanceOfHuman === "boolean"
+      ? { wikidataInstanceOfHuman: term.wikidataInstanceOfHuman }
+      : {}),
+    ...(term?.isDisambiguation === true ? { isDisambiguation: true } : {}),
     skipImageRepair: true,
   };
 }
@@ -9433,22 +9422,7 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
   }
   await upsertEntityIndex(env, saved);
   if (articleEntities.length > 0) {
-    const lightweight = articleEntities.map((e) => ({
-      type: e.type,
-      slug: e.slug,
-      name: e.name,
-      imageUrl: e.imageUrl || "",
-      url: e.url,
-      wikiUrl: e.wikiUrl || "",
-      ...(e.type === "event"
-        ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(e) }
-        : {}),
-      ...(e.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
-      ...(e.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
-      ...(e.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
-      ...(e.profileSubjectVerified === false ? { profileSubjectVerified: false } : {}),
-      ...(e.skipImageRepair ? { skipImageRepair: true } : {}),
-    }));
+    const lightweight = compactArticleEntityMeta(articleEntities);
     await env.BLOG_AI_KV.put(
       `post-entities:${slug}`,
       JSON.stringify(lightweight),
@@ -9563,6 +9537,32 @@ function buildArticleEntityStrip(entityMeta) {
   return `${css}<div class="entity-strip" data-entity-strip="1"><h2 class="h3">People in this story</h2><div class="entity-person-chips">${chips}</div></div>`;
 }
 
+function compactArticleEntityMeta(entityMeta) {
+  return (Array.isArray(entityMeta) ? entityMeta : []).map((entity) => ({
+    type: entity.type,
+    slug: entity.slug,
+    name: entity.name,
+    imageUrl: entity.imageUrl || "",
+    url: entity.url,
+    wikiUrl: entity.wikiUrl || "",
+    ...(entity.type === "event"
+      ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(entity) }
+      : {}),
+    ...(entity.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
+    ...(entity.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
+    ...(entity.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
+    ...(entity.profileSubjectVerified === false ? { profileSubjectVerified: false } : {}),
+    ...(entity.wikidataEntityId ? { wikidataEntityId: entity.wikidataEntityId } : {}),
+    ...(typeof entity.wikidataInstanceOfHuman === "boolean"
+      ? { wikidataInstanceOfHuman: entity.wikidataInstanceOfHuman }
+      : {}),
+    ...(entity.sourceEventPageFallback === true ? { sourceEventPageFallback: true } : {}),
+    ...(entity.isDisambiguation === true ? { isDisambiguation: true } : {}),
+    ...(entity.skipImageRepair ? { skipImageRepair: true } : {}),
+    ...(entity.skipStrip ? { skipStrip: true } : {}),
+  }));
+}
+
 function injectArticleEntityStrip(html, entityMeta) {
   const strip = buildArticleEntityStrip(entityMeta);
   if (!strip) return html;
@@ -9619,7 +9619,9 @@ function articleEntityStripNeedsProfileValidation(html, entityMetaRaw) {
   try {
     return JSON.parse(entityMetaRaw).some((entity) =>
       entity?.type === "person" &&
-      !hasVerifiedPersonProfileIdentity(entity),
+      !hasVerifiedPersonProfileIdentity(entity) &&
+      entity?.wikidataInstanceOfHuman !== false &&
+      entity?.isDisambiguation !== true,
     );
   } catch {
     return true;
@@ -9812,6 +9814,7 @@ async function hydrateArticleEntityImages(env, entityMeta) {
       const key = `${KV_ENTITY_PREFIX}person:${next.slug}`;
       const record = await env.BLOG_AI_KV.get(key, { type: "json" }).catch(() => null);
       const anchoredWikiUrl = record?.wikiUrl || next.wikiUrl || "";
+      let identityRecord = record;
       let profile = (
         record?.profileLinkEligible === true &&
         record?.profileSubjectVerified === true &&
@@ -9857,6 +9860,7 @@ async function hydrateArticleEntityImages(env, entityMeta) {
             profileSubjectVerified: false,
             updatedAt: new Date().toISOString(),
           };
+          identityRecord = rejectedProfile;
           env.BLOG_AI_KV.put(
             key,
             JSON.stringify(rejectedProfile),
@@ -9865,7 +9869,21 @@ async function hydrateArticleEntityImages(env, entityMeta) {
       }
 
       if (!profile) {
-        const displayOnly = unlinkedArticlePerson(next);
+        const displayOnly = unlinkedArticlePerson({
+          ...next,
+          ...(identityRecord?.wikidataEntityId
+            ? { wikidataEntityId: identityRecord.wikidataEntityId }
+            : {}),
+          ...(typeof identityRecord?.wikidataInstanceOfHuman === "boolean"
+            ? {
+                wikidataInstanceOfHuman:
+                  identityRecord.wikidataInstanceOfHuman,
+              }
+            : {}),
+          ...(identityRecord?.isDisambiguation === true
+            ? { isDisambiguation: true }
+            : {}),
+        });
         if (JSON.stringify(next) !== JSON.stringify(displayOnly)) changed = true;
         hydrated.push(displayOnly);
         continue;
@@ -9883,6 +9901,27 @@ async function hydrateArticleEntityImages(env, entityMeta) {
         next.url = profile.url || `/people/${next.slug}/`;
         delete next.skipImageRepair;
         delete next.skipStrip;
+        changed = true;
+      }
+      if (
+        profile.wikidataEntityId &&
+        next.wikidataEntityId !== profile.wikidataEntityId
+      ) {
+        next.wikidataEntityId = profile.wikidataEntityId;
+        changed = true;
+      }
+      if (
+        typeof profile.wikidataInstanceOfHuman === "boolean" &&
+        next.wikidataInstanceOfHuman !== profile.wikidataInstanceOfHuman
+      ) {
+        next.wikidataInstanceOfHuman = profile.wikidataInstanceOfHuman;
+        changed = true;
+      }
+      if (
+        profile.sourceEventPageFallback === true &&
+        next.sourceEventPageFallback !== true
+      ) {
+        next.sourceEventPageFallback = true;
         changed = true;
       }
       if (profile.imageUrl && next.imageUrl !== profile.imageUrl) {
@@ -16544,6 +16583,10 @@ export const __contentGenerationTestHooks = {
   fetchWikipediaEntityData,
   hasRichWikipediaPersonProfile,
   hasVerifiedPersonProfileIdentity,
+  compactArticleEntityMeta,
+  articleEntityStripNeedsProfileValidation,
+  unlinkedArticlePerson,
+  hydrateArticleEntityImages,
   blogEntityQualityEligible,
   filterGroundingIssues,
   verifyArticleGrounding,

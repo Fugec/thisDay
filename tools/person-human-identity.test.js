@@ -86,6 +86,123 @@ test("source-event fallbacks remain eligible without claiming a human Wikidata i
   assert.equal(blogHooks.blogEntityQualityEligible(fallback), true);
 });
 
+test("legacy linked article people are revalidated until identity evidence is stored", () => {
+  const html =
+    '<div class="entity-strip" data-entity-strip="1">' +
+    '<div class="entity-person-chips">' +
+    '<a href="/people/crimean-tatars/" class="person-pill">Crimean Tatars</a>' +
+    "</div></div>";
+  const legacyLinkedMeta = JSON.stringify([{
+    type: "person",
+    slug: "crimean-tatars",
+    name: "Crimean Tatars",
+    url: "/people/crimean-tatars/",
+    profileLinkEligible: true,
+    profileSubjectVerified: true,
+  }]);
+  const verifiedHumanMeta = JSON.stringify([{
+    type: "person",
+    slug: "ada-lovelace",
+    name: "Ada Lovelace",
+    url: "/people/ada-lovelace/",
+    profileLinkEligible: true,
+    profileSubjectVerified: true,
+    wikidataEntityId: "Q7259",
+    wikidataInstanceOfHuman: true,
+  }]);
+  const rejectedNonHumanMeta = JSON.stringify([{
+    type: "person",
+    slug: "crimean-tatars",
+    name: "Crimean Tatars",
+    profileLinkEligible: false,
+    profileSubjectVerified: false,
+    wikidataEntityId: "Q117458",
+    wikidataInstanceOfHuman: false,
+  }]);
+
+  assert.equal(
+    blogHooks.articleEntityStripNeedsProfileValidation(html, legacyLinkedMeta),
+    true,
+  );
+  assert.equal(
+    blogHooks.articleEntityStripNeedsProfileValidation(html, verifiedHumanMeta),
+    false,
+  );
+  assert.equal(
+    blogHooks.articleEntityStripNeedsProfileValidation(html, rejectedNonHumanMeta),
+    false,
+  );
+});
+
+test("article entity cache preserves terminal Wikidata identity evidence", () => {
+  const compact = blogHooks.compactArticleEntityMeta([{
+    type: "person",
+    slug: "crimean-tatars",
+    name: "Crimean Tatars",
+    imageUrl: "",
+    url: "",
+    wikiUrl: "",
+    profileLinkEligible: false,
+    profileSubjectVerified: false,
+    wikidataEntityId: "Q117458",
+    wikidataInstanceOfHuman: false,
+    skipImageRepair: true,
+  }]);
+  assert.equal(compact[0].wikidataEntityId, "Q117458");
+  assert.equal(compact[0].wikidataInstanceOfHuman, false);
+
+  const unlinked = blogHooks.unlinkedArticlePerson({
+    type: "person",
+    name: "Crimean Tatars",
+    wikidataEntityId: "Q117458",
+    wikidataInstanceOfHuman: false,
+  });
+  assert.equal(unlinked.url, "");
+  assert.equal(unlinked.wikiUrl, "");
+  assert.equal(unlinked.profileLinkEligible, false);
+  assert.equal(unlinked.profileSubjectVerified, false);
+  assert.equal(unlinked.wikidataEntityId, "Q117458");
+  assert.equal(unlinked.wikidataInstanceOfHuman, false);
+});
+
+test("article hydration removes a stale person link after stored Q5 rejection", async () => {
+  const writes = [];
+  const env = {
+    BLOG_AI_KV: {
+      get: async () => ({
+        type: "person",
+        slug: "crimean-tatars",
+        name: "Crimean Tatars",
+        wikiUrl: "https://en.wikipedia.org/wiki/Crimean_Tatars",
+        wikidataEntityId: "Q117458",
+        wikidataInstanceOfHuman: false,
+        profileLinkEligible: false,
+        profileSubjectVerified: false,
+      }),
+      put: async (...args) => writes.push(args),
+    },
+  };
+  const hydrated = await blogHooks.hydrateArticleEntityImages(env, [{
+    type: "person",
+    slug: "crimean-tatars",
+    name: "Crimean Tatars",
+    imageUrl: "https://upload.wikimedia.org/crimean-tatars.png",
+    url: "/people/crimean-tatars/",
+    wikiUrl: "https://en.wikipedia.org/wiki/Crimean_Tatars",
+    profileLinkEligible: true,
+    profileSubjectVerified: true,
+  }]);
+
+  assert.equal(hydrated[0].url, "");
+  assert.equal(hydrated[0].wikiUrl, "");
+  assert.equal(hydrated[0].imageUrl, "");
+  assert.equal(hydrated[0].profileLinkEligible, false);
+  assert.equal(hydrated[0].profileSubjectVerified, false);
+  assert.equal(hydrated[0].wikidataEntityId, "Q117458");
+  assert.equal(hydrated[0].wikidataInstanceOfHuman, false);
+  assert.equal(writes.length, 0);
+});
+
 test("SEO person creation and quality gates require Wikidata Q5", () => {
   const validPerson = {
     type: "person",

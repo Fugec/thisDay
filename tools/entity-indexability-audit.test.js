@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import test from "node:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   buildMigrationPlan,
+  executeMigrationPlan,
   selectMigrationBatch,
   verifyWikipediaSourcePages,
 } from "./entity-indexability-audit.js";
@@ -58,6 +66,58 @@ function auditEntry(
       wikiUrl,
       bodySections: [],
     }),
+  };
+}
+
+function migrationFixture() {
+  const auditedEntries = [
+    auditEntry("person", "safe-person"),
+    auditEntry("event", "safe-event"),
+  ];
+  const index = auditedEntries.map(({ entry }) => entry);
+  const indexRaw = JSON.stringify(index);
+  const plan = buildMigrationPlan(
+    auditedEntries,
+    index,
+    indexRaw,
+    2,
+    "2026-07-16T00:00:00.000Z",
+    {
+      requireSourceVerification: true,
+      sourceVerificationRequests: 1,
+    },
+  );
+  const directory = mkdtempSync(
+    join(tmpdir(), "entity-migration-test-"),
+  );
+  const planPath = join(directory, "plan.json");
+  writeFileSync(planPath, JSON.stringify(plan));
+  const kv = new Map([["entity-index-v1", indexRaw]]);
+  for (const entry of auditedEntries) {
+    kv.set(
+      `entity-v1:${entry.row.type}:${entry.row.slug}`,
+      entry.entityRaw,
+    );
+  }
+  const sourceVerifier = async (entries) => ({
+    requestCount: 1,
+    results: new Map(
+      entries.map(({ entity, entry }) => [
+        entity?.wikiUrl || entry?.wikiUrl,
+        {
+          verified: true,
+          disambiguation: false,
+          reasons: [],
+        },
+      ]),
+    ),
+  });
+  return {
+    directory,
+    kv,
+    plan,
+    planPath,
+    sourceVerifier,
   };
 }
 
@@ -189,5 +249,75 @@ test("Wikipedia verification follows redirects and rejects disambiguation pages"
       "https://en.wikipedia.org/wiki/Ambiguous_Source",
     ).verified,
     false,
+  );
+});
+
+test("verification mode creates backups without writing KV", async () => {
+  const fixture = migrationFixture();
+  const writes = [];
+  const result = await executeMigrationPlan(fixture.planPath, {
+    apply: false,
+    readKv: async (key) => fixture.kv.get(key) ?? null,
+    writeKv: async (key) => writes.push(key),
+    sourceVerifier: fixture.sourceVerifier,
+    generatedAt: new Date("2026-07-16T01:00:00.000Z"),
+  });
+
+  assert.deepEqual(writes, []);
+  assert.equal(result.productionWrites, 0);
+  assert.equal(result.backupsCreated, 3);
+  assert.equal(result.readyForConfirmedApply, true);
+  const report = JSON.parse(readFileSync(result.resultPath, "utf8"));
+  assert.equal(report.mode, "verification-only dry run");
+  assert.equal(report.productionWrites, 0);
+});
+
+test("stale entity hash rejects the complete batch before any write", async () => {
+  const fixture = migrationFixture();
+  fixture.kv.set(
+    "entity-v1:person:safe-person",
+    JSON.stringify({ changed: true }),
+  );
+  const writes = [];
+
+  await assert.rejects(
+    executeMigrationPlan(fixture.planPath, {
+      apply: true,
+      confirmed: true,
+      readKv: async (key) => fixture.kv.get(key) ?? null,
+      writeKv: async (key) => writes.push(key),
+      sourceVerifier: fixture.sourceVerifier,
+      generatedAt: new Date("2026-07-16T02:00:00.000Z"),
+    }),
+    /live hash changed/,
+  );
+  assert.deepEqual(writes, []);
+});
+
+test("confirmed apply writes verified entities before the shared index", async () => {
+  const fixture = migrationFixture();
+  const writes = [];
+  const result = await executeMigrationPlan(fixture.planPath, {
+    apply: true,
+    confirmed: true,
+    readKv: async (key) => fixture.kv.get(key) ?? null,
+    writeKv: async (key, value) => {
+      writes.push(key);
+      fixture.kv.set(key, value);
+    },
+    sourceVerifier: fixture.sourceVerifier,
+    generatedAt: new Date("2026-07-16T03:00:00.000Z"),
+  });
+
+  assert.deepEqual(writes, [
+    "entity-v1:person:safe-person",
+    "entity-v1:event:safe-event",
+    "entity-index-v1",
+  ]);
+  assert.equal(result.productionWrites, 3);
+  assert.equal(result.completed.length, 3);
+  assert.equal(
+    fixture.kv.get("entity-index-v1"),
+    JSON.stringify(fixture.plan.sharedIndex.proposedValue),
   );
 });

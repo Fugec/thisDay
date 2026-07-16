@@ -9,6 +9,8 @@
  * Outputs (gitignored):
  *   documentation/quality/entity-indexability-report.md
  *   documentation/quality/entity-indexability-report.json
+ *   documentation/quality/entity-migration-batch-plan.md
+ *   documentation/quality/entity-migration-batch-plan.json
  */
 
 import {
@@ -57,6 +59,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     outputDir: DEFAULT_OUTPUT_DIR,
     limit: 0,
     planSize: 0,
+    verifyPlan: "",
+    applyPlan: "",
+    confirmProductionWrite: false,
     help: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -64,6 +69,15 @@ function parseArgs(argv = process.argv.slice(2)) {
     if (arg === "--out-dir") options.outputDir = resolve(argv[++index] || "");
     else if (arg === "--limit") options.limit = Number(argv[++index]);
     else if (arg === "--plan-size") options.planSize = Number(argv[++index]);
+    else if (arg === "--verify-plan") {
+      options.verifyPlan = resolve(argv[++index] || "");
+    }
+    else if (arg === "--apply-plan") {
+      options.applyPlan = resolve(argv[++index] || "");
+    }
+    else if (arg === "--confirm-production-write") {
+      options.confirmProductionWrite = true;
+    }
     else if (arg === "--help" || arg === "-h") options.help = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
@@ -79,6 +93,26 @@ function parseArgs(argv = process.argv.slice(2)) {
   ) {
     throw new Error("--plan-size must be an integer from 1 to 50.");
   }
+  if (options.verifyPlan && options.applyPlan) {
+    throw new Error("--verify-plan and --apply-plan cannot be combined.");
+  }
+  if (
+    (options.verifyPlan || options.applyPlan) &&
+    (options.limit || options.planSize)
+  ) {
+    throw new Error("Audit/plan creation flags cannot be combined with plan execution.");
+  }
+  if (options.applyPlan && !options.confirmProductionWrite) {
+    throw new Error("--apply-plan requires --confirm-production-write.");
+  }
+  if (
+    options.confirmProductionWrite &&
+    !options.applyPlan
+  ) {
+    throw new Error(
+      "--confirm-production-write requires --apply-plan PATH.",
+    );
+  }
   return options;
 }
 
@@ -89,9 +123,17 @@ Options:
   --out-dir PATH   Local report directory.
   --limit N        Audit only the first N entity index entries.
   --plan-size N    Build an exact GET-only migration plan for N safe legacy entries.
+  --verify-plan PATH
+                   Re-read live KV, recheck sources and hashes, and create
+                   local backups without writing production.
+  --apply-plan PATH
+                   Apply a fully verified migration plan to production KV.
+  --confirm-production-write
+                   Required explicit acknowledgement for --apply-plan.
   -h, --help       Show this help.
 
-All production operations are Cloudflare KV GET requests only.`);
+Audit, planning, and verification modes use Cloudflare KV GET requests only.
+Production writes are available only through separately confirmed apply mode.`);
 }
 
 async function readKvValue(env, key, fetchImpl = fetch) {
@@ -112,6 +154,32 @@ async function readKvValue(env, key, fetchImpl = fetch) {
     throw new Error(`Cloudflare KV GET failed for ${key}: ${response.status}`);
   }
   return response.text();
+}
+
+async function writeKvValue(env, key, value, fetchImpl = fetch) {
+  const accountId = env.CF_ACCOUNT_ID;
+  const token = env.CF_API_TOKEN;
+  if (!accountId || !token) {
+    throw new Error("Missing CF_ACCOUNT_ID / CF_API_TOKEN in youtube-upload/.env");
+  }
+  const url =
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}` +
+    `/storage/kv/namespaces/${BLOG_KV_NAMESPACE}/values/${encodeURIComponent(key)}`;
+  const response = await fetchImpl(url, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: value,
+  });
+  if (!response.ok) {
+    throw new Error(`Cloudflare KV PUT failed for ${key}: ${response.status}`);
+  }
+  const payload = await response.json().catch(() => null);
+  if (payload?.success === false) {
+    throw new Error(`Cloudflare KV PUT was rejected for ${key}`);
+  }
 }
 
 async function mapLimit(values, concurrency, mapper) {
@@ -593,6 +661,325 @@ function buildMigrationPlanMarkdown(plan) {
   return lines.join("\n");
 }
 
+function assertExactMigrationPlan(plan) {
+  if (
+    !plan ||
+    plan.productionWrites !== 0 ||
+    !Array.isArray(plan.items) ||
+    plan.items.length < 1 ||
+    plan.items.length > 10
+  ) {
+    throw new Error(
+      "Migration plan must be a GET-only batch containing 1 to 10 entities.",
+    );
+  }
+  if (
+    plan.sharedIndex?.key !== "entity-index-v1" ||
+    !Array.isArray(plan.sharedIndex?.proposedValue) ||
+    plan.sharedIndex.beforeEntryCount !== plan.sharedIndex.afterEntryCount ||
+    plan.sharedIndex.changedEntries !== plan.items.length
+  ) {
+    throw new Error("Migration plan has an invalid shared-index contract.");
+  }
+  const proposedIndexRaw = JSON.stringify(plan.sharedIndex.proposedValue);
+  if (sha256(proposedIndexRaw) !== plan.sharedIndex.afterSha256) {
+    throw new Error("Migration plan shared-index after-hash is invalid.");
+  }
+
+  const ids = new Set();
+  for (const item of plan.items) {
+    const expectedKey = `entity-v1:${item.type}:${item.slug}`;
+    const id = `${item.type}:${item.slug}`;
+    if (
+      !["person", "event"].includes(item.type) ||
+      !/^[a-z0-9-]+$/.test(item.slug || "") ||
+      item.entityKey !== expectedKey ||
+      ids.has(id)
+    ) {
+      throw new Error("Migration plan contains an unsafe or duplicate entity key.");
+    }
+    ids.add(id);
+    if (
+      item.sourceVerification?.verified !== true ||
+      item.sourceVerification?.disambiguation === true ||
+      item.eligibilityBefore !== true ||
+      item.eligibilityAfter !== true ||
+      item.robotsBefore !== item.robotsAfter
+    ) {
+      throw new Error(`${item.entityKey} does not satisfy the safe migration contract.`);
+    }
+
+    const expectedEntityAfter = {
+      ...item.entityBefore,
+      qualityGateVersion: QUALITY_GATE_VERSION,
+    };
+    const expectedIndexAfter = {
+      ...item.indexBefore,
+      indexable: true,
+      qualityGateVersion: QUALITY_GATE_VERSION,
+      ...(item.type === "event" ? { historyLinkEligible: true } : {}),
+    };
+    if (JSON.stringify(item.entityAfter) !== JSON.stringify(expectedEntityAfter)) {
+      throw new Error(`${item.entityKey} proposes unsupported entity changes.`);
+    }
+    if (JSON.stringify(item.indexAfter) !== JSON.stringify(expectedIndexAfter)) {
+      throw new Error(`${item.entityKey} proposes unsupported index changes.`);
+    }
+    if (sha256(JSON.stringify(item.entityAfter)) !== item.entityAfterSha256) {
+      throw new Error(`${item.entityKey} has an invalid entity after-hash.`);
+    }
+  }
+  return ids;
+}
+
+function validateSharedIndexProposal(plan, liveIndexRaw, selectedIds) {
+  if (sha256(liveIndexRaw) !== plan.sharedIndex.beforeSha256) {
+    throw new Error("entity-index-v1 live hash changed; refusing the batch.");
+  }
+  const liveIndex = JSON.parse(liveIndexRaw);
+  const proposedIndex = plan.sharedIndex.proposedValue;
+  if (
+    !Array.isArray(liveIndex) ||
+    liveIndex.length !== plan.sharedIndex.beforeEntryCount ||
+    proposedIndex.length !== liveIndex.length
+  ) {
+    throw new Error("entity-index-v1 entry count changed; refusing the batch.");
+  }
+  const planItems = new Map(
+    plan.items.map((item) => [`${item.type}:${item.slug}`, item]),
+  );
+  for (let index = 0; index < liveIndex.length; index += 1) {
+    const liveEntry = liveIndex[index];
+    const proposedEntry = proposedIndex[index];
+    const id = `${liveEntry?.type}:${liveEntry?.slug}`;
+    if (`${proposedEntry?.type}:${proposedEntry?.slug}` !== id) {
+      throw new Error("entity-index-v1 order or identity changed in the proposal.");
+    }
+    if (selectedIds.has(id)) {
+      const item = planItems.get(id);
+      if (
+        JSON.stringify(liveEntry) !== JSON.stringify(item.indexBefore) ||
+        JSON.stringify(proposedEntry) !== JSON.stringify(item.indexAfter)
+      ) {
+        throw new Error(`${id} index entry no longer matches the migration plan.`);
+      }
+    } else if (JSON.stringify(liveEntry) !== JSON.stringify(proposedEntry)) {
+      throw new Error(`${id} is an unrelated shared-index change.`);
+    }
+  }
+}
+
+async function verifyStoredHash(readKv, key, expectedSha256) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const stored = await readKv(key);
+    if (sha256(stored) === expectedSha256) return true;
+    if (attempt < 5) {
+      await new Promise((resolvePromise) =>
+        setTimeout(resolvePromise, 1000),
+      );
+    }
+  }
+  return false;
+}
+
+async function executeMigrationPlan(
+  planPath,
+  {
+    apply = false,
+    confirmed = false,
+    env = null,
+    readKv = null,
+    writeKv = null,
+    sourceVerifier = verifyWikipediaSourcePages,
+    generatedAt = new Date(),
+  } = {},
+) {
+  if (apply && !confirmed) {
+    throw new Error("Production entity migration requires explicit confirmation.");
+  }
+  const resolvedPlanPath = resolve(planPath || "");
+  let plan;
+  try {
+    plan = JSON.parse(readFileSync(resolvedPlanPath, "utf8"));
+  } catch {
+    throw new Error(`Entity migration plan could not be read: ${resolvedPlanPath}`);
+  }
+  const selectedIds = assertExactMigrationPlan(plan);
+  const credentials =
+    env || parseEnvFile(join(ROOT, "youtube-upload/.env"));
+  const kvRead =
+    readKv || ((key) => readKvValue(credentials, key));
+  const kvWrite =
+    writeKv || ((key, value) => writeKvValue(credentials, key, value));
+
+  const sourceCheck = await sourceVerifier(
+    plan.items.map((item) => ({
+      entity: item.entityBefore,
+      entry: item.indexBefore,
+    })),
+  );
+  for (const item of plan.items) {
+    const wikiUrl =
+      item.entityBefore?.wikiUrl ||
+      item.indexBefore?.wikiUrl ||
+      "";
+    const verification = sourceCheck.results.get(wikiUrl);
+    if (!verification?.verified) {
+      throw new Error(
+        `${item.entityKey} source no longer passes verification.`,
+      );
+    }
+  }
+
+  // Complete preflight before creating backups or permitting the first write.
+  const liveIndexRaw = await kvRead("entity-index-v1");
+  if (liveIndexRaw == null) {
+    throw new Error("entity-index-v1 is missing from live KV.");
+  }
+  validateSharedIndexProposal(plan, liveIndexRaw, selectedIds);
+  const preflight = [];
+  for (const item of plan.items) {
+    const liveRaw = await kvRead(item.entityKey);
+    if (liveRaw == null) {
+      throw new Error(`${item.entityKey} is missing from live KV.`);
+    }
+    if (sha256(liveRaw) !== item.entityBeforeSha256) {
+      throw new Error(`${item.entityKey} live hash changed; refusing the batch.`);
+    }
+    preflight.push({
+      item,
+      liveRaw,
+      proposedRaw: JSON.stringify(item.entityAfter),
+    });
+  }
+
+  const stamp = generatedAt.toISOString().replace(/[:.]/g, "-");
+  const operationDir = join(
+    dirname(resolvedPlanPath),
+    `entity-migration-${apply ? "apply" : "verify"}-${stamp}`,
+  );
+  const backupDir = join(operationDir, "backups");
+  mkdirSync(backupDir, { recursive: true });
+  const resultPath = join(operationDir, "result.json");
+  const indexBackupPath = join(backupDir, "entity-index-v1.json");
+  writeFileSync(indexBackupPath, liveIndexRaw);
+  if (sha256(readFileSync(indexBackupPath, "utf8")) !== plan.sharedIndex.beforeSha256) {
+    throw new Error("entity-index-v1 local backup verification failed.");
+  }
+  for (const { item, liveRaw } of preflight) {
+    const backupPath = join(
+      backupDir,
+      `${item.type}-${item.slug}.json`,
+    );
+    writeFileSync(backupPath, liveRaw);
+    if (sha256(readFileSync(backupPath, "utf8")) !== item.entityBeforeSha256) {
+      throw new Error(`${item.entityKey} local backup verification failed.`);
+    }
+  }
+
+  const result = {
+    startedAt: generatedAt.toISOString(),
+    planPath: resolvedPlanPath,
+    mode: apply
+      ? "confirmed production entity migration"
+      : "verification-only dry run",
+    selectedEntities: plan.items.length,
+    sourceVerificationRequests: sourceCheck.requestCount || 0,
+    backupsCreated: plan.items.length + 1,
+    productionWrites: 0,
+    publicEntityPageFetches: 0,
+    completed: [],
+  };
+  writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+
+  if (!apply) {
+    result.verifiedAt = new Date().toISOString();
+    result.readyForConfirmedApply = true;
+    writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+    return { operationDir, resultPath, ...result };
+  }
+
+  try {
+    for (const { item, proposedRaw } of preflight) {
+      const liveRaw = await kvRead(item.entityKey);
+      if (sha256(liveRaw) !== item.entityBeforeSha256) {
+        throw new Error(
+          `${item.entityKey} changed after preflight; refusing this and later writes.`,
+        );
+      }
+      const backupPath = join(
+        backupDir,
+        `${item.type}-${item.slug}.json`,
+      );
+      writeFileSync(backupPath, liveRaw);
+      if (sha256(readFileSync(backupPath, "utf8")) !== item.entityBeforeSha256) {
+        throw new Error(`${item.entityKey} immediate backup verification failed.`);
+      }
+
+      await kvWrite(item.entityKey, proposedRaw);
+      result.productionWrites += 1;
+      if (
+        !(await verifyStoredHash(
+          kvRead,
+          item.entityKey,
+          item.entityAfterSha256,
+        ))
+      ) {
+        throw new Error(`${item.entityKey} after-hash could not be verified.`);
+      }
+      result.completed.push({
+        key: item.entityKey,
+        beforeSha256: item.entityBeforeSha256,
+        afterSha256: item.entityAfterSha256,
+        verified: true,
+      });
+      writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+    }
+
+    const latestIndexRaw = await kvRead("entity-index-v1");
+    if (sha256(latestIndexRaw) !== plan.sharedIndex.beforeSha256) {
+      throw new Error(
+        "entity-index-v1 changed after preflight; refusing the final index write.",
+      );
+    }
+    writeFileSync(indexBackupPath, latestIndexRaw);
+    if (
+      sha256(readFileSync(indexBackupPath, "utf8")) !==
+      plan.sharedIndex.beforeSha256
+    ) {
+      throw new Error("entity-index-v1 immediate backup verification failed.");
+    }
+    const proposedIndexRaw = JSON.stringify(plan.sharedIndex.proposedValue);
+    await kvWrite("entity-index-v1", proposedIndexRaw);
+    result.productionWrites += 1;
+    if (
+      !(await verifyStoredHash(
+        kvRead,
+        "entity-index-v1",
+        plan.sharedIndex.afterSha256,
+      ))
+    ) {
+      throw new Error("entity-index-v1 after-hash could not be verified.");
+    }
+    result.completed.push({
+      key: "entity-index-v1",
+      beforeSha256: plan.sharedIndex.beforeSha256,
+      afterSha256: plan.sharedIndex.afterSha256,
+      verified: true,
+    });
+  } catch (error) {
+    result.failedAt = new Date().toISOString();
+    result.failure = error.message;
+    writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+    error.applyResultPath = resultPath;
+    throw error;
+  }
+
+  result.completedAt = new Date().toISOString();
+  writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+  return { operationDir, resultPath, ...result };
+}
+
 function buildReport(rows, generatedAt) {
   const byType = countBy(rows, (row) => row.type);
   const eligibleByType = countBy(
@@ -811,6 +1198,27 @@ async function main(argv = process.argv.slice(2)) {
     printHelp();
     return;
   }
+  if (options.verifyPlan || options.applyPlan) {
+    const apply = Boolean(options.applyPlan);
+    const result = await executeMigrationPlan(
+      options.applyPlan || options.verifyPlan,
+      {
+        apply,
+        confirmed: options.confirmProductionWrite,
+      },
+    );
+    console.log("");
+    console.log(
+      apply
+        ? "Confirmed entity migration complete."
+        : "Entity migration verification complete.",
+    );
+    console.log(`Selected entities: ${result.selectedEntities}`);
+    console.log(`Local backups: ${result.backupsCreated}`);
+    console.log(`Production writes: ${result.productionWrites}`);
+    console.log(`Result: ${result.resultPath}`);
+    return;
+  }
   const result = await runAudit(options);
   console.log("");
   console.log("Read-only entity indexability audit complete.");
@@ -844,6 +1252,7 @@ export {
   buildMigrationPlanMarkdown,
   entityBodyWordCount,
   evaluateEntityIndexability,
+  executeMigrationPlan,
   historySlugQualityIssue,
   isDirectWikipediaArticleUrl,
   runAudit,

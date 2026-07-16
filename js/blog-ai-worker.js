@@ -11559,6 +11559,22 @@ const GROUNDING_CLAIM_RISK_RULES = [
   },
 ];
 
+// A source can state a direct casualty outcome with a plain predicate while an
+// article uses equivalent causal syntax: "the arson killed 36 people" supports
+// "the attack resulted in 36 deaths." Keep this equivalence deliberately
+// narrow. It does not apply to policy, motive, prevention, security changes, or
+// other downstream consequences.
+const GROUNDING_DIRECT_CASUALTY_OUTCOME_RULES = [
+  {
+    claim: /\b(?:death|deaths|died|fatalit(?:y|ies)|kill(?:ed|s|ing)?)\b/i,
+    support: /\b(?:death|deaths|died|fatalit(?:y|ies)|kill(?:ed|s|ing)?)\b/i,
+  },
+  {
+    claim: /\b(?:injur(?:ed|ies|ing|y)?|wound(?:ed|s|ing)?)\b/i,
+    support: /\b(?:injur(?:ed|ies|ing|y)?|wound(?:ed|s|ing)?)\b/i,
+  },
+];
+
 function collectGroundingClaimEntries(value, path = "", out = []) {
   if (typeof value === "string") {
     const text = value.replace(/\s+/g, " ").trim();
@@ -11655,9 +11671,46 @@ function groundingClaimHasSourceSupport(claim, sourceSentence) {
   );
 }
 
+function groundingClaimNumbers(value) {
+  return Array.from(
+    String(value || "").matchAll(/\b\d[\d,]*(?:\.\d+)?\b/g),
+    (match) => match[0].replace(/,/g, ""),
+  );
+}
+
+function groundingDirectCasualtyOutcomeHasSupport(claim, sourceEvidence) {
+  const matchedOutcomeRules = GROUNDING_DIRECT_CASUALTY_OUTCOME_RULES.filter(
+    (rule) => rule.claim.test(claim),
+  );
+  if (matchedOutcomeRules.length === 0) return false;
+  if (
+    !matchedOutcomeRules.every((rule) => {
+      rule.support.lastIndex = 0;
+      return rule.support.test(sourceEvidence);
+    })
+  ) {
+    return false;
+  }
+
+  // Exact numbers are part of a casualty claim's identity. Do not let a
+  // semantically similar sentence support different dates or tolls.
+  const sourceNumbers = new Set(groundingClaimNumbers(sourceEvidence));
+  if (
+    groundingClaimNumbers(claim).some((number) => !sourceNumbers.has(number))
+  ) {
+    return false;
+  }
+  return groundingClaimHasSourceSupport(claim, sourceEvidence);
+}
+
 function unsupportedGroundingClaims(content, sourceMaterial) {
   const sourceSentences = splitSentences(sourceMaterial).filter(Boolean);
   if (sourceSentences.length === 0) return [];
+  const adjacentSourceWindows = sourceSentences.map((sentence, index) =>
+    index + 1 < sourceSentences.length
+      ? `${sentence} ${sourceSentences[index + 1]}`
+      : sentence,
+  );
   const findings = [];
   const seen = new Set();
 
@@ -11676,7 +11729,12 @@ function unsupportedGroundingClaims(content, sourceMaterial) {
             rule.support.test(sourceSentence) &&
             groundingClaimHasSourceSupport(sentence, sourceSentence)
           );
-        });
+        }) || (
+          rule.label === "causal claim" &&
+          adjacentSourceWindows.some((sourceEvidence) =>
+            groundingDirectCasualtyOutcomeHasSupport(sentence, sourceEvidence),
+          )
+        );
         if (!supported) {
           findings.push({
             field: entry.field,

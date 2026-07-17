@@ -668,12 +668,12 @@ body[data-page="v2"] > .people-strip {
 }
 .hero-highlight-year {
   color: #86aa38;
-  font-size: 0.93rem;
+  font-size: 15px;
   font-weight: 700;
 }
 .hero-highlight-text {
   color: #2f312f;
-  font-size: 0.82rem;
+  font-size: 15px;
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -1903,10 +1903,10 @@ main.container {
     gap: 0.7rem;
   }
   .hero-highlight-year {
-    font-size: 0.82rem;
+    font-size: 15px;
   }
   .hero-highlight-text {
-    font-size: 0.75rem;
+    font-size: 15px;
     line-height: 1.45;
   }
   .hero-actions {

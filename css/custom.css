@@ -233,7 +233,6 @@ img {
 .homepage-section-title {
   margin: 0;
   padding: 40px var(--gutter-x);
-  padding-left: 0px !important;
   color: var(--text);
   font-size: 21px;
   font-weight: 700;

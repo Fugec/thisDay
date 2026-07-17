@@ -280,6 +280,10 @@
             src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
             alt="Today event image"
             class="quiz-card-img"
+            width="800"
+            height="400"
+            loading="lazy"
+            decoding="async"
             style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
@@ -301,6 +305,10 @@
             src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
             alt="Loading..."
             class="quiz-card-img"
+            width="800"
+            height="400"
+            loading="lazy"
+            decoding="async"
             style="background: var(--bg-alt)"
           />
           <div class="quiz-card-body">
@@ -363,7 +371,27 @@
                 heroQuizBtn.href = "/blog/" + latest.slug + "/#quiz";
               }
               if (imgEl && latest.imageUrl) {
-                imgEl.src = latest.imageUrl;
+                var wikiImage = latest.imageUrl.indexOf("wikimedia.org") !== -1;
+                var proxied = function (width) {
+                  return wikiImage
+                    ? "/img?src=" +
+                        encodeURIComponent(latest.imageUrl) +
+                        "&w=" +
+                        width +
+                        "&q=82"
+                    : latest.imageUrl;
+                };
+                imgEl.src = proxied(800);
+                if (wikiImage) {
+                  imgEl.srcset =
+                    proxied(400) +
+                    " 400w, " +
+                    proxied(800) +
+                    " 800w, " +
+                    proxied(1200) +
+                    " 1200w";
+                  imgEl.sizes = "(max-width: 767px) 100vw, 50vw";
+                }
                 imgEl.alt = latest.title || "Latest Article";
               }
               if (titleEl && latest.title) {
@@ -445,7 +473,7 @@
                 escHtml(v.thumbnail) +
                 '" alt="' +
                 escHtml(shortTitle) +
-                "\" loading=\"lazy\" onerror=\"if(this.src.indexOf('hqdefault')>-1){this.src=this.src.replace('hqdefault','mqdefault');}else{this.style.display='none';}\" />" +
+                "\" width=\"480\" height=\"360\" loading=\"lazy\" decoding=\"async\" onerror=\"if(this.src.indexOf('hqdefault')>-1){this.src=this.src.replace('hqdefault','mqdefault');}else{this.style.display='none';}\" />" +
                 '<div class="video-card-play"><i class="bi bi-play-circle-fill"></i></div>' +
                 "</div>" +
                 '<div class="blog-card-body">' +
@@ -782,7 +810,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="js/script.js?v=14"></script>
+    <script src="js/script.js?v=15"></script>
     <script src="/js/chatbot.js?v=5"></script>
 
     <script>
@@ -801,6 +829,10 @@
               var title = post.title || "Untitled";
               var excerpt = post.excerpt || post.description || "";
               var img = post.imageUrl || "";
+              var imgSrc = img ? getOptimizedImageUrl(img, 600) : "";
+              var imgSrcset = img
+                ? getResponsiveImageSrcset(img, [320, 600, 960])
+                : "";
               var dateStr = post.date || post.publishedAt || "";
               var dateLabel = dateStr
                 ? new Date(dateStr).toLocaleDateString("en-US", {
@@ -814,12 +846,17 @@
               card.href = "/blog/" + slug + "/";
               card.style.cssText = "text-decoration:none;color:inherit;";
               card.innerHTML =
-                (img
+                (imgSrc
                   ? '<img src="' +
-                    img +
-                    '" alt="' +
+                    imgSrc +
+                    (imgSrcset
+                      ? '" srcset="' +
+                        imgSrcset +
+                        '" sizes="(max-width: 767px) 85vw, 33vw"'
+                      : '"') +
+                    ' alt="' +
                     title.replace(/"/g, "&quot;") +
-                    '" class="blog-card-img" loading="lazy" onerror="this.style.display=\'none\'" />'
+                    '" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" onerror="this.style.display=\'none\'" />'
                   : "") +
                 '<div class="blog-card-body">' +
                 (dateLabel
@@ -881,6 +918,9 @@
               var img = e.thumbnailUrl
                 ? getOptimizedImageUrl(e.thumbnailUrl, 600)
                 : "";
+              var imgSrcset = e.thumbnailUrl
+                ? getResponsiveImageSrcset(e.thumbnailUrl, [320, 600, 960])
+                : "";
               var link = e.sourceUrl || "#";
               var yearLabel = e.year || "";
 
@@ -895,9 +935,14 @@
                 (img
                   ? '<img src="' +
                     img +
-                    '" alt="' +
+                    (imgSrcset
+                      ? '" srcset="' +
+                        imgSrcset +
+                        '" sizes="(max-width: 767px) 85vw, 33vw"'
+                      : '"') +
+                    ' alt="' +
                     title.replace(/"/g, "&quot;") +
-                    '" class="blog-card-img" loading="lazy" onerror="this.style.display=\'none\'" />'
+                    '" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" onerror="this.style.display=\'none\'" />'
                   : "") +
                 '<div class="blog-card-body">' +
                 (yearLabel

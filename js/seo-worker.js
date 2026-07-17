@@ -1148,7 +1148,7 @@ async function buildHomepageVideoCards(env) {
       const thumbnail = `https://img.youtube.com/vi/${video.youtubeId}/hqdefault.jpg`;
       return `<a class="blog-card video-card" href="https://www.youtube.com/shorts/${escapeHtml(video.youtubeId)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;color:inherit;">
         <div class="video-card-thumb">
-          <img src="${escapeHtml(thumbnail)}" alt="${escapeHtml(shortTitle)}" loading="lazy" onerror="if(this.src.indexOf('hqdefault')>-1){this.src=this.src.replace('hqdefault','mqdefault');}else{this.style.display='none';}" />
+          <img src="${escapeHtml(thumbnail)}" alt="${escapeHtml(shortTitle)}" width="480" height="360" loading="lazy" decoding="async" onerror="if(this.src.indexOf('hqdefault')>-1){this.src=this.src.replace('hqdefault','mqdefault');}else{this.style.display='none';}" />
           <div class="video-card-play"><i class="bi bi-play-circle-fill"></i></div>
         </div>
         <div class="blog-card-body">
@@ -7788,7 +7788,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=28>; rel=preload; as=style",
+      "</css/custom.css?v=31>; rel=preload; as=style",
     ].join(", "),
   );
 

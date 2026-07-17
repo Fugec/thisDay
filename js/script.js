@@ -188,6 +188,19 @@ function getOptimizedImageUrl(url, width = 1200, quality = 82) {
   return `/img?src=${encodeURIComponent(url)}&w=${width}&q=${quality}`;
 }
 
+function getResponsiveImageSrcset(
+  url,
+  widths = [320, 600, 960],
+  quality = 82,
+) {
+  if (!url || !url.includes("wikimedia.org")) return "";
+  return [...new Set(widths)]
+    .filter((width) => Number.isInteger(width) && width > 0)
+    .sort((a, b) => a - b)
+    .map((width) => `${getOptimizedImageUrl(url, width, quality)} ${width}w`)
+    .join(", ");
+}
+
 function slugifyPersonName(value) {
   return String(value || "")
     .toLowerCase()
@@ -1123,10 +1136,22 @@ async function populatePeopleStrip() {
     const imageUrl = person.thumbnailUrl || person.imageUrl || "";
     if (imageUrl) {
       const img = document.createElement("img");
-      img.src = options.useProxy
-        ? "/image-proxy?src=" + encodeURIComponent(imageUrl) + "&w=160&h=160&fit=cover&q=80"
-        : getOptimizedImageUrl(imageUrl, 160, 80);
+      if (options.useProxy) {
+        const proxied = (width) =>
+          "/image-proxy?src=" + encodeURIComponent(imageUrl) +
+          "&w=" + width + "&h=" + width + "&fit=cover&q=80";
+        img.src = proxied(160);
+        img.srcset = `${proxied(80)} 80w, ${proxied(160)} 160w`;
+      } else {
+        img.src = getOptimizedImageUrl(imageUrl, 160, 80);
+        img.srcset = getResponsiveImageSrcset(imageUrl, [80, 160], 80);
+      }
+      img.sizes = "80px";
       img.alt = person.title || person.name || "";
+      img.width = 80;
+      img.height = 80;
+      img.loading = "lazy";
+      img.decoding = "async";
       img.onerror = () => {
         circle.innerHTML = '<div class="person-circle-fallback"><i class="bi bi-person"></i></div>';
       };
@@ -1269,7 +1294,13 @@ async function populateTodayEventCard() {
       randomEvent.featuredImage ||
       "https://placehold.co/800x400?text=No+Image";
     imgEl.src = getOptimizedImageUrl(rawUrl, 800);
+    imgEl.srcset = getResponsiveImageSrcset(rawUrl, [400, 800, 1200]);
+    imgEl.sizes = "(max-width: 767px) 100vw, 50vw";
     imgEl.alt = randomEvent.title || "Today event image";
+    imgEl.width = 800;
+    imgEl.height = 400;
+    imgEl.loading = "lazy";
+    imgEl.decoding = "async";
   }
 }
 
@@ -2317,11 +2348,18 @@ function renderFilteredItems(itemsToRender) {
     }
     const extractText = String(event.pageExtract || "").trim();
     const imageAlt = titleText || event.title || "Historical event";
+    const modalImageUrl = event.thumbnailUrl
+      ? getOptimizedImageUrl(event.thumbnailUrl, 320, 80)
+      : "";
+    const modalImageSrcset = event.thumbnailUrl
+      ? getResponsiveImageSrcset(event.thumbnailUrl, [160, 320], 80)
+      : "";
     const mediaHtml = event.thumbnailUrl
       ? `
                         <div class="modal-tl-media">
-                            <img src="${escHtml(event.thumbnailUrl)}"
-                                alt="${escHtml(imageAlt.substring(0, 80))}" loading="lazy" onerror="this.parentElement.classList.add('modal-tl-media-blank'); this.remove()">
+                            <img src="${escHtml(modalImageUrl)}"
+                                ${modalImageSrcset ? `srcset="${escHtml(modalImageSrcset)}" sizes="160px"` : ""}
+                                alt="${escHtml(imageAlt.substring(0, 80))}" width="160" height="120" loading="lazy" decoding="async" onerror="this.parentElement.classList.add('modal-tl-media-blank'); this.remove()">
                         </div>
                         `
       : `
@@ -2593,7 +2631,7 @@ async function showEventDetails(
             <div class="born-died-person">
               ${
                 p.thumbnailUrl
-                  ? `<img src="${getOptimizedImageUrl(p.thumbnailUrl, 120, 80)}" alt="${p.title || ""}" class="born-died-thumb" onerror="this.style.display='none'">`
+                  ? `<img src="${getOptimizedImageUrl(p.thumbnailUrl, 72, 80)}" srcset="${getResponsiveImageSrcset(p.thumbnailUrl, [36, 72], 80)}" sizes="36px" alt="${p.title || ""}" class="born-died-thumb" width="36" height="36" loading="lazy" decoding="async" onerror="this.style.display='none'">`
                   : `<div class="born-died-thumb-placeholder"></div>`
               }
               <div class="born-died-info">
@@ -2840,6 +2878,7 @@ async function fetchWikipediaEventsForCarousel() {
               year: event.year,
               title: wikiPage.title || event.text.split(".")[0],
               excerpt: event.text,
+              sourceImageUrl: wikiPage.thumbnail.source,
               imageUrl: optimized,
               backgroundUrl: optimized,
               url: wikiPage.content_urls.desktop.page,
@@ -2886,6 +2925,7 @@ async function fetchWikipediaEventsForCarousel() {
         year: event.year,
         title: wikiPage.title,
         excerpt: event.text,
+        sourceImageUrl: wikiPage.thumbnail.source,
         imageUrl: optimized,
         backgroundUrl: optimized,
         url: wikiPage.content_urls.desktop.page,
@@ -2909,6 +2949,10 @@ function renderFullWidthCarouselItem(container, event, index) {
     event.imageUrl ||
     `https://placehold.co/1200x350/3b82f6/ffffff?text=${encodeURIComponent(title)}`;
   const fallbackUrl = `https://placehold.co/1200x350/3b82f6/ffffff?text=${encodeURIComponent(title)}`;
+  const responsiveSrcset = getResponsiveImageSrcset(
+    event.sourceImageUrl || "",
+    [640, 960, 1200],
+  );
   const excerpt =
     event.excerpt && event.excerpt.length > 160
       ? event.excerpt.substring(0, 160) + "..."
@@ -2917,8 +2961,9 @@ function renderFullWidthCarouselItem(container, event, index) {
   item.innerHTML = `
     <div class="carousel-image-container">
       <img src="${imageUrl}" class="d-block w-100" alt="${title}"
+           ${responsiveSrcset ? `srcset="${responsiveSrcset}" sizes="100vw"` : ""}
            onerror="this.onerror=null;this.src='${fallbackUrl}';"
-           ${index === 0 ? 'fetchpriority="high"' : 'fetchpriority="low"'} decoding="async" width="1200" height="350">
+           ${index === 0 ? 'fetchpriority="high" loading="eager"' : 'fetchpriority="low" loading="lazy"'} decoding="async" width="1200" height="350">
     </div>
     <div class="carousel-caption">
       <small style="opacity:0.75;font-size:0.85em;display:block;margin-bottom:6px;letter-spacing:0.05em;">${event.year}</small>

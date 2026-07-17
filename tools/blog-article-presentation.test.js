@@ -252,6 +252,126 @@ test("future articles show the verified evidence comparison near the overview", 
   assert.doesNotMatch(visibleText, /https?:\/\//);
 });
 
+test("commercial blocks render only with verified topic-matched books", () => {
+  const baseContent = {
+    title: "Spanish Civil War Begins — July 17, 1936",
+    eventTitle: "Spanish Civil War Begins",
+    sourcePageTitle: "Spanish Civil War",
+    keywords: "Spanish Civil War, Francisco Franco, Republican Spain",
+    keyTerms: [{ term: "Francisco Franco", type: "person" }],
+    bookSearchQuery: "Spanish Civil War books",
+    amazonBookTopic: "Books on the Spanish Civil War",
+  };
+  const relevantContent = {
+    ...baseContent,
+    openLibraryBooks: [
+      {
+        title: "The Spanish Civil War",
+        author: "Hugh Thomas",
+        coverUrl: "https://covers.openlibrary.org/b/id/1-M.jpg",
+      },
+      {
+        title: "Franco",
+        author: "Paul Preston",
+        coverUrl: "https://covers.openlibrary.org/b/id/2-M.jpg",
+      },
+      {
+        title: "The Roman Empire",
+        author: "Mary Beard",
+        coverUrl: "https://covers.openlibrary.org/b/id/3-M.jpg",
+      },
+    ],
+  };
+  const irrelevantContent = {
+    ...baseContent,
+    openLibraryBooks: [
+      {
+        title: "The Roman Empire",
+        author: "Mary Beard",
+        coverUrl: "https://covers.openlibrary.org/b/id/3-M.jpg",
+      },
+      {
+        title: "Apollo 11",
+        author: "James Donovan",
+        coverUrl: "https://covers.openlibrary.org/b/id/4-M.jpg",
+      },
+      {
+        title: "Napoleon",
+        author: "Andrew Roberts",
+        coverUrl: "https://covers.openlibrary.org/b/id/5-M.jpg",
+      },
+    ],
+  };
+
+  assert.equal(
+    blogHooks.commercialRecommendationsAreRelevant(relevantContent),
+    true,
+  );
+  assert.equal(
+    blogHooks.relevantOpenLibraryBooks(relevantContent).length,
+    2,
+  );
+  const relevantHtml = blogHooks.buildAmazonRelatedBlock(
+    relevantContent,
+    ["War & Conflict"],
+  );
+  assert.match(relevantHtml, /class="amazon-related/);
+  const renderedTrack = relevantHtml.match(
+    /<div class="amazon-slider-track"[^>]*>([\s\S]*?)<\/div>/,
+  )?.[1] || "";
+  assert.equal(
+    (renderedTrack.match(/class="amazon-product-card"/g) || []).length,
+    2,
+  );
+  assert.doesNotMatch(relevantHtml, /The Roman Empire/);
+
+  assert.equal(
+    blogHooks.commercialRecommendationsAreRelevant(irrelevantContent),
+    false,
+  );
+  assert.equal(
+    blogHooks.buildAmazonRelatedBlock(irrelevantContent, ["War & Conflict"]),
+    "",
+  );
+});
+
+test("irrelevant commercial recommendations omit both the affiliate slider and paired ad", () => {
+  const html = blogHooks.buildPostHTML(
+    {
+      title: "Spanish Civil War Begins — July 17, 1936",
+      eventTitle: "Spanish Civil War Begins",
+      sourcePageTitle: "Spanish Civil War",
+      historicalDate: "July 17, 1936",
+      historicalDateISO: "1936-07-17",
+      historicalYear: 1936,
+      description:
+        "A military uprising divided Spain and began the Spanish Civil War in July 1936.",
+      keywords: "Spanish Civil War, Francisco Franco, Republican Spain",
+      keyTerms: [{ term: "Francisco Franco", type: "person" }],
+      bookSearchQuery: "Spanish Civil War books",
+      openLibraryBooks: [
+        {
+          title: "Apollo 11",
+          author: "James Donovan",
+          coverUrl: "https://covers.openlibrary.org/b/id/4-M.jpg",
+        },
+        {
+          title: "The Roman Empire",
+          author: "Mary Beard",
+          coverUrl: "https://covers.openlibrary.org/b/id/3-M.jpg",
+        },
+      ],
+    },
+    new Date("2026-07-17T00:05:00.000Z"),
+    "17-july-2026",
+    [],
+    ["War & Conflict"],
+  );
+
+  assert.doesNotMatch(html, /class="amazon-related/);
+  assert.doesNotMatch(html, /article-body-ad-v1/);
+});
+
 test("public question titles use a source-supported niche while factual metadata stays locked", () => {
   const content = {
     title: "Spanish Civil War Begins — July 17, 1936",

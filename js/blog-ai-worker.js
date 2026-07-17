@@ -310,6 +310,16 @@ const DRAFT_ENRICHMENT_CRON = "15 0 * * *";
 // entity-recovery pass that re-links people strips with a fresh subrequest budget.
 const ENTITY_RECOVERY_CRON = "50 0 * * *";
 const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
+const MIN_RELEVANT_COMMERCIAL_BOOKS = 2;
+const COMMERCIAL_RELEVANCE_STOPWORDS = new Set([
+  "about", "after", "against", "also", "among", "before", "began", "begin",
+  "begins", "book", "books", "cause", "caused", "civil", "companion",
+  "documentary", "during", "event", "events", "first", "from", "historical",
+  "history", "into", "later", "memoir", "more", "most", "over", "reading",
+  "related", "second", "story", "than", "that", "their", "these", "this",
+  "through", "today", "under", "were", "what", "when", "where", "which",
+  "while", "with", "world", "would", "battle", "conflict", "incident", "war",
+]);
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
 const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
@@ -10136,8 +10146,6 @@ function assertArticleStructure(html) {
     ["collapsed analysis disclosure", /<details class="analysis-disclosure\b/i],
     ["people entity strip", /data-entity-strip="1"/i],
     ["people entity card", /class="person-pill"/i],
-    ["related Amazon block", /class="amazon-related/i],
-    ["Amazon recommendation cards", /amazon-product-card/i],
   ];
   const missing = checks
     .filter(([, pattern]) => !pattern.test(source))
@@ -13910,14 +13918,74 @@ function buildAmazonRelatedData(c, currentPillars = []) {
   return { topic, sliderItems, openLibraryQuery, bookKeywords };
 }
 
-function buildAmazonFallbackCards(sliderItems) {
-  return sliderItems.map((item) =>
-    `<a class="amazon-product-card" href="${esc(amazonSearchUrl(item.query))}" target="_blank" rel="sponsored noopener noreferrer" data-amazon-fallback="1">` +
-    `<span class="amazon-card-cover amazon-card-cover-fallback" aria-hidden="true"><i class="bi bi-book"></i></span>` +
-    `<strong>${esc(item.label)}</strong>` +
-    `<small>View on Amazon</small>` +
-    `</a>`,
-  ).join("");
+function commercialRelevanceTokens(value) {
+  return normalizeTopicMatchText(value)
+    .split(/\s+/)
+    .filter((token) =>
+      token.length >= 3 &&
+      !/^\d+$/.test(token) &&
+      !COMMERCIAL_RELEVANCE_STOPWORDS.has(token),
+    );
+}
+
+function articleCommercialTopicTokens(content) {
+  const keyTerms = Array.isArray(content?.keyTerms)
+    ? content.keyTerms.map((term) => term?.term || "")
+    : [];
+  const sourcePageTitles = Array.isArray(content?.sourcePages)
+    ? content.sourcePages.map((page) => page?.pageTitle || "")
+    : [];
+  return new Set(commercialRelevanceTokens([
+    content?.eventTitle,
+    content?.sourceEventHeadline,
+    content?.sourcePageTitle,
+    content?.keywords,
+    ...keyTerms,
+    ...sourcePageTitles,
+  ].filter(Boolean).join(" ")));
+}
+
+function openLibraryBookMatchesArticle(book, content) {
+  if (!book?.title || !book?.coverUrl) return false;
+  const articleTokens = articleCommercialTopicTokens(content);
+  if (articleTokens.size === 0) return false;
+
+  const titleAuthorTokens = new Set(commercialRelevanceTokens(
+    `${book.title || ""} ${book.author || ""}`,
+  ));
+  const subjectTokens = new Set(commercialRelevanceTokens(
+    Array.isArray(book.subjects) ? book.subjects.join(" ") : "",
+  ));
+  const primaryMatches = [...titleAuthorTokens].filter((token) =>
+    articleTokens.has(token),
+  );
+  const subjectMatches = [...subjectTokens].filter((token) =>
+    articleTokens.has(token),
+  );
+  const allMatches = new Set([...primaryMatches, ...subjectMatches]);
+
+  return (
+    primaryMatches.length >= 2 ||
+    primaryMatches.some((token) => token.length >= 6) ||
+    allMatches.size >= 2
+  );
+}
+
+function relevantOpenLibraryBooks(content) {
+  const seen = new Set();
+  return (Array.isArray(content?.openLibraryBooks) ? content.openLibraryBooks : [])
+    .filter((book) => openLibraryBookMatchesArticle(book, content))
+    .filter((book) => {
+      const key = normalizeTopicMatchText(`${book.title || ""} ${book.author || ""}`);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 5);
+}
+
+function commercialRecommendationsAreRelevant(content) {
+  return relevantOpenLibraryBooks(content).length >= MIN_RELEVANT_COMMERCIAL_BOOKS;
 }
 
 function buildOpenLibraryAmazonCards(books) {
@@ -14002,10 +14070,11 @@ async function fetchOpenLibraryBooks(query, keywords = "", limit = 5) {
 async function hydrateContentAssetsForPublish(content, currentPillars = []) {
   const related = buildAmazonRelatedData(content, currentPillars);
   if (!related) return content;
-  const existingBooks = Array.isArray(content.openLibraryBooks)
-    ? content.openLibraryBooks.filter((book) => book?.title && book?.coverUrl)
-    : [];
-  if (existingBooks.length >= 3) return content;
+  const existingBooks = relevantOpenLibraryBooks(content);
+  if (existingBooks.length >= MIN_RELEVANT_COMMERCIAL_BOOKS) {
+    content.openLibraryBooks = existingBooks;
+    return content;
+  }
 
   const queries = [
     related.openLibraryQuery,
@@ -14020,32 +14089,41 @@ async function hydrateContentAssetsForPublish(content, currentPillars = []) {
     .map((query) => String(query || "").replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
-  const books = [];
-  const seen = new Set();
+  const books = [...existingBooks];
+  const seen = new Set(
+    existingBooks.map((book) =>
+      normalizeTopicMatchText(`${book.title || ""} ${book.author || ""}`),
+    ),
+  );
   for (const query of queries) {
     if (books.length >= 5) break;
     const found = await fetchOpenLibraryBooks(query, related.bookKeywords, 5).catch(() => []);
     for (const book of found) {
       const key = normalizeTopicMatchText(`${book.title} ${book.author}`);
-      if (!key || seen.has(key)) continue;
+      if (!key || seen.has(key) || !openLibraryBookMatchesArticle(book, content)) {
+        continue;
+      }
       seen.add(key);
       books.push(book);
       if (books.length >= 5) break;
     }
   }
-  if (books.length > 0) {
+  if (books.length >= MIN_RELEVANT_COMMERCIAL_BOOKS) {
     content.openLibraryBooks = books;
+  } else {
+    delete content.openLibraryBooks;
   }
   return content;
 }
 
 function buildAmazonRelatedBlock(c, currentPillars = []) {
+  const relevantBooks = relevantOpenLibraryBooks(c);
+  if (relevantBooks.length < MIN_RELEVANT_COMMERCIAL_BOOKS) return "";
+
   const related = buildAmazonRelatedData(c, currentPillars);
   if (!related) return "";
 
-  const hydratedCards = buildOpenLibraryAmazonCards(c.openLibraryBooks || []);
-  const fallbackCards = buildAmazonFallbackCards(related.sliderItems);
-  const cards = hydratedCards || fallbackCards;
+  const cards = buildOpenLibraryAmazonCards(relevantBooks);
 
   return `<section class="amazon-related mt-4 p-3 rounded" aria-label="Related book recommendations">
             <div class="amazon-related-head">
@@ -14059,39 +14137,6 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
               <button type="button" class="amazon-slider-btn" aria-label="Next Amazon recommendations" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
             </div>
             <small class="article-meta d-block mt-2">Book covers from Open Library. As an Amazon Associate I earn from qualifying purchases.</small>
-            <script>
-(function(){
-  var shell=document.currentScript&&document.currentScript.previousElementSibling&&document.currentScript.previousElementSibling.previousElementSibling;
-  if(!shell||!shell.matches('[data-open-library-books]')||shell.dataset.loaded==='true')return;
-  shell.dataset.loaded='true';
-  var track=shell.querySelector('.amazon-slider-track');
-  var query=shell.dataset.query||'history books';
-  var keywords=(shell.dataset.keywords||'').split(/\\s+/).filter(Boolean);
-  var tag=shell.dataset.amazonTag||'${AMAZON_ASSOCIATE_TAG}';
-  function escText(value){return String(value||'').replace(/[&<>"']/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];});}
-  function amazonUrl(title,author){return 'https://www.amazon.com/s?k='+encodeURIComponent([title,author].filter(Boolean).join(' '))+'&tag='+encodeURIComponent(tag);}
-  fetch('https://openlibrary.org/search.json?q='+encodeURIComponent(query)+'&mode=books&limit=8&fields=title,author_name,cover_i,first_publish_year,subject')
-    .then(function(res){return res.ok?res.json():null;})
-    .then(function(data){
-      var docs=((data&&data.docs)||[]).filter(function(doc){
-        if(!doc||!doc.title)return false;
-        var hay=[doc.title,(doc.author_name&&doc.author_name[0])||'',((doc.subject||[]).slice(0,8).join(' '))].join(' ').toLowerCase();
-        return !keywords.length || keywords.some(function(word){return hay.indexOf(word)!==-1;});
-	      }).slice(0,5);
-	      if(!docs.length)return;
-	      track.innerHTML=docs.map(function(doc){
-        var author=(doc.author_name&&doc.author_name[0])||'';
-        var title=doc.title||'Related book';
-        var cover=doc.cover_i?'https://covers.openlibrary.org/b/id/'+doc.cover_i+'-M.jpg':'';
-        return '<a class="amazon-product-card" href="'+amazonUrl(title,author)+'" target="_blank" rel="sponsored noopener noreferrer">'+
-          (cover?'<span class="amazon-card-cover"><img src="'+cover+'" alt="'+escText(title)+' cover" loading="lazy"></span>':'<span class="amazon-card-cover amazon-card-cover-fallback" aria-hidden="true"><i class="bi bi-book"></i></span>')+
-          '<strong>'+escText(title)+'</strong>'+
-          (author?'<small>'+escText(author)+'</small>':'<small>View on Amazon</small>')+
-        '</a>';
-	      }).join('');
-	    }).catch(function(){});
-	  })();
-            </script>
           </section>`;
 }
 
@@ -17096,5 +17141,8 @@ export const __contentGenerationTestHooks = {
   evidenceMapRowsFromContent,
   validateEvidenceMapForPublish,
   buildEvidenceMapBlock,
+  relevantOpenLibraryBooks,
+  commercialRecommendationsAreRelevant,
+  buildAmazonRelatedBlock,
   buildPostHTML,
 };

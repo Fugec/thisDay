@@ -34,6 +34,19 @@ import {
   getEvidenceBasedTopicHubMatches,
   scoreContentForTopicHub,
 } from "./shared/topic-relevance.js";
+import {
+  ARCHIVE_MIN_INDEXABLE_ARTICLES,
+  archiveCollectionIsIndexable,
+  archiveEditorialContext,
+  archiveRobotsDirective,
+  archiveRootIsIndexable,
+  archiveUsablePosts,
+  buildArchiveKeywordEntries,
+  buildArchiveYearEntries,
+  getArchiveKeywordPhrases,
+  getArchivePostsForTopicHub,
+  getArchiveHistoricalYear,
+} from "./shared/archive-indexability.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -2684,110 +2697,19 @@ ${marqueeScript()}
 }
 
 function getHistoricalYearFromPost(post) {
-  if (Number.isInteger(post?.historicalYear)) return post.historicalYear;
-
-  const title = String(post?.title || "");
-  const titleYearMatch = title.match(/,\s*(-?\d{3,4})\s*$/);
-  if (titleYearMatch) return parseInt(titleYearMatch[1], 10);
-
-  const desc = String(post?.description || "");
-  const descYearMatch = desc.match(/\b(1[0-9]{3}|20[0-9]{2})\b/);
-  if (descYearMatch) return parseInt(descYearMatch[1], 10);
-
-  return null;
-}
-
-function normalizeKeywordLabel(value) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return getArchiveHistoricalYear(post);
 }
 
 function getKeywordPhrasesFromPost(post) {
-  const phrases = [];
-  const pushPhrase = (value) => {
-    const cleaned = normalizeKeywordLabel(value);
-    if (!cleaned) return;
-    if (/^\d{4}$/.test(cleaned)) return;
-    if (cleaned.length < 3 || cleaned.length > 50) return;
-    if (/^(history|historical|event|events|article|articles)$/i.test(cleaned)) return;
-    phrases.push(cleaned);
-  };
-
-  if (typeof post?.keywords === "string" && post.keywords.trim()) {
-    for (const keyword of post.keywords.split(",")) pushPhrase(keyword);
-  }
-
-  if (Array.isArray(post?.keyTerms)) {
-    for (const term of post.keyTerms) pushPhrase(term?.term || "");
-  }
-
-  if (post?.eventTitle) pushPhrase(post.eventTitle);
-
-  const title = String(post?.title || "");
-  const titleLead = title.split("—")[0].trim();
-  if (titleLead && titleLead !== title) pushPhrase(titleLead);
-
-  if (Array.isArray(post?.pillars) && post.pillars.length > 0) {
-    pushPhrase(post.pillars[0]);
-  }
-
-  const deduped = [];
-  const seen = new Set();
-  for (const phrase of phrases) {
-    const slug = slugifyArchiveLabel(phrase);
-    if (!slug || seen.has(slug)) continue;
-    seen.add(slug);
-    deduped.push({ label: phrase, slug });
-  }
-  return deduped.slice(0, 8);
+  return getArchiveKeywordPhrases(post);
 }
 
 function buildYearArchiveEntries(posts) {
-  const map = new Map();
-  for (const post of posts) {
-    const year = getHistoricalYearFromPost(post);
-    if (!year) continue;
-    if (!map.has(year)) map.set(year, []);
-    map.get(year).push(post);
-  }
-
-  return Array.from(map.entries())
-    .map(([year, yearPosts]) => ({
-      year,
-      posts: yearPosts.sort(
-        (a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0),
-      ),
-    }))
-    .sort((a, b) => b.year - a.year);
+  return buildArchiveYearEntries(posts);
 }
 
 function buildKeywordArchiveEntries(posts) {
-  const map = new Map();
-  for (const post of posts) {
-    for (const keyword of getKeywordPhrasesFromPost(post)) {
-      if (!map.has(keyword.slug)) {
-        map.set(keyword.slug, { slug: keyword.slug, label: keyword.label, posts: [] });
-      }
-      map.get(keyword.slug).posts.push(post);
-    }
-  }
-
-  return Array.from(map.values())
-    .map((entry) => ({
-      ...entry,
-      posts: entry.posts
-        .filter(
-          (post, idx, arr) =>
-            arr.findIndex((candidate) => candidate.slug === post.slug) === idx,
-        )
-        .sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0)),
-    }))
-    .filter((entry) => entry.posts.length > 0)
-    .sort((a, b) => {
-      if (b.posts.length !== a.posts.length) return b.posts.length - a.posts.length;
-      return a.label.localeCompare(b.label);
-    });
+  return buildArchiveKeywordEntries(posts);
 }
 
 function renderArchiveCards(items, options = {}) {
@@ -2811,9 +2733,50 @@ function renderArchiveCards(items, options = {}) {
     .join("");
 }
 
+function archivePageHeaders(indexable) {
+  return {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "public, max-age=300, s-maxage=1800",
+    ...(!indexable ? { "X-Robots-Tag": "noindex, follow" } : {}),
+  };
+}
+
+function renderArchiveEditorialContext(label, posts, kind) {
+  const context = archiveEditorialContext(label, posts, kind);
+  if (!context) {
+    const usableCount = archiveUsablePosts(posts).length;
+    return `<section class="card-box archive-editorial-context" data-archive-indexable="0">
+      <h2 class="h4 mb-2">Collection status</h2>
+      <p class="mb-0">This collection currently has ${usableCount} complete related article${usableCount === 1 ? "" : "s"}. It remains available for reader navigation while the archive grows toward ${ARCHIVE_MIN_INDEXABLE_ARTICLES} substantive entries.</p>
+    </section>`;
+  }
+
+  const readingPath = context.examples
+    .map(
+      (post) =>
+        `<li><a href="/blog/${escapeHtml(post.slug)}/">${escapeHtml(post.title)}</a>${
+          post.description
+            ? ` — ${escapeHtml(truncateForMeta(post.description, 120))}`
+            : ""
+        }</li>`,
+    )
+    .join("");
+
+  return `<section class="card-box archive-editorial-context" data-archive-indexable="1" aria-labelledby="archive-reading-path">
+    <h2 class="h4 mb-2" id="archive-reading-path">How to explore ${escapeHtml(label)}</h2>
+    <p>${escapeHtml(context.lead)}</p>
+    <p>${escapeHtml(context.route)}</p>
+    <ol class="mb-0">${readingPath}</ol>
+  </section>`;
+}
+
 async function handleYearsIndex(env, url) {
   const posts = await getBlogIndexEntries(env);
   const yearEntries = buildYearArchiveEntries(posts);
+  const qualifiedYearEntries = yearEntries.filter((entry) =>
+    archiveCollectionIsIndexable(entry.posts),
+  );
+  const pageIndexable = archiveRootIsIndexable(yearEntries, url);
   const canonical = `${url.origin}/years/`;
   const pageTitle = "Years | thisDay.";
   const pageDesc =
@@ -2831,7 +2794,7 @@ async function handleYearsIndex(env, url) {
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${pageTitle}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
-<meta name="robots" content="index, follow"/>
+<meta name="robots" content="${archiveRobotsDirective(pageIndexable)}"/>
 <meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/>
 <meta property="og:description" content="${escapeHtml(pageDesc)}"/>
@@ -2868,11 +2831,11 @@ ${siteNav()}
     <h1 class="h3 mb-2">Browse historical coverage by year</h1>
     <p class="mb-0">Use year archives to move from one cited event into the broader historical moment around it.</p>
   </section>
-  ${renderArchiveCards(yearEntries.slice(0, 80), {
+  ${renderArchiveCards(qualifiedYearEntries.slice(0, 80), {
     makeHref: (item) => `/years/${item.year}/`,
     makeLabel: (item) => String(item.year),
     makeMeta: (item) => `${item.posts.length} matched article${item.posts.length === 1 ? "" : "s"}`,
-    emptyText: "No year archives available yet.",
+    emptyText: "No year archive has five complete related articles yet.",
   })}
   <div class="ad-unit my-4">
     <div class="ad-unit-label">Advertisement</div>
@@ -2891,10 +2854,7 @@ ${getSharedPageScripts({ pageType: "years-index", pageSlug: "years" })}
 </body></html>`;
 
   return new Response(html, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300, s-maxage=1800",
-    },
+    headers: archivePageHeaders(pageIndexable),
   });
 }
 
@@ -2903,9 +2863,17 @@ async function handleYearArchivePage(env, url, year) {
   const yearEntry = buildYearArchiveEntries(posts).find((entry) => entry.year === year);
   if (!yearEntry) return new Response("Not Found", { status: 404 });
 
+  const pageIndexable = archiveCollectionIsIndexable(yearEntry.posts, url);
   const canonical = `${url.origin}/years/${year}/`;
   const pageTitle = `${year} | thisDay.`;
-  const pageDesc = `Historical articles on thisDay.info connected to the year ${year}.`;
+  const editorialContext = archiveEditorialContext(
+    String(year),
+    yearEntry.posts,
+    "year",
+  );
+  const pageDesc = editorialContext
+    ? truncateForMeta(editorialContext.lead, 155)
+    : `Historical articles on thisDay.info connected to the year ${year}.`;
   const schema = {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
@@ -2919,7 +2887,7 @@ async function handleYearArchivePage(env, url, year) {
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(pageTitle)}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
-<meta name="robots" content="index, follow"/>
+<meta name="robots" content="${archiveRobotsDirective(pageIndexable)}"/>
 <meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/>
 <meta property="og:description" content="${escapeHtml(pageDesc)}"/>
@@ -2957,6 +2925,7 @@ ${siteNav()}
     <h1 class="h3 mb-2">${year} in the thisDay.info archive</h1>
     <p class="mb-0">${yearEntry.posts.length} article${yearEntry.posts.length === 1 ? "" : "s"} currently connect to this historical year.</p>
   </section>
+  ${renderArchiveEditorialContext(String(year), yearEntry.posts, "year")}
   ${renderTopicHubPostCards(yearEntry.posts)}
   <div class="ad-unit my-4">
     <div class="ad-unit-label">Advertisement</div>
@@ -2975,18 +2944,17 @@ ${getSharedPageScripts({ pageType: "year-archive", pageSlug: String(year) })}
 </body></html>`;
 
   return new Response(html, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300, s-maxage=1800",
-    },
+    headers: archivePageHeaders(pageIndexable),
   });
 }
 
 async function handleKeywordsIndex(env, url) {
   const posts = await getBlogIndexEntries(env);
-  const keywordEntries = buildKeywordArchiveEntries(posts).filter(
-    (entry) => entry.posts.length >= 1,
+  const keywordEntries = buildKeywordArchiveEntries(posts);
+  const qualifiedKeywordEntries = keywordEntries.filter((entry) =>
+    archiveCollectionIsIndexable(entry.posts),
   );
+  const pageIndexable = archiveRootIsIndexable(keywordEntries, url);
   const canonical = `${url.origin}/keywords/`;
   const pageTitle = "Keywords | thisDay.";
   const pageDesc =
@@ -3004,7 +2972,7 @@ async function handleKeywordsIndex(env, url) {
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${pageTitle}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
-<meta name="robots" content="index, follow"/>
+<meta name="robots" content="${archiveRobotsDirective(pageIndexable)}"/>
 <meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/>
 <meta property="og:description" content="${escapeHtml(pageDesc)}"/>
@@ -3041,11 +3009,11 @@ ${siteNav()}
     <h1 class="h3 mb-2">Browse historical coverage by keyword cluster</h1>
     <p class="mb-0">Keyword archives connect related articles around recurring names, subjects, and historical phrases.</p>
   </section>
-  ${renderArchiveCards(keywordEntries.slice(0, 120), {
+  ${renderArchiveCards(qualifiedKeywordEntries.slice(0, 120), {
     makeHref: (item) => `/keywords/${item.slug}/`,
     makeLabel: (item) => item.label,
     makeMeta: (item) => `${item.posts.length} matched article${item.posts.length === 1 ? "" : "s"}`,
-    emptyText: "No keyword archives available yet.",
+    emptyText: "No keyword archive has five complete related articles yet.",
   })}
   <div class="ad-unit my-4">
     <div class="ad-unit-label">Advertisement</div>
@@ -3064,10 +3032,7 @@ ${getSharedPageScripts({ pageType: "keywords-index", pageSlug: "keywords" })}
 </body></html>`;
 
   return new Response(html, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300, s-maxage=1800",
-    },
+    headers: archivePageHeaders(pageIndexable),
   });
 }
 
@@ -3076,9 +3041,17 @@ async function handleKeywordArchivePage(env, url, slug) {
   const keywordEntry = buildKeywordArchiveEntries(posts).find((entry) => entry.slug === slug);
   if (!keywordEntry) return new Response("Not Found", { status: 404 });
 
+  const pageIndexable = archiveCollectionIsIndexable(keywordEntry.posts, url);
   const canonical = `${url.origin}/keywords/${slug}/`;
   const pageTitle = `${keywordEntry.label} | thisDay.`;
-  const pageDesc = `Historical articles on thisDay.info connected to the keyword ${keywordEntry.label}.`;
+  const editorialContext = archiveEditorialContext(
+    keywordEntry.label,
+    keywordEntry.posts,
+    "keyword",
+  );
+  const pageDesc = editorialContext
+    ? truncateForMeta(editorialContext.lead, 155)
+    : `Historical articles on thisDay.info connected to the keyword ${keywordEntry.label}.`;
   const schema = {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
@@ -3092,7 +3065,7 @@ async function handleKeywordArchivePage(env, url, slug) {
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(pageTitle)}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
-<meta name="robots" content="index, follow"/>
+<meta name="robots" content="${archiveRobotsDirective(pageIndexable)}"/>
 <meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/>
 <meta property="og:description" content="${escapeHtml(pageDesc)}"/>
@@ -3130,6 +3103,7 @@ ${siteNav()}
     <h1 class="h3 mb-2">${escapeHtml(keywordEntry.label)}</h1>
     <p class="mb-0">${keywordEntry.posts.length} article${keywordEntry.posts.length === 1 ? "" : "s"} currently connect to this keyword cluster.</p>
   </section>
+  ${renderArchiveEditorialContext(keywordEntry.label, keywordEntry.posts, "keyword")}
   ${renderTopicHubPostCards(keywordEntry.posts)}
   <div class="ad-unit my-4">
     <div class="ad-unit-label">Advertisement</div>
@@ -3148,10 +3122,7 @@ ${getSharedPageScripts({ pageType: "keyword-archive", pageSlug: slug })}
 </body></html>`;
 
   return new Response(html, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300, s-maxage=1800",
-    },
+    headers: archivePageHeaders(pageIndexable),
   });
 }
 
@@ -3163,15 +3134,7 @@ function scorePostForTopicHub(post, hub) {
 }
 
 function getPostsForTopicHub(posts, hub, limit = 12) {
-  return posts
-    .map((post) => ({ post, score: scorePostForTopicHub(post, hub) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return new Date(b.post?.publishedAt || 0) - new Date(a.post?.publishedAt || 0);
-    })
-    .slice(0, limit)
-    .map((entry) => entry.post);
+  return getArchivePostsForTopicHub(posts, hub, limit);
 }
 
 function renderTopicHubPostCards(posts) {
@@ -3211,10 +3174,22 @@ function renderTopicHubPostCards(posts) {
 
 async function handleTopicsIndex(env, url) {
   const posts = await getBlogIndexEntries(env);
-  const hubs = TOPIC_HUBS.map((hub) => ({
-    ...hub,
-    articleCount: getPostsForTopicHub(posts, hub, 6).length,
-  }));
+  const hubEntries = TOPIC_HUBS.map((hub) => {
+    const matchedPosts = getPostsForTopicHub(
+      posts,
+      hub,
+      Number.MAX_SAFE_INTEGER,
+    );
+    return {
+      ...hub,
+      posts: matchedPosts,
+      articleCount: archiveUsablePosts(matchedPosts).length,
+    };
+  });
+  const hubs = hubEntries.filter((hub) =>
+    archiveCollectionIsIndexable(hub.posts),
+  );
+  const pageIndexable = archiveRootIsIndexable(hubEntries, url);
 
   const canonical = `${url.origin}/topics/`;
   const pageTitle = "Topics | thisDay.";
@@ -3245,7 +3220,7 @@ async function handleTopicsIndex(env, url) {
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${pageTitle}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
-<meta name="robots" content="index, follow"/>
+<meta name="robots" content="${archiveRobotsDirective(pageIndexable)}"/>
 <meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/>
 <meta property="og:description" content="${escapeHtml(pageDesc)}"/>
@@ -3282,7 +3257,7 @@ ${siteNav()}
     <h1 class="h3 mb-2">Topic hubs for major historical subjects</h1>
     <p class="mb-0">These hubs connect thisDay.info articles into broader themes so readers and AI systems can move from one event page to a wider historical subject.</p>
   </section>
-  ${cards}
+  ${cards || `<div class="card-box"><p class="text-muted mb-0">No focused topic hub has five complete evidence-matched articles yet.</p></div>`}
   <div class="ad-unit my-4">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
@@ -3300,10 +3275,7 @@ ${getSharedPageScripts({ pageType: "topics-index", pageSlug: "topics" })}
 </body></html>`;
 
   return new Response(html, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300, s-maxage=1800",
-    },
+    headers: archivePageHeaders(pageIndexable),
   });
 }
 
@@ -3312,7 +3284,13 @@ async function handleTopicHubPage(env, url, slug) {
   if (!hub) return new Response("Not Found", { status: 404 });
 
   const posts = await getBlogIndexEntries(env);
-  const matchedPosts = getPostsForTopicHub(posts, hub, 12);
+  const allMatchedPosts = getPostsForTopicHub(
+    posts,
+    hub,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const matchedPosts = allMatchedPosts.slice(0, 12);
+  const pageIndexable = archiveCollectionIsIndexable(allMatchedPosts, url);
   const canonical = `${url.origin}/topics/${slug}/`;
   const pageTitle = `${hub.title} | thisDay.`;
   const pageDesc = hub.summary;
@@ -3345,7 +3323,7 @@ async function handleTopicHubPage(env, url, slug) {
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(pageTitle)}</title>
 <link rel="canonical" href="${escapeHtml(canonical)}"/>
-<meta name="robots" content="index, follow"/>
+<meta name="robots" content="${archiveRobotsDirective(pageIndexable)}"/>
 <meta name="description" content="${escapeHtml(pageDesc)}"/>
 <meta property="og:title" content="${escapeHtml(pageTitle)}"/>
 <meta property="og:description" content="${escapeHtml(pageDesc)}"/>
@@ -3390,6 +3368,7 @@ ${siteNav()}
     <meta itemprop="url" content="https://thisday.info/topics/${escapeHtml(hub.slug)}/">
     <meta itemprop="description" content="Connected reading and citation-friendly topic discovery">
   </section>
+  ${renderArchiveEditorialContext(hub.title, allMatchedPosts, "topic")}
   ${pillarLinks ? `<div class="topic-hub-chip-row mb-4">${pillarLinks}</div>` : ""}
   ${renderTopicHubPostCards(matchedPosts)}
   <div class="ad-unit my-4">
@@ -3409,10 +3388,7 @@ ${getSharedPageScripts({ pageType: "topic-hub", pageSlug: slug })}
 </body></html>`;
 
   return new Response(html, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "public, max-age=300, s-maxage=1800",
-    },
+    headers: archivePageHeaders(pageIndexable),
   });
 }
 
@@ -8998,4 +8974,12 @@ export const __historyEvergreenTestHooks = {
   seoHistoryEntityQualityEligible,
   handleFetchRequest,
   isEdgeCacheable,
+};
+
+export const __archiveIndexabilityTestHooks = {
+  handleFetchRequest,
+  buildYearArchiveEntries,
+  buildKeywordArchiveEntries,
+  getPostsForTopicHub,
+  renderArchiveEditorialContext,
 };

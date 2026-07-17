@@ -42,6 +42,14 @@ import {
   getEvidenceBasedTopicHubMatches,
   selectTopicallyRelatedPosts,
 } from "./shared/topic-relevance.js";
+import {
+  ARCHIVE_MIN_INDEXABLE_ARTICLES,
+  archiveCollectionIsIndexable,
+  archiveEditorialContext,
+  archiveRobotsDirective,
+  archiveUsablePosts,
+  getArchivePostsForPillar,
+} from "./shared/archive-indexability.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -3444,7 +3452,7 @@ export default {
     // Pillar hub pages: /blog/topic/:pillar-slug/
     const topicMatch = path.match(/^\/blog\/topic\/([a-z0-9-]+)$/);
     if (topicMatch) {
-      return servePillarHub(env, topicMatch[1]);
+      return servePillarHub(env, topicMatch[1], url);
     }
 
     // JSON feed of latest public YouTube videos, merged with blog index for titles/thumbnails
@@ -17414,31 +17422,51 @@ function toTitlePillarSlug(slugStr) {
   );
 }
 
-async function servePillarHub(env, slugStr) {
+async function servePillarHub(env, slugStr, url = null) {
   const pillarName = toTitlePillarSlug(slugStr);
   if (!pillarName) return serve404(env);
 
   const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
   const index = indexRaw ? JSON.parse(indexRaw) : [];
-  const posts = index
-    .filter((e) => Array.isArray(e.pillars) && e.pillars.includes(pillarName))
-    .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  const posts = getArchivePostsForPillar(index, pillarName);
+  const pageIndexable = archiveCollectionIsIndexable(posts, url);
+  const qualifiedPillars = BLOG_PILLARS.filter((pillar) =>
+    archiveCollectionIsIndexable(getArchivePostsForPillar(index, pillar)),
+  );
 
-  const html = buildPillarHubHTML(pillarName, slugStr, posts);
+  const html = buildPillarHubHTML(
+    pillarName,
+    slugStr,
+    posts,
+    pageIndexable,
+    qualifiedPillars,
+  );
   return new Response(html, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=3600, s-maxage=3600",
+      ...(!pageIndexable ? { "X-Robots-Tag": "noindex, follow" } : {}),
     },
   });
 }
 
-function buildPillarHubHTML(pillarName, slugStr, posts) {
+function buildPillarHubHTML(
+  pillarName,
+  slugStr,
+  posts,
+  pageIndexable = false,
+  qualifiedPillars = [],
+) {
   const canonicalUrl = `https://thisday.info/blog/topic/${slugStr}/`;
   const description =
     PILLAR_DESCRIPTIONS[pillarName] ||
     `Articles about ${pillarName} on thisDay.`;
   const pageTitle = `${pillarName} — Historical Articles | thisDay.`;
+  const editorialContext = archiveEditorialContext(
+    pillarName,
+    posts,
+    "pillar",
+  );
 
   const postItems = posts.length
     ? posts
@@ -17446,7 +17474,8 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
         .join("\n")
     : '<p class="text-muted">No articles in this category yet — check back soon.</p>';
 
-  const otherPillars = BLOG_PILLARS.filter((p) => p !== pillarName)
+  const otherPillars = qualifiedPillars
+    .filter((p) => p !== pillarName)
     .map((p) => {
       const s = p
         .toLowerCase()
@@ -17455,6 +17484,29 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
       return `<a href="/blog/topic/${s}/" class="badge text-decoration-none me-1 mb-1" style="background:var(--btn-bg);color:#fff;font-weight:500;font-size:.78rem;padding:.35em .7em;border-radius:20px">${esc(p)}</a>`;
     })
     .join("");
+  const usablePostCount = archiveUsablePosts(posts).length;
+  const editorialBlock = editorialContext
+    ? `<section class="card-box mb-4 archive-editorial-context" data-archive-indexable="1" aria-labelledby="pillar-reading-path">
+          <h2 class="section-header" id="pillar-reading-path">How to explore ${esc(pillarName)}</h2>
+          <p>${esc(editorialContext.lead)}</p>
+          <p>${esc(editorialContext.route)}</p>
+          <ol class="mb-0">
+            ${editorialContext.examples
+              .map(
+                (post) =>
+                  `<li><a href="/blog/${esc(post.slug)}/">${esc(post.title)}</a>${
+                    post.description
+                      ? ` — ${esc(truncateForMeta(post.description, 120))}`
+                      : ""
+                  }</li>`,
+              )
+              .join("")}
+          </ol>
+        </section>`
+    : `<section class="card-box mb-4 archive-editorial-context" data-archive-indexable="0">
+          <h2 class="section-header">Collection status</h2>
+          <p class="mb-0">This collection currently has ${usablePostCount} complete related article${usablePostCount === 1 ? "" : "s"}. It remains available for reader navigation while the archive grows toward ${ARCHIVE_MIN_INDEXABLE_ARTICLES} substantive entries.</p>
+        </section>`;
 
   const jsonLd = JSON.stringify(
     {
@@ -17522,7 +17574,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${esc(pageTitle)}</title>
     <link rel="canonical" href="${esc(canonicalUrl)}" />
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content="${archiveRobotsDirective(pageIndexable)}" />
     <meta name="description" content="${esc(description)}" />
     <meta name="author" content="thisDay. Editorial" />
     <meta property="og:title" content="${esc(pageTitle)}" />
@@ -17584,6 +17636,7 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
 
         <h1 class="fw-bold mb-2" style="font-size:1.8rem">${esc(pillarName)}</h1>
         <p class="mb-4" style="color:var(--text-muted,#5c7a65)">${esc(description)}</p>
+        ${editorialBlock}
 
         <div class="ad-unit-container mb-4">
           <span class="ad-unit-label">Advertisement</span>
@@ -17611,10 +17664,10 @@ function buildPillarHubHTML(pillarName, slugStr, posts) {
                data-ad-format="autorelaxed"></ins>
         </div>
 
-        <div class="mb-5">
+        ${otherPillars ? `<div class="mb-5">
           <h2 class="section-header" style="font-size:1rem">Explore Other Topics</h2>
           <div>${otherPillars}</div>
-        </div>
+        </div>` : ""}
       </div>
     </div>
   </main>
@@ -18313,5 +18366,7 @@ export const __contentGenerationTestHooks = {
   buildAmazonRelatedBlock,
   buildArticleProcessDisclosure,
   normalizeArticleProcessDisclosureHtml,
+  buildPillarHubHTML,
+  servePillarHub,
   buildPostHTML,
 };

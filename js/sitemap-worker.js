@@ -15,6 +15,8 @@
  * Required bindings: BLOG_AI_KV (KV namespace — same as blog worker)
  */
 
+import { qualifiedArchivePaths } from "./shared/archive-indexability.js";
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -23,6 +25,21 @@ const DOMAIN = "https://thisday.info";
 const CACHE_MAX_AGE = 3600; // 1 hour (purged immediately after each new publish)
 const KV_INDEX_KEY = "index";
 const SITE_STRUCTURE_LASTMOD = "2026-04-09";
+const SITEMAP_BLOG_PILLARS = [
+  "War & Conflict",
+  "Politics & Government",
+  "Science & Technology",
+  "Arts & Culture",
+  "Sports",
+  "Disasters & Accidents",
+  "Social & Human Rights",
+  "Economy & Business",
+  "Health & Medicine",
+  "Exploration & Discovery",
+  "Famous Persons",
+  "Born on This Day",
+  "Died on This Day",
+];
 
 // ---------------------------------------------------------------------------
 // Static pages — core site sections that never change dynamically
@@ -61,19 +78,6 @@ const STATIC_PAGES = [
     priority: "0.8",
     dynamicLastmod: true,
   },
-  // Pillar hub pages — /blog/topic/:slug/
-  { loc: "/blog/topic/war-conflict/",          lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/politics-government/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/science-technology/",    lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/arts-culture/",          lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/disasters-accidents/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/social-human-rights/",   lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/economy-business/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/health-medicine/",       lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/exploration-discovery/", lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/famous-persons/",        lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.7", dynamicLastmod: true },
-  { loc: "/blog/topic/born-on-this-day/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.6", dynamicLastmod: true },
-  { loc: "/blog/topic/died-on-this-day/",      lastmod: SITE_STRUCTURE_LASTMOD, changefreq: "weekly", priority: "0.6", dynamicLastmod: true },
   {
     loc: "/privacy-policy/",
     lastmod: SITE_STRUCTURE_LASTMOD,
@@ -262,7 +266,22 @@ function buildMainSitemap(
     );
   }
 
-  // 2. Legacy static blog posts (HTML files on disk)
+  // 2. Archive and hub pages that pass the same five-article quality gate as
+  // their rendered robots directive. Thin archives must never enter XML.
+  for (const path of qualifiedArchivePaths(aiPosts, SITEMAP_BLOG_PILLARS)) {
+    const isRoot = /^\/(?:topics|years|keywords)\/$/.test(path);
+    const isPillar = path.startsWith("/blog/topic/");
+    entries.push(
+      urlEntry(
+        `${DOMAIN}${path}`,
+        latestPostLastmod,
+        "weekly",
+        isPillar ? "0.7" : isRoot ? "0.65" : "0.6",
+      ),
+    );
+  }
+
+  // 3. Legacy static blog posts (HTML files on disk)
   if (!ignoreLegacy) {
     for (const post of STATIC_BLOG_POSTS) {
       entries.push(
@@ -271,7 +290,7 @@ function buildMainSitemap(
     }
   }
 
-  // 3. AI-generated blog posts from KV (newest first, already sorted by blog worker)
+  // 4. AI-generated blog posts from KV (newest first, already sorted by blog worker)
   for (const post of aiPosts) {
     const lastmod = post.publishedAt
       ? post.publishedAt.slice(0, 10) // "YYYY-MM-DD"
@@ -342,3 +361,8 @@ function computeLatestPostLastmod(aiPosts, ignoreLegacy = false) {
     ? candidates.reduce((max, cur) => (cur > max ? cur : max))
     : new Date().toISOString().slice(0, 10);
 }
+
+export const __archiveIndexabilityTestHooks = {
+  buildMainSitemap,
+  computeLatestPostLastmod,
+};

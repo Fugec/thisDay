@@ -117,6 +117,28 @@ function serializeInlineJson(value) {
     .replace(/&/g, "\\u0026");
 }
 
+function pickRandomHomepageHighlights(events, count = 3, randomFn = Math.random) {
+  const seen = new Set();
+  const pool = (Array.isArray(events) ? events : []).filter((event) => {
+    const text = String(event?.text || "").trim();
+    const key = `${String(event?.year ?? "")}|${text}`.toLowerCase();
+    if (!text || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const randomValue = Number(randomFn());
+    const safeRandom = Number.isFinite(randomValue)
+      ? Math.min(Math.max(randomValue, 0), 0.999999999)
+      : 0;
+    const swapIndex = Math.floor(safeRandom * (index + 1));
+    [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
+  }
+
+  return pool.slice(0, Math.max(0, count));
+}
+
 const HISTORY_EVERGREEN_PAGES = Object.freeze({
   "spanish-civil-war-1936": {
     storageSlug: "spanish-civil-war-erupts",
@@ -7289,6 +7311,18 @@ async function handleFetchRequest(request, env, ctx) {
     ogImageUrl = `/og-image?title=${encodeURIComponent(dynamicTitle)}&date=${encodeURIComponent(formattedDate)}`;
   }
   const homepageVideoCards = await buildHomepageVideoCards(env).catch(() => "");
+  const homepageHighlightsHtml = pickRandomHomepageHighlights(
+    eventsData?.events,
+    3,
+  )
+    .map(
+      (event) =>
+        `<div class="hero-highlight" role="listitem">` +
+        `<span class="hero-highlight-year">${escapeHtml(String(event.year ?? "—"))}</span>` +
+        `<span class="hero-highlight-text">${escapeHtml(String(event.text || ""))}</span>` +
+        `</div>`,
+    )
+    .join("");
 
   // Fetch the original index.html from the origin server
   const originalResponse = await fetch(url.origin, request);
@@ -7380,6 +7414,14 @@ async function handleFetchRequest(request, env, ctx) {
       element(element) {
         if (homepageVideoCards) {
           element.setInnerContent(homepageVideoCards, { html: true });
+        }
+      },
+    })
+    .on("#heroHighlightsList", {
+      element(element) {
+        if (homepageHighlightsHtml) {
+          element.setAttribute("data-hero-highlights-ready", "true");
+          element.setInnerContent(homepageHighlightsHtml, { html: true });
         }
       },
     });
@@ -7788,7 +7830,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=31>; rel=preload; as=style",
+      "</css/custom.css?v=32>; rel=preload; as=style",
     ].join(", "),
   );
 

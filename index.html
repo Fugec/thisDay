@@ -82,10 +82,10 @@
     <link
       rel="preload"
       as="style"
-      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Meddon&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap"
     />
     <link
-      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Meddon&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&display=swap"
       rel="stylesheet"
     />
     <link
@@ -114,7 +114,7 @@
       sizes="16x16"
       href="icons/favicon-16x16.png"
     />
-    <link rel="stylesheet" href="css/custom.css?v=31" />
+    <link rel="stylesheet" href="css/custom.css?v=32" />
 
     <link rel="manifest" href="/manifest.json" />
     <link
@@ -156,14 +156,43 @@
 
     <!-- Hero -->
     <section class="hero">
-      <p class="eyebrow">On This Day in History</p>
-      <h1 id="dynamicTitle">Explore This Day in History</h1>
+      <div class="hero-inner">
+        <p class="eyebrow">On This Day in History</p>
+        <h1 id="dynamicTitle">Explore This Day in History</h1>
+        <p class="hero-description">
+          Events, birthdays and milestones for any date — sourced from
+          Wikipedia.
+        </p>
+
+        <aside class="hero-highlights" aria-labelledby="heroHighlightsTitle">
+          <h2 id="heroHighlightsTitle">Today's Highlights</h2>
+          <div
+            class="hero-highlights-list"
+            id="heroHighlightsList"
+            role="list"
+            aria-live="polite"
+          ></div>
+        </aside>
+
+        <div class="hero-actions">
+          <a href="/events/today/" class="btn" id="todayBtn">
+            <span id="heroEventsLabel">Today's Events</span>
+            <i class="bi bi-arrow-right" aria-hidden="true"></i>
+          </a>
+          <a href="/blog/" class="btn" id="heroQuizBtn">
+            Today's Quiz
+            <i class="bi bi-arrow-right" aria-hidden="true"></i>
+          </a>
+        </div>
+
+      </div>
       <script>
         (function () {
           var now = new Date(),
             m = now.toLocaleDateString("en-US", { month: "long" }),
             d = now.getDate(),
-            el = document.getElementById("dynamicTitle");
+            el = document.getElementById("dynamicTitle"),
+            eventsLabel = document.getElementById("heroEventsLabel");
           if (el)
             el.innerHTML =
               '<span class="hero-title-tail"><span class="hero-title-date">' +
@@ -172,35 +201,9 @@
               d +
               "</span></span>" +
               " in History";
+          if (eventsLabel) eventsLabel.textContent = "Today's Events";
         })();
       </script>
-      <p>
-        Explore historical events, famous birthdays, and milestones from any
-        date in history. From ancient wars and groundbreaking discoveries to
-        world-changing moments, every day holds a story worth knowing.
-      </p>
-      <div class="hero-meta">
-        <span><i class="bi bi-calendar3"></i> Any date, any year</span>
-        <span><i class="bi bi-book"></i> Sourced from Wikipedia</span>
-        <span><i class="bi bi-person-heart"></i> Births &amp; deaths</span>
-        <span><i class="bi bi-patch-question"></i> Daily quizzes</span>
-      </div>
-      <div class="hero-actions">
-        <a href="https://thisday.info/events/today/" class="btn" id="todayBtn">
-          What happened on this day <i class="bi bi-arrow-right"></i>
-        </a>
-        <a href="/blog/" class="btn hero-secondary" id="heroQuizBtn"
-          >Take Today's History Quiz <i class="bi bi-arrow-right"></i
-        ></a>
-      </div>
-      <a
-        href="#peopleStrip"
-        class="hero-scroll-cue"
-        aria-label="Scroll to today's people"
-      >
-        <span>More below</span>
-        <i class="bi bi-chevron-down" aria-hidden="true"></i>
-      </a>
     </section>
 
     <!-- People Today -->
@@ -239,7 +242,7 @@
     <h2 class="homepage-section-title">Latest Articles</h2>
     <p
       style="
-        padding: 0 10px 28px 30px;
+        padding: 0 var(--gutter-x) 28px;
         line-height: 1.75;
         color: var(--text-muted);
       "
@@ -263,7 +266,7 @@
     <h2 class="homepage-section-title">Featured Today</h2>
     <p
       style="
-        padding: 0 10px 28px 30px;
+        padding: 0 var(--gutter-x) 28px;
         line-height: 1.75;
         color: var(--text-muted);
       "
@@ -328,7 +331,7 @@
     <h2 class="homepage-section-title">Today's Historical Events</h2>
     <p
       style="
-        padding: 0 10px 28px 30px;
+        padding: 0 var(--gutter-x) 28px;
         line-height: 1.75;
         color: var(--text-muted);
       "
@@ -410,7 +413,7 @@
     <h2 class="homepage-section-title">History in 60 Seconds</h2>
     <p
       style="
-        padding: 0 10px 28px 30px;
+        padding: 0 var(--gutter-x) 28px;
         line-height: 1.75;
         color: var(--text-muted);
       "
@@ -473,7 +476,7 @@
                 escHtml(v.thumbnail) +
                 '" alt="' +
                 escHtml(shortTitle) +
-                "\" width=\"480\" height=\"360\" loading=\"lazy\" decoding=\"async\" onerror=\"if(this.src.indexOf('hqdefault')>-1){this.src=this.src.replace('hqdefault','mqdefault');}else{this.style.display='none';}\" />" +
+                '" width="480" height="360" loading="lazy" decoding="async" onerror="if(this.src.indexOf(\'hqdefault\')>-1){this.src=this.src.replace(\'hqdefault\',\'mqdefault\');}else{this.style.display=\'none\';}" />' +
                 '<div class="video-card-play"><i class="bi bi-play-circle-fill"></i></div>' +
                 "</div>" +
                 '<div class="blog-card-body">' +
@@ -500,9 +503,7 @@
       >
         Explore History by Date
       </h2>
-      <p
-        style="padding: 0 10px 0 0; line-height: 1.75; color: var(--text-muted)"
-      >
+      <p style="line-height: 1.75; color: var(--text-muted)">
         Click any date on the calendar to browse historical events, famous
         birthdays, and notable deaths from that day. Move between months to
         explore thousands of years of recorded history.
@@ -810,7 +811,7 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="js/script.js?v=15"></script>
+    <script src="js/script.js?v=16"></script>
     <script src="/js/chatbot.js?v=5"></script>
 
     <script>
@@ -1043,7 +1044,7 @@
           });
         }
 
-        // "What happened today" button — scroll to today's card or calendar
+        // Keep the hero's original interaction: scroll to today's calendar card.
         var todayBtn = document.getElementById("todayBtn");
         if (todayBtn) {
           todayBtn.addEventListener("click", function (e) {

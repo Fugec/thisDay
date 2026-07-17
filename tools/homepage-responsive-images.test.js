@@ -25,7 +25,7 @@ test("homepage cards reserve image space and defer below-fold decoding", () => {
     assert.match(image, /decoding="async"/, `${id} must decode asynchronously`);
   }
   assert.match(indexHtml, /class="blog-card-img" width="600" height="400" loading="lazy" decoding="async"/);
-  assert.match(indexHtml, /width=\\"480\\" height=\\"360\\" loading=\\"lazy\\" decoding=\\"async\\"/);
+  assert.match(indexHtml, /width="480" height="360" loading="lazy" decoding="async"/);
 });
 
 test("people, modal, and compact born/died images have explicit dimensions", () => {
@@ -43,8 +43,8 @@ test("carousel eagerly loads only its first responsive image", () => {
 });
 
 test("static asset versions advance with the responsive-image change", () => {
-  assert.match(indexHtml, /js\/script\.js\?v=15/);
-  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v14"/);
-  assert.match(seoWorker, /custom\.css\?v=31/);
+  assert.match(indexHtml, /js\/script\.js\?v=16/);
+  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v15"/);
+  assert.match(seoWorker, /custom\.css\?v=32/);
   assert.match(seoWorker, /width="480" height="360" loading="lazy" decoding="async"/);
 });

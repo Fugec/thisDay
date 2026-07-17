@@ -201,6 +201,77 @@ function getResponsiveImageSrcset(
     .join(", ");
 }
 
+function pickRandomDailyHighlights(
+  events,
+  count = 3,
+  randomFn = Math.random,
+) {
+  const seen = new Set();
+  const pool = (Array.isArray(events) ? events : []).filter((event) => {
+    const text = String(event?.title || event?.description || "").trim();
+    const key = `${String(event?.year || "")}|${text}`.toLowerCase();
+    if (!text || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const randomValue = Number(randomFn());
+    const safeRandom = Number.isFinite(randomValue)
+      ? Math.min(Math.max(randomValue, 0), 0.999999999)
+      : 0;
+    const swapIndex = Math.floor(safeRandom * (index + 1));
+    [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
+  }
+
+  return pool.slice(0, Math.max(0, count));
+}
+
+async function populateHeroHighlights() {
+  const list = document.getElementById("heroHighlightsList");
+  if (!list || list.dataset.heroHighlightsReady === "true") return;
+
+  const today = new Date();
+  const eventsData = await fetchWikipediaEvents(
+    today.getMonth() + 1,
+    today.getDate(),
+  );
+  const selected = pickRandomDailyHighlights(eventsData?.events, 3);
+
+  if (!selected.length) {
+    list.innerHTML = "";
+    const empty = document.createElement("div");
+    empty.className = "hero-highlight";
+    empty.setAttribute("role", "listitem");
+    empty.textContent = "Today's historical highlights are temporarily unavailable.";
+    list.appendChild(empty);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  selected.forEach((event) => {
+    const row = document.createElement("div");
+    row.className = "hero-highlight";
+    row.setAttribute("role", "listitem");
+
+    const year = document.createElement("span");
+    year.className = "hero-highlight-year";
+    year.textContent = String(event.year || "—");
+
+    const text = document.createElement("span");
+    text.className = "hero-highlight-text";
+    text.textContent = String(
+      event.title || event.description || "Historical event",
+    ).trim();
+
+    row.append(year, text);
+    fragment.appendChild(row);
+  });
+
+  list.replaceChildren(fragment);
+  list.dataset.heroHighlightsReady = "true";
+}
+
 function slugifyPersonName(value) {
   return String(value || "")
     .toLowerCase()
@@ -2677,7 +2748,7 @@ async function showEventDetails(
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     if (!calendarGrid) return;
-    await renderCalendar();
+    await Promise.all([populateHeroHighlights(), renderCalendar()]);
   } catch (error) {
     console.error("Error initializing application:", error);
     if (calendarGrid) {

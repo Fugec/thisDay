@@ -173,6 +173,8 @@ test("analysis is event-labelled and collapsed behind a native disclosure", () =
   const html = blogHooks.buildPostHTML(
     {
       title: "Spanish Civil War Begins — July 17, 1936",
+      curiosityTitle:
+        "How Did a Partly Failed Coup Become the Spanish Civil War?",
       eventTitle: "Spanish Civil War Begins",
       sourcePageTitle: "Spanish Civil War",
       wikiUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
@@ -194,6 +196,18 @@ test("analysis is event-labelled and collapsed behind a native disclosure", () =
     ["War & Conflict"],
   );
 
+  assert.match(
+    html,
+    /<title>How Did a Partly Failed Coup Become the Spanish Civil War\?<\/title>/,
+  );
+  assert.match(
+    html,
+    /<h1 class="mb-2 fw-bold">How Did a Partly Failed Coup Become the Spanish Civil War\?<\/h1>/,
+  );
+  assert.match(
+    html,
+    /<li class="breadcrumb-item active" aria-current="page">Spanish Civil War Begins<\/li>/,
+  );
   assert.match(html, /<h2 class="h3">Analysis: Spanish Civil War<\/h2>/);
   assert.match(html, /<details class="analysis-disclosure mt-2">/);
   assert.match(
@@ -201,4 +215,111 @@ test("analysis is event-labelled and collapsed behind a native disclosure", () =
     /<summary class="analysis-disclosure-summary">What the evidence supports and leaves unresolved<\/summary>/,
   );
   assert.doesNotMatch(html, /<h2 class="h3">Our Take:/);
+});
+
+test("future articles show the verified evidence comparison near the overview", () => {
+  const sourcePages = [
+    {
+      pageTitle: "Spanish Civil War",
+      pageUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+      publisher: "Wikipedia",
+      accessedAt: "2026-07-17",
+      supportedClaims: [
+        "A military uprising in July 1936 began the Spanish Civil War.",
+      ],
+    },
+    {
+      pageTitle: "The Spanish Civil War",
+      pageUrl: "https://www.iwm.org.uk/history/what-you-need-to-know-about-the-spanish-civil-war",
+      publisher: "Imperial War Museums",
+      accessedAt: "2026-07-17",
+      supportedClaims: [
+        "A military uprising in July 1936 began the Spanish Civil War.",
+      ],
+      verifiedIndependent: true,
+    },
+  ];
+
+  const validation = blogHooks.validateEvidenceMapForPublish({ sourcePages });
+  const html = blogHooks.buildEvidenceMapBlock({ sourcePages });
+  const visibleText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+
+  assert.equal(validation.ok, true, JSON.stringify(validation.reasons));
+  assert.match(html, /Evidence Map: How We Checked the Central Claim/);
+  assert.match(html, /Spanish Civil War · Wikipedia/);
+  assert.match(html, /The Spanish Civil War · Imperial War Museums/);
+  assert.match(html, /Independent corroboration/);
+  assert.doesNotMatch(visibleText, /https?:\/\//);
+});
+
+test("public question titles use a source-supported niche while factual metadata stays locked", () => {
+  const content = {
+    title: "Spanish Civil War Begins — July 17, 1936",
+    curiosityTitle:
+      "How Did a Partly Failed Coup Become the Spanish Civil War?",
+    eventTitle: "Spanish Civil War Begins",
+    sourceEventHeadline: "Spanish Civil War Begins",
+    sourcePageTitle: "Spanish Civil War",
+    sourceText:
+      "An army coup against the Spanish Republic was only partly successful and the country was divided, beginning the Spanish Civil War.",
+    sourceExtract:
+      "The coup failed to take control of the whole country. Spain split between Republican and Nationalist zones and the conflict developed into civil war.",
+    sourcePages: [{
+      pageTitle: "Spanish Civil War",
+      pageUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+      supportedClaims: [
+        "The military coup was only partly successful and developed into the Spanish Civil War.",
+      ],
+    }],
+  };
+
+  const validation = blogHooks.validateCuriosityTitleForPublish(content);
+
+  assert.equal(validation.ok, true, JSON.stringify(validation.reasons));
+  assert.equal(
+    blogHooks.publicArticleTitle(content),
+    "How Did a Partly Failed Coup Become the Spanish Civil War?",
+  );
+  assert.equal(content.eventTitle, "Spanish Civil War Begins");
+  assert.equal(content.title, "Spanish Civil War Begins — July 17, 1936");
+});
+
+test("question-title contract rejects generic or unsupported clickbait", () => {
+  const content = {
+    title: "Spanish Civil War Begins — July 17, 1936",
+    eventTitle: "Spanish Civil War Begins",
+    sourcePageTitle: "Spanish Civil War",
+    sourceText:
+      "A military uprising divided Spain and began the Spanish Civil War.",
+    sourcePages: [{
+      pageTitle: "Spanish Civil War",
+      pageUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+      supportedClaims: [
+        "A military uprising divided Spain and began the Spanish Civil War.",
+      ],
+    }],
+  };
+
+  const generic = blogHooks.validateCuriosityTitleForPublish({
+    ...content,
+    curiosityTitle: "What Happened in the Spanish Civil War?",
+  });
+  const unsupported = blogHooks.validateCuriosityTitleForPublish({
+    ...content,
+    curiosityTitle: "Why Did a Secret Treaty Start the Spanish Civil War?",
+  });
+
+  assert.equal(generic.ok, false);
+  assert.ok(generic.reasons.some((reason) => /generic/i.test(reason)));
+  assert.equal(unsupported.ok, false);
+  assert.ok(unsupported.reasons.some((reason) => /niche angle supported/i.test(reason)));
+});
+
+test("question-title normalization removes a redundant full date without rewriting the premise", () => {
+  assert.equal(
+    blogHooks.normalizeCuriosityTitleText(
+      "Why did a non-employee set fire to Kyoto Animation's Studio 1 on July 18, 2019?",
+    ),
+    "Why did a non-employee set fire to Kyoto Animation's Studio 1?",
+  );
 });

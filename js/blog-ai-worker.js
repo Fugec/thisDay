@@ -1028,6 +1028,113 @@ function validateDirectCitationsForPublish(
   return { ok: reasons.length === 0, reasons, sources: verifiedSources };
 }
 
+function evidenceMapRowsFromContent(content, limit = 4) {
+  return sourcePagesFromContent(content)
+    .filter((page) => {
+      if (!isDirectCitationUrl(page.pageUrl)) return false;
+      let isWikipedia = false;
+      try {
+        isWikipedia = new URL(page.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
+      } catch {
+        return false;
+      }
+      return (
+        (isWikipedia || page.verifiedIndependent === true) &&
+        Array.isArray(page.supportedClaims) &&
+        page.supportedClaims.some((claim) => String(claim || "").trim())
+      );
+    })
+    .slice(0, limit)
+    .map((page) => {
+      let isWikipedia = false;
+      try {
+        isWikipedia = new URL(page.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
+      } catch {}
+      return {
+        page,
+        role: isWikipedia ? "event-record" : "independent",
+        roleLabel: isWikipedia
+          ? "Selected event record"
+          : "Independent corroboration",
+        claims: page.supportedClaims
+          .map((claim) => String(claim || "").replace(/\s+/g, " ").trim())
+          .filter(Boolean)
+          .slice(0, 2),
+      };
+    });
+}
+
+function validateEvidenceMapForPublish(content, { minimumRows = 2 } = {}) {
+  const rows = evidenceMapRowsFromContent(content);
+  const reasons = [];
+  if (rows.length < minimumRows) {
+    reasons.push(`only ${rows.length} source-backed evidence row(s); needs ${minimumRows}`);
+  }
+  if (!rows.some((row) => row.role === "event-record")) {
+    reasons.push("missing the selected event-record source");
+  }
+  if (!rows.some((row) => row.role === "independent")) {
+    reasons.push("missing an independently verified corroborating source");
+  }
+  if (!rows[0]?.claims?.[0]) {
+    reasons.push("missing the central supported claim");
+  }
+  return { ok: reasons.length === 0, reasons, rows };
+}
+
+function buildEvidenceMapBlock(content) {
+  const validation = validateEvidenceMapForPublish(content);
+  if (!validation.ok) return "";
+
+  const centralClaim = validation.rows[0].claims[0];
+  const normalizedCentralClaim = normalizeTopicMatchText(centralClaim);
+  const rows = validation.rows
+    .map(({ page, role, roleLabel, claims }) => {
+      const publisher = page.publisher || sourcePublisherName(page.pageUrl);
+      const title = page.pageTitle || publisher;
+      const sourceLabel = title === publisher ? title : `${title} · ${publisher}`;
+      const distinctClaims = claims.filter(
+        (claim) => normalizeTopicMatchText(claim) !== normalizedCentralClaim,
+      );
+      const coverage = distinctClaims.length > 0
+        ? distinctClaims.join(" ")
+        : "Supports the central claim shown above.";
+      const accessed = page.accessedAt
+        ? `<span class="evidence-map-accessed">Accessed ${esc(page.accessedAt)}</span>`
+        : "";
+      return `<tr class="evidence-map-row" data-evidence-role="${role}">
+                  <th scope="row">
+                    <a href="${esc(page.pageUrl)}" target="_blank" rel="noopener noreferrer">${esc(sourceLabel)}</a>
+                    ${accessed}
+                  </th>
+                  <td><span class="evidence-map-role evidence-map-role-${role}">${esc(roleLabel)}</span></td>
+                  <td>${esc(coverage)}</td>
+                </tr>`;
+    })
+    .join("\n");
+
+  return `<section class="article-evidence-map mt-5" aria-labelledby="evidence-map-heading">
+            <h2 class="h3" id="evidence-map-heading">Evidence Map: How We Checked the Central Claim</h2>
+            <p class="evidence-map-intro">This comparison separates the event page selected for the account from the independently verified page used to corroborate it.</p>
+            <p class="evidence-map-claim"><strong>Central claim checked:</strong> ${esc(centralClaim)}</p>
+            <div class="evidence-map-table-wrap">
+              <table class="evidence-map-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Direct source</th>
+                    <th scope="col">Verification role</th>
+                    <th scope="col">Coverage</th>
+                  </tr>
+                </thead>
+                <tbody>
+${rows}
+                </tbody>
+              </table>
+            </div>
+            <p class="article-meta evidence-map-note">Claims are paraphrased for comparison; use the direct source links for the full record.</p>
+          </section>`;
+}
+
 function buildAuthorityLinksBlock(content, _pillars = []) {
   const links = directCitationPagesFromContent(content);
   if (links.length === 0) return "";
@@ -1196,6 +1303,110 @@ function analysisLooksLikeArticleSelfReview(value) {
   );
 }
 
+const CURIOSITY_TITLE_MIN_LENGTH = 35;
+const CURIOSITY_TITLE_MAX_LENGTH = 65;
+const CURIOSITY_TITLE_START_RE = /^(?:How|Why|What|Who|Which|Where)\b/;
+const CURIOSITY_TITLE_GENERIC_RE =
+  /^(?:What Happened|What Was|Who Was|Why Did It Matter|Why Does It Matter|What Is the Story|How Did .{1,80} Change History)\b|\b(?:you won(?:'|’)t believe|shocking truth|untold secret|what really happened|mystery behind)\b/i;
+const CURIOSITY_TITLE_FULL_DATE_SUFFIX_RE = new RegExp(
+  String.raw`(?:\s+(?:on|in)|\s+[—-])\s+(?:${MONTH_NAMES.join("|")})\s+\d{1,2},\s+\d{3,4}\?\s*$`,
+  "i",
+);
+const CURIOSITY_TITLE_ANGLE_STOPWORDS = new Set([
+  "are", "became", "become", "been", "being", "could", "did", "does", "had",
+  "has", "have", "how", "into", "was", "were", "what", "when", "where", "which",
+  "who", "why", "would",
+]);
+
+function publicArticleTitle(content) {
+  return String(content?.curiosityTitle || content?.title || content?.eventTitle || "Historical Event")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeCuriosityTitleText(value) {
+  let question = String(value || "").replace(/\s+/g, " ").trim();
+  if (!question) return "";
+  question = question.replace(
+    /^(how|why|what|who|which|where)\b/i,
+    (word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`,
+  );
+  // The date is already rendered under the H1. Models sometimes append the
+  // complete date anyway, wasting the search-result title budget. Removing
+  // only that exact trailing date is source-neutral and often turns an
+  // otherwise valid question into the required 35–65 character range.
+  return question.replace(CURIOSITY_TITLE_FULL_DATE_SUFFIX_RE, "?");
+}
+
+function curiosityTitleSourceText(content) {
+  return [
+    content?.sourceText,
+    content?.sourceExtract,
+    ...sourcePagesFromContent(content).flatMap((page) => [
+      page.pageTitle,
+      page.text,
+      page.extract,
+      ...(page.supportedClaims || []),
+    ]),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function validateCuriosityTitleForPublish(content) {
+  const question = String(content?.curiosityTitle || "").replace(/\s+/g, " ").trim();
+  const reasons = [];
+  if (!question) {
+    return { ok: false, reasons: ["missing the source-grounded public question title"] };
+  }
+  if (
+    question.length < CURIOSITY_TITLE_MIN_LENGTH ||
+    question.length > CURIOSITY_TITLE_MAX_LENGTH
+  ) {
+    reasons.push(
+      `public question title must be ${CURIOSITY_TITLE_MIN_LENGTH}-${CURIOSITY_TITLE_MAX_LENGTH} characters (got ${question.length})`,
+    );
+  }
+  if (!CURIOSITY_TITLE_START_RE.test(question)) {
+    reasons.push("public question title must begin with How, Why, What, Who, Which, or Where");
+  }
+  if (!question.endsWith("?") || (question.match(/\?/g) || []).length !== 1) {
+    reasons.push("public question title must contain exactly one question mark at the end");
+  }
+  if (/[!]|(?:\s+[-—]\s+)[A-Z][a-z]+\s+\d{1,2},/i.test(question)) {
+    reasons.push("public question title must not contain hype punctuation or a date suffix");
+  }
+  if (CURIOSITY_TITLE_GENERIC_RE.test(question)) {
+    reasons.push("public question title uses a generic or sensational clickbait formula");
+  }
+
+  const topicText = [
+    content?.eventTitle,
+    content?.sourceEventHeadline,
+    content?.sourcePageTitle,
+    ...sourcePagesFromContent(content).map((page) => page.pageTitle),
+  ].filter(Boolean).join(" ");
+  const questionTokens = [...new Set(sourcePageRelevanceTokens(question))];
+  const topicTokens = new Set(sourcePageRelevanceTokens(topicText));
+  const topicOverlap = questionTokens.filter((token) => topicTokens.has(token));
+  const requiredTopicOverlap = Math.min(2, topicTokens.size);
+  if (requiredTopicOverlap > 0 && topicOverlap.length < requiredTopicOverlap) {
+    reasons.push("public question title does not retain a recognizable event subject");
+  }
+
+  const sourceTokens = new Set(sourcePageRelevanceTokens(curiosityTitleSourceText(content)));
+  const angleTokens = questionTokens.filter(
+    (token) =>
+      !topicTokens.has(token) &&
+      !CURIOSITY_TITLE_ANGLE_STOPWORDS.has(token),
+  );
+  if (!angleTokens.some((token) => sourceTokens.has(token))) {
+    reasons.push("public question title lacks a distinct niche angle supported by the source text");
+  }
+
+  return { ok: reasons.length === 0, reasons, title: question };
+}
+
 function historicalYearFields(content) {
   const found = [];
   const add = (field, value) => {
@@ -1293,6 +1504,7 @@ function visibleArticleProseEntries(content = {}) {
   };
   for (const field of [
     "title",
+    "curiosityTitle",
     "eventTitle",
     "description",
     "ogDescription",
@@ -6347,7 +6559,14 @@ async function generateAndStore(
     .slice()
     .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt))
     .slice(0, 50)
-    .map((e) => e.title)
+    .flatMap((entry) => [
+      entry.eventTitle,
+      entry.factualTitle,
+      entry.title,
+    ])
+    .filter(Boolean)
+    .filter((title, index, list) => list.indexOf(title) === index)
+    .slice(0, 50)
     .filter(
       (t) =>
         !forcedEvent ||
@@ -6614,6 +6833,40 @@ async function generateAndStore(
       );
     }
 
+    const curiosityTitleValidation = validateCuriosityTitleForPublish(content);
+    if (!curiosityTitleValidation.ok) {
+      const reason = curiosityTitleValidation.reasons.join("; ");
+      attemptFailures.push(`attempt ${attempt} public title: ${reason}`);
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        console.warn(
+          `Blog AI: public question-title contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
+        continue;
+      }
+      throw new Error(
+        `Article failed public question-title contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
+      );
+    }
+
+    const evidenceMapValidation = validateEvidenceMapForPublish(content);
+    if (!evidenceMapValidation.ok) {
+      const reason = evidenceMapValidation.reasons.join("; ");
+      attemptFailures.push(`attempt ${attempt} evidence map: ${reason}`);
+      if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const avoid = [...takenAllTime, content?.title].filter(Boolean);
+        console.warn(
+          `Blog AI: evidence-map contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+        );
+        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
+        continue;
+      }
+      throw new Error(
+        `Article failed evidence-map contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
+      );
+    }
+
     try {
       assertRequiredContentBlocks(content);
     } catch (err) {
@@ -6663,6 +6916,18 @@ async function generateAndStore(
           if (!chunkedCitations.ok) {
             throw new Error(
               `direct-citation contract failed: ${chunkedCitations.reasons.join("; ")}`,
+            );
+          }
+          const chunkedCuriosityTitle = validateCuriosityTitleForPublish(chunked);
+          if (!chunkedCuriosityTitle.ok) {
+            throw new Error(
+              `public question-title contract failed: ${chunkedCuriosityTitle.reasons.join("; ")}`,
+            );
+          }
+          const chunkedEvidenceMap = validateEvidenceMapForPublish(chunked);
+          if (!chunkedEvidenceMap.ok) {
+            throw new Error(
+              `evidence-map contract failed: ${chunkedEvidenceMap.reasons.join("; ")}`,
             );
           }
           assertRequiredContentBlocks(chunked);
@@ -6725,11 +6990,15 @@ async function generateAndStore(
             }
             const repairedSemantics = validateContentSemanticsForPublish(repaired);
             const repairedCitations = validateDirectCitationsForPublish(repaired);
+            const repairedCuriosityTitle = validateCuriosityTitleForPublish(repaired);
+            const repairedEvidenceMap = validateEvidenceMapForPublish(repaired);
             assertRequiredContentBlocks(repaired);
             const repairedGrounding = verifyArticleGrounding(repaired, groundingSource);
             if (
               repairedSemantics.ok &&
               repairedCitations.ok &&
+              repairedCuriosityTitle.ok &&
+              repairedEvidenceMap.ok &&
               repairedGrounding.ok
             ) {
               content = repaired;
@@ -6741,6 +7010,8 @@ async function generateAndStore(
               const repairReasons = [
                 ...(!repairedSemantics.ok ? repairedSemantics.reasons : []),
                 ...(!repairedCitations.ok ? repairedCitations.reasons : []),
+                ...(!repairedCuriosityTitle.ok ? repairedCuriosityTitle.reasons : []),
+                ...(!repairedEvidenceMap.ok ? repairedEvidenceMap.reasons : []),
                 ...(!repairedGrounding.ok ? repairedGrounding.reasons : []),
               ];
               console.warn(
@@ -7138,9 +7409,9 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
   if (env.DISCORD_WEBHOOK_URL && !suppressExternalNotifications) {
     try {
       const postUrl = `https://thisday.info/blog/${slug}/`;
-      const message =
+  const message =
         `📰 **New blog post published**\n` +
-        `📖 ${content.title}\n` +
+        `📖 ${publicArticleTitle(content)}\n` +
         `🌐 ${postUrl}`;
       await fetch(env.DISCORD_WEBHOOK_URL, {
         method: "POST",
@@ -7422,6 +7693,18 @@ async function savePublishedPost(
       `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
     );
   }
+  const curiosityTitleValidation = validateCuriosityTitleForPublish(content);
+  if (!curiosityTitleValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
+    );
+  }
+  const evidenceMapValidation = validateEvidenceMapForPublish(content);
+  if (!evidenceMapValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: evidence-map contract failed — ${evidenceMapValidation.reasons.join("; ")}`,
+    );
+  }
   const didYouKnowValidation = auditDidYouKnowFacts(content, {
     requireGrounding: true,
     groundingVerified: didYouKnowGroundingVerified,
@@ -7532,7 +7815,8 @@ async function savePublishedPost(
   const topicHubs = getArticleTopicHubMatches(content, 3).map((hub) => hub.slug);
   const entry = {
     slug,
-    title: content.title,
+    title: publicArticleTitle(content),
+    factualTitle: content.title,
     description: content.description,
     imageUrl: content.imageUrl,
     publishedAt: date.toISOString(),
@@ -7677,6 +7961,18 @@ async function enrichPublishedPost(env, slug) {
   if (!citationValidation.ok) {
     throw new Error(
       `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
+    );
+  }
+  const curiosityTitleValidation = validateCuriosityTitleForPublish(enriched);
+  if (!curiosityTitleValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
+    );
+  }
+  const evidenceMapValidation = validateEvidenceMapForPublish(enriched);
+  if (!evidenceMapValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: evidence-map contract failed — ${evidenceMapValidation.reasons.join("; ")}`,
     );
   }
 
@@ -9825,6 +10121,7 @@ function assertArticleStructure(html) {
   const quickFactCount = countHtmlMatches(source, /<div class="ai-answer-item"><strong>[^<\s][^<]*<\/strong><span>[^<\s][^<]*<\/span><\/div>/gi);
   const didYouKnowCount = countHtmlMatches(source, /class="dyn-fact">[^<\s][^<]*<\/p>/gi);
   const analysisItemCount = countHtmlMatches(source, /<li class="mb-2"><strong>[^<:\s][^<]*:<\/strong>\s*[^<\s]/gi);
+  const evidenceMapRowCount = countHtmlMatches(source, /class="evidence-map-row"/gi);
   const checks = [
     ["article shell", /<article\b/i],
     ["hero image area", /article-hero-wrap/i],
@@ -9832,6 +10129,9 @@ function assertArticleStructure(html) {
     ["featured image alt text", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\balt="[^"]{5,}"/i],
     ["short answer card", /ai-answer-card/i],
     ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
+    ["source-backed evidence map", /<section class="article-evidence-map\b/i],
+    ["evidence-map central claim", /class="evidence-map-claim"[\s\S]*?<strong>Central claim checked:<\/strong>\s*[^<\s]/i],
+    ["independent evidence-map source", /data-evidence-role="independent"/i],
     ["analysis section", /<h2 class="h3">Analysis:/i],
     ["collapsed analysis disclosure", /<details class="analysis-disclosure\b/i],
     ["people entity strip", /data-entity-strip="1"/i],
@@ -9844,6 +10144,7 @@ function assertArticleStructure(html) {
     .map(([label]) => label);
   if (quickFactCount < 6) missing.push("six rendered key facts");
   if (didYouKnowCount < 5) missing.push("five rendered did-you-know cards");
+  if (evidenceMapRowCount < 2) missing.push("two rendered evidence-map source rows");
   if (analysisItemCount < 6) missing.push("six rendered analysis items");
   const visibleRawUrls = visibleRawUrlsInRenderedHtml(source);
   if (visibleRawUrls.length > 0) {
@@ -10561,6 +10862,9 @@ function normalizeGeneratedArticleContent(parsed, date) {
   // Normalise fields that must be strings — the model occasionally returns arrays.
   if (Array.isArray(parsed.keywords)) parsed.keywords = parsed.keywords.join(", ");
   if (typeof parsed.keywords !== "string") parsed.keywords = String(parsed.keywords || "");
+  if (typeof parsed.curiosityTitle === "string") {
+    parsed.curiosityTitle = normalizeCuriosityTitleText(parsed.curiosityTitle);
+  }
 
   enforceAnswerFirstSections(parsed);
 
@@ -10616,6 +10920,7 @@ Do not repeat, soften, hedge, or paraphrase those claims. Replace each one with 
 function compactChunkedArticleBrief(brief) {
   return {
     title: brief?.title || "",
+    curiosityTitle: brief?.curiosityTitle || "",
     eventTitle: brief?.eventTitle || "",
     historicalDate: brief?.historicalDate || "",
     historicalYear: brief?.historicalYear || "",
@@ -10934,6 +11239,7 @@ ${sharedContext}
 Return JSON only with this shape:
 {
   "title":"... — ${monthName} ${day}, Year",
+  "curiosityTitle":"How or Why question using a source-supported niche angle?",
   "eventTitle":"short subject-plus-finite-verb clause",
   "historicalDate":"${monthName} ${day}, Year",
   "historicalYear":1234,
@@ -10962,6 +11268,9 @@ Return JSON only with this shape:
 }
 
 Requirements:
+- curiosityTitle is the public headline. It must be a 35-65 character How, Why, What, Who, Which, or Where question with exactly one final question mark.
+- Build curiosityTitle around a surprising transformation, contradiction, overlooked place, hidden decision, or consequence explicitly present in the source. Retain the recognizable event name and never use generic clickbait.
+- title and eventTitle remain factual internal labels used to protect the event identity and date. Do not turn either one into a question.
 - keyTerms must include at least one real named person connected to the event.
 - sourceFacts must preserve the source's actors, numbers, chronology, and relationship verbs exactly. A source fact may say "later" when the source says "later", but may not change that into "led to".
 - Do not put inferred significance, legacy, policy effects, security changes, mental-health effects, or moral lessons in sourceFacts.
@@ -10969,6 +11278,17 @@ Requirements:
 - Never place a raw URL in quickFacts or any other visible prose field; URLs belong only in URL/source metadata fields.`,
     1500,
     (parsed) => {
+      parsed.curiosityTitle = normalizeCuriosityTitleText(parsed.curiosityTitle);
+      const curiosityTitleValidation = validateCuriosityTitleForPublish({
+        ...parsed,
+        sourcePageTitle: forcedEvent || parsed.eventTitle,
+        sourceText: sourceMaterial || (parsed.sourceFacts || []).join(" "),
+      });
+      if (!curiosityTitleValidation.ok) {
+        throw new Error(
+          `chunked article brief: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
+        );
+      }
       requireChunkArray(parsed, "keyTerms", { min: 1, label: "chunked article brief" });
       // Validate the person against the SAME first-8 slice that
       // compactChunkedArticleBrief forwards as grounding context to every body,
@@ -11297,7 +11617,7 @@ BANNED PHRASES — never write any of these:
 "significant event", "pivotal moment", "changed history", "shaped the course of", "left a lasting impact", "cannot be overstated", "one of the most important", "it is worth noting", "it is important to remember", "this was a time of great change", "the importance of this", "a reminder of", "shows the importance of", "demonstrated the power of", "it was a dark time", "it was a bleak time", "it was a difficult period", "it was chaos", "it was a complex time", "dark chapter". These are filler. Replace them with the specific fact or analysis that the phrase was trying to avoid writing.
 "dramatic and unexpected", "dramatic and unexpected turn of events", "significant turning point", "brighter future", and "marked the end of a dark period" are also banned unless rewritten into concrete, evidenced statements.
 
-HARD RULE — NO RHETORICAL QUESTIONS: Do not write a single sentence in the form of a question directed at the reader. Not one. This includes: "But why was it significant?", "What were they thinking?", "What happened next?", "So, what happened?", "What does this tell us?", "What if King Faisal had lived?", "What were the consequences?", "Did it work?", or any variation. Every question you are tempted to write must be rewritten as a declarative statement that answers itself. Example: instead of "What were the consequences?" write "The consequences were immediate and lasting." Before submitting your response, scan every sentence — if any sentence ends with a question mark and is addressed to the reader, rewrite it.
+HARD RULE — NO RHETORICAL QUESTIONS IN ARTICLE PROSE: Do not write a question directed at the reader in any body, fact, analysis, quote, or editorial field. The one required exception is curiosityTitle, which is the public headline and must be a source-grounded question. Every other question must be rewritten as a declarative statement that answers itself. Example: instead of "What were the consequences?" write "The consequences were immediate and lasting." Before submitting your response, scan every field except curiosityTitle and rewrite any sentence ending in a question mark.
 
 HARD RULE — NO FIRST-PERSON SINGULAR: The narrator is ALWAYS third person. Never write "I", "I was", "I witnessed", "I saw", "I recall", "I remember", or any sentence where the narrator uses "I" as a subject. This applies everywhere in the article — overview, eyewitness, aftermath, conclusion, everywhere. The Eyewitness section reports WHAT witnesses said and experienced; it does not pretend the narrator was present. Write "Student Alan Canfora later recalled that..." not "I was on the campus and I witnessed...". If a real quote is included, attribute it with a signal phrase in third person ("as Canfora wrote", "Smith testified that", "the correspondent reported"). Zero first-person singular in the entire response.
 
@@ -11306,7 +11626,12 @@ HARD RULE — NO FAKE SUSPENSE OPENERS: Do not start any sentence with: "So,", "
 DO NOT open consecutive paragraphs with the same word or conjunction. Each paragraph must begin with a structurally different sentence.
 
 Title rules:
-- The "title" field is the public card headline and MUST follow exactly this format: "[factual event headline with a strong verb] — ${monthName} ${day}, Year"
+- The "curiosityTitle" field is the public search/card/H1 headline. It MUST be a 35-65 character question beginning with How, Why, What, Who, Which, or Where and ending with exactly one question mark.
+- Find one relevant, interesting niche in the supplied source text: a surprising transformation, contradiction, overlooked location, hidden decision, misunderstood cause, or concrete consequence. Build curiosityTitle around that niche while retaining the recognizable event name.
+- curiosityTitle must be directly answerable from the article and authoritative source material. It must contain at least one angle beyond merely restating eventTitle. Never invent a mystery, motive, cause, failure, secret, or consequence.
+- CORRECT: "How Did a Partly Failed Coup Become the Spanish Civil War?" WRONG: "Spanish Civil War Begins", "What Happened in the Spanish Civil War?", "Discover the Spanish Civil War", "The Untold Secret of the Spanish Civil War".
+- Do not put the date suffix in curiosityTitle. The historical date is displayed separately beneath the H1.
+- The "title" field is the locked factual reference title and MUST follow exactly this format: "[factual event headline with a strong verb] — ${monthName} ${day}, Year". It is used for factual/date validation, not as the public H1.
 - LENGTH — keep it SHORT for search results: the headline part (everything before " — ") MUST be about 50 characters or fewer (roughly 6-9 words) while still naming who + what. Drop secondary actors, lists of names, and any "Topic War:" prefix copied from the source. CORRECT (concise AND complete): "Napoleon Defeated at the Battle of Waterloo", "Royal Navy Sinks German Battleship Bismarck", "U.S. Senate Passes the Fair Labor Standards Act". WRONG (too long, lists every actor, keeps the topic tag): "Napoleonic Wars: The Battle of Waterloo results in the defeat of Napoleon Bonaparte by the Duke of Wellington and Field Marshal Blücher". Start with the real subject, not the topic tag.
 - HARD RULE — TITLE MUST CONTAIN A FINITE VERB: Both "title" and "eventTitle" MUST include at least one finite verb that describes the action — not a gerund, not a noun, a conjugated verb. "China Airlines Flight 611 Disintegrates" is correct (finite verb: disintegrates). "China Airlines Flight 611 Crash" is wrong (noun only). "China Airlines Flight 611 Crashing" is wrong (gerund). There must be a clear subject + verb structure.
 - The first part must be specific and interesting while staying factual. Never address or command the reader, and never prepend a promotional hook such as "Join the Fight:", "Discover:", "Explore:", or "Read This:". The headline MUST be a complete grammatical clause: a real subject PLUS a finite verb. For transitive actions, include the object too. CORRECT (concise — about 50 chars or fewer): "Napoleon Defeated at the Battle of Waterloo", "Royal Navy Sinks German Battleship Bismarck", "Parliament Ratifies Treaty of Versailles", "China Airlines Flight 611 Disintegrates". WRONG: "Join the Fight: Spanish Civil War Begins", "VTA Rail Yard Shooting Kills" (no subject for "Kills" — who kills?), "Bismarck Sinking Sinks" (redundant verb appended to noun phrase), "Flight 611 Crash" (noun only). Never take a Wikipedia event page title (which is a noun phrase) and just append a bare verb — always build a proper subject-verb clause from the event description.
@@ -11321,6 +11646,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
 
 {
   "title": "Factual event headline with a strong verb — ${monthName} ${day}, Year",
+  "curiosityTitle": "How or Why question using a distinct source-supported niche angle?",
   "eventTitle": "Concise event name with a finite verb (e.g. 'Flight 611 Disintegrates', not 'Flight 611 Crash')",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
@@ -11437,6 +11763,7 @@ ${groundingFeedbackSection}
 Output exactly this JSON shape and no extra text:
 {
   "title": "... — ${monthName} ${day}, Year",
+  "curiosityTitle": "How or Why question using a distinct source-supported niche angle?",
   "eventTitle": "...",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
@@ -11475,6 +11802,10 @@ Output exactly this JSON shape and no extra text:
 }
 
 Field requirements:
+- curiosityTitle is the public search/card/H1 headline. It must be a 35-65 character How, Why, What, Who, Which, or Where question with exactly one final question mark and no date suffix.
+- Find one source-supported niche beyond the event label: a surprising transformation, contradiction, overlooked location, hidden decision, misunderstood cause, or concrete consequence. Keep the recognizable event name in the question.
+- curiosityTitle must be fully answered by SOURCE MATERIAL and the article. Never use generic "What happened?", hype, a secret/mystery formula, or an invented premise.
+- title and eventTitle remain locked factual/date labels. They are not questions and must keep the selected event identity unchanged.
 - quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 5 distinct facts.
 - Every Quick Fact must be directly supported. Do not use Significance, Legacy, Impact, or Lessons labels unless SOURCE MATERIAL explicitly states the claimed consequence. Prefer Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome.
 - Every Did You Know fact must come from SOURCE MATERIAL. Do not invent a surprising consequence, coincidence, motive, fate, or policy effect.
@@ -11490,7 +11821,7 @@ Field requirements:
 Writing rules:
 - Lead with the strongest concrete fact in the first two sentences. Facts before mood.
 - Every paragraph needs a specific name, date, number, place, institution, source, or quote.
-- No rhetorical questions, no first-person singular narrator, no fake witness voice.
+- No rhetorical questions outside curiosityTitle, no first-person singular narrator, no fake witness voice.
 - No raw URLs in quick facts, Did You Know facts, body paragraphs, analysis, timeline labels, quotes, or editorial notes.
 - No hyphens or em dashes inside article body fields. Use commas or periods.
 - No filler phrases: significant event, pivotal moment, changed history, lasting impact, cannot be overstated, it is important to remember, dark chapter.
@@ -11894,6 +12225,7 @@ function collectGroundingStrings(value, out = []) {
 function articleGroundingText(content) {
   const groundedFields = {
     title: content?.title,
+    curiosityTitle: content?.curiosityTitle,
     eventTitle: content?.eventTitle,
     description: content?.description,
     quickFacts: content?.quickFacts,
@@ -12355,14 +12687,16 @@ const KV_BLOCKED_EVENT_PREFIX = "blocked-event:";
 const GROUNDING_VERIFIER_TRANSPORT_PATTERN = /final grounding verifier/;
 
 const GROUNDING_REPAIRABLE_STRING_FIELDS = [
+  "curiosityTitle",
   "description",
   "ogDescription",
   "twitterDescription",
   "jsonLdDescription",
   "editorialNote",
 ];
-// Titles are deliberately NOT repairable: they are locked to the source event
-// headline and rewriting them here would desync the KV index.
+// The factual title and eventTitle are deliberately NOT repairable: they are
+// locked to the source event headline. The separate public curiosityTitle can
+// be surgically repaired when its premise is not supported.
 const GROUNDING_REPAIRABLE_ARRAY_FIELDS = [
   "overviewParagraphs",
   "eyewitnessOrChronicle",
@@ -13343,20 +13677,20 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
   // --- PASS 2: SEO meta fields only (no paragraphs) ---
   const seoSystemPrompt =
     "You are a senior SEO editor for a historical blog. Improve only these meta fields:\n" +
+    "- curiosityTitle: 35–65 chars; a How/Why/What/Who/Which/Where question built around a surprising, relevant niche explicitly present in the supplied source; retain the recognizable event name; exactly one final question mark; no date suffix, generic 'What happened?', hype, or invented premise\n" +
     "- description: 120–155 chars, lead with a concrete hook (death toll, office, ship name, law, military result, or named figure) — do NOT start with a bare year; include location and weave the year in naturally; end on a complete clause, never a dangling preposition or mid-phrase '...'\n" +
     "- ogDescription: 100–130 chars, curiosity-driven, give readers a reason to click\n" +
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
-    "- keywords: 5–8 specific terms including year, location, key people, historical context\n" +
-    "- eventTitle: concise canonical event label with an active verb when possible\n" +
-    "- title: keep format 'Factual event headline — Month Day, Year'. Improve dull card headlines with a specific subject and verb, never a reader command or promotional hook such as 'Join the Fight:'.\n\n" +
+    "- keywords: 5–8 specific terms including year, location, key people, historical context\n\n" +
     SOURCE_BOUND_REPAIR_RULES +
-    "Return ONLY a JSON object with fields that need improvement. Omit fields that are already good.\n" +
+    "Do not change title or eventTitle; they are locked factual/date labels. Return ONLY a JSON object with fields that need improvement. Omit fields that are already good.\n" +
     "Ban vague copy such as 'dramatic and unexpected', 'significant turning point', 'remarkable', 'important moment', 'in the history of', or 'changed everything' unless a concrete fact immediately follows. " +
     "Do not use lazy suffix headlines like 'Founding', 'Creation', 'Launch', 'Opening', 'Completion', or 'Presentation' unless the event text literally says that happened.";
 
   const seoUserMessage =
     (sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : "") +
-    `Title: ${content.title}\n` +
+    `Locked factual title: ${content.title}\n` +
+    `Current public question title: ${content.curiosityTitle || ""}\n` +
     `Event: ${content.eventTitle} on ${content.historicalDate} in ${content.location || "unknown"}\n` +
     `description: ${content.description || ""}\n` +
     `ogDescription: ${content.ogDescription || ""}\n` +
@@ -13402,8 +13736,7 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
 
   // SEO pass only touches meta fields — paragraphs were handled in Pass 1
   const ALLOWED_FIELDS = [
-    "title",
-    "eventTitle",
+    "curiosityTitle",
     "description",
     "ogDescription",
     "twitterDescription",
@@ -13435,20 +13768,11 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     changed++;
   }
 
-  // Guard: if the expert changed the title, make sure format is still correct
-  if (improved.title !== content.title) {
-    const expectedDate = content.historicalDate || "";
-    const improvedLead = getTitleLead(improved.title);
-    if (
-      !improved.title.includes(" — ") ||
-      (expectedDate && !improved.title.includes(expectedDate)) ||
-      isWeakCtaTitleLead(improvedLead)
-    ) {
-      improved.title = content.title; // revert bad title
+  if (improved.curiosityTitle !== content.curiosityTitle) {
+    const validation = validateCuriosityTitleForPublish(improved);
+    if (!validation.ok) {
+      improved.curiosityTitle = content.curiosityTitle;
     }
-  }
-  if (improved.eventTitle !== content.eventTitle && improved.title === content.title) {
-    improved.title = buildDisplayTitle(content.title, improved.eventTitle, content.historicalDate);
   }
 
   console.log(`SEO expert: reviewed content — ${changed} field(s) improved`);
@@ -14452,6 +14776,7 @@ function visibleArticleCorpus(content) {
   return normalizeTopicMatchText(
     [
       content?.title,
+      content?.curiosityTitle,
       content?.eventTitle,
       content?.description,
       content?.historicalDate,
@@ -14560,7 +14885,7 @@ function buildBlogPostStructuredData(
     "@context": "https://schema.org",
     "@type": "BlogPosting",
     mainEntityOfPage: { "@type": "WebPage", "@id": canonicalUrl },
-    headline: content.title,
+    headline: publicArticleTitle(content),
     datePublished: publishedAt,
     inLanguage: "en",
     articleSection: "History",
@@ -14626,7 +14951,7 @@ function buildArticleBreadcrumbStructuredData(content, canonicalUrl, currentPill
   itemListElement.push({
     "@type": "ListItem",
     position: itemListElement.length + 1,
-    name: content.title,
+    name: content.eventTitle || content.title,
     item: canonicalUrl,
   });
   return {
@@ -14680,7 +15005,9 @@ function validateArticleStructuredDataForPublish(html, content, entityMeta = [])
 
   const article = articles[0];
   if (article) {
-    if (article.headline !== content?.title) reasons.push("schema headline does not match the visible title");
+    if (article.headline !== publicArticleTitle(content)) {
+      reasons.push("schema headline does not match the visible title");
+    }
     const about = article.about;
     if (!schemaObjectHasType(about, "Event")) reasons.push("article about schema must describe an Event");
     const expectedEventName = content?.eventTitle || content?.jsonLdName || content?.title;
@@ -14744,6 +15071,7 @@ function buildPostHTML(
   const publishYear = date.getFullYear();
   const canonicalUrl = `https://thisday.info/blog/${slug}/`;
   const publishedStr = `${monthName} ${day}, ${publishYear}`;
+  const publicTitle = publicArticleTitle(c);
   const keywords = Array.isArray(c.keywords)
     ? c.keywords.map((keyword) => String(keyword).trim()).filter(Boolean).join(", ")
     : String(c.keywords || "");
@@ -14751,6 +15079,7 @@ function buildPostHTML(
   const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || [], c);
   const sectionHeadings = buildArticleSectionHeadings(c, currentPillars);
   const analysisHeading = `Analysis: ${compactAnalysisSubject(c)}`;
+  const evidenceMapBlock = buildEvidenceMapBlock(c);
   const amazonRelatedBlock = buildAmazonRelatedBlock(c, currentPillars);
   const articleBodyAdBlock = amazonRelatedBlock ? buildArticleBodyAdBlock() : "";
 
@@ -14855,7 +15184,7 @@ ${currentPillars
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="X-UA-Compatible" content="ie=edge" />
-    <title>${esc(c.title)}</title>
+    <title>${esc(publicTitle)}</title>
     <link rel="canonical" href="${canonicalUrl}" />
     <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="author" content="thisDay. Editorial" />
@@ -14863,7 +15192,7 @@ ${currentPillars
     <meta name="keywords" content="${esc(keywords)}" />
 
     <!-- Open Graph -->
-    <meta property="og:title" content="${esc(c.title)}" />
+    <meta property="og:title" content="${esc(publicTitle)}" />
     <meta property="og:description" content="${esc(c.ogDescription || c.description)}" />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="${canonicalUrl}" />
@@ -14887,7 +15216,7 @@ ${currentPillars
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${esc(c.title)}" />
+    <meta name="twitter:title" content="${esc(publicTitle)}" />
     <meta name="twitter:description" content="${esc(c.twitterDescription || c.description)}" />
     <meta name="twitter:image" content="${esc(previewImageUrl)}" />
     <meta name="twitter:image:alt" content="${esc(c.imageAlt || c.title)}" />
@@ -15017,6 +15346,19 @@ ${breadcrumbJsonLd}
       .authority-links-row{display:flex;flex-wrap:wrap;gap:8px}
       .authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;font-weight:400;color:var(--btn-bg);background:#fff;text-decoration:none}
       .authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+      .article-evidence-map{border:1px solid var(--border);border-radius:10px;background:var(--bg-alt);padding:1.25rem}
+      .evidence-map-intro{margin:0 0 .85rem;color:var(--text-muted)}
+      .evidence-map-claim{margin:0 0 1rem;padding:.9rem 1rem;border-left:3px solid var(--btn-bg);background:#fff}
+      .evidence-map-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#fff}
+      .evidence-map-table{width:100%;min-width:640px;border-collapse:collapse;font-size:.9rem}
+      .evidence-map-table th,.evidence-map-table td{padding:.85rem;vertical-align:top;text-align:left;border-bottom:1px solid var(--border)}
+      .evidence-map-table thead th{background:#e7f0e7;color:var(--text);font-weight:600}
+      .evidence-map-table tbody tr:last-child th,.evidence-map-table tbody tr:last-child td{border-bottom:0}
+      .evidence-map-table tbody th{width:30%;font-weight:600}
+      .evidence-map-accessed{display:block;margin-top:.3rem;color:var(--text-muted);font-size:.75rem;font-weight:400}
+      .evidence-map-role{display:inline-flex;padding:.3rem .55rem;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--text);font-size:.78rem;line-height:1.25}
+      .evidence-map-role-independent{border-color:#9dc43a;background:#f4f8e9}
+      .evidence-map-note{margin:.75rem 0 0}
       .amazon-related{background:var(--bg-alt);border:1px solid var(--border)}
       .amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
       .amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
@@ -15085,7 +15427,7 @@ ${breadcrumbJsonLd}
 
         <div class="article-hero-wrap article-hero-standalone">
           <header class="mb-4 text-center article-hero-header">
-            <h1 class="mb-2 fw-bold">${esc(c.title)}</h1>
+            <h1 class="mb-2 fw-bold">${esc(publicTitle)}</h1>
             <p class="article-meta mb-0">
               <small>
                 Published: ${esc(publishedStr)} &nbsp;|&nbsp;
@@ -15129,6 +15471,8 @@ ${overviewParas}
           </section>`
               : ""
           }
+
+          ${evidenceMapBlock}
 
           ${amazonRelatedBlock}
           ${articleBodyAdBlock}
@@ -16746,5 +17090,11 @@ export const __contentGenerationTestHooks = {
   buildArticleEntityStrip,
   normalizeArticleEntityStripPresentationHtml,
   compactAnalysisSubject,
+  publicArticleTitle,
+  normalizeCuriosityTitleText,
+  validateCuriosityTitleForPublish,
+  evidenceMapRowsFromContent,
+  validateEvidenceMapForPublish,
+  buildEvidenceMapBlock,
   buildPostHTML,
 };

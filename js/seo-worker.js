@@ -53,6 +53,7 @@ import {
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
+const HOMEPAGE_PRELOAD_VERSION = 2;
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
@@ -64,6 +65,58 @@ const PROTECTED_LEGACY_PERSON_SLUGS = new Set([
   "african-american",
   "warren-anderson",
 ]);
+
+function compactHomepagePreloadPage(page) {
+  if (!page || typeof page !== "object") return null;
+  const title = String(page.title || page.normalizedtitle || "").trim();
+  const description = String(page.description || "").trim();
+  const extract = String(page.extract || "").trim();
+  const sourceUrl = String(page.content_urls?.desktop?.page || "").trim();
+  const thumbnailUrl = String(page.thumbnail?.source || "").trim();
+  const originalImageUrl = String(page.originalimage?.source || "").trim();
+  const compact = {};
+
+  if (title) compact.title = title;
+  if (description) compact.description = description;
+  if (extract) compact.extract = extract;
+  if (sourceUrl) compact.content_urls = { desktop: { page: sourceUrl } };
+  if (thumbnailUrl) compact.thumbnail = { source: thumbnailUrl };
+  if (originalImageUrl) compact.originalimage = { source: originalImageUrl };
+  return Object.keys(compact).length ? compact : null;
+}
+
+function compactHomepagePreloadItem(item) {
+  if (!item || typeof item !== "object") return null;
+  const text = String(item.text || "").trim();
+  if (!text) return null;
+  const page = compactHomepagePreloadPage(item.pages?.[0]);
+  return {
+    text,
+    year: item.year ?? "",
+    pages: page ? [page] : [],
+  };
+}
+
+function buildHomepagePreloadPayload(eventsData) {
+  const compactItems = (items) =>
+    (Array.isArray(items) ? items : [])
+      .map(compactHomepagePreloadItem)
+      .filter(Boolean);
+  return {
+    version: HOMEPAGE_PRELOAD_VERSION,
+    events: compactItems(eventsData?.events),
+    births: compactItems(eventsData?.births),
+    deaths: compactItems(eventsData?.deaths),
+  };
+}
+
+function serializeInlineJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026");
+}
+
 const HISTORY_EVERGREEN_PAGES = Object.freeze({
   "spanish-civil-war-1936": {
     storageSlug: "spanish-civil-war-erupts",
@@ -7333,16 +7386,8 @@ async function handleFetchRequest(request, env, ctx) {
 
   // Inject preloaded data for the current day into the HTML
   if (eventsData && eventsData.events && eventsData.events.length > 0) {
-    const initialEventsForClient = eventsData.events;
-    const initialBirthsForClient = eventsData.births || [];
-    const initialDeathsForClient = eventsData.deaths || [];
-
-    const preloadedData = {
-      events: initialEventsForClient,
-      births: initialBirthsForClient,
-      deaths: initialDeathsForClient,
-    };
-    const jsonData = JSON.stringify(preloadedData);
+    const preloadedData = buildHomepagePreloadPayload(eventsData);
+    const jsonData = serializeInlineJson(preloadedData);
 
     rewriter.on("head", {
       element(element) {
@@ -8982,4 +9027,12 @@ export const __archiveIndexabilityTestHooks = {
   buildKeywordArchiveEntries,
   getPostsForTopicHub,
   renderArchiveEditorialContext,
+};
+
+export const __homepagePerformanceTestHooks = {
+  HOMEPAGE_PRELOAD_VERSION,
+  compactHomepagePreloadPage,
+  compactHomepagePreloadItem,
+  buildHomepagePreloadPayload,
+  serializeInlineJson,
 };

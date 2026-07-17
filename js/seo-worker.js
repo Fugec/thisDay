@@ -367,12 +367,12 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v46/born-v28) already tolerate up to a 7-day
-// staleness window (publish busts quiz-page-v30 only, not these), so a 1h edge
+// date-page KV caches (gen-post-v47/born-v29) already tolerate up to a 7-day
+// staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
 // Routes eligible for CF Cache API storage. Quiz pages are excluded because
-// the blog worker busts their KV key (quiz-page-v30) on publish; the CF Cache
+// the blog worker busts their KV key (quiz-page-v31) on publish; the CF Cache
 // has no hook into that invalidation path.
 const EDGE_CACHE_ROUTE_RE = /^\/(events|born|died|people|history|topics|years|keywords)\/./;
 function isEdgeCacheable(url, request) {
@@ -3564,12 +3564,14 @@ function buildQuizAnswerBlock({ mDisplay, day, quiz, featuredEvent }) {
   </section>`;
 }
 
-function buildPersonAnswerBlock({ mDisplay, day, featured, count, type, eraRange }) {
+function buildPersonAnswerBlock({ mDisplay, day, featured, count, type, eraRange, personLinks = null }) {
   if (!featured) return "";
   const p = featured.pages?.[0];
-  const personName = escapeHtml(featured.text.split(",")[0].trim());
+  const rawPersonName = featured.text.split(",")[0].trim();
+  const personName = escapeHtml(rawPersonName);
   const wikiDesc = p?.description ? escapeHtml(p.description) : "";
-  const wikiUrl = p?.content_urls?.desktop?.page || "";
+  const profileUrl = internalPersonUrl(personLinks, rawPersonName);
+  const wikiUrl = profileUrl || p?.content_urls?.desktop?.page || "";
   const extract = p?.extract || "";
   const knownFor = extract
     ? escapeHtml(extract.split(/\.\s+/)[1]?.trim() || extract.split(/\.\s+/)[0]?.trim() || "")
@@ -3585,7 +3587,7 @@ function buildPersonAnswerBlock({ mDisplay, day, featured, count, type, eraRange
     <h2 id="${titleId}" class="h4 mb-2">${escapeHtml(question)}</h2>
     ${wikiDesc ? `<p class="mb-3">${personName} — ${wikiDesc}</p>` : ""}
     <div class="ai-answer-grid" aria-label="Key facts">
-      <div class="ai-answer-item"><strong>Featured</strong><span>${wikiUrl ? `<a href="${escapeHtml(wikiUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit">${personName}</a>` : personName}</span></div>
+      <div class="ai-answer-item"><strong>Featured</strong><span>${wikiUrl ? `<a href="${escapeHtml(wikiUrl)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} style="color:inherit">${personName}</a>` : personName}</span></div>
       <div class="ai-answer-item"><strong>${yearLabel}</strong><span>${escapeHtml(String(featured.year))}</span></div>
       ${knownFor ? `<div class="ai-answer-item" style="grid-column:1/-1"><strong>Known for</strong><span>${knownFor}</span></div>` : ""}
       <div class="ai-answer-item"><strong>${countLabel}</strong><span>${escapeHtml(String(count))}${eraRange ? ` (${escapeHtml(eraRange)})` : ""}</span></div>
@@ -3593,12 +3595,12 @@ function buildPersonAnswerBlock({ mDisplay, day, featured, count, type, eraRange
   </section>`;
 }
 
-function buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange }) {
-  return buildPersonAnswerBlock({ mDisplay, day, featured, count: births.length, type: "born", eraRange });
+function buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange, personLinks = null }) {
+  return buildPersonAnswerBlock({ mDisplay, day, featured, count: births.length, type: "born", eraRange, personLinks });
 }
 
-function buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange }) {
-  return buildPersonAnswerBlock({ mDisplay, day, featured, count: deaths.length, type: "died", eraRange });
+function buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange, personLinks = null }) {
+  return buildPersonAnswerBlock({ mDisplay, day, featured, count: deaths.length, type: "died", eraRange, personLinks });
 }
 
 function verifiedPersonWikipediaUrl(item) {
@@ -3682,7 +3684,7 @@ function selectDatePersonProfiles(items, featured, limit = MAX_DATE_PERSON_PROFI
   const remaining = (Array.isArray(items) ? items : [])
     .filter((item) => item && item !== featured && datePersonProfileScore(item) > 0)
     .sort((left, right) => {
-      const scoreDiff = datePersonProfileScore(right) - datePersonProfileScore(left);
+      const scoreDiff = datePersonRankScore(right) - datePersonRankScore(left);
       if (scoreDiff) return scoreDiff;
       const yearDiff = (parseInt(left?.year, 10) || 0) - (parseInt(right?.year, 10) || 0);
       if (yearDiff) return yearDiff;
@@ -3691,6 +3693,143 @@ function selectDatePersonProfiles(items, featured, limit = MAX_DATE_PERSON_PROFI
   return featured
     ? [featured, ...remaining.slice(0, maxProfiles - 1)]
     : remaining.slice(0, maxProfiles);
+}
+
+// ---------------------------------------------------------------------------
+// Person notability via Wikimedia pageviews (mirrors the blog worker's
+// event rerank). A person's previous-month pageviews translate into a bonus
+// that lets famous people win featured/list ranking over people who merely
+// have long extracts. Every failure path fails open (bonus 0, prior order).
+// ---------------------------------------------------------------------------
+const DATE_PERSON_PAGEVIEW_TOP_N = 12;
+const DATE_PERSON_NOTABILITY_MAX_BONUS = 55;
+const DATE_PERSON_PAGEVIEW_TIMEOUT_MS = 4000;
+
+function personPageviewNotabilityBonus(monthlyViews) {
+  const views = Number(monthlyViews);
+  if (!Number.isFinite(views) || views <= 1000) return 0;
+  // log scale: 10k/month → +20, 100k → +40, capped at +55 (~1M+).
+  return Math.min(
+    DATE_PERSON_NOTABILITY_MAX_BONUS,
+    Math.round((Math.log10(views) - 3) * 20),
+  );
+}
+
+function datePersonRankScore(item) {
+  return (
+    datePersonProfileScore(item) +
+    personPageviewNotabilityBonus(item?.monthlyPageviews)
+  );
+}
+
+async function fetchMonthlyPageviewsForTitle(pageTitle, fetchImpl = fetch) {
+  const title = String(pageTitle || "").trim();
+  if (!title) return 0;
+  // Previous full calendar month (monthly granularity needs whole months).
+  const now = new Date();
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1));
+  const fmt = (d) => `${d.toISOString().slice(0, 10).replace(/-/g, "")}00`;
+  const article = encodeURIComponent(title.replace(/\s+/g, "_"));
+  const apiUrl =
+    `https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/` +
+    `all-access/user/${article}/monthly/${fmt(start)}/${fmt(end)}`;
+  const response = await fetchImpl(apiUrl, {
+    headers: { "User-Agent": WIKIPEDIA_USER_AGENT },
+  });
+  if (!response?.ok) return 0;
+  const data = await response.json();
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return items.reduce((sum, item) => sum + (Number(item?.views) || 0), 0);
+}
+
+// Annotates the strongest person candidates with monthlyPageviews in place.
+// Only the top DATE_PERSON_PAGEVIEW_TOP_N by profile/richness pre-rank are
+// fetched so a date with 50 births costs at most 12 subrequests, and only on
+// the cold render that the 7-day full-page KV cache then amortizes.
+async function annotatePersonNotability(persons, fetchImpl = fetch) {
+  const list = Array.isArray(persons) ? persons : [];
+  const head = list
+    .filter((item) => datePersonProfileScore(item) > 0)
+    .sort(
+      (a, b) =>
+        datePersonProfileScore(b) + wikiRichScore(b) -
+        (datePersonProfileScore(a) + wikiRichScore(a)),
+    )
+    .slice(0, DATE_PERSON_PAGEVIEW_TOP_N);
+  if (!head.length) return persons;
+  const withTimeout = (promise) =>
+    Promise.race([
+      promise,
+      new Promise((resolvePromise) =>
+        setTimeout(() => resolvePromise(0), DATE_PERSON_PAGEVIEW_TIMEOUT_MS),
+      ),
+    ]);
+  const views = await Promise.all(
+    head.map((item) =>
+      withTimeout(
+        fetchMonthlyPageviewsForTitle(
+          item?.pages?.[0]?.titles?.canonical || item?.pages?.[0]?.title || "",
+          fetchImpl,
+        ),
+      ).catch(() => 0),
+    ),
+  );
+  head.forEach((item, i) => {
+    item.monthlyPageviews = Number(views[i]) || 0;
+  });
+  return persons;
+}
+
+// ---------------------------------------------------------------------------
+// Internal /people/ links for date-page person cards. Only entity-index
+// entries that are person-typed AND indexable (the seoEntityQualityEligible
+// gate) get linked — non-eligible /people/ URLs 302 back to the date pages,
+// which would loop. Lookup keys: normalized display name and slugified name.
+// ---------------------------------------------------------------------------
+function normalizePersonNameKey(name) {
+  return String(name || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildPersonEntityLinkMap(indexEntries) {
+  const map = new Map();
+  for (const entry of Array.isArray(indexEntries) ? indexEntries : []) {
+    if (entry?.type !== "person" || entry.indexable !== true || !entry.slug)
+      continue;
+    const targetUrl = entry.url || `/people/${entry.slug}/`;
+    const nameKey = normalizePersonNameKey(entry.name);
+    if (nameKey && !map.has(nameKey)) map.set(nameKey, targetUrl);
+    const slugKey = slugifyArchiveLabel(entry.name);
+    if (slugKey && !map.has(slugKey)) map.set(slugKey, targetUrl);
+    if (!map.has(entry.slug)) map.set(entry.slug, targetUrl);
+  }
+  return map;
+}
+
+function internalPersonUrl(personLinks, name) {
+  if (!personLinks || typeof personLinks.get !== "function") return "";
+  const raw = String(name || "").trim();
+  if (!raw) return "";
+  return (
+    personLinks.get(normalizePersonNameKey(raw)) ||
+    personLinks.get(slugifyArchiveLabel(raw)) ||
+    ""
+  );
+}
+
+async function loadPersonEntityLinkMap(env) {
+  try {
+    const raw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
+    return buildPersonEntityLinkMap(raw ? JSON.parse(raw) : []);
+  } catch (_) {
+    return new Map();
+  }
 }
 
 // Returns an array of 2-3 original editorial paragraphs for the featured event.
@@ -4372,6 +4511,7 @@ function generateEventsDateHTML(
   quizHtml = "",
   quizData = null,
   relatedBlogEntry = null,
+  personLinks = null,
 ) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
@@ -4384,8 +4524,21 @@ function generateEventsDateHTML(
     ? events.reduce((best, e) => wikiRichScore(e) >= wikiRichScore(best) ? e : best, events[0])
     : null;
   const others = events.filter((e) => e !== featured);
-  const topBirths = births.slice(0, 20);
-  const topDeaths = deaths.slice(0, 20);
+  // Preview strips: strongest 20 profiles (not the oldest 20), year-sorted so
+  // the timeline still reads chronologically. No pageview fetches here — the
+  // dedicated born/died pages carry the fame-precise ranking.
+  const topPersons = (list) =>
+    list
+      .slice()
+      .sort(
+        (a, b) =>
+          datePersonRankScore(b) + wikiRichScore(b) -
+          (datePersonRankScore(a) + wikiRichScore(a)),
+      )
+      .slice(0, 20)
+      .sort((a, b) => a.year - b.year);
+  const topBirths = topPersons(births);
+  const topDeaths = topPersons(deaths);
 
   const pageTitle = buildEventsDateTitle({ mDisplay, day, featured });
   const rawDesc = featured
@@ -4645,7 +4798,9 @@ function generateEventsDateHTML(
   const renderPersonTimelineItem = (p, idx, isDeaths = false) => {
     const th = p.pages?.[0]?.thumbnail?.source || "";
     const w = p.pages?.[0]?.content_urls?.desktop?.page || "";
-    const name = escapeHtml(p.text.split(",")[0]);
+    const rawName = p.text.split(",")[0];
+    const profileUrl = internalPersonUrl(personLinks, rawName);
+    const name = escapeHtml(rawName);
     const desc = p.text.includes(",")
       ? escapeHtml(p.text.slice(p.text.indexOf(",") + 1).trim())
       : "";
@@ -4656,18 +4811,24 @@ function generateEventsDateHTML(
     const year = escapeHtml(String(p.year));
     const badgeStyle = isDeaths ? ' style="background:#6c757d"' : "";
     const isEven = idx % 2 === 1;
+    const imgLink = profileUrl || w;
     const imgHtml = th
-      ? w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+      ? imgLink
+        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
         : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
+    const actionBtn = profileUrl
+      ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
+      : w
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>`
+        : "";
     const card = `<div class="tl-card">
   ${imgHtml}
   <div class="tl-card-body">
     <div class="tl-card-title">${name}</div>
     ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
     ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-    ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
+    ${actionBtn}
   </div>
 </div>`;
     const media = `<div class="tl-media"></div>`;
@@ -5056,7 +5217,7 @@ function buildPageSchema({
   }).replace(/<\//g, "<\\/");
 }
 
-function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry = null) {
+function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry = null, personLinks = null) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const MM = String(mNum).padStart(2, "0");
@@ -5076,7 +5237,12 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     }).length;
   };
   const hasImage = (p) => !!(p?.pages?.[0]?.thumbnail?.source || p?.pages?.[0]?.originalimage?.source);
-  const bornScore = (b) => countDyk(b) * 10 + wikiRichScore(b);
+  // Fame first (pageview bonus, when the handler annotated it), DYK richness
+  // as the tiebreaker so the featured card still fills its slider.
+  const bornScore = (b) =>
+    personPageviewNotabilityBonus(b?.monthlyPageviews) * 10 +
+    countDyk(b) * 10 +
+    wikiRichScore(b);
   const substantiveBirths = births.filter((birth) => datePersonProfileScore(birth) > 0);
   const featuredCandidates = substantiveBirths.length ? substantiveBirths : births;
   const birthsWithImg = featuredCandidates.filter(hasImage);
@@ -5205,7 +5371,9 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const renderBornTlItem = (b, idx) => {
     const th = b.pages?.[0]?.thumbnail?.source || "";
     const w = b.pages?.[0]?.content_urls?.desktop?.page || "";
-    const name = escapeHtml(b.text.split(",")[0]);
+    const rawName = b.text.split(",")[0];
+    const profileUrl = internalPersonUrl(personLinks, rawName);
+    const name = escapeHtml(rawName);
     const desc = b.text.includes(",")
       ? escapeHtml(b.text.slice(b.text.indexOf(",") + 1).trim())
       : "";
@@ -5215,18 +5383,24 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       : "";
     const year = escapeHtml(String(b.year));
     const isEven = idx % 2 === 1;
+    const imgLink = profileUrl || w;
     const imgHtml = th
-      ? w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+      ? imgLink
+        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
         : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
+    const actionBtn = profileUrl
+      ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
+      : w
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>`
+        : "";
     const card = `<div class="tl-card">
   ${imgHtml}
   <div class="tl-card-body">
     <div class="tl-card-title">${name}</div>
     ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
     ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-    ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
+    ${actionBtn}
   </div>
 </div>`;
     const media = `<div class="tl-media"></div>`;
@@ -5338,7 +5512,7 @@ ${siteNav()}
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
   ${relatedBlogHtml}
-  ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange })}
+  ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange, personLinks })}
   ${buildDateClusterCard(monthName, day, mDisplay, "born")}
   ${topEvents.length > 0 ? `
   <div class="card-box">
@@ -5368,7 +5542,7 @@ ${getSharedPageScripts({ pageType: "born-date", pageSlug: `${monthName}-${day}` 
 </body></html>`;
 }
 
-function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry = null) {
+function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry = null, personLinks = null) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const MM = String(mNum).padStart(2, "0");
@@ -5387,7 +5561,12 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     }).length;
   };
   const hasImgD = (p) => !!(p?.pages?.[0]?.thumbnail?.source || p?.pages?.[0]?.originalimage?.source);
-  const diedScore = (d) => countDykD(d) * 10 + wikiRichScore(d);
+  // Fame first (pageview bonus, when the handler annotated it), DYK richness
+  // as the tiebreaker so the featured card still fills its slider.
+  const diedScore = (d) =>
+    personPageviewNotabilityBonus(d?.monthlyPageviews) * 10 +
+    countDykD(d) * 10 +
+    wikiRichScore(d);
   const substantiveDeaths = deaths.filter((death) => datePersonProfileScore(death) > 0);
   const featuredCandidatesD = substantiveDeaths.length ? substantiveDeaths : deaths;
   const deathsWithImg = featuredCandidatesD.filter(hasImgD);
@@ -5516,7 +5695,9 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const renderDiedTlItem = (d, idx) => {
     const th = d.pages?.[0]?.thumbnail?.source || "";
     const w = d.pages?.[0]?.content_urls?.desktop?.page || "";
-    const name = escapeHtml(d.text.split(",")[0]);
+    const rawName = d.text.split(",")[0];
+    const profileUrl = internalPersonUrl(personLinks, rawName);
+    const name = escapeHtml(rawName);
     const desc = d.text.includes(",")
       ? escapeHtml(d.text.slice(d.text.indexOf(",") + 1).trim())
       : "";
@@ -5526,18 +5707,24 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       : "";
     const year = escapeHtml(String(d.year));
     const isEven = idx % 2 === 1;
+    const imgLink = profileUrl || w;
     const imgHtml = th
-      ? w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+      ? imgLink
+        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
         : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
+    const actionBtn = profileUrl
+      ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
+      : w
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>`
+        : "";
     const card = `<div class="tl-card">
   ${imgHtml}
   <div class="tl-card-body">
     <div class="tl-card-title">${name}</div>
     ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
     ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-    ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
+    ${actionBtn}
   </div>
 </div>`;
     const media = `<div class="tl-media"></div>`;
@@ -5649,7 +5836,7 @@ ${siteNav()}
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
   ${relatedBlogHtml}
-  ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange })}
+  ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange, personLinks })}
   ${buildDateClusterCard(monthName, day, mDisplay, "died")}
   ${topEvents.length > 0 ? `
   <div class="card-box">
@@ -5865,7 +6052,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v28-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v29-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -5922,13 +6109,18 @@ async function handleBornPage(request, env, ctx, url) {
     }
   }
 
-  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
+  const [relatedBlogEntry, personLinks] = await Promise.all([
+    findMatchingDateBlogEntry(env, monthName, day),
+    loadPersonEntityLinkMap(env),
+    annotatePersonNotability(eventsData?.births),
+  ]);
   const html = generateBornHTML(
     "https://thisday.info",
     monthName,
     day,
     eventsData,
     relatedBlogEntry,
+    personLinks,
   );
   if (env.EVENTS_KV && eventsData?.births?.length)
     ctx.waitUntil(
@@ -5959,7 +6151,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v27-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v28-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -6016,13 +6208,18 @@ async function handleDiedPage(request, env, ctx, url) {
     }
   }
 
-  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
+  const [relatedBlogEntry, personLinks] = await Promise.all([
+    findMatchingDateBlogEntry(env, monthName, day),
+    loadPersonEntityLinkMap(env),
+    annotatePersonNotability(eventsData?.deaths),
+  ]);
   const html = generateDiedHTML(
     "https://thisday.info",
     monthName,
     day,
     eventsData,
     relatedBlogEntry,
+    personLinks,
   );
   if (env.EVENTS_KV && eventsData?.deaths?.length)
     ctx.waitUntil(
@@ -6344,7 +6541,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v46-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v47-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -6507,7 +6704,10 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     ? buildQuizHTML(quizData, mDisplayForQuiz, day)
     : "";
 
-  const relatedBlogEntry = await findMatchingDateBlogEntry(env, monthName, day);
+  const [relatedBlogEntry, personLinks] = await Promise.all([
+    findMatchingDateBlogEntry(env, monthName, day),
+    loadPersonEntityLinkMap(env),
+  ]);
   const html = generateEventsDateHTML(
     monthName,
     day,
@@ -6517,6 +6717,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     quizHtml,
     quizData,
     relatedBlogEntry,
+    personLinks,
   );
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
@@ -7859,7 +8060,7 @@ async function handleScheduledEvent(env) {
         { expirationTtl: 7 * 24 * 60 * 60 },
       );
       // Invalidate stale full-page HTML cache so next visit regenerates with fresh data
-      await env.EVENTS_KV.delete(`quiz-page-v30:${mNum}-${dNum}`);
+      await env.EVENTS_KV.delete(`quiz-page-v31:${mNum}-${dNum}`);
       console.log(
         `Successfully pre-fetched and stored events for ${isoDateKey} in KV.`,
       );
@@ -8297,11 +8498,11 @@ function buildQuizHTML(quiz, monthDisplay, day) {
 function buildCarouselQuizHTML(
   quiz,
   topEvents,
-  _monthDisplay,
+  monthDisplay,
   day,
   monthSlug,
-  nextMonthSlug,
-  nextDay,
+  prevQuizMonthSlug,
+  prevQuizDay,
   blogEntry = null,
 ) {
   if (!quiz?.questions?.length)
@@ -8383,10 +8584,13 @@ function buildCarouselQuizHTML(
     .join("");
 
   // Final score slide
-  const nextLink =
-    nextMonthSlug && nextDay
-      ? `<a href="/quiz/${escapeHtml(nextMonthSlug)}/${nextDay}/" class="qsc-cta-btn qsc-cta-primary"><i class="bi bi-arrow-left-circle"></i>Previous Day's Quiz</a>`
+  const prevQuizLink =
+    prevQuizMonthSlug && prevQuizDay
+      ? `<a href="/quiz/${escapeHtml(prevQuizMonthSlug)}/${prevQuizDay}/" class="qsc-cta-btn"><i class="bi bi-arrow-left-circle"></i>Yesterday's Quiz</a>`
       : "";
+  const storyLink = blogEntry?.slug
+    ? `<a href="/blog/${escapeHtml(blogEntry.slug)}/" class="qsc-cta-btn"><i class="bi bi-journal-text"></i>Read the Full Story</a>`
+    : `<a href="/events/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn"><i class="bi bi-calendar-event"></i>See All Events</a>`;
   const scoreSlide =
     `<div class="qsc-slide qsc-final-slide" data-slide="${total}" id="qsc-slide-${total}">` +
     `<div class="qsc-final-body">` +
@@ -8396,9 +8600,10 @@ function buildCarouselQuizHTML(
     `</div>` +
     `<div class="qsc-review-list" id="qsc-review-list"></div>` +
     `<div class="qsc-cta-row">` +
-    `<a href="/events/${escapeHtml(monthSlug)}/${day}/" class="qsc-cta-btn"><i class="bi bi-calendar-event"></i>See All Events</a>` +
-    `<a href="/blog/" class="qsc-cta-btn"><i class="bi bi-journal-text"></i>Read the Blog</a>` +
-    nextLink +
+    `<button type="button" id="qsc-share-btn" class="qsc-cta-btn qsc-cta-primary"><i class="bi bi-share-fill"></i>Share Your Score</button>` +
+    `<button type="button" id="qsc-retry-btn" class="qsc-cta-btn" hidden><i class="bi bi-arrow-repeat"></i>Try Again</button>` +
+    storyLink +
+    prevQuizLink +
     `</div></div></div>`;
 
   // Progress dots
@@ -8504,6 +8709,22 @@ function buildCarouselQuizHTML(
     `if(dx<-40&&results[cur]!==undefined){var nb=document.querySelector('.qsc-next-btn[data-slide="'+cur+'"]');if(nb)nb.click();}` +
     `if(dx>40&&cur>0)showSlide(cur-1);` +
     `},{passive:true});` +
+    // Local stats (streak + best score) \u2014 client-side only, cache-safe
+    `var statsKey='tdq-v1-stats';` +
+    `var dateKey='${escapeHtml(monthSlug)}-${day}';` +
+    `function tdqStats(){try{return JSON.parse(localStorage.getItem(statsKey))||{}}catch(e){return{}}}` +
+    `function tdqSave(s){try{localStorage.setItem(statsKey,JSON.stringify(s));}catch(e){}}` +
+    `function localDay(offset){var d=new Date();d.setDate(d.getDate()+(offset||0));return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}` +
+    `function renderStatsChip(){var chip=document.getElementById('tdq-streak-chip');if(!chip)return;` +
+    `var s=tdqStats();var bits=[];` +
+    `if((s.streak||0)>=2&&(s.last===localDay(0)||s.last===localDay(-1)))bits.push('\uD83D\uDD25 '+s.streak+' day streak');` +
+    `var best=(s.best||{})[dateKey];` +
+    `if(typeof best==='number')bits.push('Your best here '+best+'/'+total);` +
+    `if(bits.length){chip.textContent=bits.join(' \u00B7 ');chip.hidden=false;}else{chip.hidden=true;}}` +
+    `function recordResult(){var s=tdqStats();var today=localDay(0);` +
+    `if(s.last!==today){s.streak=(s.last===localDay(-1))?(s.streak||0)+1:1;s.last=today;}` +
+    `s.best=s.best||{};if(!(dateKey in s.best)||score>s.best[dateKey])s.best[dateKey]=score;` +
+    `tdqSave(s);renderStatsChip();}` +
     // Final score
     `function showFinal(){` +
     `var pct=Math.round((score/total)*100);` +
@@ -8513,8 +8734,23 @@ function buildCarouselQuizHTML(
     `var rev='';` +
     `for(var i=0;i<total;i++){var ok=results[i];rev+='<div class="qsc-rev-item"><span class="'+(ok?'tdq-correct':'tdq-wrong')+'">'+(ok?'<i class=\"bi bi-check-circle-fill\"></i>':'<i class=\"bi bi-x-circle-fill\"></i>')+'</span><span>Q'+(i+1)+': '+(ok?'Correct':'Incorrect')+'</span></div>';}` +
     `document.getElementById('qsc-review-list').innerHTML=rev;` +
+    `var retry=document.getElementById('qsc-retry-btn');` +
+    `if(retry&&score<total)retry.hidden=false;` +
+    `recordResult();` +
     `if(pct>=60)confetti();` +
     `}` +
+    // Share + retry buttons
+    `var shareBtn=document.getElementById('qsc-share-btn');` +
+    `if(shareBtn)shareBtn.addEventListener('click',function(){` +
+    `var sq='';for(var i=0;i<total;i++)sq+=results[i]?'\uD83D\uDFE9':'\uD83D\uDFE5';` +
+    `var txt='I scored '+score+'/'+total+' on the ${escapeHtml(monthDisplay)} ${day} history quiz '+sq;` +
+    `var shareUrl=location.origin+location.pathname;` +
+    `if(navigator.share){navigator.share({title:document.title,text:txt,url:shareUrl}).catch(function(){});}` +
+    `else if(navigator.clipboard){navigator.clipboard.writeText(txt+' '+shareUrl).then(function(){shareBtn.innerHTML='<i class=\"bi bi-check-lg\"></i>Copied';});}` +
+    `});` +
+    `var retryBtn=document.getElementById('qsc-retry-btn');` +
+    `if(retryBtn)retryBtn.addEventListener('click',function(){location.reload();});` +
+    `renderStatsChip();` +
     // Confetti
     `function confetti(){` +
     `var c=document.createElement('canvas');` +
@@ -8548,7 +8784,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
   const dPad = String(day).padStart(2, "0");
 
   // Full-page HTML cache (set by cron or previous visit)
-  const pageHtmlKey = `quiz-page-v30:${mPad}-${dPad}`;
+  const pageHtmlKey = `quiz-page-v31:${mPad}-${dPad}`;
   if (env.EVENTS_KV) {
     try {
       const cachedHtml = await env.EVENTS_KV.get(pageHtmlKey);
@@ -8675,7 +8911,7 @@ async function handleQuizPage(_request, env, monthSlug, day) {
       topEvents,
     ));
 
-  // Previous day for CTA
+  // Previous day for the "Yesterday's Quiz" CTA
   const _pd = new Date(
     Date.UTC(
       new Date().getUTCFullYear(),
@@ -8683,8 +8919,8 @@ async function handleQuizPage(_request, env, monthSlug, day) {
       day - 1,
     ),
   );
-  const nextMonthSlug = MONTHS_ALL[_pd.getUTCMonth()];
-  const nextDay = _pd.getUTCDate();
+  const prevQuizMonthSlug = MONTHS_ALL[_pd.getUTCMonth()];
+  const prevQuizDay = _pd.getUTCDate();
 
   const carouselHtml = buildCarouselQuizHTML(
     quiz,
@@ -8692,8 +8928,8 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     mDisplay,
     day,
     monthSlug,
-    nextMonthSlug,
-    nextDay,
+    prevQuizMonthSlug,
+    prevQuizDay,
     blogEntry,
   );
 
@@ -8929,6 +9165,7 @@ a{color:var(--lc)}.text-muted{color:var(--text-muted)!important}
 .qsc-page-header{text-align:center;padding:8px 0 24px;border-bottom:1px solid var(--cbr);margin-bottom:28px}
 .qsc-page-header h1{font-size:1.7rem;font-weight:800;color:var(--tc);margin-bottom:6px}
 .qsc-page-header p{color:var(--mu);font-size:15px;margin:0}
+.qsc-streak-chip{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:5px 14px;border:1.5px solid var(--cbr);border-radius:20px;font-size:13px;color:var(--tc);background:var(--bg-alt)}
 /* Recommended quizzes slider */
 .qsc-rec-heading{font-size:1rem;font-weight:700;color:var(--tc);margin-bottom:12px}
 .qsc-rec-slider{display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;scrollbar-width:thin;-webkit-overflow-scrolling:touch}.qsc-rec-slider::-webkit-scrollbar{height:4px}.qsc-rec-slider::-webkit-scrollbar-thumb{background:var(--cbr);border-radius:2px}
@@ -8957,6 +9194,7 @@ ${siteNav()}
 	  <div class="qsc-page-header">
 	    <h1><i class="bi bi-patch-question-fill me-2" style="color:var(--accent,#9dc43a)"></i>${escapeHtml(mDisplay)} ${day} — History Quiz</h1>
 	    <p>5 questions &middot; Based on real historical events &middot; Instant feedback</p>
+	    <div id="tdq-streak-chip" class="qsc-streak-chip" hidden></div>
 	  </div>
 	  ${carouselHtml}
   ${recSliderHtml}
@@ -9039,6 +9277,21 @@ export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(handleScheduledEvent(env));
   },
+};
+
+export const __datePageEngagementTestHooks = {
+  personPageviewNotabilityBonus,
+  datePersonRankScore,
+  annotatePersonNotability,
+  fetchMonthlyPageviewsForTitle,
+  normalizePersonNameKey,
+  buildPersonEntityLinkMap,
+  internalPersonUrl,
+  selectDatePersonProfiles,
+  generateBornHTML,
+  generateDiedHTML,
+  generateEventsDateHTML,
+  buildCarouselQuizHTML,
 };
 
 export const __personIdentityTestHooks = {

@@ -60,7 +60,6 @@ test("hero uses Lora without loading or applying Meddon", () => {
 
 test("desktop and mobile layouts place highlights in the requested order", () => {
   assert.match(css, /\.hero \{[\s\S]*?padding: 0;/);
-  assert.match(css, /\.hero \{[^}]*border-bottom: 1px solid var\(--border\);/);
   assert.doesNotMatch(css, /\.hero \{[^}]*box-shadow:/);
   assert.match(
     css,

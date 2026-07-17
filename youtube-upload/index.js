@@ -43,6 +43,7 @@ import {
 } from "./lib/kv.js";
 import { selectInterestingNarrationFacts } from "./lib/narration-selection.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
+import { videoHeadlineTitle, videoMatchTitle } from "./lib/titles.js";
 import { verifyKvReadWriteAccess } from "./lib/kv.js";
 import { checkVideoQuality } from "./lib/video-quality.js";
 import { uploadToYoutube, verifyYoutubeAuth } from "./lib/youtube.js";
@@ -350,10 +351,10 @@ async function main() {
           () => null,
         );
         const selectedNarrationItems = selectInterestingNarrationFacts(
-          post.title,
+          videoMatchTitle(post),
           contentItems,
           articleText,
-          { limit: 3 },
+          { limit: 3, dateHint: videoHeadlineTitle(post) },
         );
         if (selectedNarrationItems.length > 0) {
           console.log(

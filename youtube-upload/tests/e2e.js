@@ -25,6 +25,7 @@ config({ path: new URL("../.env", import.meta.url).pathname });
 import { unlinkSync, existsSync } from "fs";
 import { getPostIndex, getDidYouKnow, getQuickFacts, getArticleText } from "../lib/kv.js";
 import { polishNarrationItems } from "../lib/narration-expert.js";
+import { videoMatchTitle } from "../lib/titles.js";
 import {
   generateNarration,
   buildNarrationScript,
@@ -192,7 +193,7 @@ await step("Narration expert — polish items for engaging TTS", async () => {
     throw new Error("No GROQ_API_KEY or HF_TOKEN configured");
   }
 
-  narrationItems = await polishNarrationItems(post.title, contentItems, articleText);
+  narrationItems = await polishNarrationItems(videoMatchTitle(post), contentItems, articleText);
 
   console.log(`  Before / After:`);
   contentItems.forEach((orig, i) => {

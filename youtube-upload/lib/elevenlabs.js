@@ -23,6 +23,7 @@ import { writeFile } from "fs/promises";
 import { mkdirSync } from "fs";
 import { join } from "path";
 import { recordQuotaSignal } from "./tracker.js";
+import { videoHeadlineTitle } from "./titles.js";
 
 const ASSETS_DIR = "./assets";
 const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // George — warm captivating storyteller
@@ -43,7 +44,7 @@ const MODEL_IDS = [
  * @returns {string}
  */
 function buildNarrationIntro(post) {
-  const rawTitle = String(post?.title || "").trim();
+  const rawTitle = videoHeadlineTitle(post);
   const parts = rawTitle.split(/ [—–] /);
   const lead = parts[0]?.trim() || rawTitle;
   return `${lead}.`;
@@ -53,7 +54,7 @@ function trimRedundantDateLead(text, post) {
   let out = String(text || "").trim();
   if (!out) return out;
 
-  const rawTitle = String(post?.title || "").trim();
+  const rawTitle = videoHeadlineTitle(post);
   const datePart = rawTitle.split(/ [—–] /)[1]?.trim() || "";
   const yearMatch = datePart.match(/\b(\d{4})\b/);
   const year = yearMatch ? yearMatch[1] : "";

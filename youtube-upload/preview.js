@@ -8,6 +8,7 @@
 import "dotenv/config";
 import { getPostIndex, getDidYouKnow, getQuickFacts, getArticleText, getPostWikipediaUrl } from "./lib/kv.js";
 import { generateVideo } from "./lib/video.js";
+import { videoHeadlineTitle, videoMatchTitle } from "./lib/titles.js";
 import { generateNarration, buildNarrationScript, buildNarrationParts } from "./lib/elevenlabs.js";
 import { selectInterestingNarrationFacts } from "./lib/narration-selection.js";
 import { getMusicPath } from "./lib/music.js";
@@ -41,10 +42,10 @@ async function main() {
   ]);
   const rawItems = [...(dyk || []), ...(qf || [])];
   const selectedItems = selectInterestingNarrationFacts(
-    post.title,
+    videoMatchTitle(post),
     rawItems,
     articleText,
-    { limit: 3 },
+    { limit: 3, dateHint: videoHeadlineTitle(post) },
   );
   const contentItems = selectedItems;
   const narrationItems = selectedItems;

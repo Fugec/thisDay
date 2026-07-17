@@ -1,4 +1,5 @@
 import { statSync, readFileSync } from "fs";
+import { videoHeadlineTitle } from "./titles.js";
 
 /**
  * Upload notification — posts a Discord (or Slack) webhook message after
@@ -111,7 +112,7 @@ export async function notifyUpload(post, youtubeId, videoPath = null) {
 
   const message =
     `✅ **New Short uploaded**\n` +
-    `📺 ${post.title}\n` +
+    `📺 ${videoHeadlineTitle(post)}\n` +
     `🎬 https://www.youtube.com/shorts/${youtubeId}\n` +
     `🌐 https://thisday.info/blog/${post.slug}/` +
     (downloadUrl ? `\n📥 Download MP4: ${downloadUrl}` : ``);

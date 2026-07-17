@@ -28,6 +28,7 @@ import { readFileSync, mkdirSync, unlinkSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { getPostImageUrls } from "./kv.js";
+import { videoHeadlineTitle, videoMatchTitle } from "./titles.js";
 // Wiki-only mode: no AI scene generation imports
 
 const TMP = join(dirname(fileURLToPath(import.meta.url)), "../tmp");
@@ -752,7 +753,7 @@ function isPlaceholderImage(url) {
  * Returns { imageUrl, wasReplaced } on success; throws IMAGE_UNAVAILABLE if
  * no working image is found (caller should skip the post).
  *
- * @param {{ slug: string, title: string, imageUrl?: string }} post
+ * @param {{ slug: string, title: string, factualTitle?: string, eventTitle?: string, imageUrl?: string }} post
  * @returns {Promise<{ imageUrl: string, wasReplaced: boolean }>}
  */
 export async function resolvePostImage(post) {
@@ -774,7 +775,7 @@ export async function resolvePostImage(post) {
   } else if (original) {
     console.warn(`  ⚠ Image broken or unreachable: ${original}`);
   } else {
-    console.warn(`  ⚠ No imageUrl stored for "${post.title}"`);
+    console.warn(`  ⚠ No imageUrl stored for "${videoMatchTitle(post)}"`);
   }
 
   // 2. Try Wikipedia thumbnail with two queries:
@@ -784,13 +785,14 @@ export async function resolvePostImage(post) {
   // Strip "The [Verb] of [The]" prefix for the core-subject query
   const verbPrefixRe =
     /^(The\s+)?(Founding|Birth|Death|Discovery|Invention|Signing|Formation|Establishment|Battle|Siege|Launch|Liberation|Revolution|Treaty|Election|Inauguration|Coronation|Assassination)\s+(of\s+)?(the\s+)?/i;
-  const beforeDate = post.title
+  const matchTitle = videoMatchTitle(post);
+  const beforeDate = matchTitle
     .split(/\s*[-–—]\s+(?=[A-Z][a-z]+ \d)/)[0]
     .trim();
   const coreSubject = beforeDate.replace(verbPrefixRe, "").trim();
 
   const wikiQueries = [
-    post.title, // 1. full title (date + year intact)
+    matchTitle, // 1. full match title (dated factual title on legacy posts)
     beforeDate, // 2. event name, date stripped
     coreSubject, // 3. core subject, prefix + date stripped  (e.g. "Kappa Alpha Society")
   ].filter((q, i, arr) => q && arr.indexOf(q) === i); // deduplicate
@@ -808,7 +810,7 @@ export async function resolvePostImage(post) {
   // 3. No working image — throw so the caller skips this post rather than
   //    uploading a video with no meaningful background.
   throw new Error(
-    `IMAGE_UNAVAILABLE: no working image found for "${post.title}" (original: ${original ?? "none"})`,
+    `IMAGE_UNAVAILABLE: no working image found for "${matchTitle}" (original: ${original ?? "none"})`,
   );
 }
 
@@ -1523,7 +1525,8 @@ async function generateMultiSceneVideo(
     qualityHint = null,
   },
 ) {
-  const { slug, title } = post;
+  const { slug } = post;
+  const title = videoHeadlineTitle(post);
   const XF = 1.2; // crossfade duration in seconds — longer = gentler on the eyes
 
   // Compute actual video duration from narration end + 3 s tail,
@@ -1540,7 +1543,7 @@ async function generateMultiSceneVideo(
 
   // 1. Use the article's featured image first. This keeps the video aligned with
   // the published blog post; Wikipedia article images are only fallback material.
-  const fallbackTitle = title.replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
+  const fallbackTitle = videoMatchTitle(post).replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
   const articleSource = wikiArticleUrl || fallbackTitle;
   console.log(`  Fetching featured/article image for "${slug}"...`);
   const imageBuffers = await fetchPreferredVideoImageBuffers(post, articleSource, N_SCENES, {
@@ -1833,7 +1836,7 @@ async function generateMultiSceneVideo(
  * Returns the path to the generated video file.
  * The caller is responsible for deleting the file after upload.
  *
- * @param {{ slug: string, title: string, description: string, imageUrl: string }} post
+ * @param {{ slug: string, title: string, factualTitle?: string, eventTitle?: string, description: string, imageUrl: string }} post
  * @param {{
  *   narrationPath?: string|null,  ElevenLabs TTS audio — played once at 100% volume
  *   bgMusicPath?:   string|null,  Background music — looped at 15% volume
@@ -1858,7 +1861,8 @@ export async function generateVideo(
 ) {
   mkdirSync(TMP, { recursive: true });
 
-  const { slug, title } = post;
+  const { slug } = post;
+  const title = videoHeadlineTitle(post);
   const framePath = join(TMP, `${slug}_frame.png`);
   const videoPath = join(TMP, `${slug}.mp4`);
 

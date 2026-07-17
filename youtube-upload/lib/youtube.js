@@ -10,6 +10,7 @@
 import { google } from "googleapis";
 import { Gaxios } from "gaxios";
 import { createReadStream } from "fs";
+import { buildVideoTitle, videoMatchTitle } from "./titles.js";
 
 // Root cause of the 2026-06-25 upload break: the GitHub-hosted runner image
 // updated (ubuntu24/20260615 -> 20260622) and the new environment makes Google's
@@ -106,7 +107,7 @@ function buildChapters(cuts) {
 }
 
 function getEventName(post) {
-  return String(post.eventTitle || post.title || "")
+  return videoMatchTitle(post)
     .replace(/\s*[—–-]\s+[A-Z][a-z]+ \d{1,2},\s*\d{4}\s*$/, "")
     .replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}\s*$/, "")
     .trim();
@@ -162,11 +163,6 @@ function buildEventHashtags(post) {
   }
 
   return hashtags.slice(0, 3);
-}
-
-function buildVideoTitle(post) {
-  const rawTitle = String(post.title || "").replace(/ [—–] /g, ": ");
-  return rawTitle.length > 97 ? rawTitle.slice(0, 94) + "..." : rawTitle;
 }
 
 function buildVideoDescription(post, cuts) {

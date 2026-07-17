@@ -229,13 +229,16 @@ function candidateSentences(items) {
   return candidates;
 }
 
+function scoredCandidates(title, items) {
+  return candidateSentences(items).map((text, sourceOrder) => ({
+    text,
+    sourceOrder,
+    score: narrationFactScore(text, title),
+  }));
+}
+
 function rankedCandidates(title, items) {
-  return candidateSentences(items)
-    .map((text, sourceOrder) => ({
-      text,
-      sourceOrder,
-      score: narrationFactScore(text, title),
-    }))
+  return scoredCandidates(title, items)
     .filter((candidate) => candidate.score >= 4)
     .sort(
       (left, right) =>
@@ -243,11 +246,75 @@ function rankedCandidates(title, items) {
     );
 }
 
+// The interest scorer deliberately penalizes facts that restate the title, so
+// for multi-year events (wars, reigns) the fact describing the anniversary day
+// itself tends to lose to dramatic facts from elsewhere in the timespan. A
+// date hint (the dated factual headline) lets selection reserve the opening
+// slot for the day's own event.
+const EVENT_START_PATTERN =
+  /\b(?:began|begins|beginning|broke out|breaks out|outbreak|erupt(?:ed|s)|coup|uprising|revolt|rebellion|insurrection|invasion|invaded|declared war|started|starts)\b/i;
+
+function parseDateHint(dateHint) {
+  const matches = [
+    ...String(dateHint || "").matchAll(
+      /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{3,4})\b/g,
+    ),
+  ];
+  const last = matches[matches.length - 1];
+  if (!last) return null;
+  return { month: last[1], day: parseInt(last[2], 10), year: parseInt(last[3], 10) };
+}
+
+function dayRelevanceBonus(text, hint) {
+  if (!hint) return 0;
+  const clean = normalizeText(text);
+  const monthNearYear = new RegExp(
+    `\\b(?:${hint.day}\\s+)?${hint.month}\\b[^.;]{0,40}?\\b${hint.year}\\b|\\b${hint.month}\\s+${hint.day}\\b`,
+    "i",
+  );
+  let bonus = 0;
+  if (monthNearYear.test(clean)) bonus += 8;
+  else if (
+    new RegExp(`\\b${hint.year}\\b`).test(clean) &&
+    EVENT_START_PATTERN.test(clean)
+  ) {
+    bonus += 7;
+  }
+  if (bonus > 0 && EVENT_START_PATTERN.test(clean)) bonus += 4;
+  return bonus;
+}
+
+function pickDayFact(title, hint, items, articleText) {
+  if (!hint) return null;
+  const pools = [items];
+  if (articleText) pools.push(splitNarrationSentences(articleText));
+  for (const pool of pools) {
+    const candidates = scoredCandidates(title, pool)
+      .map((candidate) => ({
+        ...candidate,
+        day: dayRelevanceBonus(candidate.text, hint),
+      }))
+      .filter((candidate) => candidate.score > -100 && candidate.day >= 7)
+      .sort(
+        (left, right) =>
+          right.score + right.day - (left.score + left.day) ||
+          left.sourceOrder - right.sourceOrder,
+      );
+    if (candidates.length > 0) return candidates[0];
+  }
+  return null;
+}
+
+function earliestYear(text) {
+  const years = String(text).match(/\b(?:1\d{3}|20\d{2})\b/g);
+  return years ? Math.min(...years.map(Number)) : Infinity;
+}
+
 export function selectInterestingNarrationFacts(
   title,
   items,
   articleText = null,
-  { limit = 3 } = {},
+  { limit = 3, dateHint = "" } = {},
 ) {
   const selected = [];
 
@@ -266,11 +333,20 @@ export function selectInterestingNarrationFacts(
     }
   };
 
+  const dayFact = pickDayFact(title, parseDateHint(dateHint), items, articleText);
+  if (dayFact) selected.push(dayFact);
+
   addRankedCandidates(rankedCandidates(title, items));
   if (selected.length < limit && articleText) {
     addRankedCandidates(
       rankedCandidates(title, splitNarrationSentences(articleText)),
     );
+  }
+
+  if (dayFact && selected.length > 1) {
+    const rest = selected.slice(1);
+    rest.sort((left, right) => earliestYear(left.text) - earliestYear(right.text));
+    return [selected[0], ...rest].map((candidate) => candidate.text);
   }
 
   return selected.map((candidate) => candidate.text);

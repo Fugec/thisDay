@@ -9878,9 +9878,12 @@ async function recoverRecentEntityStrips(env, { maxPosts = 3, lookbackDays = 3 }
 
 function buildArticleEntityStrip(entityMeta) {
   if (!Array.isArray(entityMeta) || entityMeta.length === 0) return "";
-  const people = entityMeta.filter((e) => e.type === "person" && e.slug && e.name && !e.skipStrip);
+  const normalizedEntityMeta = entityMeta.map(
+    normalizeArticleHistoryEntityMeta,
+  );
+  const people = normalizedEntityMeta.filter((e) => e.type === "person" && e.slug && e.name && !e.skipStrip);
   if (people.length === 0) return "";
-  const historyEntity = entityMeta.find((entity) =>
+  const historyEntity = normalizedEntityMeta.find((entity) =>
     isHistoryEntityDiscoveryLinkEligible(entity),
   );
 
@@ -9906,30 +9909,80 @@ function buildArticleEntityStrip(entityMeta) {
   return `${ARTICLE_ENTITY_STRIP_STYLE}<div class="entity-strip people-strip" data-entity-strip="1"><div class="entity-strip-content people-track-wrap"><h2 class="h3">People in this story</h2><div class="entity-person-chips people-track">${personChips}</div>${historySection}</div></div>`;
 }
 
+function isSpanishCivilWarHistoryEntity(entity) {
+  if (entity?.type !== "event") return false;
+  if (
+    ["spanish-civil-war-erupts", "spanish-civil-war-1936"].includes(
+      String(entity.slug || "").toLowerCase(),
+    )
+  ) {
+    return true;
+  }
+  try {
+    const wikiUrl = new URL(String(entity.wikiUrl || ""));
+    const title = decodeURIComponent(
+      wikiUrl.pathname.split("/wiki/")[1] || "",
+    )
+      .replace(/_/g, " ")
+      .toLowerCase();
+    return [
+      "spanish civil war",
+      "spanish coup of july 1936",
+    ].includes(title);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeArticleHistoryEntityMeta(entity) {
+  if (!isSpanishCivilWarHistoryEntity(entity)) return entity;
+  return {
+    ...entity,
+    slug: "spanish-civil-war-1936",
+    name: "Spanish Civil War, 1936",
+    url: "/history/spanish-civil-war-1936/",
+  };
+}
+
+function normalizeHistoryEntityCanonicalLinksHtml(body) {
+  return String(body || "")
+    .replaceAll(
+      'href="/history/spanish-civil-war-erupts/"',
+      'href="/history/spanish-civil-war-1936/"',
+    )
+    .replaceAll(
+      "href='/history/spanish-civil-war-erupts/'",
+      "href='/history/spanish-civil-war-1936/'",
+    );
+}
+
 function compactArticleEntityMeta(entityMeta) {
-  return (Array.isArray(entityMeta) ? entityMeta : []).map((entity) => ({
-    type: entity.type,
-    slug: entity.slug,
-    name: entity.name,
-    imageUrl: entity.imageUrl || "",
-    url: entity.url,
-    wikiUrl: entity.wikiUrl || "",
-    ...(entity.type === "event"
-      ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(entity) }
-      : {}),
-    ...(entity.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
-    ...(entity.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
-    ...(entity.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
-    ...(entity.profileSubjectVerified === false ? { profileSubjectVerified: false } : {}),
-    ...(entity.wikidataEntityId ? { wikidataEntityId: entity.wikidataEntityId } : {}),
-    ...(typeof entity.wikidataInstanceOfHuman === "boolean"
-      ? { wikidataInstanceOfHuman: entity.wikidataInstanceOfHuman }
-      : {}),
-    ...(entity.sourceEventPageFallback === true ? { sourceEventPageFallback: true } : {}),
-    ...(entity.isDisambiguation === true ? { isDisambiguation: true } : {}),
-    ...(entity.skipImageRepair ? { skipImageRepair: true } : {}),
-    ...(entity.skipStrip ? { skipStrip: true } : {}),
-  }));
+  return (Array.isArray(entityMeta) ? entityMeta : []).map((rawEntity) => {
+    const entity = normalizeArticleHistoryEntityMeta(rawEntity);
+    return {
+      type: entity.type,
+      slug: entity.slug,
+      name: entity.name,
+      imageUrl: entity.imageUrl || "",
+      url: entity.url,
+      wikiUrl: entity.wikiUrl || "",
+      ...(entity.type === "event"
+        ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(entity) }
+        : {}),
+      ...(entity.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
+      ...(entity.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
+      ...(entity.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
+      ...(entity.profileSubjectVerified === false ? { profileSubjectVerified: false } : {}),
+      ...(entity.wikidataEntityId ? { wikidataEntityId: entity.wikidataEntityId } : {}),
+      ...(typeof entity.wikidataInstanceOfHuman === "boolean"
+        ? { wikidataInstanceOfHuman: entity.wikidataInstanceOfHuman }
+        : {}),
+      ...(entity.sourceEventPageFallback === true ? { sourceEventPageFallback: true } : {}),
+      ...(entity.isDisambiguation === true ? { isDisambiguation: true } : {}),
+      ...(entity.skipImageRepair ? { skipImageRepair: true } : {}),
+      ...(entity.skipStrip ? { skipStrip: true } : {}),
+    };
+  });
 }
 
 function injectArticleEntityStrip(html, entityMeta) {
@@ -17063,16 +17116,18 @@ function normalizeArticleAssetVersionsHtml(body) {
 }
 
 function prepareHtmlResponse(body) {
-  return normalizeArticleAssetVersionsHtml(
-    normalizeArticleEntityStripPresentationHtml(
-      normalizeStackedTitleHtml(
-        normalizeImageAltHtml(
-          normalizeCrawlableLinksHtml(
-            normalizeSearchPreviewHtml(
-              normalizeHeadingAuditHtml(
-                normalizeAiAnswerCardHtml(
-                  normalizeArticleLayoutHtml(
-                    stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+  return normalizeHistoryEntityCanonicalLinksHtml(
+    normalizeArticleAssetVersionsHtml(
+      normalizeArticleEntityStripPresentationHtml(
+        normalizeStackedTitleHtml(
+          normalizeImageAltHtml(
+            normalizeCrawlableLinksHtml(
+              normalizeSearchPreviewHtml(
+                normalizeHeadingAuditHtml(
+                  normalizeAiAnswerCardHtml(
+                    normalizeArticleLayoutHtml(
+                      stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+                    ),
                   ),
                 ),
               ),
@@ -17161,6 +17216,8 @@ export const __contentGenerationTestHooks = {
   validateContentSemanticsForPublish,
   buildArticleEntityStrip,
   normalizeArticleEntityStripPresentationHtml,
+  normalizeArticleHistoryEntityMeta,
+  normalizeHistoryEntityCanonicalLinksHtml,
   compactAnalysisSubject,
   publicArticleTitle,
   normalizeCuriosityTitleText,

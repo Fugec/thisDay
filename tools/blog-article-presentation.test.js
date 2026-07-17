@@ -82,9 +82,9 @@ test("history discovery is separated from the people row", () => {
     },
     {
       type: "event",
-      slug: "spanish-civil-war",
-      name: "Spanish Civil War",
-      url: "/history/spanish-civil-war/",
+      slug: "spanish-civil-war-erupts",
+      name: "Spanish Civil War Erupts",
+      url: "/history/spanish-civil-war-erupts/",
       wikiUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
       bodySections: richHistoryBody,
     },
@@ -115,7 +115,8 @@ test("history discovery is separated from the people row", () => {
     html,
     /<section class="story-topic-section"[^>]*><h2 class="h4">Explore this event<\/h2>/,
   );
-  assert.match(html, /href="\/history\/spanish-civil-war\/"/);
+  assert.match(html, /href="\/history\/spanish-civil-war-1936\/"/);
+  assert.match(html, />Spanish Civil War, 1936<\/span><\/a>/);
   assert.equal(
     blogHooks.articleEntityStripNeedsProfileValidation(
       html,
@@ -130,6 +131,30 @@ test("history discovery is separated from the people row", () => {
       }]),
     ),
     false,
+  );
+});
+
+test("serve-time history link migration preserves the date article canonical", () => {
+  const stored = `<!doctype html><html><head>
+    <link rel="canonical" href="https://thisday.info/blog/17-july-2026/" />
+  </head><body>
+    <a href="/history/spanish-civil-war-erupts/">Spanish Civil War Erupts</a>
+  </body></html>`;
+
+  const migrated =
+    blogHooks.normalizeHistoryEntityCanonicalLinksHtml(stored);
+
+  assert.match(
+    migrated,
+    /<link rel="canonical" href="https:\/\/thisday\.info\/blog\/17-july-2026\/"/,
+  );
+  assert.match(
+    migrated,
+    /href="\/history\/spanish-civil-war-1936\/"/,
+  );
+  assert.doesNotMatch(
+    migrated,
+    /href="\/history\/spanish-civil-war-erupts\/"/,
   );
 });
 

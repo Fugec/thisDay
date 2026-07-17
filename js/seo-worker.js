@@ -48,6 +48,200 @@ const PROTECTED_LEGACY_PERSON_SLUGS = new Set([
   "african-american",
   "warren-anderson",
 ]);
+const HISTORY_EVERGREEN_PAGES = Object.freeze({
+  "spanish-civil-war-1936": {
+    storageSlug: "spanish-civil-war-erupts",
+    legacySlugs: ["spanish-civil-war-erupts"],
+    slug: "spanish-civil-war-1936",
+    url: "/history/spanish-civil-war-1936/",
+    name: "Spanish Civil War (1936–1939)",
+    pageHeading: "Why Did Spain's July 1936 Coup Fail—and Start a Civil War?",
+    seoTitle: "Why Did Spain's 1936 Coup Fail—and Start a Civil War?",
+    seoDescription:
+      "Spain's July 1936 coup was meant to seize power quickly. Its partial failure divided the country and opened a civil war shaped by foreign intervention.",
+    description:
+      "The coup was designed to replace Spain's government quickly. Its partial failure created rival zones—and a war that lasted until 1939.",
+    summary:
+      "A planned military takeover failed to control all of Spain in July 1936, dividing the country between Republican and Nationalist zones and turning a coup into a civil war.",
+    wikiUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+    sourcePostUrl: "/blog/17-july-2026/",
+    sourcePostTitle:
+      "How Did a Partly Failed Coup Become the Spanish Civil War?",
+    relatedPosts: ["17-july-2026"],
+    relatedTopics: ["War & Conflict", "Politics & Power", "Europe"],
+    qualityGateVersion: SEO_ENTITY_QUALITY_GATE_VERSION,
+    needsWikiRefresh: false,
+    updatedAt: "2026-07-17T00:00:00.000Z",
+    overviewCards: [
+      {
+        label: "The central puzzle",
+        value:
+          "The rebels expected a rapid transfer of power. Instead, resistance in major cities left neither side able to control the whole country.",
+      },
+      {
+        label: "Where it began",
+        value:
+          "The uprising started in Spanish Morocco on July 17, 1936, and spread to mainland garrisons the following day.",
+      },
+      {
+        label: "What failure created",
+        value:
+          "By July 19–20, Spain was divided into Republican and Nationalist zones, turning a short coup attempt into sustained warfare.",
+      },
+      {
+        label: "Why outsiders mattered",
+        value:
+          "Germany and Italy backed the Nationalists; the Soviet Union and Mexico supported the Republic, while foreign volunteers joined the fighting.",
+      },
+      {
+        label: "How it ended",
+        value:
+          "The Nationalists won in 1939, ending the Second Republic and establishing Francisco Franco's dictatorship.",
+      },
+    ],
+    comparisonHeading: "The four-day failure that changed the conflict",
+    comparisonIntro:
+      "The decisive shift was not simply that officers rebelled. It was that the rebellion succeeded in enough places to survive, but failed in enough places to prevent an immediate takeover.",
+    comparisonRows: [
+      {
+        expected: "A fast seizure of national power",
+        happened:
+          "The rebellion took territory but failed in Madrid, Barcelona, Valencia, and other important centres.",
+        mattered:
+          "The Republic retained a government, major cities, industry, and forces capable of resisting.",
+      },
+      {
+        expected: "Mainland garrisons would join in sequence",
+        happened:
+          "Local outcomes varied as officers, security forces, political organisations, and armed workers made different choices.",
+        mattered:
+          "Control formed a patchwork rather than one continuous national victory.",
+      },
+      {
+        expected: "The Army of Africa would reinforce the takeover",
+        happened:
+          "Its movement to mainland Spain became dependent on transport and assistance from Germany and Italy.",
+        mattered:
+          "Foreign intervention influenced the war from its opening phase instead of arriving only after the front lines settled.",
+      },
+    ],
+    bodySections: [
+      {
+        heading: "Why the Second Republic was vulnerable",
+        paragraphs: [
+          "Spain entered the summer of 1936 with a constitutional government but little agreement about what the Republic should become. Disputes over land reform, workers' rights, the political role of the Catholic Church, military authority, and autonomy for Catalonia and the Basque Country had accumulated over years. Governments of both left and right had faced strikes, insurrections, repression, and political violence. The Popular Front's election victory in February 1936 returned a left-leaning coalition to office, but it did not settle those conflicts or persuade all military leaders to accept the result.",
+          "A group of generals, chiefly Emilio Mola and José Sanjurjo and later joined by Francisco Franco, prepared to remove the government. Their conspiracy drew support from conservative, monarchist, Carlist, and far-right networks, yet the coup was not an inevitable consequence of Spain's divisions. Political crisis explains why the plot found allies; it does not erase the decision to overthrow an elected government. That distinction matters because the civil war began with an organised attempt to seize power, not with two fully formed armies declaring war at the same moment.",
+        ],
+      },
+      {
+        heading: "Who fought—and why two labels hide many factions",
+        paragraphs: [
+          "The Republican side defended the Second Republic, but it was never a single ideological bloc. Republican liberals, socialists, communists, anarchists, trade unions, and supporters of Catalan or Basque autonomy shared an enemy while disagreeing over revolution, property, regional power, and how tightly the war effort should be controlled. In places where the coup was defeated, workers' organisations sometimes received weapons and created militias. That helped stop rebel units in key cities, while also weakening ordinary state authority and accelerating social revolution behind Republican lines.",
+          "The Nationalist side was equally broader than the name suggests. It combined rebel army officers with monarchists, Carlists, conservatives, Catholic traditionalists, and the fascist Falange. The Army of Africa gave the rebellion an experienced military core, but the coalition initially had several senior commanders and competing political traditions. Franco was not the sole architect of the original plan; he rose as the war developed and was appointed supreme military and political leader on October 1, 1936. The two camps therefore became more organised through war rather than entering July as perfectly unified states.",
+        ],
+      },
+      {
+        heading: "July 17–20: how a coup became a war",
+        paragraphs: [
+          "The rebellion began in Spanish Morocco on July 17 and spread to mainland garrisons on July 18. Its organisers intended a swift coup, but success depended on officers across Spain taking their commands, suppressing opposition, and linking their territories. They gained control across parts of northern, western, and southern Spain and secured Seville, an essential bridgehead. Yet the uprising failed in Madrid, Barcelona, Valencia, and other political or industrial centres, where loyal security forces, soldiers, and armed civilian organisations resisted it.",
+          "By July 19–20, the government had failed to suppress the rebellion everywhere, while the rebels had failed to replace the government. That double failure was the hinge of the crisis. Spain now contained two rival zones with territory, armed forces, administrations, and access to different resources. A complete rebel victory would have produced a coup; a complete government victory would have produced a defeated mutiny. The unstable result produced front lines and a contest over who could centralise command, obtain weapons, move troops, and claim legitimacy.",
+        ],
+      },
+      {
+        heading: "Foreign intervention changed the balance",
+        paragraphs: [
+          "International involvement began shaping the conflict almost immediately. Nazi Germany and Fascist Italy supplied aircraft, weapons, personnel, and other support to the Nationalists. German and Italian aircraft helped move troops from the Army of Africa to mainland Spain, overcoming one of the rebellion's first strategic obstacles. Later, the German Condor Legion and Italian forces expanded the Nationalists' air and ground capabilities. Portugal also aided the Nationalist cause, while Franco's coalition gained the advantage of comparatively dependable support from sympathetic dictatorships.",
+          "The Republic received major weapons and advisers from the Soviet Union, material and diplomatic support from Mexico, and volunteers from many countries through the International Brigades. Britain and France promoted non-intervention, and an international embargo was supposed to restrict arms reaching either side. In practice, the policy did not stop German, Italian, or Soviet involvement, and it constrained the Republic's access to open arms markets. Spain became an international ideological cause, but calling it merely a rehearsal for the Second World War can obscure the Spanish political struggles that caused and sustained it.",
+        ],
+      },
+      {
+        heading: "Outcome, dictatorship, and the longer aftermath",
+        paragraphs: [
+          "The war lasted until April 1, 1939. Over time, the Nationalists unified political authority around Franco and used foreign support, military organisation, and territorial gains to defeat a Republic damaged by shortages, internal conflict, and diplomatic isolation. Nationalist victory ended the Second Republic and established a dictatorship that ruled until Franco's death in 1975. The military outcome therefore settled control of the state for decades, not simply the ownership of a few contested provinces.",
+          "Victory did not close the human story. The conflict involved mass killing, reprisals, bombing, imprisonment, displacement, and exile, and its political memory remains contested. The most useful way to understand July 1936 is to resist a tidy beginning: the coup was neither an instant Nationalist triumph nor a successful Republican defence. It was a partial rebel success and a partial government survival. That unstable middle outcome explains why the crisis expanded into a three-year civil war—and why organisation, foreign assistance, and coalition discipline became as important as the original plot.",
+        ],
+      },
+    ],
+    timeline: [
+      {
+        date: "February 16, 1936",
+        label:
+          "The Popular Front wins Spain's general election and forms a new government.",
+        kind: "milestone",
+      },
+      {
+        date: "July 17, 1936",
+        label:
+          "The military uprising begins in Spanish Morocco after the conspiracy is exposed there.",
+        kind: "milestone",
+      },
+      {
+        date: "July 18, 1936",
+        label:
+          "The rebellion spreads to mainland garrisons, with sharply different outcomes from city to city.",
+        kind: "milestone",
+      },
+      {
+        date: "July 19–20, 1936",
+        label:
+          "Rebel failures in major cities leave Spain divided between Republican and Nationalist zones.",
+        kind: "milestone",
+      },
+      {
+        date: "October 1, 1936",
+        label:
+          "Francisco Franco is confirmed as head of the Nationalist state and its armed forces.",
+        kind: "milestone",
+      },
+      {
+        date: "April 26, 1937",
+        label:
+          "German and Italian aircraft bomb Guernica, making foreign intervention one of the war's defining images.",
+        kind: "milestone",
+      },
+      {
+        date: "March 28, 1939",
+        label:
+          "Nationalist forces enter Madrid as organised Republican resistance collapses.",
+        kind: "milestone",
+      },
+      {
+        date: "April 1, 1939",
+        label:
+          "Franco declares the war over after the Nationalist victory.",
+        kind: "milestone",
+      },
+    ],
+    sourceLinks: [
+      {
+        label: "Spanish coup of July 1936",
+        url: "https://en.wikipedia.org/wiki/Spanish_coup_of_July_1936",
+      },
+      {
+        label: "Spanish Civil War overview",
+        url: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+      },
+      {
+        label: "Popular Front in Spain",
+        url: "https://en.wikipedia.org/wiki/Popular_Front_(Spain)",
+      },
+      {
+        label: "University of South Florida history project",
+        url: "https://digitalcommons.usf.edu/span_civil_war/",
+      },
+      {
+        label: "Library of Congress poster collection",
+        url:
+          "https://www.loc.gov/collections/spanish-civil-war-posters/about-this-collection/",
+      },
+    ],
+  },
+});
+const HISTORY_LEGACY_REDIRECTS = new Map(
+  Object.values(HISTORY_EVERGREEN_PAGES).flatMap((page) =>
+    page.legacySlugs.map((legacySlug) => [legacySlug, page.slug]),
+  ),
+);
 const MAX_DATE_PERSON_PROFILES = 20;
 const WIKIMEDIA_THUMBNAIL_STEPS = [
   20, 40, 60, 120, 250, 330, 500, 960, 1280, 1920, 3840,
@@ -93,10 +287,13 @@ const EDGE_CACHE_ROUTE_RE = /^\/(events|born|died|people|history|topics|years|ke
 function isEdgeCacheable(url, request) {
   if (request.method !== "GET") return false;
   const p = url.pathname;
+  const legacyHistorySlug =
+    p.match(/^\/history\/([a-z0-9-]+)\/?$/)?.[1] || "";
   if (
     url.searchParams.has("fresh") ||
     url.searchParams.has("nocache") ||
-    url.searchParams.has("repair")
+    url.searchParams.has("repair") ||
+    HISTORY_LEGACY_REDIRECTS.has(legacyHistorySlug)
   ) return false;
   if (p.startsWith("/api/") || p.startsWith("/blog/publish") || p.startsWith("/warmup")) return false;
   if (/^\/quiz\//.test(p)) return false;
@@ -694,6 +891,80 @@ function renderEntityInlineFigure(img, altFallback = "") {
     <img src="${escapeHtml(proxied)}" loading="lazy" alt="${escapeHtml(alt)}" />
     ${img.caption ? `<figcaption class="article-meta mt-2"><small>${escapeHtml(img.caption)}</small></figcaption>` : ""}
   </figure>`;
+}
+
+function getHistoryEvergreenPage(slug) {
+  return HISTORY_EVERGREEN_PAGES[String(slug || "").trim()] || null;
+}
+
+function canonicalEntityPublicPath(entity) {
+  if (entity?.type === "person") {
+    return `/people/${entity.slug}/`;
+  }
+  const slug = String(entity?.slug || "").trim();
+  const canonicalSlug = HISTORY_LEGACY_REDIRECTS.get(slug) || slug;
+  return `/history/${canonicalSlug}/`;
+}
+
+function applyHistoryEvergreenPage(entity, page) {
+  if (!page) return entity;
+  return {
+    ...entity,
+    ...page,
+    type: "event",
+    slug: page.slug,
+    url: page.url,
+    imageUrl: entity?.imageUrl || "",
+    inlineImages: Array.isArray(entity?.inlineImages) ? entity.inlineImages : [],
+  };
+}
+
+function buildHistoryEvergreenComparison(entity) {
+  const rows = (Array.isArray(entity.comparisonRows)
+    ? entity.comparisonRows
+    : [])
+    .filter((row) => row?.expected && row?.happened && row?.mattered);
+  if (!rows.length) return "";
+  return `<section class="history-comparison mt-4">
+    <h2 class="h3">${escapeHtml(entity.comparisonHeading || "What changed")}</h2>
+    ${entity.comparisonIntro ? `<p>${escapeHtml(entity.comparisonIntro)}</p>` : ""}
+    <div class="history-comparison-scroll">
+      <table class="history-comparison-table">
+        <thead><tr><th scope="col">The plan needed</th><th scope="col">What happened</th><th scope="col">Why it mattered</th></tr></thead>
+        <tbody>${rows.map((row) =>
+          `<tr><td>${escapeHtml(row.expected)}</td><td>${escapeHtml(row.happened)}</td><td>${escapeHtml(row.mattered)}</td></tr>`,
+        ).join("")}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function buildEntitySourceLinks(entity) {
+  const links = [];
+  if (entity.sourcePostUrl) {
+    links.push({
+      label: entity.sourcePostTitle
+        ? `Date article: ${entity.sourcePostTitle}`
+        : "Read the related date article",
+      url: entity.sourcePostUrl,
+    });
+  }
+  if (Array.isArray(entity.sourceLinks)) {
+    links.push(...entity.sourceLinks);
+  } else if (entity.wikiUrl) {
+    links.push({ label: "Wikipedia source", url: entity.wikiUrl });
+  }
+  if (!links.length) return "";
+  return `<section class="authority-links mt-4" aria-labelledby="entity-sources-heading">
+    <h2 class="h4 authority-links-label" id="entity-sources-heading">Sources and further reading</h2>
+    <p class="authority-links-note">Use the dated article for the July 17 entry point; use these references for the wider conflict, source record, and historical collections.</p>
+    <div class="authority-links-row">
+      ${links.map((link) => {
+        const external = /^https?:\/\//i.test(String(link.url || ""));
+        return `<a class="authority-link" href="${escapeHtml(link.url)}"${external ? ' target="_blank" rel="noopener noreferrer"' : ""}>${escapeHtml(link.label)}</a>`;
+      }).join("")}
+    </div>
+  </section>`;
 }
 
 function buildEntityBodySections(entity) {
@@ -1970,7 +2241,9 @@ async function createPersonEntityFromWikipediaRequest(env, slug, url) {
 }
 
 async function handleEntityPage(request, env, url, type, slug, ctx) {
-  const raw = await env.BLOG_AI_KV?.get(entityKey(type, slug)).catch(() => null);
+  const historyPage = type === "event" ? getHistoryEvergreenPage(slug) : null;
+  const storageSlug = historyPage?.storageSlug || slug;
+  const raw = await env.BLOG_AI_KV?.get(entityKey(type, storageSlug)).catch(() => null);
   let entity = raw ? JSON.parse(raw) : null;
   if (!entity && type === "person") {
     entity = await createPersonEntityFromWikipediaRequest(env, slug, url).catch(() => null);
@@ -2040,22 +2313,27 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     if (ctx?.waitUntil && repairWrite) ctx.waitUntil(repairWrite);
     else if (repairWrite) await repairWrite;
   }
-  const indexWrite = updateEntityIndexEntry(env, entity).catch(() => {});
-  if (ctx?.waitUntil) ctx.waitUntil(indexWrite);
-  else await indexWrite;
+  if (!historyPage) {
+    const indexWrite = updateEntityIndexEntry(env, entity).catch(() => {});
+    if (ctx?.waitUntil) ctx.waitUntil(indexWrite);
+    else await indexWrite;
+  }
   if (entity._sourcePostSynced) {
     delete entity._sourcePostSynced;
-    const write = env.BLOG_AI_KV?.put(entityKey(type, entity.slug), JSON.stringify(entity)).catch(() => {});
+    const write = env.BLOG_AI_KV?.put(entityKey(type, storageSlug), JSON.stringify(entity)).catch(() => {});
     if (ctx?.waitUntil && write) ctx.waitUntil(write);
   }
-  const title = `${entity.name} | thisDay.`;
+  entity = applyHistoryEvergreenPage(entity, historyPage);
+  const title = entity.seoTitle || `${entity.name} | thisDay.`;
+  const pageHeading = entity.pageHeading || entity.name;
   const canonical = `${url.origin}${entity.url || url.pathname}`;
   const descriptionBase = type === "person"
     ? `Explore ${entity.name} through thisDay articles, biographical context, source links, and related historical coverage.`
-    : (entity.summary || entity.description || `Explore ${entity.name} through thisDay articles, sources, and related history.`);
-  const description = descriptionBase
-    .replace(/\s+/g, " ")
-    .slice(0, 155);
+    : (entity.seoDescription || entity.summary || entity.description || `Explore ${entity.name} through thisDay articles, sources, and related history.`);
+  const description = truncateForMeta(
+    descriptionBase.replace(/\s+/g, " "),
+    155,
+  );
   const imageUrl = entity.imageUrl
     ? `${url.origin}/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=1200&h=630&fit=cover&q=85`
     : `${url.origin}/images/logo.png`;
@@ -2114,13 +2392,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
         )
         .join("")}</div>`
     : "";
-  const sourceLinks = `<div class="authority-links mt-4">
-    <span class="authority-links-label">Sources and Links</span>
-    <div class="authority-links-row">
-      ${entity.sourcePostUrl ? `<a class="authority-link" href="${escapeHtml(entity.sourcePostUrl)}">Read the article</a>` : ""}
-      ${entity.wikiUrl ? `<a class="authority-link" href="${escapeHtml(entity.wikiUrl)}" target="_blank" rel="noopener">Wikipedia source</a>` : ""}
-    </div>
-  </div>`;
+  const sourceLinks = buildEntitySourceLinks(entity);
 
   const html = `<!doctype html>
 <html lang="en">
@@ -2152,7 +2424,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     body{font-family:Lora,serif;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text)}main{flex:1;margin-top:20px}p{font-size:15px;line-height:1.6}a{color:var(--btn-bg)}a:hover{color:var(--accent)}h1,h2,h3{color:var(--text)}.article-meta{color:var(--text-muted);font-size:13px}.breadcrumb{background:transparent;padding:0;margin-bottom:1rem}.breadcrumb-item a{color:var(--btn-bg)}.breadcrumb-item.active{color:var(--text-muted)}
     .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;text-decoration:none}.pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
     .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}.dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}.slider-controls{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}.slider-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:50%;background:#fff;color:var(--btn-bg);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.slider-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.slider-btn:disabled{opacity:.35;cursor:default}
-    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:15px;line-height:1.75;margin-bottom:1rem}.entity-inline-figure{margin:1.25rem 0;text-align:center}.entity-inline-figure img{max-width:100%;height:auto;border-radius:8px;border:1px solid var(--border)}.entity-inline-figure figcaption{margin-top:.4rem}.article-timeline{margin:1.75rem 0}.article-timeline h2{margin-bottom:1rem}.article-timeline .tl-list{list-style:none;margin:0;padding:0;border-left:2px solid var(--border)}.article-timeline .tl-entry{position:relative;padding:0 0 1rem 1.25rem}.article-timeline .tl-entry:last-child{padding-bottom:0}.article-timeline .tl-entry::before{content:"";position:absolute;left:-7px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--btn-bg);border:2px solid var(--bg)}.article-timeline .tl-entry.tl-birth::before,.article-timeline .tl-entry.tl-death::before{background:var(--accent)}.article-timeline .tl-date{display:block;font-size:13px;font-weight:600;color:var(--btn-bg)}.article-timeline .tl-label{display:block;font-size:15px;line-height:1.6;color:var(--text)}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:14px 16px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin-bottom:10px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+    .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:15px;line-height:1.75;margin-bottom:1rem}.entity-inline-figure{margin:1.25rem 0;text-align:center}.entity-inline-figure img{max-width:100%;height:auto;border-radius:8px;border:1px solid var(--border)}.entity-inline-figure figcaption{margin-top:.4rem}.history-comparison{border-top:1px solid var(--border);padding-top:1.5rem}.history-comparison-scroll{overflow-x:auto}.history-comparison-table{width:100%;min-width:680px;border-collapse:collapse;font-size:14px;line-height:1.55}.history-comparison-table th,.history-comparison-table td{padding:12px 14px;border:1px solid var(--border);vertical-align:top;text-align:left}.history-comparison-table th{background:var(--btn-bg);color:#fff;font-weight:600}.history-comparison-table td:first-child{font-weight:600;color:var(--btn-bg);background:var(--bg-alt)}.article-timeline{margin:1.75rem 0}.article-timeline h2{margin-bottom:1rem}.article-timeline .tl-list{list-style:none;margin:0;padding:0;border-left:2px solid var(--border)}.article-timeline .tl-entry{position:relative;padding:0 0 1rem 1.25rem}.article-timeline .tl-entry:last-child{padding-bottom:0}.article-timeline .tl-entry::before{content:"";position:absolute;left:-7px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--btn-bg);border:2px solid var(--bg)}.article-timeline .tl-entry.tl-birth::before,.article-timeline .tl-entry.tl-death::before{background:var(--accent)}.article-timeline .tl-date{display:block;font-size:13px;font-weight:600;color:var(--btn-bg)}.article-timeline .tl-label{display:block;font-size:15px;line-height:1.6;color:var(--text)}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:18px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin:0 0 8px}.authority-links-note{font-size:14px;line-height:1.55;margin:0 0 12px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
     .amazon-related{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px}.amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}.amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}.amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}.amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.amazon-slider-wrap::-webkit-scrollbar{display:none}.amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.amazon-product-card{flex:0 0 170px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}.amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.amazon-product-card small{color:var(--text-muted)}.amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden}.amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}@media(min-width:768px){.amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
     .entity-grid{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:720px){.entity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}.entity-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72);text-decoration:none;color:inherit}.entity-card:hover{background:var(--bg-alt);text-decoration:none;color:inherit}.border{border:1px solid var(--border)!important;box-shadow:none}.nav-inner{max-width:1920px!important;margin:0 auto!important}
     .entity-description{font-size:1rem;color:var(--text-muted);font-style:italic;line-height:1.4}.entity-dates{font-size:13px;color:var(--text-muted)}
@@ -2169,13 +2441,14 @@ ${siteNav()}
       <nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/">Home</a></li><li class="breadcrumb-item"><a href="${type === "person" ? "/people/" : "/history/"}">${type === "person" ? "People" : "History"}</a></li><li class="breadcrumb-item active" aria-current="page">${escapeHtml(entity.name)}</li></ol></nav>
       <article class="p-4 rounded border" style="background-color:var(--bg);color:var(--text)">
         <header class="mb-4 text-center">
-          <h1 class="mb-2 fw-bold">${escapeHtml(entity.name)}</h1>
+          <h1 class="mb-2 fw-bold">${escapeHtml(pageHeading)}</h1>
           ${entity.description ? `<p class="entity-description mb-1">${escapeHtml(entity.description)}</p>` : ""}
           ${type === "person" && (entity.birthDate || entity.deathDate) ? `<p class="entity-dates article-meta mb-2">${[entity.birthDate ? `Born: ${escapeHtml(entity.birthDate)}` : "", entity.deathDate ? `Died: ${escapeHtml(entity.deathDate)}` : ""].filter(Boolean).join(" &nbsp;·&nbsp; ")}</p>` : ""}
           ${topicPills}
         </header>
         ${imageFigure}
         ${buildEntityOverviewSlider(entity)}
+        ${buildHistoryEvergreenComparison(entity)}
         ${buildEntityBodySections(entity)}
         ${buildEntityTimelineBlock(entity)}
         ${buildEntityAdUnits()}
@@ -6528,7 +6801,15 @@ async function handleFetchRequest(request, env, ctx) {
 
   const historyEntityMatch = url.pathname.match(/^\/history\/([a-z0-9-]+)\/?$/);
   if (historyEntityMatch) {
-    return handleEntityPage(request, env, url, "event", historyEntityMatch[1], ctx);
+    const requestedSlug = historyEntityMatch[1];
+    const canonicalSlug = HISTORY_LEGACY_REDIRECTS.get(requestedSlug);
+    if (canonicalSlug) {
+      return Response.redirect(
+        `${url.origin}/history/${canonicalSlug}/`,
+        301,
+      );
+    }
+    return handleEntityPage(request, env, url, "event", requestedSlug, ctx);
   }
 
   // Born pages: /born/{month}/{day}/
@@ -6625,11 +6906,24 @@ async function handleFetchRequest(request, env, ctx) {
   if (url.pathname === "/sitemap-entities.xml") {
     const raw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
     const index = raw ? JSON.parse(raw) : [];
-    const urls = index
-      .filter((e) => e?.slug && e?.type && e.indexable === true)
-      .map((e) => {
-        const path = e.type === "person" ? `/people/${e.slug}/` : `/history/${e.slug}/`;
-        const lastmod = (e.updatedAt || new Date().toISOString()).slice(0, 10);
+    const canonicalEntries = new Map();
+    for (const entry of index.filter(
+      (candidate) =>
+        candidate?.slug && candidate?.type && candidate.indexable === true,
+    )) {
+      const path = canonicalEntityPublicPath(entry);
+      const existing = canonicalEntries.get(path);
+      if (
+        !existing ||
+        new Date(entry.updatedAt || 0) > new Date(existing.updatedAt || 0)
+      ) {
+        canonicalEntries.set(path, entry);
+      }
+    }
+    const urls = [...canonicalEntries.entries()]
+      .sort(([pathA], [pathB]) => pathA.localeCompare(pathB))
+      .map(([path, entry]) => {
+        const lastmod = (entry.updatedAt || new Date().toISOString()).slice(0, 10);
         return `<url><loc>https://thisday.info${path}</loc>` +
           `<lastmod>${lastmod}</lastmod>` +
           `<changefreq>weekly</changefreq>` +
@@ -8579,4 +8873,17 @@ export const __personIdentityTestHooks = {
   seoEntityQualityEligible,
   updateEntityIndexEntry,
   refreshEntityIndexFromStoredEntities,
+};
+
+export const __historyEvergreenTestHooks = {
+  HISTORY_EVERGREEN_PAGES,
+  HISTORY_LEGACY_REDIRECTS,
+  getHistoryEvergreenPage,
+  canonicalEntityPublicPath,
+  applyHistoryEvergreenPage,
+  buildHistoryEvergreenComparison,
+  buildEntitySourceLinks,
+  entityBodyWordCount,
+  handleFetchRequest,
+  isEdgeCacheable,
 };

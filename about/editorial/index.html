@@ -254,13 +254,13 @@
           <div>
             <h5>AI-assisted research and drafting</h5>
             <p>
-              An AI language model drafts the article using its training
-              knowledge of the event, constrained to include specific,
-              verifiable facts — real names, exact dates, documented locations,
-              and attributable quotes. The AI is instructed to flag any detail
-              it cannot attribute to a named source. Generic summaries and
-              unsupported generalisations are explicitly prohibited in the
-              generation prompt.
+              An AI language model drafts the article from the selected event
+              record and the direct source pages gathered for that event. It is
+              constrained to include specific, verifiable facts — real names,
+              exact dates, documented locations, and attributable quotes — and
+              not to fill gaps with plausible-sounding detail. Generic
+              summaries and unsupported generalisations are explicitly
+              prohibited in the generation prompt.
             </p>
           </div>
         </div>
@@ -282,12 +282,13 @@
         <div class="step-card">
           <div class="step-num">4</div>
           <div>
-            <h5>Fact-check pass</h5>
+            <h5>Automated source and fact checks</h5>
             <p>
-              A dedicated fact-check step verifies that the event date, year,
-              and location are internally consistent and match the article's
-              core claims. Any identified discrepancy triggers a correction
-              before the article is stored.
+              Automated publication safeguards verify the event date and year,
+              direct citations, independent corroboration of the central claim,
+              factual consistency with the gathered source material, and image
+              relevance. A failed check triggers a source-bound repair or stops
+              the article from being published.
             </p>
           </div>
         </div>
@@ -295,12 +296,13 @@
         <div class="step-card">
           <div class="step-num">5</div>
           <div>
-            <h5>SEO and quality review</h5>
+            <h5>Automated SEO and quality pass</h5>
             <p>
-              The article is reviewed for clarity, completeness, and accuracy of
-              metadata (descriptions, keywords, image attribution). Weak or
-              vague passages are rewritten. The article must meet a minimum word
-              count and structural standard before it qualifies for publication.
+              A separate automated pass checks clarity, completeness, metadata,
+              repeated claims, image attribution, and required article
+              sections. Weak or vague passages are sent through a source-bound
+              rewrite. The article must meet minimum content and structural
+              standards before it qualifies for publication.
             </p>
           </div>
         </div>
@@ -310,11 +312,11 @@
           <div>
             <h5>Publication</h5>
             <p>
-              The finished article is published with full source attribution to
-              Wikipedia (under CC BY-SA 4.0), image credit to Wikimedia Commons,
-              and a disclosure note stating it was produced with AI assistance.
-              Every article links back to its Wikipedia source so readers can
-              verify facts independently.
+              The finished article is published with direct source links,
+              visible independent corroboration of its central claim, image
+              credit to Wikimedia Commons, and a disclosure explaining the
+              AI-assisted process. Readers can inspect the listed sources and
+              report a correction.
             </p>
           </div>
         </div>
@@ -354,6 +356,17 @@
             attribution. The fact-check and quote validation steps exist
             specifically to catch and remove hallucinated content before
             publication.
+          </p>
+        </div>
+
+        <div class="policy-box">
+          <strong>Human review is not guaranteed before publication</strong>
+          <p>
+            Routine daily articles can be published after the automated checks
+            above without a human editor reviewing every sentence first. Human
+            editors may inspect, correct, or expand an article, but the
+            disclosure on each article distinguishes those automated safeguards
+            from guaranteed pre-publication human review.
           </p>
         </div>
 

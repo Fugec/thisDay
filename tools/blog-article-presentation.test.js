@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -370,6 +371,58 @@ test("irrelevant commercial recommendations omit both the affiliate slider and p
 
   assert.doesNotMatch(html, /class="amazon-related/);
   assert.doesNotMatch(html, /article-body-ad-v1/);
+});
+
+test("article disclosure accurately distinguishes automated safeguards from human review", () => {
+  const html = blogHooks.buildArticleProcessDisclosure();
+
+  assert.match(html, /AI assisted with source research and drafting/);
+  assert.match(
+    html,
+    /automated safeguards checked direct citations, independent corroboration of the central claim, factual consistency, and required article structure/,
+  );
+  assert.match(
+    html,
+    /A human editor does not necessarily review every article before publication/,
+  );
+  assert.match(html, /href="\/about\/editorial\/">Read our editorial process/);
+  assert.doesNotMatch(
+    html,
+    /reviewed for factual accuracy by the|reviewed by the editorial team/i,
+  );
+});
+
+test("legacy article disclosures drop the guaranteed editorial-review claim", () => {
+  const legacy = `<div><strong>About this article</strong><span>
+    This article was researched and drafted with AI assistance, then reviewed for factual accuracy by the
+    <a href="/about/editorial/" rel="author">thisDay. editorial team</a>.
+    Historical source: Wikipedia.
+  </span></div>`;
+  const normalized = blogHooks.normalizeArticleProcessDisclosureHtml(legacy);
+
+  assert.match(normalized, /Automated safeguards vary by publication date/);
+  assert.match(
+    normalized,
+    /A human editor did not necessarily review it before publication/,
+  );
+  assert.doesNotMatch(normalized, /automated safeguards checked direct citations/i);
+  assert.doesNotMatch(normalized, /reviewed for factual accuracy by the/i);
+  assert.equal(
+    blogHooks.normalizeArticleProcessDisclosureHtml(normalized),
+    normalized,
+  );
+});
+
+test("editorial policy documents the same non-guaranteed human-review workflow", () => {
+  const policy = readFileSync(
+    new URL("../about/editorial/index.html", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(policy, /Automated source and fact checks/);
+  assert.match(policy, /Automated SEO and quality pass/);
+  assert.match(policy, /Human review is not guaranteed before publication/);
+  assert.doesNotMatch(policy, /using its training\s+knowledge of the event/i);
 });
 
 test("public question titles use a source-supported niche while factual metadata stays locked", () => {

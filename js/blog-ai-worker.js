@@ -3879,22 +3879,15 @@ export default {
           !patchedHtml.includes("About this article") &&
           patchedHtml.includes("</article>")
         ) {
-          const disclosureBlock =
-            `<div class="mt-5 p-3 rounded" style="background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);font-size:.82rem;line-height:1.6">` +
-            `<strong style="display:block;margin-bottom:4px">About this article</strong>` +
-            `<span class="article-meta">` +
-            `This article was researched and drafted with AI assistance, then reviewed for factual accuracy by the ` +
-            `<a href="/about/editorial/" rel="author">thisDay. editorial team</a>. ` +
-            `Historical source: <a href="https://en.wikipedia.org/" target="_blank" rel="noopener noreferrer">Wikipedia</a> ` +
-            `(licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>). ` +
-            `Images via <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>. ` +
-            `Found an error? <a href="/contact/">Let us know</a>.` +
-            `</span></div>`;
+          const disclosureBlock = buildArticleProcessDisclosure({
+            legacyWikipediaAttribution: true,
+          });
           patchedHtml = patchedHtml.replace(
             "</article>",
             disclosureBlock + "\n</article>",
           );
         }
+        patchedHtml = normalizeArticleProcessDisclosureHtml(patchedHtml);
         // Patch old quiz popup to flex-column sticky-header layout
         if (
           patchedHtml.includes('id="tdq-popup"') &&
@@ -15102,6 +15095,50 @@ function validateArticleStructuredDataForPublish(html, content, entityMeta = [])
   return { ok: reasons.length === 0, reasons, objects };
 }
 
+function articleProcessReviewMarkup({ legacy = false } = {}) {
+  if (legacy) {
+    return (
+      `AI assisted with research and drafting. Automated safeguards vary by publication date, and this stored article ` +
+      `may predate the current citation, corroboration, grounding, and structure checks. A human editor did not necessarily ` +
+      `review it before publication, so errors may remain. <a href="/about/editorial/">Read our current editorial process</a>.`
+    );
+  }
+  return (
+    `AI assisted with source research and drafting. Before publication, automated safeguards checked direct citations, ` +
+    `independent corroboration of the central claim, factual consistency, and required article structure. ` +
+    `A human editor does not necessarily review every article before publication, so errors may remain. ` +
+    `<a href="/about/editorial/">Read our editorial process</a>.`
+  );
+}
+
+function buildArticleProcessDisclosure({
+  legacyWikipediaAttribution = false,
+} = {}) {
+  const sourceNote = legacyWikipediaAttribution
+    ? `Historical source: <a href="https://en.wikipedia.org/" target="_blank" rel="noopener noreferrer">Wikipedia</a> ` +
+      `(licensed under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>).`
+    : "The direct historical sources used for the central event are listed above.";
+  return `<!-- AI & Editorial Disclosure -->
+          <div class="mt-5 p-3 rounded" style="background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);font-size:.82rem;line-height:1.6">
+            <strong style="display:block;margin-bottom:4px">About this article</strong>
+            <span class="article-meta">
+              ${articleProcessReviewMarkup({
+                legacy: legacyWikipediaAttribution,
+              })}
+              ${sourceNote}
+              Images via <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.
+              Found an error? <a href="/contact/">Let us know</a>.
+            </span>
+          </div>`;
+}
+
+function normalizeArticleProcessDisclosureHtml(body) {
+  return String(body || "").replace(
+    /This article was researched and drafted with AI assistance,\s*then reviewed for factual accuracy by the\s*<a href="\/about\/(?:editorial\/)?" rel="author">thisDay\. editorial team<\/a>\./gi,
+    articleProcessReviewMarkup({ legacy: true }),
+  );
+}
+
 function buildPostHTML(
   c,
   date,
@@ -15665,17 +15702,7 @@ ${analysisBadItems}
 
           ${buildArticleRelatedQuestionsBlock(c, currentPillars)}
 
-          <!-- AI & Editorial Disclosure -->
-          <div class="mt-5 p-3 rounded" style="background:rgba(0,0,0,0.03);border:1px solid rgba(0,0,0,0.08);font-size:.82rem;line-height:1.6">
-            <strong style="display:block;margin-bottom:4px">About this article</strong>
-            <span class="article-meta">
-              This article was researched and drafted with AI assistance, then reviewed for factual accuracy by the
-              <a href="/about/editorial/" rel="author">thisDay. editorial team</a>.
-              The direct historical sources used for the central event are listed above.
-              Images via <a href="https://commons.wikimedia.org/" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.
-              Found an error? <a href="/contact/">Let us know</a>.
-            </span>
-          </div>
+          ${buildArticleProcessDisclosure()}
 
           <footer class="text-center mt-4 pt-3 border-top">
             <small class="article-meta">
@@ -17144,5 +17171,7 @@ export const __contentGenerationTestHooks = {
   relevantOpenLibraryBooks,
   commercialRecommendationsAreRelevant,
   buildAmazonRelatedBlock,
+  buildArticleProcessDisclosure,
+  normalizeArticleProcessDisclosureHtml,
   buildPostHTML,
 };

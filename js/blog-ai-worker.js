@@ -327,7 +327,7 @@ const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const ARTICLE_HERO_CSS =
   `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
 const ARTICLE_ENTITY_STRIP_STYLE =
-  `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3,.entity-strip .h4{margin:0 0 1rem}.story-topic-section{margin-top:1.25rem;padding-top:1.1rem;border-top:1px solid var(--border,#cfe0cf)}.story-topic-section .h4{font-size:1rem}.story-topic-pill{display:inline-flex;align-items:center;gap:.5rem;max-width:360px;padding:.55rem .8rem;border:1px solid var(--border,#cfe0cf);border-radius:999px;background:var(--bg-alt,#f2f7f2);color:var(--btn-bg,#1b3a2d)!important;text-decoration:none!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.story-topic-pill span:last-child{overflow:hidden;text-overflow:ellipsis}.story-topic-label{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted,#5c7a65)}</style>`;
+  `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3,.entity-strip .h4{margin:0 0 1rem}.story-topic-section{margin-top:1.5rem;padding-top:1.35rem;border-top:1px solid var(--border,#cfe0cf)}.story-topic-section .story-topic-heading{font-size:clamp(1.3rem,2vw,1.65rem);margin:0 0 1rem}.story-topic-card{display:grid;grid-template-columns:minmax(210px,34%) minmax(0,1fr);overflow:hidden;border:1px solid var(--border,#cfe0cf);border-radius:14px;background:var(--bg-alt,#f2f7f2);color:var(--text,#1a2e20)!important;text-decoration:none!important;box-shadow:0 12px 30px rgba(27,58,45,.08);transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}.story-topic-card-no-image{grid-template-columns:1fr}.story-topic-card:hover{transform:translateY(-2px);border-color:var(--btn-bg,#1b3a2d);box-shadow:0 16px 34px rgba(27,58,45,.14);color:var(--text,#1a2e20)!important}.story-topic-card:focus-visible{outline:3px solid var(--accent,#9dc43a);outline-offset:3px}.story-topic-card-image{position:relative;min-height:220px;background:var(--btn-bg,#1b3a2d);overflow:hidden}.story-topic-card-image img{display:block;width:100%;height:100%;position:absolute;inset:0;object-fit:cover;object-position:center}.story-topic-card-copy{display:flex;min-width:0;flex-direction:column;align-items:flex-start;justify-content:center;padding:1.5rem}.story-topic-kicker{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted,#5c7a65);margin-bottom:.55rem}.story-topic-title{font-size:clamp(1.15rem,2vw,1.45rem);line-height:1.3;margin:0 0 .7rem;color:var(--text,#1a2e20)}.story-topic-description{font-size:14px;line-height:1.65;margin:0 0 1rem;color:var(--text-muted,#5c7a65)}.story-topic-cta{display:inline-flex;align-items:center;gap:.45rem;margin-top:auto;font-size:14px;font-weight:700;color:var(--btn-bg,#1b3a2d)}@media(max-width:680px){.story-topic-card{grid-template-columns:1fr}.story-topic-card-image{min-height:210px}.story-topic-card-copy{padding:1.2rem}}</style>`;
 const VIDEO_THUMBNAIL_OVERRIDES = {
   "13-may-2026":
     "https://thisday.info/image-proxy?src=https%3A%2F%2Fupload.wikimedia.org%2Fwikipedia%2Fcommons%2Ff%2Ffb%2FGIRO8076_Pogacar_%252853750349243%2529.jpg",
@@ -3684,6 +3684,10 @@ export default {
         };
         // Patch old quiz API path in already-stored HTML
         let patchedHtml = html.replaceAll("/api/blog-quiz/", "/blog/quiz/");
+        patchedHtml = normalizeArticleHistoryDiscoveryCardHtml(
+          patchedHtml,
+          articleEntitiesRaw,
+        );
         // Ensure the "Explore [Month Day] in History" card matches the post slug,
         // not a potentially-wrong AI-provided historicalDateISO.
         if (slugParsedForThumb) {
@@ -9899,14 +9903,33 @@ function buildArticleEntityStrip(entityMeta) {
       ? `<a href="${esc(e.url)}" class="person-pill">${inner}</a>`
       : `<span class="person-pill">${inner}</span>`;
   }).join("");
-  const historyChip = historyEntity
-    ? `<a href="${esc(historyEntity.url)}" class="story-topic-pill" data-history-entity-link="1" aria-label="Explore event: ${esc(historyEntity.name)}"><span class="story-topic-label">Explore</span><span>${esc(historyEntity.name)}</span></a>`
-    : "";
-  const historySection = historyChip
-    ? `<section class="story-topic-section" aria-label="Explore this event"><h2 class="h4">Explore this event</h2>${historyChip}</section>`
-    : "";
+  const historySection = buildArticleHistoryDiscoveryCard(historyEntity);
 
   return `${ARTICLE_ENTITY_STRIP_STYLE}<div class="entity-strip people-strip" data-entity-strip="1"><div class="entity-strip-content people-track-wrap"><h2 class="h3">People in this story</h2><div class="entity-person-chips people-track">${personChips}</div>${historySection}</div></div>`;
+}
+
+function buildArticleHistoryDiscoveryCard(historyEntity) {
+  if (!historyEntity?.url || !historyEntity?.name) return "";
+  const title =
+    String(
+      historyEntity.pageHeading ||
+      historyEntity.seoTitle ||
+      historyEntity.name,
+    )
+      .replace(/\s+\|\s+thisDay\.\s*$/i, "")
+      .trim();
+  const description =
+    String(
+      historyEntity.description ||
+      historyEntity.summary ||
+      `Read the wider historical context, causes, and consequences of ${historyEntity.name}.`,
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+  const image = isProxyableArticleImageUrl(historyEntity.imageUrl)
+    ? `<span class="story-topic-card-image"><img src="/image-proxy?src=${encodeURIComponent(historyEntity.imageUrl)}&w=720&h=405&fit=cover&q=82" alt="${esc(historyEntity.name)}" loading="lazy" width="720" height="405"></span>`
+    : "";
+  return `<section class="story-topic-section" aria-labelledby="story-topic-heading"><h2 class="story-topic-heading" id="story-topic-heading">Explore this event</h2><a href="${esc(historyEntity.url)}" class="story-topic-card${image ? "" : " story-topic-card-no-image"}" data-history-entity-link="1" aria-label="Read the full history: ${esc(title)}">${image}<span class="story-topic-card-copy"><span class="story-topic-kicker">The wider story</span><strong class="story-topic-title">${esc(title)}</strong><span class="story-topic-description">${esc(description)}</span><span class="story-topic-cta">Read the full history <span aria-hidden="true">→</span></span></span></a></section>`;
 }
 
 function isSpanishCivilWarHistoryEntity(entity) {
@@ -9940,8 +9963,37 @@ function normalizeArticleHistoryEntityMeta(entity) {
     ...entity,
     slug: "spanish-civil-war-1936",
     name: "Spanish Civil War, 1936",
+    pageHeading:
+      "Why Did Spain's July 1936 Coup Fail—and Start a Civil War?",
+    description:
+      "The coup was designed to replace Spain's government quickly. Its partial failure created rival zones—and a war that lasted until 1939.",
     url: "/history/spanish-civil-war-1936/",
   };
+}
+
+function normalizeArticleHistoryDiscoveryCardHtml(body, entityMetaRaw) {
+  const html = String(body || "");
+  if (
+    !html.includes("story-topic-section") ||
+    !String(entityMetaRaw || "").trim()
+  ) {
+    return html;
+  }
+  let entityMeta;
+  try {
+    entityMeta = JSON.parse(entityMetaRaw);
+  } catch {
+    return html;
+  }
+  const historyEntity = (Array.isArray(entityMeta) ? entityMeta : [])
+    .map(normalizeArticleHistoryEntityMeta)
+    .find((entity) => isHistoryEntityDiscoveryLinkEligible(entity));
+  const section = buildArticleHistoryDiscoveryCard(historyEntity);
+  if (!section) return html;
+  return html.replace(
+    /<section class="story-topic-section"[\s\S]*?<\/section>/i,
+    section,
+  );
 }
 
 function normalizeHistoryEntityCanonicalLinksHtml(body) {
@@ -9967,7 +10019,15 @@ function compactArticleEntityMeta(entityMeta) {
       url: entity.url,
       wikiUrl: entity.wikiUrl || "",
       ...(entity.type === "event"
-        ? { historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(entity) }
+        ? {
+            historyLinkEligible: isHistoryEntityDiscoveryLinkEligible(entity),
+            ...(entity.pageHeading ? { pageHeading: entity.pageHeading } : {}),
+            ...(entity.seoTitle ? { seoTitle: entity.seoTitle } : {}),
+            ...(entity.description ? { description: entity.description } : {}),
+            ...(!entity.description && entity.summary
+              ? { summary: entity.summary }
+              : {}),
+          }
         : {}),
       ...(entity.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
       ...(entity.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
@@ -17215,8 +17275,10 @@ export const __contentGenerationTestHooks = {
   normalizeContentMetadata,
   validateContentSemanticsForPublish,
   buildArticleEntityStrip,
+  buildArticleHistoryDiscoveryCard,
   normalizeArticleEntityStripPresentationHtml,
   normalizeArticleHistoryEntityMeta,
+  normalizeArticleHistoryDiscoveryCardHtml,
   normalizeHistoryEntityCanonicalLinksHtml,
   compactAnalysisSubject,
   publicArticleTitle,

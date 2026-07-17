@@ -86,6 +86,8 @@ test("history discovery is separated from the people row", () => {
       name: "Spanish Civil War Erupts",
       url: "/history/spanish-civil-war-erupts/",
       wikiUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+      imageUrl:
+        "https://upload.wikimedia.org/wikipedia/commons/a/a0/spanish-civil-war.jpg",
       bodySections: richHistoryBody,
     },
   ]);
@@ -113,10 +115,22 @@ test("history discovery is separated from the people row", () => {
   assert.doesNotMatch(peopleRow, /Spanish Civil War|\/history\//);
   assert.match(
     html,
-    /<section class="story-topic-section"[^>]*><h2 class="h4">Explore this event<\/h2>/,
+    /<section class="story-topic-section"[^>]*><h2 class="story-topic-heading"[^>]*>Explore this event<\/h2>/,
   );
   assert.match(html, /href="\/history\/spanish-civil-war-1936\/"/);
-  assert.match(html, />Spanish Civil War, 1936<\/span><\/a>/);
+  assert.match(
+    html,
+    /class="story-topic-title">Why Did Spain&#39;s July 1936 Coup Fail—and Start a Civil War\?<\/strong>/,
+  );
+  assert.match(
+    html,
+    /class="story-topic-description">The coup was designed to replace Spain&#39;s government quickly\./,
+  );
+  assert.match(
+    html,
+    /class="story-topic-card-image"><img[^>]+w=720&h=405&fit=cover&q=82/,
+  );
+  assert.match(html, /Read the full history/);
   assert.equal(
     blogHooks.articleEntityStripNeedsProfileValidation(
       html,
@@ -131,6 +145,83 @@ test("history discovery is separated from the people row", () => {
       }]),
     ),
     false,
+  );
+});
+
+test("legacy history pills become prominent linked preview cards at serve time", () => {
+  const stored = `<!doctype html><html><head>
+    <link rel="canonical" href="https://thisday.info/blog/17-july-2026/" />
+  </head><body>
+    <section class="story-topic-section" aria-label="Explore this event">
+      <h2 class="h4">Explore this event</h2>
+      <a href="/history/spanish-civil-war-erupts/" class="story-topic-pill" data-history-entity-link="1">
+        <span class="story-topic-label">Explore</span><span>Spanish Civil War Erupts</span>
+      </a>
+    </section>
+  </body></html>`;
+  const entityMeta = JSON.stringify([{
+    type: "event",
+    slug: "spanish-civil-war-erupts",
+    name: "Spanish Civil War Erupts",
+    url: "/history/spanish-civil-war-erupts/",
+    wikiUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+    imageUrl:
+      "https://upload.wikimedia.org/wikipedia/commons/a/a0/spanish-civil-war.jpg",
+    historyLinkEligible: true,
+  }]);
+
+  const upgraded = blogHooks.normalizeArticleHistoryDiscoveryCardHtml(
+    stored,
+    entityMeta,
+  );
+
+  assert.match(
+    upgraded,
+    /<link rel="canonical" href="https:\/\/thisday\.info\/blog\/17-july-2026\/"/,
+  );
+  assert.match(
+    upgraded,
+    /href="\/history\/spanish-civil-war-1936\/" class="story-topic-card"/,
+  );
+  assert.match(
+    upgraded,
+    /Why Did Spain&#39;s July 1936 Coup Fail—and Start a Civil War\?/,
+  );
+  assert.match(
+    upgraded,
+    /The coup was designed to replace Spain&#39;s government quickly\./,
+  );
+  assert.match(upgraded, /class="story-topic-card-image"><img/);
+  assert.match(upgraded, /Read the full history/);
+  assert.doesNotMatch(upgraded, /story-topic-pill/);
+});
+
+test("future article metadata retains the history card title, image, and description", () => {
+  const [historyEntity] = blogHooks.compactArticleEntityMeta([{
+    type: "event",
+    slug: "moon-landing-1969",
+    name: "Apollo 11 Moon Landing",
+    pageHeading: "Why Did Apollo 11 Risk a Manual Lunar Landing?",
+    description:
+      "Explore the alarms, fuel pressure, and decisions behind Apollo 11's final descent.",
+    imageUrl:
+      "https://upload.wikimedia.org/wikipedia/commons/example-moon.jpg",
+    url: "/history/moon-landing-1969/",
+    wikiUrl: "https://en.wikipedia.org/wiki/Apollo_11",
+    historyLinkEligible: true,
+  }]);
+
+  assert.equal(
+    historyEntity.pageHeading,
+    "Why Did Apollo 11 Risk a Manual Lunar Landing?",
+  );
+  assert.equal(
+    historyEntity.description,
+    "Explore the alarms, fuel pressure, and decisions behind Apollo 11's final descent.",
+  );
+  assert.equal(
+    historyEntity.imageUrl,
+    "https://upload.wikimedia.org/wikipedia/commons/example-moon.jpg",
   );
 });
 

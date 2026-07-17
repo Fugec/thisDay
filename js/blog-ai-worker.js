@@ -316,8 +316,8 @@ const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
 const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const ARTICLE_HERO_CSS =
   `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
-const ENTITY_STRIP_BLOCK_RE =
-  /<style>\.entity-strip\{[\s\S]*?<\/style><div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/;
+const ARTICLE_ENTITY_STRIP_STYLE =
+  `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3,.entity-strip .h4{margin:0 0 1rem}.story-topic-section{margin-top:1.25rem;padding-top:1.1rem;border-top:1px solid var(--border,#cfe0cf)}.story-topic-section .h4{font-size:1rem}.story-topic-pill{display:inline-flex;align-items:center;gap:.5rem;max-width:360px;padding:.55rem .8rem;border:1px solid var(--border,#cfe0cf);border-radius:999px;background:var(--bg-alt,#f2f7f2);color:var(--btn-bg,#1b3a2d)!important;text-decoration:none!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.story-topic-pill span:last-child{overflow:hidden;text-overflow:ellipsis}.story-topic-label{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted,#5c7a65)}</style>`;
 const VIDEO_THUMBNAIL_OVERRIDES = {
   "13-may-2026":
     "https://thisday.info/image-proxy?src=https%3A%2F%2Fupload.wikimedia.org%2Fwikipedia%2Fcommons%2Ff%2Ffb%2FGIRO8076_Pogacar_%252853750349243%2529.jpg",
@@ -377,22 +377,51 @@ function findArticleHeroWrapEnd(html, heroStart) {
   return -1;
 }
 
+function findArticleEntityStripRange(html) {
+  const source = String(html || "");
+  const stripMatch = source.match(
+    /<div class="[^"]*\bentity-strip\b[^"]*" data-entity-strip="1">/i,
+  );
+  if (!stripMatch || typeof stripMatch.index !== "number") return null;
+  const divStart = stripMatch.index;
+  const divEnd = findArticleHeroWrapEnd(source, divStart);
+  if (divEnd === -1) return null;
+
+  let start = divStart;
+  const prefix = source.slice(0, divStart);
+  const styleMatch = prefix.match(/<style>\.entity-strip\{[\s\S]*?<\/style>\s*$/i);
+  if (styleMatch && typeof styleMatch.index === "number") {
+    start = styleMatch.index;
+  }
+  return { start, end: divEnd };
+}
+
+function replaceArticleEntityStripHtml(html, replacement) {
+  const source = String(html || "");
+  const range = findArticleEntityStripRange(source);
+  if (!range) return source;
+  return source.slice(0, range.start) + replacement + source.slice(range.end);
+}
+
+function removeArticleEntityStripHtml(html) {
+  return replaceArticleEntityStripHtml(html, "");
+}
+
 function moveEntityStripOutOfArticleHero(html) {
   const heroStart = html.indexOf('<div class="article-hero-wrap">');
   if (heroStart === -1 || !html.includes('data-entity-strip="1"')) return html;
   const heroEnd = findArticleHeroWrapEnd(html, heroStart);
   if (heroEnd === -1) return html;
 
-  const scoped = html.slice(heroStart);
-  const stripMatch = scoped.match(ENTITY_STRIP_BLOCK_RE);
-  if (!stripMatch) return html;
+  const stripRange = findArticleEntityStripRange(html);
+  if (!stripRange || stripRange.start < heroStart || stripRange.start >= heroEnd) {
+    return html;
+  }
 
-  const strip = stripMatch[0];
-  const stripIndex = heroStart + stripMatch.index;
-  if (stripIndex >= heroEnd) return html;
-
-  const withoutStrip = html.slice(0, stripIndex) + html.slice(stripIndex + strip.length);
-  const newHeroEnd = heroEnd - strip.length;
+  const strip = html.slice(stripRange.start, stripRange.end);
+  const withoutStrip =
+    html.slice(0, stripRange.start) + html.slice(stripRange.end);
+  const newHeroEnd = heroEnd - (stripRange.end - stripRange.start);
   return withoutStrip.slice(0, newHeroEnd) + "\n" + strip + withoutStrip.slice(newHeroEnd);
 }
 
@@ -1151,7 +1180,7 @@ function validateContentDateForPublish(content, targetDate) {
 // remainder proves that the first word is acting as the subject ("Bomb
 // Explodes...") and the headline is allowed.
 const HEADLINE_IMPERATIVE_START_RE =
-  /^(?:accept|adopt|appoint|approve|arrest|assassinate|bomb|capture|convict|create|declare|defeat|deport|destroy|detain|discover|elect|establish|execute|free|found|honou?r|imprison|invade|invent|kill|launch|liberate|meet|negotiate|open|order|publish|ratify|reject|rescue|sign|surrender|visit|withdraw)\b/i;
+  /^(?:accept|adopt|appoint|approve|arrest|assassinate|bomb|capture|convict|create|declare|defeat|deport|destroy|detain|discover|elect|establish|execute|free|found|honou?r|imprison|invade|invent|join|kill|launch|liberate|meet|negotiate|open|order|publish|ratify|reject|rescue|sign|surrender|visit|withdraw)\b/i;
 
 function headlineStartsWithUnsupportedImperative(value) {
   const lead = getTitleLead(value).replace(/^["'“‘]+/, "").trim();
@@ -1159,6 +1188,12 @@ function headlineStartsWithUnsupportedImperative(value) {
   if (!match) return false;
   const remainder = lead.slice(match[0].length).trim();
   return !hasFiniteHeadlineVerb(remainder);
+}
+
+function analysisLooksLikeArticleSelfReview(value) {
+  return /\b(?:the|this)\s+(?:article|piece|post|write[- ]?up)\b|\b(?:article|piece|post|write[- ]?up)\s+(?:accurately|correctly|records?|identifies?|states?|notes?|omits?|fails?|provides?|describes?|discusses?|explains?|covers?|mentions?)\b/i.test(
+    plainText(value),
+  );
 }
 
 function historicalYearFields(content) {
@@ -1237,6 +1272,16 @@ function validateContentSemanticsForPublish(content) {
 
   const visibleUrlValidation = validateVisibleProseForPublish(content);
   reasons.push(...visibleUrlValidation.reasons);
+
+  for (const field of ["analysisGood", "analysisBad"]) {
+    (Array.isArray(content?.[field]) ? content[field] : []).forEach((item, index) => {
+      if (analysisLooksLikeArticleSelfReview(item?.detail)) {
+        reasons.push(
+          `${field}[${index}].detail reviews the article instead of analyzing the historical event`,
+        );
+      }
+    });
+  }
 
   return { ok: reasons.length === 0, reasons };
 }
@@ -1449,6 +1494,23 @@ function getTitleLead(title) {
     .trim();
 }
 
+function repairPromotionalTitleLead(value) {
+  const lead = String(value || "").replace(/\s+/g, " ").trim();
+  const match = lead.match(/^([^:]{1,40}):\s*(.+)$/);
+  if (!match || !isWeakCtaTitleLead(match[1])) return lead;
+  const factualLead = match[2].trim();
+  const hasSelfContainedFinalVerb =
+    /\b(?:begins?|ends?|erupts?|falls?|rises?|dies?|crashes?|explodes?|sinks?|sank|disintegrates?|collapses?|vanishes?|disappears?|resigns?|survives?|opens?|launches?)$/i.test(
+      factualLead,
+    );
+  return factualLead &&
+    !isWeakCtaTitleLead(factualLead) &&
+    hasFiniteHeadlineVerb(factualLead) &&
+    (!titleEndsWithVerb(factualLead) || hasSelfContainedFinalVerb)
+    ? factualLead
+    : lead;
+}
+
 // Derives a short NOUN-PHRASE label from a (possibly clause-style) event title for use
 // in "What led to {X}?" / answer-first sentence slots. The display <title>/<h1> are NOT
 // changed. Verb-pattern-independent (the title's verb may not be a recognized headline
@@ -1541,10 +1603,15 @@ function repairStackedTitleLead(value) {
 }
 
 function buildDisplayTitle(currentTitle, eventTitle, historicalDate) {
-  const currentLead = repairStackedTitleLead(getTitleLead(currentTitle));
+  const currentLead = repairStackedTitleLead(
+    repairPromotionalTitleLead(getTitleLead(currentTitle)),
+  );
+  const eventLead = repairStackedTitleLead(
+    repairPromotionalTitleLead(getTitleLead(eventTitle)),
+  );
   const lead =
     (currentLead && hasFiniteHeadlineVerb(currentLead) && !isWeakCtaTitleLead(currentLead) ? currentLead : "") ||
-    repairStackedTitleLead(getTitleLead(eventTitle)) ||
+    (eventLead && !isWeakCtaTitleLead(eventLead) ? eventLead : "") ||
     "Historical Event";
   return historicalDate ? `${lead} — ${historicalDate}` : lead;
 }
@@ -1552,7 +1619,7 @@ function buildDisplayTitle(currentTitle, eventTitle, historicalDate) {
 function isWeakCtaTitleLead(value) {
   const lead = String(value || "").trim();
   if (!lead) return true;
-  return /^(discover|uncover|explore|learn|read|meet|watch|see|inside|remembering|a look at|the story of|what happened|why it matters)\b/i.test(lead) ||
+  return /^(discover|uncover|explore|join|learn|read|meet|watch|see|inside|remembering|a look at|the story of|what happened|why it matters)\b/i.test(lead) ||
     /\b(details of|story behind|history of|what happened)\b/i.test(lead);
 }
 
@@ -1648,7 +1715,9 @@ function sourceEventHeadline(eventText, maxLength = HEADLINE_SEO_MAX) {
 // truth, also used by seo-worker for date-page meta descriptions).
 
 function eventTitleFromCandidate(parsedTitle, candidate) {
-  const aiTitle = String(parsedTitle || "").replace(/\s+[-—]\s+.*$/, "").trim();
+  const aiTitle = repairPromotionalTitleLead(
+    String(parsedTitle || "").replace(/\s+[-—]\s+.*$/, "").trim(),
+  );
   const pageTitle = String(candidate?.pageTitle || "").trim();
   const eventText = String(candidate?.text || "").replace(/\s+/g, " ").trim();
   // Tier 1 — a complete source clause within the tight SEO budget (best case:
@@ -4274,7 +4343,7 @@ export default {
               const strip = buildArticleEntityStrip(entityMeta);
               const entityMetaRaw = JSON.stringify(entityMeta);
               if (!strip) {
-                const strippedHtml = htmlSnapshot.replace(ENTITY_STRIP_BLOCK_RE, "");
+                const strippedHtml = removeArticleEntityStripHtml(htmlSnapshot);
                 const writes = [
                   env.BLOG_AI_KV.put(
                     `${KV_POST_PREFIX}${slug}`,
@@ -4290,10 +4359,7 @@ export default {
               }
               let updated = htmlSnapshot;
               if (updated.includes("data-entity-strip")) {
-                updated = updated.replace(
-                  /<style>\.entity-strip\{[\s\S]*?<div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/,
-                  strip,
-                );
+                updated = replaceArticleEntityStripHtml(updated, strip);
               } else {
                 const heroWrapIdx = updated.indexOf('<div class="article-hero-wrap">');
                 const heroWrapEnd = findArticleHeroWrapEnd(updated, heroWrapIdx);
@@ -7090,7 +7156,9 @@ async function runPostPublishExtras(env, slug, content, { scheduleEnrichment = f
 
 function normalizeContentMetadata(content) {
   const originalEventTitle = content.eventTitle;
-  const repairedEventTitle = repairStackedTitleLead(content.eventTitle);
+  const repairedEventTitle = repairStackedTitleLead(
+    repairPromotionalTitleLead(content.eventTitle),
+  );
   if (repairedEventTitle && repairedEventTitle !== content.eventTitle) {
     content.eventTitle = repairedEventTitle;
     content.jsonLdName = repairedEventTitle;
@@ -7103,7 +7171,9 @@ function normalizeContentMetadata(content) {
       );
     }
   }
-  const repairedTitleLead = repairStackedTitleLead(getTitleLead(content.title));
+  const repairedTitleLead = repairStackedTitleLead(
+    repairPromotionalTitleLead(getTitleLead(content.title)),
+  );
   if (repairedTitleLead && repairedTitleLead !== getTitleLead(content.title)) {
     content.title = buildDisplayTitle(
       repairedTitleLead,
@@ -9519,7 +9589,7 @@ function buildArticleEntityStrip(entityMeta) {
     // A name can be shown for context, but links require a verified substantive profile.
     const inner =
       `<span class="person-circle">${e.imageUrl
-        ? `<img src="/image-proxy?src=${encodeURIComponent(e.imageUrl)}&w=120&h=120&fit=cover&q=80" alt="${esc(e.name)}" loading="lazy">`
+        ? `<img src="/image-proxy?src=${encodeURIComponent(e.imageUrl)}&w=160&h=160&fit=cover&q=80" alt="${esc(e.name)}" loading="lazy" width="80" height="80">`
         : `<span class="person-circle-fallback" aria-hidden="true">${esc(String(e.name).slice(0, 1).toUpperCase())}</span>`
       }</span>` +
       `<span class="person-pill-name">${esc(e.name)}</span>`;
@@ -9530,11 +9600,11 @@ function buildArticleEntityStrip(entityMeta) {
   const historyChip = historyEntity
     ? `<a href="${esc(historyEntity.url)}" class="story-topic-pill" data-history-entity-link="1" aria-label="Explore event: ${esc(historyEntity.name)}"><span class="story-topic-label">Explore</span><span>${esc(historyEntity.name)}</span></a>`
     : "";
-  const chips = personChips + historyChip;
+  const historySection = historyChip
+    ? `<section class="story-topic-section" aria-label="Explore this event"><h2 class="h4">Explore this event</h2>${historyChip}</section>`
+    : "";
 
-  const css = `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3{margin:0 0 1rem}.entity-person-chips{display:flex;flex-wrap:nowrap;align-items:center;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:.35rem;scrollbar-width:thin}.person-pill{display:inline-flex;align-items:center;gap:.55rem;flex:0 0 auto;white-space:nowrap;text-decoration:none!important;color:var(--btn-bg,#1b3a2d)!important}.person-circle{width:42px;height:42px;border-radius:50%;overflow:hidden;background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);display:inline-flex;align-items:center;justify-content:center;flex:0 0 42px}.person-circle img{width:100%;height:100%;object-fit:cover;object-position:top}.person-circle-fallback{font-size:1rem;font-weight:700}.person-pill-name{font-size:15px;font-weight:600;white-space:nowrap}.story-topic-pill{display:inline-flex;align-items:center;gap:.5rem;flex:0 0 auto;max-width:360px;padding:.55rem .8rem;border:1px solid var(--border,#cfe0cf);border-radius:999px;background:var(--bg-alt,#f2f7f2);color:var(--btn-bg,#1b3a2d)!important;text-decoration:none!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.story-topic-pill span:last-child{overflow:hidden;text-overflow:ellipsis}.story-topic-label{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted,#5c7a65)}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}</style>`;
-
-  return `${css}<div class="entity-strip" data-entity-strip="1"><h2 class="h3">People in this story</h2><div class="entity-person-chips">${chips}</div></div>`;
+  return `${ARTICLE_ENTITY_STRIP_STYLE}<div class="entity-strip people-strip" data-entity-strip="1"><div class="entity-strip-content people-track-wrap"><h2 class="h3">People in this story</h2><div class="entity-person-chips people-track">${personChips}</div>${historySection}</div></div>`;
 }
 
 function compactArticleEntityMeta(entityMeta) {
@@ -9568,10 +9638,7 @@ function injectArticleEntityStrip(html, entityMeta) {
   if (!strip) return html;
   let updated = String(html || "");
   if (updated.includes('data-entity-strip="1"')) {
-    return updated.replace(
-      /<style>\.entity-strip\{[\s\S]*?<div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/,
-      strip,
-    );
+    return replaceArticleEntityStripHtml(updated, strip);
   }
   const heroWrapIdx = updated.indexOf('<div class="article-hero-wrap">');
   const heroWrapEnd = findArticleHeroWrapEnd(updated, heroWrapIdx);
@@ -9590,10 +9657,68 @@ function countHtmlMatches(source, pattern) {
 }
 
 function extractArticleEntityStripHtml(html) {
-  const match = String(html || "").match(
-    /<div class="entity-strip" data-entity-strip="1">[\s\S]*?<\/div><\/div>/i,
+  const source = String(html || "");
+  const range = findArticleEntityStripRange(source);
+  return range ? source.slice(range.start, range.end) : "";
+}
+
+function addHtmlClassToken(classNames, token) {
+  const values = String(classNames || "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!values.includes(token)) values.push(token);
+  return values.join(" ");
+}
+
+function normalizeArticleEntityStripPresentationHtml(body) {
+  const html = String(body || "");
+  const range = findArticleEntityStripRange(html);
+  if (!range) return html;
+
+  let strip = html.slice(range.start, range.end);
+  if (/^<style>\.entity-strip\{/i.test(strip)) {
+    strip = strip.replace(
+      /^<style>\.entity-strip\{[\s\S]*?<\/style>/i,
+      ARTICLE_ENTITY_STRIP_STYLE,
+    );
+  } else {
+    strip = ARTICLE_ENTITY_STRIP_STYLE + strip;
+  }
+  strip = strip.replace(
+    /<div class="([^"]*\bentity-strip\b[^"]*)" data-entity-strip="1">/i,
+    (_match, classes) =>
+      `<div class="${addHtmlClassToken(classes, "people-strip")}" data-entity-strip="1">`,
   );
-  return match?.[0] || "";
+  strip = strip.replace(
+    /class="([^"]*\bentity-strip-content\b[^"]*)"/i,
+    (_match, classes) =>
+      `class="${addHtmlClassToken(classes, "people-track-wrap")}"`,
+  );
+  strip = strip.replace(
+    /class="([^"]*\bentity-person-chips\b[^"]*)"/i,
+    (_match, classes) =>
+      `class="${addHtmlClassToken(classes, "people-track")}"`,
+  );
+  strip = strip
+    .replaceAll(
+      "w=120&h=120&fit=cover&q=80",
+      "w=160&h=160&fit=cover&q=80",
+    )
+    .replaceAll(
+      "w=120&amp;h=120&amp;fit=cover&amp;q=80",
+      "w=160&amp;h=160&amp;fit=cover&amp;q=80",
+    )
+    .replace(
+      /(<span class="person-circle"><img\b)([^>]*)(>)/gi,
+      (_match, start, attributes, end) => {
+        let normalized = attributes;
+        if (!/\bwidth="/i.test(normalized)) normalized += ' width="80"';
+        if (!/\bheight="/i.test(normalized)) normalized += ' height="80"';
+        return start + normalized + end;
+      },
+    );
+
+  return html.slice(0, range.start) + strip + html.slice(range.end);
 }
 
 function articleEntityStripNeedsImageRepair(html) {
@@ -9707,7 +9832,8 @@ function assertArticleStructure(html) {
     ["featured image alt text", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\balt="[^"]{5,}"/i],
     ["short answer card", /ai-answer-card/i],
     ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
-    ["analysis section", /<h2 class="h3">Our Take:/i],
+    ["analysis section", /<h2 class="h3">Analysis:/i],
+    ["collapsed analysis disclosure", /<details class="analysis-disclosure\b/i],
     ["people entity strip", /data-entity-strip="1"/i],
     ["people entity card", /class="person-pill"/i],
     ["related Amazon block", /class="amazon-related/i],
@@ -11013,7 +11139,7 @@ Requirements:
 - analysisBad must contain exactly 3 items.
 - Analysis may interpret facts, but it must not invent causality, effectiveness, responsibility, policy change, prevention, or a better alternative.
 - Each analysis item must anchor every judgment in actions or limits explicitly present in the source. If the source cannot support "why it worked" or "what should have happened", do not make that claim.
-- Do not critique the article's writing, sourcing process, repetition, or credibility. Analyze the historical record only.
+- Analyze the historical event and record, never the generated article. Do not write "the article", "this piece", "the post", "accurately records", "correctly identifies", "omits", or any critique of the writing, sourcing process, repetition, coverage, or credibility.
 - Never place a raw URL in analysis or editorial text. Refer to a source by name instead.
 - Every detail must include a concrete name, date, number, institution, place, or source.
 - editorialNote must be specific to this article, stay with source-supported details, and avoid preventive lessons or modern policy prescriptions.`,
@@ -11180,10 +11306,10 @@ HARD RULE — NO FAKE SUSPENSE OPENERS: Do not start any sentence with: "So,", "
 DO NOT open consecutive paragraphs with the same word or conjunction. Each paragraph must begin with a structurally different sentence.
 
 Title rules:
-- The "title" field is the public card headline and MUST follow exactly this format: "[CTA headline with a strong verb] — ${monthName} ${day}, Year"
+- The "title" field is the public card headline and MUST follow exactly this format: "[factual event headline with a strong verb] — ${monthName} ${day}, Year"
 - LENGTH — keep it SHORT for search results: the headline part (everything before " — ") MUST be about 50 characters or fewer (roughly 6-9 words) while still naming who + what. Drop secondary actors, lists of names, and any "Topic War:" prefix copied from the source. CORRECT (concise AND complete): "Napoleon Defeated at the Battle of Waterloo", "Royal Navy Sinks German Battleship Bismarck", "U.S. Senate Passes the Fair Labor Standards Act". WRONG (too long, lists every actor, keeps the topic tag): "Napoleonic Wars: The Battle of Waterloo results in the defeat of Napoleon Bonaparte by the Duke of Wellington and Field Marshal Blücher". Start with the real subject, not the topic tag.
 - HARD RULE — TITLE MUST CONTAIN A FINITE VERB: Both "title" and "eventTitle" MUST include at least one finite verb that describes the action — not a gerund, not a noun, a conjugated verb. "China Airlines Flight 611 Disintegrates" is correct (finite verb: disintegrates). "China Airlines Flight 611 Crash" is wrong (noun only). "China Airlines Flight 611 Crashing" is wrong (gerund). There must be a clear subject + verb structure.
-- The first part must make someone want to click while staying factual. The headline MUST be a complete grammatical clause: a real subject PLUS a finite verb. For transitive actions, include the object too. CORRECT (concise — about 50 chars or fewer): "Napoleon Defeated at the Battle of Waterloo", "Royal Navy Sinks German Battleship Bismarck", "Parliament Ratifies Treaty of Versailles", "China Airlines Flight 611 Disintegrates". WRONG: "VTA Rail Yard Shooting Kills" (no subject for "Kills" — who kills?), "Bismarck Sinking Sinks" (redundant verb appended to noun phrase), "Flight 611 Crash" (noun only). Never take a Wikipedia event page title (which is a noun phrase) and just append a bare verb — always build a proper subject-verb clause from the event description.
+- The first part must be specific and interesting while staying factual. Never address or command the reader, and never prepend a promotional hook such as "Join the Fight:", "Discover:", "Explore:", or "Read This:". The headline MUST be a complete grammatical clause: a real subject PLUS a finite verb. For transitive actions, include the object too. CORRECT (concise — about 50 chars or fewer): "Napoleon Defeated at the Battle of Waterloo", "Royal Navy Sinks German Battleship Bismarck", "Parliament Ratifies Treaty of Versailles", "China Airlines Flight 611 Disintegrates". WRONG: "Join the Fight: Spanish Civil War Begins", "VTA Rail Yard Shooting Kills" (no subject for "Kills" — who kills?), "Bismarck Sinking Sinks" (redundant verb appended to noun phrase), "Flight 611 Crash" (noun only). Never take a Wikipedia event page title (which is a noun phrase) and just append a bare verb — always build a proper subject-verb clause from the event description.
 - Use the most specific named subject available: prefer a person's title and name ("President Eisenhower", "General MacArthur", "Prime Minister Churchill") or a specific named entity ("Royal Navy", "U.S. Congress", "Apollo 11 Crew") over generic terms ("A leader", "Officials", "The government", "Gunman"). If no named actor is known, name the event's primary subject instead ("Two Unidentified Servicemen", "Ten Workers").
 - Embed the historical year inside the headline when the event is tied to a recurring occasion (Memorial Day, the Olympics, an annual treaty deadline, etc.) so the reader knows which one: "President Eisenhower Honors Two Unknown Soldiers at Arlington on Memorial Day 1958" not "…on Memorial Day". Omit the year when the headline is already unambiguous without it.
 - Avoid lazy suffix titles. Do NOT append "Founding", "Creation", "Launch", "Opening", "Completion", or "Presentation" just to make a noun sound like an event. Use them only if the source event is literally a founding/opening/launch and no more specific verb is available. Prefer "Rosenborg BK Founded" over "Rosenborg BK Founding"; prefer "First Oscars Honor Wings" over "The First Oscars Founding"; prefer "Brown v. Board Strikes Down School Segregation" over "Brown v. Board of Education Founding"; prefer "Israel Declares Independence" over "Israeli Independence".
@@ -11194,7 +11320,7 @@ Title rules:
 Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation — just the JSON.
 
 {
-  "title": "CTA headline with a strong verb — ${monthName} ${day}, Year",
+  "title": "Factual event headline with a strong verb — ${monthName} ${day}, Year",
   "eventTitle": "Concise event name with a finite verb (e.g. 'Flight 611 Disintegrates', not 'Flight 611 Crash')",
   "historicalDate": "Month Day, Year",
   "historicalYear": 1234,
@@ -11246,12 +11372,12 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "Paragraph 2 (reframing close; ~80 to 100 words): End with a specific source fact, contradiction, or documented detail. The final sentence must be short, direct, self-contained, and source-supported."
   ],
   "analysisGood": [
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Evaluate a source-documented action, response, or strength of the record without inventing effectiveness, credit, causality, or alternatives." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Analyze a source-documented historical action, response, or strength of the record without inventing effectiveness, credit, causality, or alternatives. Analyze the event itself, never the article, post, piece, writing, or coverage." },
     { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." },
     { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." }
   ],
   "analysisBad": [
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Evaluate a source-documented failure, limitation, or unresolved question without inventing responsibility, prevention, or a better alternative." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Analyze a source-documented historical failure, limitation, or unresolved question without inventing responsibility, prevention, or a better alternative. Analyze the event itself, never what the article omits, states, explains, or covers." },
     { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." },
     { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." }
   ],
@@ -13222,7 +13348,7 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     "- twitterDescription: 90–120 chars, punchy, present-tense energy\n" +
     "- keywords: 5–8 specific terms including year, location, key people, historical context\n" +
     "- eventTitle: concise canonical event label with an active verb when possible\n" +
-    "- title: keep format 'CTA headline — Month Day, Year'. Improve dull card headlines with a specific verb and concrete hook.\n\n" +
+    "- title: keep format 'Factual event headline — Month Day, Year'. Improve dull card headlines with a specific subject and verb, never a reader command or promotional hook such as 'Join the Fight:'.\n\n" +
     SOURCE_BOUND_REPAIR_RULES +
     "Return ONLY a JSON object with fields that need improvement. Omit fields that are already good.\n" +
     "Ban vague copy such as 'dramatic and unexpected', 'significant turning point', 'remarkable', 'important moment', 'in the history of', or 'changed everything' unless a concrete fact immediately follows. " +
@@ -14072,6 +14198,17 @@ function compactHeadingSubject(content) {
     .slice(0, 70);
 }
 
+function compactAnalysisSubject(content) {
+  const sourceSubject =
+    String(content?.sourcePageTitle || "").trim() ||
+    wikiTitleFromUrl(content?.wikiUrl || content?.jsonLdUrl);
+  const subject = String(sourceSubject || compactHeadingSubject(content))
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 70);
+  return subject || "the historical event";
+}
+
 function buildArticleSectionHeadings(content, pillars = []) {
   const subject = compactHeadingSubject(content);
   const haystack = normalizeTopicMatchText(
@@ -14613,6 +14750,7 @@ function buildPostHTML(
 
   const didYouKnowSlider = buildDidYouKnowSlider(c.didYouKnowFacts || [], c);
   const sectionHeadings = buildArticleSectionHeadings(c, currentPillars);
+  const analysisHeading = `Analysis: ${compactAnalysisSubject(c)}`;
   const amazonRelatedBlock = buildAmazonRelatedBlock(c, currentPillars);
   const articleBodyAdBlock = amazonRelatedBlock ? buildArticleBodyAdBlock() : "";
 
@@ -14856,6 +14994,11 @@ ${breadcrumbJsonLd}
       @media(max-width:767px){.dyn-slider-shell{grid-template-columns:minmax(0,1fr)}}
       .analysis-good{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
       .analysis-bad{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3)}
+      .analysis-disclosure{border:1px solid var(--border);border-radius:10px;background:var(--bg);overflow:hidden}
+      .analysis-disclosure-summary{cursor:pointer;padding:1rem 1.1rem;font-weight:700;color:var(--btn-bg);background:var(--bg-alt);list-style-position:inside}
+      .analysis-disclosure-summary:hover{background:#e7f0e7}
+      .analysis-disclosure[open] .analysis-disclosure-summary{border-bottom:1px solid var(--border)}
+      .analysis-disclosure-body{padding:1rem}
       li.mb-2{font-size:15px}
       .related-card{border:1px solid var(--border);background:var(--bg);transition:transform .15s ease,box-shadow .15s ease}
       .related-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1);text-decoration:none}
@@ -15052,12 +15195,16 @@ ${conclusionParas}
           </div>` : ""}
           ${
             analysisGoodItems || analysisBadItems
-              ? `<section class="mt-5" style="margin-top:2rem!important">
-            <h2 class="h3">${esc(sectionHeadings.analysis)}</h2>
-            <div class="row g-3 mt-1">
+              ? `<section class="article-analysis mt-5" style="margin-top:2rem!important">
+            <h2 class="h3">${esc(analysisHeading)}</h2>
+            <details class="analysis-disclosure mt-2">
+              <summary class="analysis-disclosure-summary">What the evidence supports and leaves unresolved</summary>
+              <div class="analysis-disclosure-body">
+                <p class="article-meta mb-3">The overview above gives the factual narrative. This optional section separates interpretation from the documented record.</p>
+                <div class="row g-3 mt-1">
               <div class="col-md-6">
                 <div class="analysis-good p-3 rounded h-100">
-                  <h3 style="color:#16a34a">${esc(sectionHeadings.good)}</h3>
+                  <h3 style="color:#16a34a">What the record supports</h3>
                   <ul class="mb-0">
 ${analysisGoodItems}
                   </ul>
@@ -15065,14 +15212,16 @@ ${analysisGoodItems}
               </div>
               <div class="col-md-6">
                 <div class="analysis-bad p-3 rounded h-100">
-                  <h3 style="color:#dc2626">${esc(sectionHeadings.bad)}</h3>
+                  <h3 style="color:#b45309">Limits and unresolved questions</h3>
                   <ul class="mb-0">
 ${analysisBadItems}
                   </ul>
                 </div>
               </div>
-            </div>
-            ${editorialNote}
+                </div>
+                ${editorialNote}
+              </div>
+            </details>
           </section>`
               : ""
           }
@@ -16499,14 +16648,16 @@ function normalizeArticleAssetVersionsHtml(body) {
 
 function prepareHtmlResponse(body) {
   return normalizeArticleAssetVersionsHtml(
-    normalizeStackedTitleHtml(
-      normalizeImageAltHtml(
-        normalizeCrawlableLinksHtml(
-          normalizeSearchPreviewHtml(
-            normalizeHeadingAuditHtml(
-              normalizeAiAnswerCardHtml(
-                normalizeArticleLayoutHtml(
-                  stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+    normalizeArticleEntityStripPresentationHtml(
+      normalizeStackedTitleHtml(
+        normalizeImageAltHtml(
+          normalizeCrawlableLinksHtml(
+            normalizeSearchPreviewHtml(
+              normalizeHeadingAuditHtml(
+                normalizeAiAnswerCardHtml(
+                  normalizeArticleLayoutHtml(
+                    stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+                  ),
                 ),
               ),
             ),
@@ -16590,4 +16741,10 @@ export const __contentGenerationTestHooks = {
   blogEntityQualityEligible,
   filterGroundingIssues,
   verifyArticleGrounding,
+  normalizeContentMetadata,
+  validateContentSemanticsForPublish,
+  buildArticleEntityStrip,
+  normalizeArticleEntityStripPresentationHtml,
+  compactAnalysisSubject,
+  buildPostHTML,
 };

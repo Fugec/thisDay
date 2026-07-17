@@ -43,6 +43,9 @@ const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
+const SEO_HISTORY_QUALITY_GATE_VERSION = 2;
+const EVERGREEN_HISTORY_EDITION_VERSION = 1;
+const MIN_EVERGREEN_HISTORY_BODY_WORDS = 650;
 const WIKIDATA_HUMAN_ENTITY_ID = "Q5";
 const PROTECTED_LEGACY_PERSON_SLUGS = new Set([
   "african-american",
@@ -955,9 +958,12 @@ function buildEntitySourceLinks(entity) {
     links.push({ label: "Wikipedia source", url: entity.wikiUrl });
   }
   if (!links.length) return "";
+  const sourceNote = getHistoryEvergreenPage(entity.slug)
+    ? "Use the dated article for the July 17 entry point; use these references for the wider conflict, source record, and historical collections."
+    : "Use the dated article for the day-specific account; use these references to check the event record and explore its wider historical context.";
   return `<section class="authority-links mt-4" aria-labelledby="entity-sources-heading">
     <h2 class="h4 authority-links-label" id="entity-sources-heading">Sources and further reading</h2>
-    <p class="authority-links-note">Use the dated article for the July 17 entry point; use these references for the wider conflict, source record, and historical collections.</p>
+    <p class="authority-links-note">${escapeHtml(sourceNote)}</p>
     <div class="authority-links-row">
       ${links.map((link) => {
         const external = /^https?:\/\//i.test(String(link.url || ""));
@@ -1405,6 +1411,70 @@ function entityBodyWordCount(entity) {
     .filter(Boolean).length;
 }
 
+function seoHasDirectSourcePage(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return (
+      /^https?:$/.test(url.protocol) &&
+      Boolean(url.hostname) &&
+      url.hostname.toLowerCase() !== "example.com" &&
+      url.pathname !== "/" &&
+      !/(?:^|\/)search(?:\/|$|\.)/i.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function seoEvergreenHistoryEditionEligible(entity) {
+  const sections = Array.isArray(entity?.bodySections)
+    ? entity.bodySections
+    : [];
+  const cards = Array.isArray(entity?.overviewCards)
+    ? entity.overviewCards.filter((card) => card?.label && card?.value)
+    : [];
+  const timeline = Array.isArray(entity?.timeline)
+    ? entity.timeline.filter((item) => item?.date && item?.label)
+    : [];
+  const sources = Array.isArray(entity?.sourceLinks)
+    ? entity.sourceLinks.filter((source) =>
+        source?.label && seoHasDirectSourcePage(source?.url),
+      )
+    : [];
+  const hasIndependentSource = sources.some((source) => {
+    try {
+      return (
+        source.verifiedIndependent === true &&
+        !new URL(source.url).hostname.toLowerCase().endsWith("wikipedia.org")
+      );
+    } catch {
+      return false;
+    }
+  });
+  return Boolean(
+    entity?.evergreenHistoryVersion === EVERGREEN_HISTORY_EDITION_VERSION &&
+    /-\d{1,4}$/.test(String(entity?.slug || "")) &&
+    /^(?:how|why|what|who|which|where)\b.*\?$/i.test(
+      String(entity?.pageHeading || "").trim(),
+    ) &&
+    String(entity?.description || "").trim().length >= 90 &&
+    cards.length >= 5 &&
+    sections.length >= 4 &&
+    sections.every((section) =>
+      section?.heading &&
+      Array.isArray(section.paragraphs) &&
+      section.paragraphs.length >= 2 &&
+      section.paragraphs.every((paragraph) =>
+        String(paragraph || "").split(/\s+/).filter(Boolean).length >= 55,
+      ),
+    ) &&
+    entityBodyWordCount(entity) >= MIN_EVERGREEN_HISTORY_BODY_WORDS &&
+    timeline.length >= 5 &&
+    sources.length >= 2 &&
+    hasIndependentSource
+  );
+}
+
 function seoHasDirectWikipediaEntitySource(value) {
   try {
     const url = new URL(String(value || ""));
@@ -1424,6 +1494,17 @@ function seoHistoryEntityQualityEligible(entity) {
   const relatedPosts = Array.isArray(entity?.relatedPosts)
     ? entity.relatedPosts
     : [];
+  if (
+    entity?.historyQualityGateVersion === SEO_HISTORY_QUALITY_GATE_VERSION
+  ) {
+    return Boolean(
+      !entity.needsWikiRefresh &&
+      !entity.needsEvergreenRefresh &&
+      seoHasDirectWikipediaEntitySource(entity.wikiUrl) &&
+      relatedPosts.length >= 1 &&
+      seoEvergreenHistoryEditionEligible(entity)
+    );
+  }
   return Boolean(
     entity &&
     entity.type === "event" &&
@@ -1489,6 +1570,7 @@ async function updateEntityIndexEntry(env, entity) {
     slug: entity.slug,
     name: entity.name,
     url: entity.url || (entity.type === "person" ? `/people/${entity.slug}/` : `/history/${entity.slug}/`),
+    ...(entity.storageSlug ? { storageSlug: entity.storageSlug } : {}),
     wikiUrl: entity.wikiUrl || "",
     imageUrl: entity.imageUrl || "",
     summary: entity.summary || entity.description || "",
@@ -1503,9 +1585,24 @@ async function updateEntityIndexEntry(env, entity) {
     ...(entity.type === "event"
       ? { historyLinkEligible: seoHistoryEntityQualityEligible(entity) }
       : {}),
+    ...(entity.type === "event" && entity.historyQualityGateVersion
+      ? {
+          historyQualityGateVersion: entity.historyQualityGateVersion,
+          ...(entity.canonicalIdentity
+            ? { canonicalIdentity: entity.canonicalIdentity }
+            : {}),
+        }
+      : {}),
     ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
+    ...(entity.needsEvergreenRefresh
+      ? { needsEvergreenRefresh: true }
+      : {}),
   };
   const merged = { ...(existing || {}), ...nextEntry };
+  if (merged.indexable) {
+    delete merged.needsWikiRefresh;
+    delete merged.needsEvergreenRefresh;
+  }
   // Only write when the entry actually changed. handleEntityPage calls this on
   // every entity page view; an unconditional put() rewrites the whole index on
   // each crawl hit and exhausts the daily KV write limit (after which all puts
@@ -1549,6 +1646,7 @@ async function refreshEntityIndexFromStoredEntities(env, index, typeFilter = "pe
         ...entry,
         name: entity.name || entry.name,
         url: entity.url || entry.url,
+        ...(entity.storageSlug ? { storageSlug: entity.storageSlug } : {}),
         wikiUrl: entity.wikiUrl || entry.wikiUrl || "",
         imageUrl: entity.imageUrl || entry.imageUrl || "",
         summary: entity.summary || entity.description || entry.summary || "",
@@ -1563,8 +1661,20 @@ async function refreshEntityIndexFromStoredEntities(env, index, typeFilter = "pe
         ...(entity.type === "event"
           ? { historyLinkEligible: seoHistoryEntityQualityEligible(entity) }
           : {}),
+        ...(entity.type === "event" && entity.historyQualityGateVersion
+          ? {
+              historyQualityGateVersion: entity.historyQualityGateVersion,
+              ...(entity.canonicalIdentity
+                ? { canonicalIdentity: entity.canonicalIdentity }
+                : {}),
+            }
+          : {}),
+        ...(entity.needsEvergreenRefresh
+          ? { needsEvergreenRefresh: true }
+          : {}),
       };
       if (next.indexable) delete next.needsWikiRefresh;
+      if (next.indexable) delete next.needsEvergreenRefresh;
       if (JSON.stringify(next) !== JSON.stringify(entry)) changed = true;
       refreshed.push(next);
     } catch {
@@ -8884,6 +8994,8 @@ export const __historyEvergreenTestHooks = {
   buildHistoryEvergreenComparison,
   buildEntitySourceLinks,
   entityBodyWordCount,
+  seoEvergreenHistoryEditionEligible,
+  seoHistoryEntityQualityEligible,
   handleFetchRequest,
   isEdgeCacheable,
 };

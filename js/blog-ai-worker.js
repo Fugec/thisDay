@@ -338,6 +338,7 @@ const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
 const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const BLOG_HISTORY_QUALITY_GATE_VERSION = 2;
 const EVERGREEN_HISTORY_EDITION_VERSION = 1;
+const ARTICLE_ORIGINAL_VALUE_GATE_VERSION = 1;
 const MIN_EVERGREEN_HISTORY_BODY_WORDS = 650;
 const ARTICLE_HERO_CSS =
   `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
@@ -453,6 +454,9 @@ function moveEntityStripOutOfArticleHero(html) {
 function buildTimelineBlock(content) {
   const items = Array.isArray(content.timeline) ? content.timeline : [];
   if (!items.length) return "";
+  const originalValueMarker = validateSourcedTimelineForPublish(content).ok
+    ? ' data-original-value-module="sourced-timeline"'
+    : "";
   const rows = items
     .map(
       (e) => `        <li class="tl-entry tl-${esc(e.kind || "leadup")}">
@@ -462,12 +466,54 @@ function buildTimelineBlock(content) {
     )
     .join("\n");
   const label = eventNounLabel(content);
-  return `<section class="article-timeline mb-4" aria-label="Timeline">
+  return `<section class="article-timeline mb-4"${originalValueMarker} aria-label="Timeline">
       <h2 class="h3">Timeline: the road to ${esc(label)} and its aftermath</h2>
       <ol class="tl-list">
 ${rows}
       </ol>
     </section>`;
+}
+
+function validateSourcedTimelineForPublish(content, { minimumEntries = 3 } = {}) {
+  const input = Array.isArray(content?.timeline) ? content.timeline : [];
+  const entries = input.filter(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      String(entry.date || entry.year || "").trim() &&
+      String(entry.label || "").trim() &&
+      ["leadup", "event", "aftermath"].includes(String(entry.kind || "")),
+  );
+  const reasons = [];
+  if (entries.length < minimumEntries) {
+    reasons.push(
+      `only ${entries.length} complete timeline entr${entries.length === 1 ? "y" : "ies"}; needs ${minimumEntries}`,
+    );
+  }
+  if (entries.length !== input.length) {
+    reasons.push("timeline contains an incomplete entry or unsupported kind");
+  }
+
+  const eventEntries = entries.filter((entry) => entry.kind === "event");
+  if (eventEntries.length !== 1) {
+    reasons.push(`timeline has ${eventEntries.length} event entries; needs exactly one`);
+  }
+  if (!entries.some((entry) => entry.kind === "leadup" || entry.kind === "aftermath")) {
+    reasons.push("timeline needs sourced lead-up or aftermath context");
+  }
+
+  const identities = entries.map(
+    (entry) =>
+      `${normalizeTopicMatchText(entry.date || entry.year)}|${normalizeTopicMatchText(entry.label)}`,
+  );
+  if (new Set(identities).size !== identities.length) {
+    reasons.push("timeline contains duplicate dated entries");
+  }
+
+  const visibleValidation = validateVisibleProseForPublish({ timeline: entries });
+  if (!visibleValidation.ok) reasons.push(...visibleValidation.reasons);
+
+  return { ok: reasons.length === 0, reasons, entries };
 }
 
 function articleAnswerFacts(content) {
@@ -1107,6 +1153,42 @@ function validateEvidenceMapForPublish(content, { minimumRows = 2 } = {}) {
   return { ok: reasons.length === 0, reasons, rows };
 }
 
+function validateOriginalValueForPublish(content) {
+  const modules = [];
+  const timeline = validateSourcedTimelineForPublish(content);
+  if (timeline.ok) {
+    modules.push({
+      type: "sourced-timeline",
+      entryCount: timeline.entries.length,
+    });
+  }
+
+  const comparison = validateEvidenceMapForPublish(content);
+  if (comparison.ok) {
+    modules.push({
+      type: "source-comparison",
+      rowCount: comparison.rows.length,
+    });
+  }
+
+  const reasons = [];
+  if (modules.length === 0) {
+    reasons.push(
+      "no qualifying original-value module; needs a sourced timeline or verified source comparison",
+    );
+    reasons.push(
+      ...timeline.reasons.map((reason) => `sourced timeline: ${reason}`),
+      ...comparison.reasons.map((reason) => `source comparison: ${reason}`),
+    );
+  }
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    modules,
+    gateVersion: ARTICLE_ORIGINAL_VALUE_GATE_VERSION,
+  };
+}
+
 function buildEvidenceMapBlock(content) {
   const validation = validateEvidenceMapForPublish(content);
   if (!validation.ok) return "";
@@ -1138,7 +1220,7 @@ function buildEvidenceMapBlock(content) {
     })
     .join("\n");
 
-  return `<section class="article-evidence-map mt-5" aria-labelledby="evidence-map-heading">
+  return `<section class="article-evidence-map mt-5" data-original-value-module="source-comparison" aria-labelledby="evidence-map-heading">
             <h2 class="h3" id="evidence-map-heading">Evidence Map: How We Checked the Central Claim</h2>
             <p class="evidence-map-intro">This comparison separates the event page selected for the account from the independently verified page used to corroborate it.</p>
             <p class="evidence-map-claim"><strong>Central claim checked:</strong> ${esc(centralClaim)}</p>
@@ -7789,6 +7871,16 @@ async function savePublishedPost(
       `Refusing to publish ${slug}: evidence-map contract failed — ${evidenceMapValidation.reasons.join("; ")}`,
     );
   }
+  const originalValueValidation = validateOriginalValueForPublish(content);
+  if (!originalValueValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: original-value contract failed — ${originalValueValidation.reasons.join("; ")}`,
+    );
+  }
+  content.originalValueGateVersion = originalValueValidation.gateVersion;
+  content.originalValueModules = originalValueValidation.modules.map(
+    (module) => module.type,
+  );
   const didYouKnowValidation = auditDidYouKnowFacts(content, {
     requireGrounding: true,
     groundingVerified: didYouKnowGroundingVerified,
@@ -7915,6 +8007,8 @@ async function savePublishedPost(
     ...(safePillars.length > 0 ? { pillars: safePillars } : {}),
     ...(topicHubs.length > 0 ? { topicHubs } : {}),
     ...(content.contentRationale ? { contentRationale: content.contentRationale } : {}),
+    originalValueGateVersion: content.originalValueGateVersion,
+    originalValueModules: content.originalValueModules,
   };
   deduped.unshift(entry);
   if (deduped.length > 200) deduped.splice(200);
@@ -8057,6 +8151,12 @@ async function enrichPublishedPost(env, slug) {
   if (!evidenceMapValidation.ok) {
     throw new Error(
       `Refusing to publish ${slug}: evidence-map contract failed — ${evidenceMapValidation.reasons.join("; ")}`,
+    );
+  }
+  const originalValueValidation = validateOriginalValueForPublish(enriched);
+  if (!originalValueValidation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: original-value contract failed — ${originalValueValidation.reasons.join("; ")}`,
     );
   }
 
@@ -11269,6 +11369,7 @@ function assertArticleStructure(html) {
     ["short answer card", /ai-answer-card/i],
     ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
     ["source-backed evidence map", /<section class="article-evidence-map\b/i],
+    ["original-value module", /data-original-value-module="(?:sourced-timeline|source-comparison)"/i],
     ["evidence-map central claim", /class="evidence-map-claim"[\s\S]*?<strong>Central claim checked:<\/strong>\s*[^<\s]/i],
     ["independent evidence-map source", /data-evidence-role="independent"/i],
     ["analysis section", /<h2 class="h3">Analysis:/i],

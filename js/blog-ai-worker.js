@@ -53,6 +53,9 @@ import {
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
+const KV_DRAFT_SOURCE_PREFIX = "draft-source-v1:";
+const DRAFT_SOURCE_VERSION = 1;
+const DRAFT_SOURCE_TTL = 3 * 86_400;
 const FEATURED_IMAGE_CHECK_MARKER = "<!-- featured-image-check-v1 -->";
 const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
 const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
@@ -75,7 +78,11 @@ async function callPublicationGateAI(env, messages, options = {}) {
   // E2E runs don't drain the pool the nightly cron needs; Workers AI remains
   // the chain's own last resort.
   if (env.AI_GATE_PREFER_EXTERNAL) {
-    return callAI(env, messages, { ...options, providerAttemptLimit: 8 });
+    return callAI(env, messages, {
+      ...options,
+      providerAttemptLimit: 8,
+      groqSectionAttemptLimit: 2,
+    });
   }
   try {
     return await callWorkersAIDirect(env, messages, options);
@@ -87,6 +94,7 @@ async function callPublicationGateAI(env, messages, options = {}) {
       ...options,
       skipWorkersAI: true,
       providerAttemptLimit: 8,
+      groqSectionAttemptLimit: 2,
     });
   }
 }
@@ -217,6 +225,22 @@ async function recordPipelineFailure(
   }
 }
 
+async function recordPipelineSuccess(
+  env,
+  { step, slug, date = new Date() },
+) {
+  const state = await getPipelineState(env);
+  const stepState = state.steps[step] ?? {};
+  stepState.lastSuccessDate = utcDateString(date);
+  stepState.lastFailureDate = null;
+  stepState.lastFailureSlug = null;
+  stepState.lastFailureMessage = null;
+  stepState.streak = 0;
+  stepState.lastSuccessSlug = slug;
+  state.steps[step] = stepState;
+  await savePipelineState(env, state);
+}
+
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 const KV_POST_PREFIX = "post:";
 const KV_INDEX_KEY = "index";
@@ -310,10 +334,16 @@ const EVENT_FAMILY_RULES = [
   },
 ];
 const EVERY_OTHER_DAYS = 1; // Generate every N days
-// Generation and enrichment intentionally use separate cron invocations. The
-// article pipeline can exceed the Free-plan limit of 50 external subrequests
-// when both phases share one invocation (June 22, 2026 incident).
-const DRAFT_ENRICHMENT_CRON = "15 0 * * *";
+// Source preparation, article generation, and enrichment intentionally use
+// separate cron invocations. Source vetting can consume most of the Free-plan
+// limit of 50 external subrequests before provider fallback even starts (July
+// 18, 2026 incident); enrichment has its own similarly large budget (June 22).
+// A comma-list is one Cloudflare cron trigger but produces independent
+// scheduled invocations. This preserves the account's five-trigger allowance.
+const DAILY_PUBLICATION_CRON = "5,10,12,15 0 * * *";
+const DRAFT_PREPARATION_MINUTE = 5;
+const DRAFT_GENERATION_MINUTES = new Set([10, 12]);
+const DRAFT_ENRICHMENT_MINUTE = 15;
 // Cron string (must match a trigger in wrangler-blog.jsonc) for the dedicated
 // entity-recovery pass that re-links people strips with a fresh subrequest budget.
 const ENTITY_RECOVERY_CRON = "50 0 * * *";
@@ -1507,11 +1537,58 @@ function validateCuriosityTitleForPublish(content) {
       !topicTokens.has(token) &&
       !CURIOSITY_TITLE_ANGLE_STOPWORDS.has(token),
   );
-  if (!angleTokens.some((token) => sourceTokens.has(token))) {
+  const neutralChronologyFallback =
+    /^How Did (?:the )?.+ Unfold\?$/i.test(question) &&
+    topicOverlap.length >= requiredTopicOverlap &&
+    sourceTokens.size > 0;
+  if (
+    !neutralChronologyFallback &&
+    !angleTokens.some((token) => sourceTokens.has(token))
+  ) {
     reasons.push("public question title lacks a distinct niche angle supported by the source text");
   }
 
   return { ok: reasons.length === 0, reasons, title: question };
+}
+
+function repairCuriosityTitleFromSource(content) {
+  const sourceSubjects = [
+    content?.sourcePageTitle,
+    ...sourcePagesFromContent(content).map((page) => page.pageTitle),
+  ]
+    .map((value) =>
+      String(value || "")
+        .replace(/_/g, " ")
+        .replace(/\s*\([^)]*\)\s*$/, "")
+        .replace(/\s+[-—]\s+.*$/, "")
+        .replace(/\s+/g, " ")
+        .trim(),
+    )
+    .filter(Boolean);
+
+  for (const rawSubject of [...new Set(sourceSubjects)]) {
+    const subject = rawSubject.replace(
+      /\b[a-z][a-z']*/g,
+      (word) => word.charAt(0).toUpperCase() + word.slice(1),
+    );
+    const article = /^(?:a|an|the)\b/i.test(subject) ? "" : "the ";
+    const candidate = `How Did ${article}${subject} Unfold?`;
+    if (
+      candidate.length < CURIOSITY_TITLE_MIN_LENGTH ||
+      candidate.length > CURIOSITY_TITLE_MAX_LENGTH
+    ) {
+      continue;
+    }
+    const validation = validateCuriosityTitleForPublish({
+      ...content,
+      curiosityTitle: candidate,
+    });
+    if (validation.ok) {
+      content.curiosityTitle = candidate;
+      return candidate;
+    }
+  }
+  return "";
 }
 
 function historicalYearFields(content) {
@@ -2903,11 +2980,28 @@ export default {
    */
   async scheduled(event, env, ctx) {
     const cron = event?.cron || "";
+    const scheduledMinute = Number.isFinite(Number(event?.scheduledTime))
+      ? new Date(Number(event.scheduledTime)).getUTCMinutes()
+      : new Date().getUTCMinutes();
     ctx.waitUntil(
       (async () => {
-        // Promote the 00:05 draft in a fresh invocation with its own external
+        // Vet and cache today's source package without starting article AI.
+        // The 00:10 generation invocation then begins with a fresh external
+        // subrequest budget instead of inheriting source-discovery fetches.
+        if (
+          cron === DAILY_PUBLICATION_CRON &&
+          scheduledMinute === DRAFT_PREPARATION_MINUTE
+        ) {
+          await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
+          await maybePrepareBlogDraftSource(env);
+          return;
+        }
+        // Promote the 00:10 draft in a fresh invocation with its own external
         // subrequest budget. Do not combine generation and enrichment here.
-        if (cron === DRAFT_ENRICHMENT_CRON) {
+        if (
+          cron === DAILY_PUBLICATION_CRON &&
+          scheduledMinute === DRAFT_ENRICHMENT_MINUTE
+        ) {
           await recoverPendingBlogDraft(env);
           return;
         }
@@ -2926,8 +3020,24 @@ export default {
           );
           return;
         }
+        // The 00:10 generation and 00:12 missing-draft retry invocations
+        // deliberately fall through here. Keeping the default path also
+        // preserves manual scheduled-event compatibility.
+        if (
+          cron === DAILY_PUBLICATION_CRON &&
+          !DRAFT_GENERATION_MINUTES.has(scheduledMinute)
+        ) {
+          console.warn(
+            `Blog AI: unexpected publication minute ${scheduledMinute}; using draft generation path.`,
+          );
+        } else if (cron && cron !== DAILY_PUBLICATION_CRON) {
+          console.warn(`Blog AI: unrecognized cron "${cron}" using draft generation path.`);
+        }
         await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
-        await maybeGenerateBlogPost(env, ctx);
+        await maybeGenerateBlogPost(env, ctx, {
+          preferWorkersAIForArticle:
+            cron === DAILY_PUBLICATION_CRON && scheduledMinute === 12,
+        });
       })(),
     );
   },
@@ -2988,18 +3098,54 @@ export default {
       });
     }
 
-    // Failsafe phase 1: generate a lightweight draft without consuming the
-    // enrichment invocation's subrequest budget. The GitHub workflow follows
-    // this with authenticated POST /blog/enrich?slug=...&sync=true.
+    // Failsafe phase 1: vet and cache today's source package in its own Worker
+    // invocation. The GitHub workflow follows this with /blog/generate-draft
+    // and /blog/enrich, each of which receives a fresh subrequest budget.
+    if (path === "/blog/prepare-draft" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      try {
+        const result = await maybePrepareBlogDraftSource(env);
+        return jsonResponse({
+          status: "ok",
+          slug: buildSlug(new Date()),
+          message: "Blog draft source prepared.",
+          result,
+        });
+      } catch (err) {
+        const today = todayDateString();
+        console.error(`Blog AI: /blog/prepare-draft failed — ${err.message}`);
+        await recordPipelineFailure(env, {
+          step: "blog",
+          slug: today,
+          message: err.message,
+          date: new Date(),
+        });
+        await env.BLOG_AI_KV.put(
+          `error:${today}`,
+          `Draft preparation endpoint failed: ${err.message}`,
+          { expirationTtl: 7 * 86_400 },
+        );
+        return jsonResponse({ status: "error", message: err.message }, 500);
+      }
+    }
+
+    // Failsafe phase 2: generate a lightweight draft from the cached source
+    // package without consuming the enrichment invocation's request budget.
     if (path === "/blog/generate-draft" && request.method === "POST") {
       const auth = request.headers.get("Authorization") ?? "";
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
       try {
+        const preferWorkersAIForArticle =
+          url.searchParams.get("prefer-workers-ai") === "true";
         await generateAndStore(env, null, null, null, null, {
           lightweightPublish: true,
           enrichDraft: false,
+          preferWorkersAIForArticle,
         });
         return jsonResponse({
           status: "ok",
@@ -3105,9 +3251,11 @@ export default {
           { expirationTtl: 7 * 86_400 },
         ).catch(() => {});
       };
+      const boundedRecovery =
+        enrichUrl.searchParams.get("bounded") === "true";
       if (enrichUrl.searchParams.get("sync") === "true") {
         try {
-          await enrichPublishedPost(env, slug);
+          await enrichPublishedPost(env, slug, { boundedRecovery });
           return jsonResponse({ status: "ok", slug, message: "Enrichment completed." });
         } catch (err) {
           await recordEnrichError(err);
@@ -3115,7 +3263,7 @@ export default {
         }
       }
       ctx.waitUntil(
-        enrichPublishedPost(env, slug).catch(recordEnrichError),
+        enrichPublishedPost(env, slug, { boundedRecovery }).catch(recordEnrichError),
       );
       return jsonResponse({ status: "ok", slug, message: "Enrichment started." });
     }
@@ -5120,9 +5268,112 @@ export default {
  * Checks the last generation date and generates a new post if enough days
  * have passed (every EVERY_OTHER_DAYS days).
  *
- * Retry strategy: tries up to 3 times with increasing delays so transient
- * CF Workers AI timeouts don't silently skip an entire day.
+ * Daily source preparation and draft generation are deliberately separate.
+ * Provider fallback already handles transient model failures inside one draft
+ * attempt; retrying the whole pipeline in one invocation can only spend the
+ * same finite subrequest budget again. The GitHub failsafe is the next
+ * independent retry.
  */
+function draftSourceKey(date) {
+  return `${KV_DRAFT_SOURCE_PREFIX}${buildSlug(date)}`;
+}
+
+function preparedDraftSourceEvent(payload, date) {
+  if (
+    !payload ||
+    payload.version !== DRAFT_SOURCE_VERSION ||
+    payload.slug !== buildSlug(date) ||
+    !payload.selectedEvent
+  ) {
+    return null;
+  }
+  const selectedEvent = payload.selectedEvent;
+  if (
+    !selectedEvent.eventTitle ||
+    !selectedEvent.sourcePageTitle ||
+    !selectedEvent.sourceText ||
+    !selectedEvent.sourceExtract ||
+    !selectedEvent.wikiUrl
+  ) {
+    return null;
+  }
+  const dateValidation = validateContentDateForPublish(selectedEvent, date);
+  if (!dateValidation.ok) return null;
+  const sourcePages = normalizeSourcePages(selectedEvent.sourcePages || []);
+  if (
+    sourcePages.length < 2 ||
+    !sourcePages.some((page) => page.verifiedIndependent === true)
+  ) {
+    return null;
+  }
+  return { ...selectedEvent, sourcePages };
+}
+
+async function loadPreparedDraftSource(env, date) {
+  try {
+    const payload = await env.BLOG_AI_KV.get(draftSourceKey(date), {
+      type: "json",
+    });
+    const selectedEvent = preparedDraftSourceEvent(payload, date);
+    if (!selectedEvent && payload) {
+      await env.BLOG_AI_KV.delete(draftSourceKey(date)).catch(() => {});
+    }
+    return selectedEvent;
+  } catch (err) {
+    console.warn(`Blog AI: prepared draft source lookup failed — ${err.message}`);
+    return null;
+  }
+}
+
+async function storePreparedDraftSource(env, date, selectedEvent) {
+  const payload = {
+    version: DRAFT_SOURCE_VERSION,
+    slug: buildSlug(date),
+    preparedAt: new Date().toISOString(),
+    selectedEvent,
+  };
+  if (!preparedDraftSourceEvent(payload, date)) {
+    throw new Error(`Refusing to cache an incomplete source package for ${buildSlug(date)}`);
+  }
+  await env.BLOG_AI_KV.put(
+    draftSourceKey(date),
+    JSON.stringify(payload),
+    { expirationTtl: DRAFT_SOURCE_TTL },
+  );
+}
+
+async function maybePrepareBlogDraftSource(env) {
+  const now = new Date();
+  const slug = buildSlug(now);
+  const draft = await env.BLOG_AI_KV.get(`${KV_DRAFT_PREFIX}${slug}`);
+  if (draft) {
+    console.log(`Blog AI: draft:${slug} already exists — source preparation skipped.`);
+    return { status: "draft-exists", slug };
+  }
+
+  const post = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`);
+  if (post) {
+    const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+    const index = indexRaw ? JSON.parse(indexRaw) : [];
+    if (index.some((entry) => entry?.slug === slug)) {
+      console.log(`Blog AI: post:${slug} is already public — source preparation skipped.`);
+      return { status: "published", slug };
+    }
+  }
+
+  const prepared = await loadPreparedDraftSource(env, now);
+  if (prepared) {
+    console.log(`Blog AI: source package for ${slug} is already prepared.`);
+    return { status: "prepared", slug, eventTitle: prepared.eventTitle };
+  }
+
+  return generateAndStore(env, null, null, null, null, {
+    lightweightPublish: true,
+    enrichDraft: false,
+    prepareOnly: true,
+  });
+}
+
 async function recoverPendingBlogDraft(env) {
   for (let daysBack = 0; daysBack <= 3; daysBack++) {
     const draftDate = new Date();
@@ -5170,7 +5421,11 @@ async function recoverPendingBlogDraft(env) {
   return { status: "no-draft", slug: null };
 }
 
-async function maybeGenerateBlogPost(env, ctx) {
+async function maybeGenerateBlogPost(
+  env,
+  ctx,
+  { preferWorkersAIForArticle = false } = {},
+) {
   const today = todayDateString(); // "YYYY-MM-DD"
   const todaySlug = buildSlug(new Date());
   const lastGen = await env.BLOG_AI_KV.get(KV_LAST_GEN_KEY);
@@ -5185,7 +5440,7 @@ async function maybeGenerateBlogPost(env, ctx) {
   }
   if (todayDraft && (!todayPost || !todayInIndex)) {
     console.log(
-      `Blog AI: draft:${todaySlug} already exists — awaiting ${DRAFT_ENRICHMENT_CRON} enrichment.`,
+      `Blog AI: draft:${todaySlug} already exists — awaiting the ${DRAFT_ENRICHMENT_MINUTE}-minute enrichment phase.`,
     );
     return;
   }
@@ -5335,44 +5590,34 @@ async function maybeGenerateBlogPost(env, ctx) {
   // from today's date regardless of whether generation succeeds or fails.
   await env.BLOG_AI_KV.put(KV_LAST_GEN_KEY, today);
 
-  // Retry up to 3 times — CF Workers AI occasionally times out on the first attempt.
-  let lastError;
-  let attemptsMade = 0;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    attemptsMade = attempt;
-    try {
-      await generateAndStore(env, ctx, null, null, null, {
-        lightweightPublish: true,
-        enrichDraft: false,
-      });
-      console.log(
-        `Blog AI: draft generated successfully; ${DRAFT_ENRICHMENT_CRON} cron will enrich it (attempt ${attempt}/3).`,
-      );
-      return;
-    } catch (err) {
-      lastError = err;
-      console.error(`Blog AI: attempt ${attempt}/3 failed — ${err.message}`);
-      if (/too many subrequests/i.test(err.message || "")) break;
-      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt));
-    }
+  try {
+    await generateAndStore(env, ctx, null, null, null, {
+      lightweightPublish: true,
+      enrichDraft: false,
+      preferWorkersAIForArticle,
+    });
+    console.log(
+      `Blog AI: draft generated successfully; the ${DRAFT_ENRICHMENT_MINUTE}-minute cron phase will enrich it.`,
+    );
+    await env.BLOG_AI_KV.delete(`error:${today}`).catch(() => {});
+  } catch (err) {
+    // Persist the failure and stop. A complete pipeline retry inside this same
+    // invocation would inherit the already-spent subrequest allowance. The
+    // authenticated 00:35 failsafe provides the clean retry boundary.
+    const errMsg = err?.message ?? String(err);
+    await recordPipelineFailure(env, {
+      step: "blog",
+      slug: today,
+      message: errMsg,
+      date: new Date(),
+    });
+    await env.BLOG_AI_KV.put(
+      `error:${today}`,
+      `Generation failed: ${errMsg}`,
+      { expirationTtl: 7 * 86_400 },
+    );
+    console.error(`Blog AI: draft generation failed for ${today}. Error stored in KV.`);
   }
-
-  // All attempts failed — persist error in KV so it's visible in the dashboard.
-  const errMsg = lastError?.message ?? String(lastError);
-  await recordPipelineFailure(env, {
-    step: "blog",
-    slug: today,
-    message: errMsg,
-    date: new Date(),
-  });
-  await env.BLOG_AI_KV.put(
-    `error:${today}`,
-    `Generation failed after ${attemptsMade} attempt(s): ${errMsg}`,
-    { expirationTtl: 7 * 86_400 }, // auto-expire after 7 days
-  );
-  console.error(
-    `Blog AI: all 3 attempts failed for ${today}. Error stored in KV.`,
-  );
 }
 
 /**
@@ -6691,7 +6936,12 @@ async function generateAndStore(
   forcedEvent = null,
   forceDate = null,
   forceImage = null,
-  { lightweightPublish = false, enrichDraft = true } = {},
+  {
+    lightweightPublish = false,
+    enrichDraft = true,
+    prepareOnly = false,
+    preferWorkersAIForArticle = false,
+  } = {},
 ) {
   // Accept both ISO format ("2026-05-25") and slug format ("25-may-2026").
   // The slug format is what buildSlug() produces, but "new Date('25-may-2026T12:00:00Z')"
@@ -6827,19 +7077,42 @@ async function generateAndStore(
   let selectedForcedEvent = forcedEvent;
   let selectedEvent = null;
   if (!selectedForcedEvent) {
-    selectedEvent = await chooseEventForDate(
-      env,
-      now,
-      takenAllTime,
-      preferredPillars,
-      recentPillars,
-      recentEventFamilies,
-    );
-    selectedForcedEvent = selectedEvent.eventTitle;
-    console.log(
-      `Blog AI: selected event "${selectedForcedEvent}" for ${selectedEvent.historicalDate || now.toISOString().slice(0, 10)}`,
-    );
-    selectedEvent = await expandSelectedEventSourcePages(selectedEvent);
+    selectedEvent = await loadPreparedDraftSource(env, now);
+    if (selectedEvent) {
+      selectedForcedEvent = selectedEvent.eventTitle;
+      console.log(
+        `Blog AI: reusing prepared source package for "${selectedForcedEvent}" (${buildSlug(now)}).`,
+      );
+    } else {
+      selectedEvent = await chooseEventForDate(
+        env,
+        now,
+        takenAllTime,
+        preferredPillars,
+        recentPillars,
+        recentEventFamilies,
+      );
+      selectedForcedEvent = selectedEvent.eventTitle;
+      console.log(
+        `Blog AI: selected event "${selectedForcedEvent}" for ${selectedEvent.historicalDate || now.toISOString().slice(0, 10)}`,
+      );
+      selectedEvent = await expandSelectedEventSourcePages(selectedEvent);
+      await storePreparedDraftSource(env, now, selectedEvent);
+      console.log(
+        `Blog AI: cached vetted source package at ${draftSourceKey(now)}.`,
+      );
+    }
+  }
+
+  if (prepareOnly) {
+    if (!selectedEvent) {
+      throw new Error("Draft source preparation requires a vetted selected event");
+    }
+    return {
+      status: "prepared",
+      slug: buildSlug(now),
+      eventTitle: selectedEvent.eventTitle,
+    };
   }
 
   // P4a — "why now" context hook: one short AI call that grounds the article
@@ -6863,6 +7136,9 @@ async function generateAndStore(
       }
     : null;
   const sourceMaterial = sourceMaterialForGrounding(groundingSource) || null;
+  const articleGenerationEnv = preferWorkersAIForArticle
+    ? { ...env, ARTICLE_GENERATION_PREFER_WORKERS_AI: "1" }
+    : env;
 
   let content = null;
   let pillars = [];
@@ -6879,7 +7155,7 @@ async function generateAndStore(
     for (let responseAttempt = 1; responseAttempt <= MAX_MALFORMED_RESPONSE_ATTEMPTS; responseAttempt++) {
       try {
         return await callWorkersAI(
-          env,
+          articleGenerationEnv,
           now,
           avoidTitles,
           activeModel,
@@ -6905,7 +7181,7 @@ async function generateAndStore(
         if (chunkableFailure && chunkedArticleFallbackEnabled(env)) {
           try {
             return await generateArticleContentChunkedFallback(
-              env,
+              articleGenerationEnv,
               now,
               avoidTitles,
               activeModel,
@@ -6999,7 +7275,16 @@ async function generateAndStore(
       );
     }
 
-    const curiosityTitleValidation = validateCuriosityTitleForPublish(content);
+    let curiosityTitleValidation = validateCuriosityTitleForPublish(content);
+    if (!curiosityTitleValidation.ok) {
+      const repairedCuriosityTitle = repairCuriosityTitleFromSource(content);
+      if (repairedCuriosityTitle) {
+        curiosityTitleValidation = validateCuriosityTitleForPublish(content);
+        console.warn(
+          `Blog AI: replaced an invalid public question title with source-page chronology: "${repairedCuriosityTitle}".`,
+        );
+      }
+    }
     if (!curiosityTitleValidation.ok) {
       const reason = curiosityTitleValidation.reasons.join("; ");
       attemptFailures.push(`attempt ${attempt} public title: ${reason}`);
@@ -7051,7 +7336,7 @@ async function generateAndStore(
         );
         try {
           const chunked = await generateArticleContentChunkedFallback(
-            env,
+            articleGenerationEnv,
             now,
             avoid,
             activeModel,
@@ -8013,9 +8298,20 @@ async function savePublishedPost(
   deduped.unshift(entry);
   if (deduped.length > 200) deduped.splice(200);
   await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(deduped));
+  await recordPipelineSuccess(env, {
+    step: "blog",
+    slug,
+    date,
+  }).catch((err) => {
+    console.warn(`Blog: failed to record pipeline success for ${slug}: ${err.message}`);
+  });
 }
 
-async function enrichPublishedPost(env, slug) {
+async function enrichPublishedPost(
+  env,
+  slug,
+  { boundedRecovery = false } = {},
+) {
   // Diagnostic checkpoint writer — expires in 7 days so we can diagnose failures
   const chk = (step) =>
     env.BLOG_AI_KV.put(
@@ -8053,34 +8349,53 @@ async function enrichPublishedPost(env, slug) {
   const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
   const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
 
-  await chk("pre-banned-phrases");
-  const violations = scanBannedPhrases(content);
-  const fixed = violations.length > 0
-    ? await fixBannedPhrases(env, content, violations, groundingSource)
-    : content;
-  const qualityIssues = [...scanArticleQuality(fixed), ...scanIntraPageDuplication(fixed)];
-  const qualityRepaired = qualityIssues.length > 0
-    ? await improveArticleQuality(env, fixed, qualityIssues, groundingSource)
-    : fixed;
+  let enriched;
+  let pillars;
+  if (boundedRecovery) {
+    await chk("bounded-preflight");
+    const boundedIssues = [
+      ...scanBannedPhrases(content),
+      ...scanArticleQuality(content),
+      ...scanIntraPageDuplication(content),
+    ];
+    if (boundedIssues.length > 0) {
+      throw new Error(
+        `Bounded recovery rejected the draft before publication: ${boundedIssues.join("; ")}`,
+      );
+    }
+    enriched = content;
+    pillars = classifyPillarsDeterministically(enriched);
+    await chk("bounded-preflight-passed");
+  } else {
+    await chk("pre-banned-phrases");
+    const violations = scanBannedPhrases(content);
+    const fixed = violations.length > 0
+      ? await fixBannedPhrases(env, content, violations, groundingSource)
+      : content;
+    const qualityIssues = [...scanArticleQuality(fixed), ...scanIntraPageDuplication(fixed)];
+    const qualityRepaired = qualityIssues.length > 0
+      ? await improveArticleQuality(env, fixed, qualityIssues, groundingSource)
+      : fixed;
 
-  await chk("pre-seo-review");
-  let enriched = await reviewContentWithSEOExpert(qualityRepaired, env, groundingSource);
-  await chk("post-seo-review");
+    await chk("pre-seo-review");
+    enriched = await reviewContentWithSEOExpert(qualityRepaired, env, groundingSource);
+    await chk("post-seo-review");
 
-  const postReviewViolations = scanBannedPhrases(enriched);
-  if (postReviewViolations.length > 0) {
-    enriched = await fixBannedPhrases(env, enriched, postReviewViolations, groundingSource);
+    const postReviewViolations = scanBannedPhrases(enriched);
+    if (postReviewViolations.length > 0) {
+      enriched = await fixBannedPhrases(env, enriched, postReviewViolations, groundingSource);
+    }
+    const postReviewQualityIssues = [...scanArticleQuality(enriched), ...scanIntraPageDuplication(enriched)];
+    if (postReviewQualityIssues.length > 0) {
+      enriched = await improveArticleQuality(env, enriched, postReviewQualityIssues, groundingSource);
+    }
+
+    await chk("pre-factcheck");
+    await factCheckContent(env, enriched, groundingSource);
+    await validateEyewitnessQuote(env, enriched);
+    pillars = await classifyPillars(env, enriched);
+    await chk("post-factcheck");
   }
-  const postReviewQualityIssues = [...scanArticleQuality(enriched), ...scanIntraPageDuplication(enriched)];
-  if (postReviewQualityIssues.length > 0) {
-    enriched = await improveArticleQuality(env, enriched, postReviewQualityIssues, groundingSource);
-  }
-
-  await chk("pre-factcheck");
-  await factCheckContent(env, enriched, groundingSource);
-  await validateEyewitnessQuote(env, enriched);
-  const pillars = await classifyPillars(env, enriched);
-  await chk("post-factcheck");
 
   const workingImage = verifiedFeaturedImage;
   enriched.imageUrl = verifiedFeaturedImage;
@@ -8105,12 +8420,14 @@ async function enrichPublishedPost(env, slug) {
     console.log(`Blog: featured image fallback → event figure "${eventImages[0].imageUrl}" for ${slug}`);
   }
 
-  await generateEditorialNote(env, enriched, date);
-  await chk("post-editorial-note");
+  if (!boundedRecovery) {
+    await generateEditorialNote(env, enriched, date);
+    await chk("post-editorial-note");
 
-  const editorialQualityIssues = [...scanArticleQuality(enriched), ...scanIntraPageDuplication(enriched)];
-  if (editorialQualityIssues.length > 0) {
-    enriched = await improveArticleQuality(env, enriched, editorialQualityIssues, groundingSource);
+    const editorialQualityIssues = [...scanArticleQuality(enriched), ...scanIntraPageDuplication(enriched)];
+    if (editorialQualityIssues.length > 0) {
+      enriched = await improveArticleQuality(env, enriched, editorialQualityIssues, groundingSource);
+    }
   }
   enriched = enforceEditorialNoteQuality(enriched);
   alignContentDateFields(enriched, { historicalDateISO: date.toISOString().slice(0, 10) });
@@ -8121,7 +8438,9 @@ async function enrichPublishedPost(env, slug) {
 
   await chk("pre-learning-blocks");
   try {
-    await generateLearningBlocks(env, enriched);
+    if (!boundedRecovery || !validateSourcedTimelineForPublish(enriched).ok) {
+      await generateLearningBlocks(env, enriched);
+    }
     groundLearningBlocks(enriched);
   } catch (err) {
     console.warn(`Blog: learning-blocks pass failed for ${slug}: ${err.message}`);
@@ -12382,7 +12701,10 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
   let retryFeedback = "";
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const raw = await callAI(
+      const callArticleAI = env.ARTICLE_GENERATION_PREFER_WORKERS_AI
+        ? callPublicationGateAI
+        : callAI;
+      const raw = await callArticleAI(
         env,
         [
           {
@@ -12517,11 +12839,24 @@ Requirements:
     1500,
     (parsed) => {
       parsed.curiosityTitle = normalizeCuriosityTitleText(parsed.curiosityTitle);
-      const curiosityTitleValidation = validateCuriosityTitleForPublish({
+      const briefTitleContext = {
         ...parsed,
-        sourcePageTitle: forcedEvent || parsed.eventTitle,
+        sourcePageTitle:
+          wikiTitleFromUrl(parsed.wikiUrl) ||
+          forcedEvent ||
+          parsed.eventTitle,
         sourceText: sourceMaterial || (parsed.sourceFacts || []).join(" "),
-      });
+      };
+      let curiosityTitleValidation =
+        validateCuriosityTitleForPublish(briefTitleContext);
+      if (!curiosityTitleValidation.ok) {
+        const repaired = repairCuriosityTitleFromSource(briefTitleContext);
+        if (repaired) {
+          parsed.curiosityTitle = repaired;
+          curiosityTitleValidation =
+            validateCuriosityTitleForPublish(briefTitleContext);
+        }
+      }
       if (!curiosityTitleValidation.ok) {
         throw new Error(
           `chunked article brief: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
@@ -13074,7 +13409,10 @@ Writing rules:
   // with a tighter TPM ceiling than the primary, so this base value doesn't
   // need to be conservative for the worst-case model anymore. Truncation is
   // still handled by the malformed-output retry loop and quality gates.
-  const rawValue = await callAI(
+  const callArticleAI = env.ARTICLE_GENERATION_PREFER_WORKERS_AI
+    ? callPublicationGateAI
+    : callAI;
+  const rawValue = await callArticleAI(
     env,
     [
       {
@@ -13084,7 +13422,15 @@ Writing rules:
       },
       { role: "user", content: compactPrompt },
     ],
-    { maxTokens: 4096, timeoutMs: 90_000, cfModel: model, temperature: 0.15 },
+    {
+      maxTokens: 4096,
+      timeoutMs: 90_000,
+      cfModel: model,
+      temperature: 0.15,
+      // 10 Groq attempts + 3 OpenRouter keys + NVIDIA still leaves one
+      // internal Workers AI fallback while bounding the external chain.
+      providerAttemptLimit: 15,
+    },
   );
 
   if (!rawValue || rawValue.trim().length < 100) {
@@ -13105,7 +13451,7 @@ Writing rules:
   let jsonCandidate;
   if (jsonStart === -1) {
     console.warn(`Blog: AI returned prose instead of JSON (${rawValue.length} chars). Retrying with explicit JSON instruction...`);
-    const retryRaw = await callAI(
+    const retryRaw = await callArticleAI(
       env,
       [
         {
@@ -13119,7 +13465,13 @@ Writing rules:
             `${compactPrompt}\n\nIMPORTANT: Start your response immediately with the character { and end with }. Do not write any prose or explanation. Begin with { right now.`,
         },
       ],
-      { maxTokens: 4096, timeoutMs: 90_000, cfModel: model, temperature: 0.15 },
+      {
+        maxTokens: 4096,
+        timeoutMs: 90_000,
+        cfModel: model,
+        temperature: 0.15,
+        providerAttemptLimit: 15,
+      },
     );
     const retryStart = String(retryRaw || "").trim().indexOf("{");
     if (retryStart === -1)
@@ -14073,8 +14425,9 @@ async function markGroundingBlockedEvent(env, slug, content, reasons) {
       { expirationTtl: 3 * 86_400 },
     );
     await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`);
+    await env.BLOG_AI_KV.delete(`${KV_DRAFT_SOURCE_PREFIX}${slug}`);
     console.warn(
-      `Grounding self-heal: blocked event "${content?.sourcePageTitle || content?.eventTitle}" for ${slug} and deleted the draft so regeneration picks a different topic.`,
+      `Grounding self-heal: blocked event "${content?.sourcePageTitle || content?.eventTitle}" for ${slug} and deleted the draft/source package so regeneration picks a different topic.`,
     );
   } catch (err) {
     console.warn(`Grounding self-heal marking failed for ${slug}: ${err.message}`);
@@ -14170,6 +14523,36 @@ function normalizePillarsForContent(pillars, content) {
     next.unshift("Sports");
   }
   return [...new Set(next)].slice(0, 3);
+}
+
+function classifyPillarsDeterministically(content) {
+  const haystack = normalizeTopicMatchText(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.keywords,
+      content?.description,
+      content?.contentRationale,
+      ...(Array.isArray(content?.keyTerms)
+        ? content.keyTerms.map((term) => term?.term || "")
+        : []),
+    ].join(" "),
+  );
+  const rules = [
+    ["Disasters & Accidents", /\b(?:accident|arson|attack|avalanche|crash|disaster|earthquake|explosion|fire|flood|hurricane|shipwreck|storm|tsunami)\b/i],
+    ["Arts & Culture", /\b(?:anime|animation|art|artist|book|cinema|culture|film|literature|music|studio|theatre)\b/i],
+    ["Science & Technology", /\b(?:computer|discovery|engineer|invention|laboratory|science|scientist|space|technology)\b/i],
+    ["Politics & Government", /\b(?:congress|government|king|parliament|president|prime minister|senate)\b/i],
+    ["War & Conflict", /\b(?:army|battle|bombing|invasion|military|siege|war)\b/i],
+    ["Social & Human Rights", /\b(?:civil rights|human rights|protest|racial|slavery|suffrage)\b/i],
+    ["Economy & Business", /\b(?:bank|business|company|economy|finance|market|trade)\b/i],
+    ["Health & Medicine", /\b(?:disease|doctor|health|hospital|medicine|pandemic|vaccine)\b/i],
+    ["Exploration & Discovery", /\b(?:expedition|exploration|explorer|voyage)\b/i],
+  ];
+  const matches = rules
+    .filter(([, pattern]) => pattern.test(haystack))
+    .map(([pillar]) => pillar);
+  return normalizePillarsForContent(matches, content);
 }
 
 /**

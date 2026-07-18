@@ -367,7 +367,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v47/born-v29) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v48/born-v30) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
@@ -676,28 +676,46 @@ function buildTopicHubLinks(sourceText = "", heading = "Explore Related Topics")
 }
 
 function buildRelatedQuestionsBlock(title, questions = [], sourceText = "") {
-  if (!Array.isArray(questions) || questions.length === 0) return "";
+  const usable = (Array.isArray(questions) ? questions : []).filter(
+    (item) => item?.question && item?.answer,
+  );
+  if (usable.length === 0) return "";
 
-  return `<section class="card-box ai-question-block">
+  // Same accordion pattern as the homepage and blog FAQ sections
+  // (.faq-list styles ship in css/custom.css, loaded by the date pages).
+  const faqItems = usable
+    .map(
+      (item, i) => `<div class="faq-item">
+        <button class="faq-q" aria-expanded="false" aria-controls="dq-a${i + 1}">
+          <span>${escapeHtml(item.question)}</span><span class="faq-icon">+</span>
+        </button>
+        <div class="faq-a" id="dq-a${i + 1}" hidden>
+          <p>${escapeHtml(item.answer)}</p>
+          ${
+            item.href
+              ? `<p class="mt-2 mb-0"><a href="${escapeHtml(item.href)}" class="site-btn site-btn-primary">${escapeHtml(item.cta || "Explore")}</a></p>`
+              : ""
+          }
+        </div>
+      </div>`,
+    )
+    .join("");
+
+  return `<section class="card-box ai-question-block" aria-label="Related questions">
     <div class="ai-answer-kicker">Related questions</div>
-    <h2 class="h4 mb-3">${escapeHtml(title)}</h2>
-    <div class="ai-question-grid">
-      ${questions
-        .filter((item) => item?.question && item?.answer)
-        .map(
-          (item) => `<article class="ai-question-card">
-            <h3>${escapeHtml(item.question)}</h3>
-            <p>${escapeHtml(item.answer)}</p>
-            ${
-              item.href
-                ? `<a href="${escapeHtml(item.href)}" class="site-btn site-btn-primary">${escapeHtml(item.cta || "Explore")}</a>`
-                : ""
-            }
-          </article>`,
-        )
-        .join("")}
-    </div>
+    <h2 class="h4 mb-2">${escapeHtml(title)}</h2>
+    <div class="faq-list">${faqItems}</div>
     ${buildTopicHubLinks(sourceText)}
+    <script>
+      document.querySelectorAll('.faq-q').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var open = this.getAttribute('aria-expanded') === 'true';
+          var ans = document.getElementById(this.getAttribute('aria-controls'));
+          this.setAttribute('aria-expanded', open ? 'false' : 'true');
+          ans.hidden = open;
+        });
+      });
+    </script>
   </section>`;
 }
 
@@ -3539,6 +3557,138 @@ function buildDidYouKnowSlider(facts, extraClass = "") {
   </section>`;
 }
 
+// Tropical zodiac sign for a calendar date. Deterministic, no data source.
+function zodiacSignFor(monthNum, day) {
+  const md = monthNum * 100 + day;
+  if (md >= 321 && md <= 419) return "Aries";
+  if (md >= 420 && md <= 520) return "Taurus";
+  if (md >= 521 && md <= 620) return "Gemini";
+  if (md >= 621 && md <= 722) return "Cancer";
+  if (md >= 723 && md <= 822) return "Leo";
+  if (md >= 823 && md <= 922) return "Virgo";
+  if (md >= 923 && md <= 1022) return "Libra";
+  if (md >= 1023 && md <= 1121) return "Scorpio";
+  if (md >= 1122 && md <= 1221) return "Sagittarius";
+  if (md >= 1222 || md <= 119) return "Capricorn";
+  if (md >= 120 && md <= 218) return "Aquarius";
+  return "Pisces";
+}
+
+function fullYearsSinceDate(historicalYear, monthNum, day, now = new Date()) {
+  const year = Number(historicalYear);
+  const month = Number(monthNum);
+  const dayOfMonth = Number(day);
+  if (
+    !Number.isInteger(year) ||
+    year === 0 ||
+    !Number.isInteger(month) ||
+    month < 1 ||
+    month > 12 ||
+    !Number.isInteger(dayOfMonth) ||
+    dayOfMonth < 1 ||
+    dayOfMonth > 31 ||
+    !(now instanceof Date) ||
+    Number.isNaN(now.getTime())
+  ) {
+    return 0;
+  }
+
+  // Historical year numbering has no year zero, while arithmetic across a
+  // negative (BC) source year otherwise assumes one.
+  let years = now.getFullYear() - year - (year < 0 ? 1 : 0);
+  const currentMonth = now.getMonth() + 1;
+  if (
+    currentMonth < month ||
+    (currentMonth === month && now.getDate() < dayOfMonth)
+  ) {
+    years -= 1;
+  }
+  return Math.max(years, 0);
+}
+
+function buildYearsAgoPill({
+  historicalYear,
+  monthNum,
+  day,
+  className,
+  prefix = "",
+}) {
+  const year = Number(historicalYear);
+  if (!Number.isInteger(year) || year === 0) return "";
+  return `<span class="${escapeHtml(className)}" data-years-ago-year="${year}" data-years-ago-month="${monthNum}" data-years-ago-day="${day}" data-years-ago-prefix="${escapeHtml(prefix)}" hidden><i class="bi bi-hourglass-split me-1"></i><span data-years-ago-label></span></span>`;
+}
+
+function buildDateEngagementScript(monthName, day) {
+  const pageMonth = JSON.stringify(String(monthName || "").toLowerCase());
+  const pageDay = Number(day);
+  return `<script>(function(){
+var d=new Date();
+var months=['january','february','march','april','may','june','july','august','september','october','november','december'];
+if(months[d.getMonth()]===${pageMonth}&&d.getDate()===${pageDay}){var today=document.getElementById('today-pill');if(today)today.hidden=false;}
+document.querySelectorAll('[data-years-ago-year]').forEach(function(el){
+  var year=Number(el.dataset.yearsAgoYear),month=Number(el.dataset.yearsAgoMonth),day=Number(el.dataset.yearsAgoDay);
+  if(!Number.isInteger(year)||year===0||!Number.isInteger(month)||!Number.isInteger(day))return;
+  var years=d.getFullYear()-year-(year<0?1:0);
+  var currentMonth=d.getMonth()+1;
+  if(currentMonth<month||(currentMonth===month&&d.getDate()<day))years-=1;
+  if(years<=0)return;
+  var label=el.querySelector('[data-years-ago-label]');
+  if(!label)return;
+  label.textContent=(el.dataset.yearsAgoPrefix||'')+years+' '+(years===1?'year':'years')+' ago';
+  el.hidden=false;
+});
+})();</script>`;
+}
+
+// First quiz question embedded on the events page as a hook. Answering
+// reveals the explanation and a continue link to the full /quiz/ page.
+// Fail-soft: renders nothing when the quiz is missing or thin.
+function buildQuizHookCard(quizData, monthName, day, mDisplay) {
+  const questions = quizData?.questions;
+  if (!Array.isArray(questions) || questions.length < 3) return "";
+  const q1 = questions[0];
+  if (!q1?.q || !Array.isArray(q1.options) || q1.options.length < 2) return "";
+  const answer = Number(q1.answer) || 0;
+  const remaining = Math.max(questions.length - 1, 1);
+  const optsHtml = q1.options
+    .map(
+      (opt, oi) =>
+        `<button type="button" class="tdq-opt" data-qh-oi="${oi}" role="radio" aria-checked="false">` +
+        `<span class="tdq-opt-key">${String.fromCharCode(65 + oi)}</span>${escapeHtml(String(opt))}` +
+        `</button>`,
+    )
+    .join("");
+  const explanation = q1.explanation
+    ? `<div class="tdq-explanation" id="qh-explanation" hidden>${escapeHtml(String(q1.explanation))}</div>`
+    : "";
+  return `<div class="card-box" id="quiz-hook-card">
+    <h2 class="h5 mb-2"><i class="bi bi-patch-question-fill me-2" style="color:#1a1a1a"></i>Quick Quiz: ${escapeHtml(mDisplay)} ${day}</h2>
+    <p class="tdq-q-text" style="font-weight:600">${escapeHtml(String(q1.q))}</p>
+    <div class="tdq-options" id="qh-options" role="radiogroup" aria-label="Answer options">${optsHtml}</div>
+    <div class="tdq-feedback" id="qh-feedback" role="status" aria-live="polite" hidden></div>
+    ${explanation}
+    <a href="/quiz/${escapeHtml(monthName)}/${day}/" class="site-btn site-btn-primary w-100 mt-3" id="qh-continue" style="justify-content:center;display:none">Continue the Quiz, ${remaining} More Questions<i class="bi bi-arrow-right"></i></a>
+  </div>
+  <script>(function(){
+    var answer=${answer};
+    var opts=document.querySelectorAll('[data-qh-oi]');
+    var done=false;
+    opts.forEach(function(opt){opt.addEventListener('click',function(){
+      if(done)return;done=true;
+      var chosen=parseInt(this.dataset.qhOi,10);
+      this.setAttribute('aria-checked','true');
+      opts.forEach(function(o){o.disabled=true;});
+      if(opts[answer])opts[answer].classList.add('tdq-opt-correct');
+      var fb=document.getElementById('qh-feedback');
+      if(chosen===answer){fb.innerHTML='<span class="tdq-correct"><i class="bi bi-check-circle-fill me-1"></i>Correct!</span>';}
+      else{this.classList.add('tdq-opt-wrong');fb.innerHTML='<span class="tdq-wrong"><i class="bi bi-x-circle-fill me-1"></i>Incorrect.</span> Correct: <strong>'+String.fromCharCode(65+answer)+'</strong>';}
+      fb.hidden=false;
+      var exp=document.getElementById('qh-explanation');if(exp)exp.hidden=false;
+      document.getElementById('qh-continue').style.display='flex';
+    });});
+  })();</script>`;
+}
+
 function buildQuizAnswerBlock({ mDisplay, day, quiz, featuredEvent }) {
   if (!quiz?.topic) return "";
 
@@ -4338,7 +4488,12 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 
 .ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:13px;font-weight:400;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
 .tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
-.tdq-opt{display:flex;align-items:center;gap:10px;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
+.era-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.era-chip{padding:5px 14px;border:1.5px solid var(--cbr);border-radius:20px;background:var(--cb);color:var(--tc);font-size:13px;font-family:inherit;cursor:pointer;transition:all .15s}
+.era-chip:hover{border-color:var(--btn-bg);background:var(--bg-alt)}
+.era-chip-active{background:var(--btn-bg);color:var(--btn-text);border-color:var(--btn-bg)}
+.tdq-opt{display:flex;align-items:center;gap:10px;width:100%;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;color:var(--tc);font-family:inherit;text-align:left;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
+.tdq-opt:disabled{opacity:1;cursor:default}
 .tdq-opt:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.tdq-opt-selected{border-color:var(--btn-bg)!important;background:rgba(157,196,58,.15)!important;font-weight:500}
 .tdq-opt-correct{border-color:#10b981!important;background:#d1fae5!important;color:#0f172a!important}.tdq-opt-wrong{border-color:#ef4444!important;background:#fee2e2!important;color:#0f172a!important}
 .tdq-opt-key{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#e2e8f0;font-size:.75rem;font-weight:700;flex-shrink:0}
@@ -4579,13 +4734,30 @@ function generateEventsDateHTML(
         ? fmtY(evMin)
         : "";
 
-  // Intro paragraph — original content for SEO depth
+  // Intro paragraph — original content for SEO depth (prose keeps the house
+  // punctuation rule: no em dash, ranges written with "to")
   const eventsCountLabel =
     events.length > 0 ? `${events.length} recorded events` : "recorded events";
+  const evEraProse =
+    evMin !== null && evMax !== null && evMin !== evMax
+      ? `, from ${fmtY(evMin)} to ${fmtY(evMax)}`
+      : evMin !== null
+        ? `, in ${fmtY(evMin)}`
+        : "";
   const eventsIntroLine =
     events.length > 0
-      ? `${mDisplay} ${day} spans ${eventsCountLabel} across recorded history${evEraRange ? ` — from ${evEraRange}` : ""}. Below is a curated digest of the most significant moments tied to this date.`
+      ? `${mDisplay} ${day} spans ${eventsCountLabel} across recorded history${evEraProse}. Below is a curated digest of the most significant moments tied to this date.`
       : `Explore historical events, births, and deaths that occurred on ${mDisplay} ${day} throughout world history.`;
+  const renderYearsAgoPill = (className) =>
+    featured
+      ? buildYearsAgoPill({
+          historicalYear: featured.year,
+          monthNum: mNum,
+          day,
+          className,
+        })
+      : "";
+  const dateEngagementScript = buildDateEngagementScript(monthName, day);
   const _todayDate = new Date();
   const todayMonthSlug = MONTHS_ALL[_todayDate.getUTCMonth()];
   const todayDayNum = _todayDate.getUTCDate();
@@ -4785,7 +4957,7 @@ function generateEventsDateHTML(
   </div>
 </div>`;
     const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago">${yearStr}</span></div>`;
-    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}">
+    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}" data-year="${parseInt(e.year, 10) || 0}">
   <div class="tl-body">${card}</div>
   ${node}
   <div class="tl-media"></div>
@@ -4793,6 +4965,52 @@ function generateEventsDateHTML(
   };
   const othersVisibleHtml = others.slice(0, 10).map((e, i) => renderTimelineItem(e, i)).join("");
   const othersHiddenHtml = others.slice(10).map((e, i) => renderTimelineItem(e, i + 10)).join("");
+
+  // Era filter chips — only for long timelines, only eras that have events.
+  // Filtering is display-only; every event stays in the HTML for SEO.
+  const ERA_FILTERS = [
+    { label: "Before 1500", min: -9999, max: 1499 },
+    { label: "1500 to 1799", min: 1500, max: 1799 },
+    { label: "1800 to 1899", min: 1800, max: 1899 },
+    { label: "1900 to 1999", min: 1900, max: 1999 },
+    { label: "2000 to today", min: 2000, max: 9999 },
+  ];
+  const otherYears = others.map((e) => parseInt(e.year, 10) || 0);
+  const usableEras = ERA_FILTERS.filter((era) =>
+    otherYears.some((y) => y >= era.min && y <= era.max),
+  );
+  const eraChipsHtml =
+    others.length >= 12 && usableEras.length >= 2
+      ? `<div class="era-chip-row" role="group" aria-label="Filter events by era">
+    <button type="button" class="era-chip era-chip-active">All</button>
+    ${usableEras
+      .map(
+        (era) =>
+          `<button type="button" class="era-chip" data-min="${era.min}" data-max="${era.max}">${era.label}</button>`,
+      )
+      .join("")}
+  </div>`
+      : "";
+  const eraChipScript = eraChipsHtml
+    ? `<script>(function(){
+var chips=document.querySelectorAll('.era-chip');
+if(!chips.length)return;
+var moreWrap=document.getElementById('events-more');
+var moreBtn=document.getElementById('events-more-btn');
+chips.forEach(function(chip){chip.addEventListener('click',function(){
+chips.forEach(function(c){c.classList.remove('era-chip-active');});
+this.classList.add('era-chip-active');
+var min=parseInt(this.dataset.min,10),max=parseInt(this.dataset.max,10);
+var all=isNaN(min);
+document.querySelectorAll('.tl-item[data-year]').forEach(function(item){
+var y=parseInt(item.dataset.year,10);
+item.style.display=(all||(y>=min&&y<=max))?'':'none';
+});
+if(moreWrap){if(!all){moreWrap.style.display='block';if(moreBtn)moreBtn.style.display='none';}
+else{moreWrap.style.display='none';if(moreBtn){moreBtn.style.display='';moreBtn.innerHTML='<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events';}}}
+});});
+})();</script>`
+    : "";
 
   // Person timeline item renderer (replaces card + grid row)
   const renderPersonTimelineItem = (p, idx, isDeaths = false) => {
@@ -4904,6 +5122,8 @@ ${siteNav()}
   ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     ${events.length > 0 ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
     ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
+    ${renderYearsAgoPill("auto-tag event-years-ago ms-2")}
+    <span class="auto-tag event-years-ago ms-2" id="today-pill" hidden><i class="bi bi-calendar-check me-1"></i>Today in history</span>
   </div>`}
   ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(eventsIntroLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time>${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
@@ -4922,6 +5142,8 @@ ${siteNav()}
         <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-calendar-event me-1"></i>Historical Events</span>
         ${events.length > 0 ? `<span class="article-hero-pill"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
         ${evEraRange ? `<span class="article-hero-pill"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
+        ${renderYearsAgoPill("article-hero-pill")}
+        <span class="article-hero-pill" id="today-pill" hidden><i class="bi bi-calendar-check me-1"></i>Today in history</span>
       </div>
     </div>
   </div>` : ""}
@@ -4933,13 +5155,16 @@ ${siteNav()}
     ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${others.length > 0 ? `
+    ${eraChipsHtml}
     <div class="tl-wrap">${othersVisibleHtml}</div>
     ${othersHiddenHtml ? `<div id="events-more" style="display:none"><div class="tl-wrap">${othersHiddenHtml}</div></div>
-    <button onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>` : ""}` : ""}
+    <button id="events-more-btn" onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>` : ""}` : ""}
     </div>
-  </div>`
+  </div>
+  ${eraChipScript}`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
+  ${buildQuizHookCard(quizData, monthName, day, mDisplay)}
   <div class="ad-unit">
     <div class="ad-unit-label">Advertisement</div>
     <ins class="adsbygoogle"
@@ -5009,6 +5234,7 @@ ${siteNav()}
     </div>
   </div>
 </main>
+${dateEngagementScript}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "events-date", pageSlug: `${monthName}-${day}` })}
 </body></html>`;
@@ -5308,11 +5534,30 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
         ? fmtYear(minYear)
         : "";
 
-  // Intro paragraph — original content for SEO depth
+  // Intro paragraph — original content for SEO depth (prose keeps the house
+  // punctuation rule: no em dash, ranges written with "to")
+  const eraProse =
+    minYear !== null && maxYear !== null && minYear !== maxYear
+      ? `, from ${fmtYear(minYear)} to ${fmtYear(maxYear)}`
+      : minYear !== null
+        ? `, in ${fmtYear(minYear)}`
+        : "";
   const introLine =
     births.length > 0
-      ? `${mDisplay} ${day} has ${births.length} recorded notable births across history${eraRange ? ` — from ${eraRange}` : ""}. This focused page highlights ${displayedBirths.length} people with the strongest available profile context.`
+      ? `${mDisplay} ${day} has ${births.length} recorded notable births across history${eraProse}. This focused page highlights ${displayedBirths.length} people with the strongest available profile context.`
       : `Explore notable people born on ${mDisplay} ${day} throughout history.`;
+  const zodiacSign = zodiacSignFor(mNum, day);
+  const renderYearsAgoPill = (className) =>
+    featured
+      ? buildYearsAgoPill({
+          historicalYear: featured.year,
+          monthNum: mNum,
+          day,
+          className,
+          prefix: "born ",
+        })
+      : "";
+  const dateEngagementScript = buildDateEngagementScript(monthName, day);
 
   const topEvents = (eventsData?.events || []).slice(0, 3);
 
@@ -5475,6 +5720,9 @@ ${siteNav()}
   ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} source records</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+    <span class="auto-tag event-years-ago ms-2"><i class="bi bi-stars me-1"></i>${escapeHtml(zodiacSign)}</span>
+    ${renderYearsAgoPill("auto-tag event-years-ago ms-2")}
+    <span class="auto-tag event-years-ago ms-2" id="today-pill" hidden><i class="bi bi-calendar-check me-1"></i>Today in history</span>
   </div>`}
   ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
@@ -5491,6 +5739,9 @@ ${siteNav()}
         <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-person-heart me-1"></i>Famous Birthdays</span>
         <span class="article-hero-pill"><i class="bi bi-people me-1"></i>${births.length} source records</span>
         ${eraRange ? `<span class="article-hero-pill"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+        <span class="article-hero-pill"><i class="bi bi-stars me-1"></i>${escapeHtml(zodiacSign)}</span>
+        ${renderYearsAgoPill("article-hero-pill")}
+        <span class="article-hero-pill" id="today-pill" hidden><i class="bi bi-calendar-check me-1"></i>Today in history</span>
       </div>
     </div>
   </div>` : ""}
@@ -5537,6 +5788,7 @@ ${siteNav()}
     </div>
   </div>
 </main>
+${dateEngagementScript}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "born-date", pageSlug: `${monthName}-${day}` })}
 </body></html>`;
@@ -5635,8 +5887,24 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   // Intro paragraph — original content for SEO depth
   const introLine =
     deaths.length > 0
-      ? `${mDisplay} ${day} has ${deaths.length} recorded notable deaths across history${eraRange ? ` — from ${eraRange}` : ""}. This focused page highlights ${displayedDeaths.length} people with the strongest available profile context.`
+      ? `${mDisplay} ${day} has ${deaths.length} recorded notable deaths across history${
+          minYear !== null && maxYear !== null && minYear !== maxYear
+            ? `, from ${fmtYear(minYear)} to ${fmtYear(maxYear)}`
+            : minYear !== null
+              ? `, in ${fmtYear(minYear)}`
+              : ""
+        }. This focused page highlights ${displayedDeaths.length} people with the strongest available profile context.`
       : `Explore notable people who died on ${mDisplay} ${day} throughout history.`;
+  const renderYearsAgoPill = (className) =>
+    featured
+      ? buildYearsAgoPill({
+          historicalYear: featured.year,
+          monthNum: mNum,
+          day,
+          className,
+        })
+      : "";
+  const dateEngagementScript = buildDateEngagementScript(monthName, day);
 
   const topEvents = (eventsData?.events || []).slice(0, 3);
 
@@ -5799,6 +6067,8 @@ ${siteNav()}
   ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} source records</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+    ${renderYearsAgoPill("auto-tag event-years-ago ms-2")}
+    <span class="auto-tag event-years-ago ms-2" id="today-pill" hidden><i class="bi bi-calendar-check me-1"></i>Today in history</span>
   </div>`}
   ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
@@ -5815,6 +6085,8 @@ ${siteNav()}
         <span class="article-hero-pill article-hero-pill-featured"><i class="bi bi-flower1 me-1"></i>Notable Deaths</span>
         <span class="article-hero-pill"><i class="bi bi-people me-1"></i>${deaths.length} source records</span>
         ${eraRange ? `<span class="article-hero-pill"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
+        ${renderYearsAgoPill("article-hero-pill")}
+        <span class="article-hero-pill" id="today-pill" hidden><i class="bi bi-calendar-check me-1"></i>Today in history</span>
       </div>
     </div>
   </div>` : ""}
@@ -5861,6 +6133,7 @@ ${siteNav()}
     </div>
   </div>
 </main>
+${dateEngagementScript}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "died-date", pageSlug: `${monthName}-${day}` })}
 </body></html>`;
@@ -6052,7 +6325,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v29-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v30-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -6151,7 +6424,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v28-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v29-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -6541,7 +6814,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v47-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v48-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -9292,6 +9565,10 @@ export const __datePageEngagementTestHooks = {
   generateDiedHTML,
   generateEventsDateHTML,
   buildCarouselQuizHTML,
+  zodiacSignFor,
+  fullYearsSinceDate,
+  buildQuizHookCard,
+  buildRelatedQuestionsBlock,
 };
 
 export const __personIdentityTestHooks = {

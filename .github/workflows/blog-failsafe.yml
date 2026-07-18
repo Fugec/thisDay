@@ -1,9 +1,10 @@
 name: Blog Post Failsafe
 
-# Runs 30 minutes after the blog worker cron (00:05 UTC).
+# Runs after the blog worker's 00:05 prepare, 00:10/00:12 generate, and 00:15
+# enrich invocations. Checks whether the complete pipeline produced a post.
 # Checks if today's post actually exists in KV. If it doesn't (the worker
-# failed all 3 internal retries), this workflow creates a draft if necessary,
-# then enriches it in a separate Worker invocation.
+# failed), this workflow prepares the source, creates a draft, and enriches it
+# in three separate Worker invocations.
 #
 # Synchronous enrichment must finish before /blog/enrich returns success. The
 # workflow still polls KV for up to 10 minutes as a replication/race safety
@@ -60,15 +61,41 @@ jobs:
           echo "KV status for draft:${SLUG} → HTTP $DRAFT_STATUS"
 
           if [ "$DRAFT_STATUS" != "200" ]; then
-            echo "Draft for ${SLUG} is missing — generating it in a dedicated invocation..."
-            DRAFT_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-              -X POST "$WORKER_URL/blog/generate-draft" \
+            echo "Draft for ${SLUG} is missing — preparing its source in a dedicated invocation..."
+            PREPARE_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+              -X POST "$WORKER_URL/blog/prepare-draft" \
               -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
-            DRAFT_BODY=$(echo "$DRAFT_RESULT" | head -n -1)
-            DRAFT_HTTP_STATUS=$(echo "$DRAFT_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
-            echo "Draft response (HTTP $DRAFT_HTTP_STATUS): $DRAFT_BODY"
-            if [ "$DRAFT_HTTP_STATUS" != "200" ]; then
-              echo "::error::Blog draft generation failed with HTTP status $DRAFT_HTTP_STATUS"
+            PREPARE_BODY=$(echo "$PREPARE_RESULT" | head -n -1)
+            PREPARE_HTTP_STATUS=$(echo "$PREPARE_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
+            echo "Source preparation response (HTTP $PREPARE_HTTP_STATUS): $PREPARE_BODY"
+            if [ "$PREPARE_HTTP_STATUS" != "200" ]; then
+              echo "::error::Blog source preparation failed with HTTP status $PREPARE_HTTP_STATUS"
+              exit 1
+            fi
+
+            DRAFT_CREATED=false
+            for DRAFT_ATTEMPT in 1 2 3; do
+              echo "Generating draft:${SLUG} from the prepared source in fresh invocation ${DRAFT_ATTEMPT}/3..."
+              DRAFT_ENDPOINT="$WORKER_URL/blog/generate-draft"
+              if [ "$DRAFT_ATTEMPT" != "1" ]; then
+                DRAFT_ENDPOINT="$DRAFT_ENDPOINT?prefer-workers-ai=true"
+              fi
+              DRAFT_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+                -X POST "$DRAFT_ENDPOINT" \
+                -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
+              DRAFT_BODY=$(echo "$DRAFT_RESULT" | head -n -1)
+              DRAFT_HTTP_STATUS=$(echo "$DRAFT_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
+              echo "Draft response (HTTP $DRAFT_HTTP_STATUS): $DRAFT_BODY"
+              if [ "$DRAFT_HTTP_STATUS" = "200" ]; then
+                DRAFT_CREATED=true
+                break
+              fi
+              if [ "$DRAFT_ATTEMPT" != "3" ]; then
+                sleep 5
+              fi
+            done
+            if [ "$DRAFT_CREATED" != "true" ]; then
+              echo "::error::Blog draft generation failed in all three fresh Worker invocations"
               exit 1
             fi
           fi
@@ -76,7 +103,7 @@ jobs:
           # ── Phase 3: Enrich/publish in a fresh invocation ────────────────
           echo "Enriching draft:${SLUG} in a fresh Worker invocation..."
           RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-            -X POST "$WORKER_URL/blog/enrich?slug=${SLUG}&sync=true" \
+            -X POST "$WORKER_URL/blog/enrich?slug=${SLUG}&sync=true&bounded=true" \
             -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
           BODY=$(echo "$RESULT" | head -n -1)
           HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')

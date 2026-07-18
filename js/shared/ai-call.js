@@ -652,6 +652,7 @@ export async function callAI(env, messages, options = {}) {
     cfModel = null,
     skipWorkersAI = false,
     providerAttemptLimit = null,
+    groqSectionAttemptLimit = null,
   } = options;
   const cassette = await cassetteLookup(env, [
     "callAI",
@@ -662,6 +663,8 @@ export async function callAI(env, messages, options = {}) {
       cfModel,
       skipWorkersAI: Boolean(skipWorkersAI),
       providerAttemptLimit: providerAttemptLimit == null ? null : Number(providerAttemptLimit),
+      groqSectionAttemptLimit:
+        groqSectionAttemptLimit == null ? null : Number(groqSectionAttemptLimit),
     },
   ]);
   if (cassette.text) return cassette.text;
@@ -680,6 +683,7 @@ async function callAIProviders(
     temperature = 0.3,
     skipWorkersAI = false,
     providerAttemptLimit: providerAttemptLimitOverride,
+    groqSectionAttemptLimit: groqSectionAttemptLimitOverride,
   } = {},
 ) {
   const failureReasons = [];
@@ -688,6 +692,15 @@ async function callAIProviders(
     Number.isFinite(parsedProviderAttemptLimit) && parsedProviderAttemptLimit > 0
       ? Math.floor(parsedProviderAttemptLimit)
       : getProviderAttemptLimit(env);
+  const parsedGroqSectionAttemptLimit = Number(groqSectionAttemptLimitOverride);
+  const groqSectionAttemptLimit =
+    Number.isFinite(parsedGroqSectionAttemptLimit) &&
+    parsedGroqSectionAttemptLimit > 0
+      ? Math.min(
+          Math.floor(parsedGroqSectionAttemptLimit),
+          GROQ_SECTION_MAX_ATTEMPTS,
+        )
+      : GROQ_SECTION_MAX_ATTEMPTS;
   let providerAttempts = 0;
 
   // Resolve key arrays up front so model resolution can use the first available key.
@@ -711,9 +724,9 @@ async function callAIProviders(
   let groqSectionAttempts = 0;
   for (const groqModel of groqModelsForRequest) {
     for (const key of groqKeys) {
-      if (groqSectionAttempts >= GROQ_SECTION_MAX_ATTEMPTS) {
+      if (groqSectionAttempts >= groqSectionAttemptLimit) {
         failureReasons.push(
-          `Groq section stopped after ${GROQ_SECTION_MAX_ATTEMPTS} attempts to preserve fallback budget`,
+          `Groq section stopped after ${groqSectionAttemptLimit} attempts to preserve fallback budget`,
         );
         stopGroqAfterAttemptShare = true;
         break;

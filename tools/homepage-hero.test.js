@@ -143,11 +143,11 @@ test("highlights reuse preloaded daily data and receive Worker SSR", () => {
   );
   assert.match(
     script,
-    /readMore\.className = "major-event-source";[\s\S]*?readMore\.textContent = "Read more";[\s\S]*?copy\.append\(text, readMore\)/,
+    /readMore\.className = "major-event-source";[\s\S]*?readMore\.append\("Read More"\);[\s\S]*?readMoreIcon\.className = "bi bi-box-arrow-up-right";[\s\S]*?copy\.append\(text, readMore\)/,
   );
   assert.match(
     seoWorker,
-    /<span class="hero-highlight-copy">[\s\S]*?<span class="major-event-source">Read more<\/span>/,
+    /<span class="hero-highlight-copy">[\s\S]*?<span class="major-event-source">Read More<i class="bi bi-box-arrow-up-right" aria-hidden="true"><\/i><\/span>/,
   );
   assert.match(
     css,
@@ -156,6 +156,14 @@ test("highlights reuse preloaded daily data and receive Worker SSR", () => {
   assert.match(
     css,
     /\.hero-highlight \.major-event-source \{[\s\S]*?color: var\(--btn-bg\);[\s\S]*?font-size: 13px;[\s\S]*?font-weight: 600;/,
+  );
+  assert.match(
+    css,
+    /\.hero-highlight:hover \.major-event-source,[\s\S]*?text-decoration: none;/,
+  );
+  assert.match(
+    seoWorker,
+    /\.major-event-source:hover,\.major-event-source:focus-visible\{text-decoration:none\}/,
   );
 });
 

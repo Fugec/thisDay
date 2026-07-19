@@ -4611,7 +4611,6 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .date-cluster-link i{font-size:1rem;flex-shrink:0}
 .date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
 
-.date-top-navigation{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:.75rem;align-items:center;margin:0 0 1rem}
 .date-view-tabs{display:flex;gap:.5rem;overflow-x:auto;margin:0 0 1.25rem;padding:0 0 .2rem;scrollbar-width:thin}
 .date-view-tab{display:inline-flex;align-items:center;gap:.45rem;flex:0 0 auto;padding:.55rem .8rem;border:1px solid var(--cbr);border-radius:999px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px;white-space:nowrap}
 .date-view-tab:hover{background:var(--bg-alt);color:var(--tc);text-decoration:none}
@@ -4624,7 +4623,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .major-event-year{display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:.3rem .55rem;border-radius:999px;background:var(--btn-bg);color:#fff;font:600 13px Georgia,serif}
 .major-event-copy{min-width:0;font-size:14px;line-height:1.45;color:var(--tc)}
 .major-event-source{display:inline-flex;align-items:center;gap:.35rem;color:var(--btn-bg);font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
-.major-event-source:hover{text-decoration:underline}
+.major-event-source:hover,.major-event-source:focus-visible{text-decoration:none}
 .major-event-actions{display:flex;align-items:center;justify-content:flex-end;gap:.65rem;flex-wrap:wrap}
 .major-event-story{display:inline-flex;align-items:center;gap:.35rem;padding:.32rem .58rem;border-radius:999px;background:var(--btn-bg);color:#fff;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
 .major-event-story:hover{background:#2a4d3a;color:#fff;text-decoration:none}
@@ -5526,13 +5525,55 @@ function buildDateTopNavigation({
     .join("");
 
   return `<nav aria-label="${escapeHtml(mDisplay)} ${day} date navigation">
-    <div class="date-top-navigation">
-      <a href="/events/${prevMonthName}/${prevDay}/" class="btn date-top-link date-top-link-prev" rel="prev"><i class="bi bi-chevron-left"></i><span>${escapeHtml(prevMonthDisplay)} ${prevDay}</span></a>
-      <a href="/" class="btn date-top-link date-top-calendar" aria-label="Open date calendar"><i class="bi bi-calendar3"></i><span>${escapeHtml(mDisplay)} ${day}</span></a>
-      <a href="/events/${nextMonthName}/${nextDay}/" class="btn date-top-link date-top-link-next" rel="next"><span>${escapeHtml(nextMonthDisplay)} ${nextDay}</span><i class="bi bi-chevron-right"></i></a>
+    <div class="month-nav date-top-navigation">
+      <a href="/events/${prevMonthName}/${prevDay}/" class="btn date-top-link date-top-link-prev" rel="prev" aria-label="Previous day: ${escapeHtml(prevMonthDisplay)} ${prevDay}"><i class="bi bi-chevron-left" aria-hidden="true"></i></a>
+      <h2 class="date-top-current">${escapeHtml(mDisplay)} ${day}</h2>
+      <a href="/events/${nextMonthName}/${nextDay}/" class="btn date-top-link date-top-link-next" rel="next" aria-label="Next day: ${escapeHtml(nextMonthDisplay)} ${nextDay}"><i class="bi bi-chevron-right" aria-hidden="true"></i></a>
     </div>
     <div class="date-view-tabs" aria-label="Explore this date">${tabs}</div>
   </nav>`;
+}
+
+function buildDateTopNavigationForRoute(
+  monthName,
+  day,
+  currentType = "events",
+) {
+  const normalizedMonthName = String(monthName || "").toLowerCase();
+  const monthNum = MONTH_NUM_MAP[normalizedMonthName];
+  const dayNum = Number(day);
+  const monthIndex = monthNum - 1;
+  if (
+    !monthNum ||
+    !Number.isInteger(dayNum) ||
+    dayNum < 1 ||
+    dayNum > DAYS_IN_MONTH[monthIndex]
+  ) {
+    return "";
+  }
+
+  const prevMonthIndex =
+    dayNum > 1 ? monthIndex : (monthIndex - 1 + 12) % 12;
+  const nextMonthIndex =
+    dayNum < DAYS_IN_MONTH[monthIndex]
+      ? monthIndex
+      : (monthIndex + 1) % 12;
+
+  return buildDateTopNavigation({
+    monthName: normalizedMonthName,
+    day: dayNum,
+    mDisplay: MONTH_DISPLAY_NAMES[monthNum],
+    prevMonthName: MONTHS_ALL[prevMonthIndex],
+    prevMonthDisplay: MONTH_DISPLAY_NAMES[prevMonthIndex + 1],
+    prevDay:
+      dayNum > 1
+        ? dayNum - 1
+        : DAYS_IN_MONTH[(monthIndex - 1 + 12) % 12],
+    nextMonthName: MONTHS_ALL[nextMonthIndex],
+    nextMonthDisplay: MONTH_DISPLAY_NAMES[nextMonthIndex + 1],
+    nextDay: dayNum < DAYS_IN_MONTH[monthIndex] ? dayNum + 1 : 1,
+    currentType,
+  });
 }
 
 function buildEventAnchorNavigationScript() {
@@ -5576,6 +5617,27 @@ var id='';
 try{id=decodeURIComponent(location.hash.slice(1));}catch(_){id=location.hash.slice(1);}
 if(id.indexOf('event-')!==0)return;
 var target=document.getElementById(id);
+if(!target){
+var items=document.querySelectorAll('.tl-item');
+for(var itemIndex=0;itemIndex<items.length;itemIndex+=1){
+var item=items[itemIndex];
+var title=item.querySelector('.tl-card-title');
+var description=item.querySelector('.tl-card-desc');
+var featured=item.querySelector('.tl-feat-body');
+var badge=item.querySelector('.event-years-ago');
+var year=item.getAttribute('data-year')||(badge&&badge.textContent)||'';
+var titleText=title&&title.textContent?title.textContent.trim():'';
+var descriptionText=description&&description.textContent?description.textContent.trim():'';
+var candidates=featured&&featured.textContent?[featured.textContent.trim()]:[[titleText,descriptionText].filter(Boolean).join(' '),titleText];
+for(var candidateIndex=0;candidateIndex<candidates.length;candidateIndex+=1){
+var candidateText=candidates[candidateIndex];
+if(!candidateText)continue;
+var candidatePrefix=historicalEventAnchorId({year:year,description:candidateText}).replace(/-[a-z0-9]+$/,'-');
+if(id.indexOf(candidatePrefix)===0){item.id=id;target=item;break;}
+}
+if(target)break;
+}
+}
 if(!target)return;
 var moreWrap=target.closest('#events-more');
 var moreBtn=document.getElementById('events-more-btn');
@@ -5591,21 +5653,39 @@ window.addEventListener('hashchange',revealEventAnchor);
 
 function ensureEventAnchorNavigationHtml(html) {
   const source = String(html || "");
-  if (!source || source.includes('id="event-anchor-navigation"')) return source;
+  if (!source) return source;
+  const navigationScript = buildEventAnchorNavigationScript();
+  if (source.includes('id="event-anchor-navigation"')) {
+    return source.replace(
+      /<script id="event-anchor-navigation">[\s\S]*?<\/script>/,
+      navigationScript,
+    );
+  }
   return source.replace(
     "</body>",
-    `${buildEventAnchorNavigationScript()}</body>`,
+    `${navigationScript}</body>`,
   );
 }
 
-function normalizeCachedDatePageControlsHtml(html) {
+function normalizeCachedDatePageControlsHtml(
+  html,
+  { monthName = "", day = 0 } = {},
+) {
   const source = String(html || "");
   if (!source) return source;
 
   const withVisibleEraSelection = source
     .replace(
+      ".major-event-source:hover{text-decoration:underline}",
+      ".major-event-source:hover,.major-event-source:focus-visible{text-decoration:none}",
+    )
+    .replace(
       ".era-chip-active{background:var(--btn-bg);color:var(--btn-text);border-color:var(--btn-bg)}",
       ".era-chip-active{background:var(--bg-alt);color:var(--btn-bg);border-color:var(--btn-bg)}",
+    )
+    .replace(
+      ".date-top-navigation{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:.75rem;align-items:center;margin:0 0 1rem}",
+      "",
     )
     .replace(
       ".date-top-navigation .date-top-link{display:flex;align-items:center;gap:.5rem;min-height:44px;padding:.65rem .85rem;border:1.5px solid var(--cbr);border-radius:8px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px}",
@@ -5640,13 +5720,55 @@ function normalizeCachedDatePageControlsHtml(html) {
       "",
     );
 
-  return withVisibleEraSelection.replace(
-    /<div class="date-top-navigation">([\s\S]*?)<\/div>/,
-    (navigationBlock) =>
-      navigationBlock
-        .replace(/class="date-top-link/g, 'class="btn date-top-link')
-        .replace(/bi-arrow-left/g, "bi-chevron-left")
-        .replace(/bi-arrow-right/g, "bi-chevron-right"),
+  const withNormalizedNavigation = withVisibleEraSelection.replace(
+    /<div\b[^>]*class="[^"]*\bdate-top-navigation\b[^"]*"[^>]*>([\s\S]*?)<\/div>/,
+    (navigationBlock) => {
+      if (
+        navigationBlock.includes("month-nav") &&
+        navigationBlock.includes("date-top-current")
+      ) {
+        return navigationBlock;
+      }
+      const anchors =
+        navigationBlock.match(/<a\b[^>]*>[\s\S]*?<\/a>/g) || [];
+      const anchor = (className) =>
+        anchors.find((link) => link.includes(className)) || "";
+      const href = (link) => link.match(/href="([^"]+)"/)?.[1] || "";
+      const label = (link) =>
+        link.match(/<span[^>]*>([^<]+)<\/span>/)?.[1]?.trim() || "";
+      const previous = anchor("date-top-link-prev");
+      const current = anchor("date-top-calendar");
+      const next = anchor("date-top-link-next");
+      const previousHref = href(previous);
+      const nextHref = href(next);
+      const currentLabel = label(current);
+      if (!previousHref || !nextHref || !currentLabel) return navigationBlock;
+      return `<div class="month-nav date-top-navigation">
+      <a href="${previousHref}" class="btn date-top-link date-top-link-prev" rel="prev" aria-label="Previous day${label(previous) ? `: ${label(previous)}` : ""}"><i class="bi bi-chevron-left" aria-hidden="true"></i></a>
+      <h2 class="date-top-current">${currentLabel}</h2>
+      <a href="${nextHref}" class="btn date-top-link date-top-link-next" rel="next" aria-label="Next day${label(next) ? `: ${label(next)}` : ""}"><i class="bi bi-chevron-right" aria-hidden="true"></i></a>
+    </div>`;
+    },
+  );
+
+  if (
+    /class="[^"]*\bdate-top-navigation\b[^"]*"/.test(
+      withNormalizedNavigation,
+    )
+  ) {
+    return withNormalizedNavigation;
+  }
+
+  const missingNavigation = buildDateTopNavigationForRoute(
+    monthName,
+    day,
+    "events",
+  );
+  if (!missingNavigation) return withNormalizedNavigation;
+
+  return withNormalizedNavigation.replace(
+    /(<main\b[^>]*>[\s\S]*?<h1\b[^>]*>[\s\S]*?<\/h1>)/i,
+    `$1\n  ${missingNavigation}`,
   );
 }
 
@@ -7188,7 +7310,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
         const normalizedControls = ensureEventAnchorNavigationHtml(
-          normalizeCachedDatePageControlsHtml(cached),
+          normalizeCachedDatePageControlsHtml(cached, { monthName, day }),
         );
         const patched = normalizedControls.includes('ai-card-patch-v2') ? normalizedControls : normalizedControls.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
@@ -8166,7 +8288,7 @@ async function handleFetchRequest(request, env, ctx) {
         `<span class="hero-highlight-year">${escapeHtml(String(event.year ?? "—"))}</span>` +
         `<span class="hero-highlight-copy">` +
         `<span class="hero-highlight-text">${escapeHtml(String(event.text || ""))}</span>` +
-        `<span class="major-event-source">Read more</span>` +
+        `<span class="major-event-source">Read More<i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></span>` +
         `</span>` +
         `</a>`,
     )
@@ -9876,9 +9998,15 @@ export default {
     if (cacheKey) {
       const cached = await caches.default.match(cacheKey);
       if (cached) {
-        const cachedBody = /^\/events\/[a-z]+\/\d+\/?$/.test(url.pathname)
+        const cachedDateRoute = url.pathname.match(
+          /^\/events\/([a-z]+)\/(\d+)\/?$/,
+        );
+        const cachedBody = cachedDateRoute
           ? ensureEventAnchorNavigationHtml(
-              normalizeCachedDatePageControlsHtml(await cached.text()),
+              normalizeCachedDatePageControlsHtml(await cached.text(), {
+                monthName: cachedDateRoute[1],
+                day: Number(cachedDateRoute[2]),
+              }),
             )
           : cached.body;
         const r = new Response(cachedBody, {

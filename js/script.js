@@ -295,7 +295,11 @@ async function populateHeroHighlights() {
 
     const readMore = document.createElement("span");
     readMore.className = "major-event-source";
-    readMore.textContent = "Read more";
+    readMore.append("Read More");
+    const readMoreIcon = document.createElement("i");
+    readMoreIcon.className = "bi bi-box-arrow-up-right";
+    readMoreIcon.setAttribute("aria-hidden", "true");
+    readMore.appendChild(readMoreIcon);
 
     const copy = document.createElement("span");
     copy.className = "hero-highlight-copy";

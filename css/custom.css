@@ -709,7 +709,7 @@ body[data-page="v2"] > .people-strip {
 }
 .hero-highlight:hover .major-event-source,
 .hero-highlight:focus-visible .major-event-source {
-  text-decoration: underline;
+  text-decoration: none;
 }
 /* Events Section - Grid layout like Quiz */
 .events-section {

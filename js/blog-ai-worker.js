@@ -637,7 +637,8 @@ ${gridItems}
   </section>`;
 }
 
-const REQUIRED_DID_YOU_KNOW_FACTS = 5;
+const MIN_DID_YOU_KNOW_FACTS = 4;
+const MAX_DID_YOU_KNOW_FACTS = 5;
 
 function normalizeArticleDidYouKnowFact(value) {
   return String(value || "")
@@ -677,28 +678,36 @@ function auditDidYouKnowFacts(
   const rawFacts = Array.isArray(content?.didYouKnowFacts)
     ? content.didYouKnowFacts
     : [];
-  const facts = rawFacts
+  const normalizedFacts = rawFacts
     .filter((fact) => typeof fact === "string")
     .map(normalizeArticleDidYouKnowFact)
     .filter(Boolean);
+  const facts = publishableDidYouKnowFacts(normalizedFacts, content);
   const reasons = [];
 
-  if (rawFacts.length !== REQUIRED_DID_YOU_KNOW_FACTS || facts.length !== REQUIRED_DID_YOU_KNOW_FACTS) {
+  if (facts.length < MIN_DID_YOU_KNOW_FACTS) {
     reasons.push(
-      `didYouKnowFacts must contain exactly ${REQUIRED_DID_YOU_KNOW_FACTS} populated facts (got ${facts.length})`,
+      `didYouKnowFacts must contain at least ${MIN_DID_YOU_KNOW_FACTS} distinct concrete facts (got ${facts.length} usable from ${normalizedFacts.length})`,
     );
-  }
-
-  for (let i = 0; i < facts.length; i += 1) {
-    if (!hasHardFact(facts[i])) {
-      reasons.push(`didYouKnowFacts[${i}] lacks a concrete name, date, number, place, or institution`);
-    }
-    for (let j = i + 1; j < facts.length; j += 1) {
-      const exact = normalizeForCompare(facts[i]) === normalizeForCompare(facts[j]);
-      if (exact) {
-        reasons.push(`didYouKnowFacts[${i}] and didYouKnowFacts[${j}] are exact duplicates`);
-      } else if (didYouKnowFactsAreNearDuplicates(facts[i], facts[j], content)) {
-        reasons.push(`didYouKnowFacts[${i}] and didYouKnowFacts[${j}] repeat the same claim`);
+    for (let i = 0; i < normalizedFacts.length; i += 1) {
+      if (!hasHardFact(normalizedFacts[i])) {
+        reasons.push(`didYouKnowFacts[${i}] lacks a concrete name, date, number, place, or institution`);
+      }
+      for (let j = i + 1; j < normalizedFacts.length; j += 1) {
+        const exact =
+          normalizeForCompare(normalizedFacts[i]) ===
+          normalizeForCompare(normalizedFacts[j]);
+        if (exact) {
+          reasons.push(`didYouKnowFacts[${i}] and didYouKnowFacts[${j}] are exact duplicates`);
+        } else if (
+          didYouKnowFactsAreNearDuplicates(
+            normalizedFacts[i],
+            normalizedFacts[j],
+            content,
+          )
+        ) {
+          reasons.push(`didYouKnowFacts[${i}] and didYouKnowFacts[${j}] repeat the same claim`);
+        }
       }
     }
   }
@@ -730,14 +739,26 @@ function distinctDidYouKnowFacts(facts, content = null) {
   return selected;
 }
 
+function publishableDidYouKnowFacts(facts, content = null) {
+  const concreteFacts = (Array.isArray(facts) ? facts : [])
+    .filter((fact) => typeof fact === "string")
+    .map(normalizeArticleDidYouKnowFact)
+    .filter((fact) => fact && hasHardFact(fact));
+  return distinctDidYouKnowFacts(concreteFacts, content).slice(
+    0,
+    MAX_DID_YOU_KNOW_FACTS,
+  );
+}
+
 function buildDidYouKnowSlider(facts, content = null) {
-  const cleanedFacts = distinctDidYouKnowFacts(facts, content);
+  const cleanedFacts = publishableDidYouKnowFacts(facts, content);
   if (!cleanedFacts.length) return "";
 
   // Never manufacture a complete slider by cycling a short fact list. New
-  // publication fails closed before rendering unless five distinct facts pass
-  // source grounding; legacy repairs may render fewer cards rather than repeat.
-  const sliderFacts = cleanedFacts.slice(0, REQUIRED_DID_YOU_KNOW_FACTS).map((fact, index) => {
+  // publication fails closed before rendering unless at least four distinct
+  // concrete facts pass source grounding; legacy repairs may render fewer
+  // cards rather than repeat or pad weak facts.
+  const sliderFacts = cleanedFacts.map((fact, index) => {
     return `            <article class="blog-cta-col dyn-slide" aria-label="Did you know fact ${index + 1}">
               <p>Did you know</p>
               <p class="dyn-fact">${esc(fact)}</p>
@@ -8309,6 +8330,7 @@ async function savePublishedPost(
       `Refusing to publish ${slug}: Did You Know contract failed — ${didYouKnowValidation.reasons.join("; ")}`,
     );
   }
+  content.didYouKnowFacts = didYouKnowValidation.facts;
   // Final publication gate: enrichment is allowed to retry transient image
   // failures, but public HTML must never be written without a working Wikimedia
   // hero. This also protects callers that bypass the normal generation path.
@@ -11964,7 +11986,7 @@ function assertRequiredContentBlocks(content) {
   if (quickFacts.length < 6) missing.push("six populated quick facts");
   const didYouKnowAudit = auditDidYouKnowFacts(content);
   if (!didYouKnowAudit.ok) {
-    missing.push(`five distinct did-you-know facts (${didYouKnowAudit.reasons.join("; ")})`);
+    missing.push(`four distinct did-you-know facts (${didYouKnowAudit.reasons.join("; ")})`);
   }
   if (namedPeople.length < 1) missing.push("one named person for the people strip");
   if (analysisCount(content.analysisGood) < 3) missing.push("three positive analysis items");
@@ -12020,7 +12042,9 @@ function assertArticleStructure(html) {
     .filter(([, pattern]) => !pattern.test(source))
     .map(([label]) => label);
   if (quickFactCount < 6) missing.push("six rendered key facts");
-  if (didYouKnowCount < 5) missing.push("five rendered did-you-know cards");
+  if (didYouKnowCount < MIN_DID_YOU_KNOW_FACTS) {
+    missing.push(`${MIN_DID_YOU_KNOW_FACTS} rendered did-you-know cards`);
+  }
   if (evidenceMapRowCount < 2) missing.push("two rendered evidence-map source rows");
   if (analysisItemCount < 6) missing.push("six rendered analysis items");
   const visibleRawUrls = visibleRawUrlsInRenderedHtml(source);
@@ -12743,6 +12767,10 @@ function normalizeGeneratedArticleContent(parsed, date) {
   if (typeof parsed.curiosityTitle === "string") {
     parsed.curiosityTitle = normalizeCuriosityTitleText(parsed.curiosityTitle);
   }
+  parsed.didYouKnowFacts = publishableDidYouKnowFacts(
+    parsed.didYouKnowFacts,
+    parsed,
+  );
 
   enforceAnswerFirstSections(parsed);
 
@@ -12894,7 +12922,10 @@ Requirements:
 
 function validateChunkedArticleSupport(merged) {
   requireChunkArray(merged, "quickFacts", { exact: 6, label: "chunked article fallback" });
-  requireChunkArray(merged, "didYouKnowFacts", { exact: 5, label: "chunked article fallback" });
+  requireChunkArray(merged, "didYouKnowFacts", {
+    min: MIN_DID_YOU_KNOW_FACTS,
+    label: "chunked article fallback",
+  });
   requireChunkArray(merged, "analysisGood", { min: 3, label: "chunked article fallback" });
   requireChunkArray(merged, "analysisBad", { min: 3, label: "chunked article fallback" });
   assertRequiredContentBlocks(merged);
@@ -13049,9 +13080,15 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
     } catch (err) {
       lastError = err;
       if (attempt < 2) {
+        const rejection = String(err.message || err).slice(0, 900);
+        const needsConcreteDetail =
+          /lacks a concrete (?:name|detail)|lacks a hard fact/i.test(rejection);
+        const correction = needsConcreteDetail
+          ? "For every flagged item, keep only source-supported claims and add an explicit proper name, calendar year, number, place, or institution copied from the canonical brief or its sourceFacts. Check each required item separately before returning."
+          : "Correct the exact structural or quality failure while keeping every claim source-grounded.";
         retryFeedback =
-          `\n\nPREVIOUS RESPONSE REJECTED: ${String(err.message || err).slice(0, 900)}\n` +
-          "Correct that exact failure in the next JSON response. Do not repeat or paraphrase a rejected unsupported claim.";
+          `\n\nPREVIOUS RESPONSE REJECTED: ${rejection}\n` +
+          `${correction} Do not invent a replacement detail. Return only the complete JSON object requested above, with no planning or explanation.`;
         console.warn(`Blog: ${label} attempt ${attempt} failed (${err.message}) — retrying once.`);
       }
     }
@@ -13303,21 +13340,25 @@ ${JSON.stringify(compactBrief, null, 2)}
 Write only this JSON:
 {
   "quickFacts":[{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Source Detail","value":"..."},{"label":"Confirmed Outcome","value":"..."}],
-  "didYouKnowFacts":["five distinct facts, 35-55 words each"]
+  "didYouKnowFacts":["fact 1","fact 2","fact 3","fact 4","fact 5"]
 }
 
 Requirements:
 - quickFacts must contain exactly 6 populated label/value objects.
 - Every quick-fact value must be directly supported by the source. Do not use Significance, Legacy, Impact, or Lessons labels unless the source explicitly states the claimed consequence.
 - Prefer neutral labels such as Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome, choosing only labels supported by this event's source.
-- didYouKnowFacts must contain exactly 5 distinct source-grounded facts.
+- didYouKnowFacts must contain 4 or 5 distinct source-grounded facts. Prefer 5 when the source supports them, but return 4 rather than padding with a vague or repetitive item.
 - Did You Know facts may be surprising, but surprise must come from a source fact, not an inferred consequence, motive, coincidence, fate, or policy effect.
 - Never place a raw URL in a fact. Refer to a source by name instead.
-- Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.`,
+- Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.
+- Before returning, inspect every returned fact individually: each must be 35-55 words and must literally contain at least one source-backed proper name, calendar year, number, place, or institution from the canonical brief or sourceFacts.`,
     1600,
     (parsed) => {
       requireChunkArray(parsed, "quickFacts", { exact: 6, label: "chunked article facts" });
-      requireChunkArray(parsed, "didYouKnowFacts", { exact: 5, label: "chunked article facts" });
+      requireChunkArray(parsed, "didYouKnowFacts", {
+        min: MIN_DID_YOU_KNOW_FACTS,
+        label: "chunked article facts",
+      });
       const didYouKnowAudit = auditDidYouKnowFacts({
         ...compactBrief,
         didYouKnowFacts: parsed.didYouKnowFacts,
@@ -13676,7 +13717,7 @@ Output exactly this JSON shape and no extra text:
   "organizerName": "key person or organization",
   "readingTimeMinutes": 8,
   "quickFacts": [{"label":"Event","value":"..."},{"label":"Date","value":"..."},{"label":"Location","value":"..."},{"label":"Key Figure","value":"..."},{"label":"Source Detail","value":"..."},{"label":"Confirmed Outcome","value":"..."}],
-  "didYouKnowFacts": ["five distinct facts, 35-55 words each"],
+  "didYouKnowFacts": ["four or five distinct facts, 35-55 words each"],
   "overviewParagraphs": ["two paragraphs, 125-145 words each"],
   "eyewitnessOrChronicle": ["two paragraphs, 115-135 words each"],
   "eyewitnessQuote": "",
@@ -13700,7 +13741,7 @@ Field requirements:
 - Find one source-supported niche beyond the event label: a surprising transformation, contradiction, overlooked location, hidden decision, misunderstood cause, or concrete consequence. Keep the recognizable event name in the question.
 - curiosityTitle must be fully answered by SOURCE MATERIAL and the article. Never use generic "What happened?", hype, a secret/mystery formula, or an invented premise.
 - title and eventTitle remain locked factual/date labels. They are not questions and must keep the selected event identity unchanged.
-- quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain exactly 5 distinct facts.
+- quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain 4 or 5 distinct facts. Prefer 5 when fully supported, but return 4 instead of adding vague, repetitive, or weakly sourced filler.
 - Every Quick Fact must be directly supported. Do not use Significance, Legacy, Impact, or Lessons labels unless SOURCE MATERIAL explicitly states the claimed consequence. Prefer Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome.
 - Every Did You Know fact must come from SOURCE MATERIAL. Do not invent a surprising consequence, coincidence, motive, fate, or policy effect.
 - analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
@@ -14547,7 +14588,7 @@ async function verifyFinalArticleGrounding(env, content, source) {
               "Start with the headline and central event claim. Reject a command-style or imperative headline with no historical actor. Reject any headline or body claim that assigns an action, order, execution, killing, relationship, title, or identity to a person when the source assigns it to someone else or does not support that attribution. Distinguish who ordered an act, who carried it out, and who was its target. " +
               "Reject an asserted cause, motive, forced response, enabled result, prevented result, institutional creation or abolition, or other concrete outcome unless the source explicitly supports that connection. Chronology alone is not causality: 'B happened after A' does not prove that A caused B. Verify family, marital, and succession relationships exactly rather than accepting that both names merely appear in the source. " +
               "Reject ONLY clear factual contradictions: conflated people/places/dates, invented casualty numbers, or named documents/quotes/reports presented as sources without support in the source material or established history. " +
-              "Audit each of the exactly five Did You Know facts separately. Reject any Did You Know fact whose central claim is not directly supported by the authoritative source material, even when the source does not explicitly contradict it. Identify a rejected fact by its array index. " +
+              "Audit each of the four or five Did You Know facts separately. Reject any Did You Know fact whose central claim is not directly supported by the authoritative source material, even when the source does not explicitly contradict it. Identify a rejected fact by its array index. " +
               "Pay special attention to whether recognition and arrest happened in different places and whether a cited publication existed in the stated year. " +
               "OMISSIONS ARE NOT FAILURES. The article does not need to mention, include, or elaborate on every fact in the source. Never raise an issue that the article 'does not mention', 'does not include', or 'fails to mention' something, and never fault it for leaving out background context. Only flag a fact the article actively STATES that contradicts the source. " +
               "Do not reject ordinary interpretation or clearly labeled opinion. Return exactly one JSON object: " +

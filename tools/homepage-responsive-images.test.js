@@ -42,10 +42,10 @@ test("carousel eagerly loads only its first responsive image", () => {
   assert.match(script, /fetchpriority="low" loading="lazy"/);
 });
 
-test("static asset versions advance with the responsive-image change", () => {
+test("homepage static asset versions are current", () => {
   assert.match(indexHtml, /js\/script\.js\?v=16/);
-  assert.match(indexHtml, /custom\.css\?v=33/);
+  assert.match(indexHtml, /custom\.css\?v=34/);
   assert.match(serviceWorker, /const CACHE_NAME = "thisday-v16"/);
-  assert.match(seoWorker, /custom\.css\?v=33/);
+  assert.match(seoWorker, /custom\.css\?v=34/);
   assert.match(seoWorker, /width="480" height="360" loading="lazy" decoding="async"/);
 });

@@ -429,6 +429,13 @@ body[data-page="v2"] > .people-strip {
   line-height: 1.35;
 }
 .people-group-wrap .group-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  align-self: flex-start;
+  width: max-content;
+  max-width: 100%;
+  background: #fff;
   padding: 20px 0 10px 0 !important;
 }
 .people-divider {

@@ -47,6 +47,7 @@ import {
   getArchivePostsForTopicHub,
   getArchiveHistoricalYear,
 } from "./shared/archive-indexability.js";
+import { rankHistoricalEventCandidates } from "./shared/event-ranking.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -3810,6 +3811,56 @@ function wikiRichScore(item) {
   return s;
 }
 
+function rankDateEventsBySignificance(items) {
+  const candidates = (Array.isArray(items) ? items : []).map(
+    (event, sourceIndex) => {
+      const pages = Array.isArray(event?.pages) ? event.pages : [];
+      const eventText = String(event?.text || "").toLowerCase();
+      const page =
+        pages.find((candidate) => {
+          const title = String(
+            candidate?.normalizedtitle || candidate?.title || "",
+          )
+            .replace(/_/g, " ")
+            .toLowerCase();
+          return title.length >= 4 && eventText.includes(title);
+        }) ||
+        pages[0] ||
+        {};
+      const strongestExtractLength = pages.reduce(
+        (best, candidate) =>
+          Math.max(best, String(candidate?.extract || "").length),
+        0,
+      );
+      const hasThumbnail = pages.some(
+        (candidate) =>
+          candidate?.thumbnail?.source || candidate?.originalimage?.source,
+      );
+      const sourceRichnessScore = pages.reduce(
+        (best, candidate) =>
+          Math.max(best, wikiRichScore({ pages: [candidate] })),
+        0,
+      );
+      return {
+        event,
+        sourceIndex,
+        year: event?.year,
+        text: event?.text,
+        pageTitle: String(
+          page?.normalizedtitle || page?.title || "",
+        ).replace(/_/g, " "),
+        pageDescription: page?.description || "",
+        hasThumbnail,
+        extractLength: strongestExtractLength,
+        sourceRichnessScore,
+      };
+    },
+  );
+  return rankHistoricalEventCandidates(candidates).map(
+    (candidate) => candidate.event,
+  );
+}
+
 function datePersonProfileScore(item) {
   const page = item?.pages?.[0];
   if (!page || page.type !== "standard") return 0;
@@ -4531,6 +4582,27 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .date-cluster-link i{font-size:1rem;flex-shrink:0}
 .date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
 
+.date-top-navigation{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:.75rem;align-items:center;margin:0 0 1rem}
+.date-top-navigation .date-top-link{display:flex;align-items:center;gap:.5rem;min-height:44px;padding:.65rem .85rem;border:1.5px solid var(--cbr);border-radius:8px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px}
+.date-top-navigation .date-top-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
+.date-top-navigation .date-top-link-next{justify-content:flex-end;text-align:right}
+.date-top-navigation .date-top-calendar{justify-content:center;font-weight:600}
+.date-view-tabs{display:flex;gap:.5rem;overflow-x:auto;margin:0 0 1.25rem;padding:0 0 .2rem;scrollbar-width:thin}
+.date-view-tab{display:inline-flex;align-items:center;gap:.45rem;flex:0 0 auto;padding:.55rem .8rem;border:1px solid var(--cbr);border-radius:999px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px;white-space:nowrap}
+.date-view-tab:hover{background:var(--bg-alt);color:var(--tc);text-decoration:none}
+.date-view-tab-active{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff!important}
+.major-events-summary{margin:0 0 1.25rem}
+.major-events-summary-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:.8rem}
+.major-events-summary-head p{max-width:620px;margin:0;color:var(--mu);font-size:14px}
+.major-events-list{display:grid;grid-template-columns:1fr;gap:.65rem;margin:0;padding:0;list-style:none}
+.major-event-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.8rem;align-items:center;padding:.8rem .9rem;border:1px solid var(--cbr);border-radius:9px;background:var(--bg-alt)}
+.major-event-year{display:inline-flex;align-items:center;justify-content:center;min-width:58px;padding:.3rem .55rem;border-radius:999px;background:var(--btn-bg);color:#fff;font:600 13px Georgia,serif}
+.major-event-copy{min-width:0;font-size:14px;line-height:1.45;color:var(--tc)}
+.major-event-source{display:inline-flex;align-items:center;gap:.35rem;color:var(--btn-bg);font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+.major-event-source:hover{text-decoration:underline}
+@media(min-width:900px){.major-events-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:575px){.date-top-navigation{grid-template-columns:1fr 1fr}.date-top-calendar{grid-column:1/-1;grid-row:1}.date-top-navigation .date-top-link-prev{grid-column:1}.date-top-navigation .date-top-link-next{grid-column:2}.major-events-summary-head{display:block}.major-events-summary-head p{margin-top:.35rem}.major-event-item{grid-template-columns:auto minmax(0,1fr)}.major-event-source{grid-column:2}}
+
 /* ── Events Timeline ─────────────────────────────────────────── */
 .tl-wrap{position:relative;padding:4px 0 8px}
 .tl-wrap::before{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--border);transform:translateX(-50%);z-index:0;pointer-events:none}
@@ -4675,9 +4747,13 @@ function generateEventsDateHTML(
   const births = eventsData?.births || [];
   const deaths = eventsData?.deaths || [];
 
-  const featured = events.length
-    ? events.reduce((best, e) => wikiRichScore(e) >= wikiRichScore(best) ? e : best, events[0])
-    : null;
+  const rankedEvents = rankDateEventsBySignificance(events);
+  const featured = rankedEvents[0] || null;
+  const majorEventsSummary = buildMajorEventsSummary(
+    rankedEvents.slice(1, 5),
+    mDisplay,
+    day,
+  );
   const others = events.filter((e) => e !== featured);
   // Preview strips: strongest 20 profiles (not the oldest 20), year-sorted so
   // the timeline still reads chronologically. No pageview fetches here — the
@@ -4790,7 +4866,7 @@ function generateEventsDateHTML(
     ...(featImg && { image: { "@type": "ImageObject", url: featImg } }),
     about: { "@type": "Thing", name: `Historical events on ${mDisplay} ${day}` },
     ...(events.length > 0 && {
-      mentions: events.slice(0, 6).map((ev) => ({
+      mentions: rankedEvents.slice(0, 6).map((ev) => ({
         "@type": "Event",
         name: String(ev.text || "").split(".")[0].trim(),
         startDate: String(ev.year),
@@ -4808,7 +4884,7 @@ function generateEventsDateHTML(
           "@type": "ItemList",
           name: `Historical Events on ${mDisplay} ${day}`,
           numberOfItems: events.length,
-          itemListElement: events.slice(0, 5).map((e, i) => ({
+          itemListElement: rankedEvents.slice(0, 5).map((e, i) => ({
             "@type": "ListItem",
             position: i + 1,
             item: {
@@ -5119,6 +5195,18 @@ ${siteNav()}
     </ol>
   </nav>
   <h1 class="mb-2">${escapeHtml(mDisplay)} ${day} in History</h1>
+  ${buildDateTopNavigation({
+    monthName,
+    day,
+    mDisplay,
+    prevMonthName,
+    prevMonthDisplay,
+    prevDay: prevDayNum,
+    nextMonthName,
+    nextMonthDisplay,
+    nextDay: nextDayNum,
+    currentType: "events",
+  })}
   ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     ${events.length > 0 ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-list-ul me-1"></i>${events.length} events</span>` : ""}
     ${evEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(evEraRange)}</span>` : ""}
@@ -5152,6 +5240,7 @@ ${siteNav()}
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${featTitle}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
+    ${majorEventsSummary}
     ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${others.length > 0 ? `
@@ -5205,7 +5294,6 @@ ${siteNav()}
   ${relatedBlogHtml}
   ${relatedQuestionsHtml}
   ${buildEventAnswerBlock({ mDisplay, day, featured, events, evEraRange })}
-	  ${buildDateClusterCard(monthName, day, mDisplay, "events")}
   <div class="card-box">
     <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
     <div class="explore-actions">
@@ -5324,6 +5412,91 @@ function buildDateClusterCard(monthName, day, mDisplay, currentType) {
     <p class="text-muted mb-3" style="font-size:15px">Jump between the main pages for this date to compare events, people, and the daily quiz.</p>
     <div class="date-cluster-links">${buttons}</div>
   </div>`;
+}
+
+function buildDateTopNavigation({
+  monthName,
+  day,
+  mDisplay,
+  prevMonthName,
+  prevMonthDisplay,
+  prevDay,
+  nextMonthName,
+  nextMonthDisplay,
+  nextDay,
+  currentType = "events",
+}) {
+  const views = [
+    {
+      type: "events",
+      href: `/events/${monthName}/${day}/`,
+      icon: "bi-calendar-event",
+      label: "Events",
+    },
+    {
+      type: "born",
+      href: `/born/${monthName}/${day}/`,
+      icon: "bi-person-heart",
+      label: "Birthdays",
+    },
+    {
+      type: "died",
+      href: `/died/${monthName}/${day}/`,
+      icon: "bi-flower1",
+      label: "Deaths",
+    },
+    {
+      type: "quiz",
+      href: `/quiz/${monthName}/${day}/`,
+      icon: "bi-patch-question",
+      label: "Quiz",
+    },
+  ];
+  const tabs = views
+    .map((view) => {
+      const active = view.type === currentType;
+      return `<a href="${view.href}" class="date-view-tab${active ? " date-view-tab-active" : ""}"${active ? ' aria-current="page"' : ""}><i class="bi ${view.icon}"></i>${escapeHtml(view.label)}</a>`;
+    })
+    .join("");
+
+  return `<nav aria-label="${escapeHtml(mDisplay)} ${day} date navigation">
+    <div class="date-top-navigation">
+      <a href="/events/${prevMonthName}/${prevDay}/" class="date-top-link date-top-link-prev" rel="prev"><i class="bi bi-arrow-left"></i><span>${escapeHtml(prevMonthDisplay)} ${prevDay}</span></a>
+      <a href="/" class="date-top-link date-top-calendar" aria-label="Open date calendar"><i class="bi bi-calendar3"></i><span>${escapeHtml(mDisplay)} ${day}</span></a>
+      <a href="/events/${nextMonthName}/${nextDay}/" class="date-top-link date-top-link-next" rel="next"><span>${escapeHtml(nextMonthDisplay)} ${nextDay}</span><i class="bi bi-arrow-right"></i></a>
+    </div>
+    <div class="date-view-tabs" aria-label="Explore this date">${tabs}</div>
+  </nav>`;
+}
+
+function buildMajorEventsSummary(events, mDisplay, day) {
+  const items = (Array.isArray(events) ? events : []).slice(0, 4);
+  if (!items.length) return "";
+
+  const rows = items
+    .map((event) => {
+      const sourcePage =
+        (Array.isArray(event?.pages) ? event.pages : []).find(
+          (page) => page?.content_urls?.desktop?.page,
+        ) || {};
+      const sourceUrl = sourcePage?.content_urls?.desktop?.page || "";
+      return `<li class="major-event-item">
+        <span class="major-event-year">${escapeHtml(String(event?.year || ""))}</span>
+        <span class="major-event-copy">${escapeHtml(String(event?.text || "").trim())}</span>
+        ${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" class="major-event-source" target="_blank" rel="noopener noreferrer">Source<i class="bi bi-box-arrow-up-right"></i></a>` : ""}
+      </li>`;
+    })
+    .join("");
+
+  return `<section class="major-events-summary" aria-labelledby="major-events-heading">
+    <div class="major-events-summary-head">
+      <div>
+        <h2 class="h5 mb-1" id="major-events-heading">More major events on ${escapeHtml(mDisplay)} ${day}</h2>
+        <p>The featured story and these ranked highlights form a quick summary. Every recorded event remains available in the chronology below.</p>
+      </div>
+    </div>
+    <ol class="major-events-list">${rows}</ol>
+  </section>`;
 }
 
 function buildRelatedBlogCard(entry, heading = "Related Story") {
@@ -6666,9 +6839,7 @@ function buildEventsMarkdown(monthName, dayNum, eventsData) {
   const births = (eventsData?.births || []).slice(0, 10);
   const deaths = (eventsData?.deaths || []).slice(0, 10);
 
-  const featured = events.length
-    ? events.reduce((best, e) => wikiRichScore(e) >= wikiRichScore(best) ? e : best, events[0])
-    : null;
+  const featured = rankDateEventsBySignificance(events)[0] || null;
 
   const fmtY = (y) => (y < 0 ? `${Math.abs(y)} BC` : String(y));
   const allYears = events.map((e) => parseInt(e.year)).filter(Boolean);
@@ -6881,12 +7052,10 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     }
   }
 
-  // Identify featured event and generate AI "Did You Know" facts
-  // Must use the same wikiRichScore selection as generateEventsDateHTML so DYK facts match the featured card.
+  // Identify the featured event with the same shared significance ranker used
+  // by the rendered date page and daily blog shortlist.
   const _evForFeatured = (eventsData?.events || []).slice().sort((a, b) => a.year - b.year);
-  const featuredEvent = _evForFeatured.length
-    ? _evForFeatured.reduce((best, e) => wikiRichScore(e) >= wikiRichScore(best) ? e : best, _evForFeatured[0])
-    : null;
+  const featuredEvent = rankDateEventsBySignificance(_evForFeatured)[0] || null;
   let didYouKnowFacts = [];
   const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
   const wikiSummary = featuredEvent
@@ -8348,24 +8517,15 @@ async function handleScheduledEvent(env) {
   try {
     const monthSlug = MONTHS_ALL[today.getUTCMonth()];
     const day = today.getUTCDate();
-    const featuredEvent =
-      eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) ||
-      eventsData?.events?.[0] ||
-      null;
+    const rankedEvents = rankDateEventsBySignificance(
+      eventsData?.events || [],
+    );
+    const featuredEvent = rankedEvents[0] || null;
     const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
     const wikiSummary = wikiTitle
       ? await fetchWikipediaSummaryByTitle(wikiTitle)
       : "";
-    const cronTopEvents = [];
-    const cronEvAll = eventsData?.events || [];
-    for (const e of cronEvAll) {
-      if (e.pages?.[0]?.thumbnail?.source && cronTopEvents.length < 5)
-        cronTopEvents.push(e);
-    }
-    for (const e of cronEvAll) {
-      if (!e.pages?.[0]?.thumbnail?.source && cronTopEvents.length < 5)
-        cronTopEvents.push(e);
-    }
+    const cronTopEvents = rankedEvents.slice(0, 5);
     await generateQuizForDate(
       env,
       monthSlug,
@@ -9151,26 +9311,14 @@ async function handleQuizPage(_request, env, monthSlug, day) {
     }
   }
 
-  const featuredEvent =
-    eventsData?.events?.find((e) => e.pages?.[0]?.thumbnail?.source) ||
-    eventsData?.events?.[0] ||
-    null;
+  const rankedEvents = rankDateEventsBySignificance(eventsData?.events || []);
+  const featuredEvent = rankedEvents[0] || null;
   const wikiTitle = featuredEvent ? pickRelevantWikiTitle(featuredEvent) : "";
   const wikiSummary = wikiTitle
     ? await fetchWikipediaSummaryByTitle(wikiTitle)
     : "";
 
-  // Gather top events with images for carousel slides (images-first order)
-  const topEvents = [];
-  const evAll = eventsData?.events || [];
-  for (const e of evAll) {
-    if (e.pages?.[0]?.thumbnail?.source && topEvents.length < 5)
-      topEvents.push(e);
-  }
-  for (const e of evAll) {
-    if (!e.pages?.[0]?.thumbnail?.source && topEvents.length < 5)
-      topEvents.push(e);
-  }
+  const topEvents = rankedEvents.slice(0, 5);
 
   const quiz =
     blogQuiz ||

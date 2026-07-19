@@ -56,6 +56,9 @@ import {
   publicKvWriteBudget,
   withKvWriteBudget,
 } from "./shared/kv-write-budget.js";
+import {
+  rankHistoricalEventCandidates,
+} from "./shared/event-ranking.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -1303,26 +1306,68 @@ function buildEvidenceMapBlock(content) {
     })
     .join("\n");
 
-  return `<section class="article-evidence-map mt-5" data-original-value-module="source-comparison" aria-labelledby="evidence-map-heading">
-            <h2 class="h3" id="evidence-map-heading">Evidence Map: How We Checked the Central Claim</h2>
-            <p class="evidence-map-intro">This comparison separates the event page selected for the account from the independently verified page used to corroborate it.</p>
-            <p class="evidence-map-claim"><strong>Central claim checked:</strong> ${esc(centralClaim)}</p>
-            <div class="evidence-map-table-wrap">
-              <table class="evidence-map-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Direct source</th>
-                    <th scope="col">Verification role</th>
-                    <th scope="col">Coverage</th>
-                  </tr>
-                </thead>
-                <tbody>
+  return `<details class="article-evidence-map mt-5" data-original-value-module="source-comparison" aria-labelledby="evidence-map-heading">
+            <summary class="evidence-map-summary">
+              <span class="evidence-map-title" id="evidence-map-heading">Evidence Map: How We Checked the Central Claim</span>
+              <span class="evidence-map-toggle-label" aria-hidden="true">Sources</span>
+            </summary>
+            <div class="evidence-map-content">
+              <p class="evidence-map-intro">This comparison separates the event page selected for the account from the independently verified page used to corroborate it.</p>
+              <p class="evidence-map-claim"><strong>Central claim checked:</strong> ${esc(centralClaim)}</p>
+              <div class="evidence-map-table-wrap">
+                <table class="evidence-map-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Direct source</th>
+                      <th scope="col">Verification role</th>
+                      <th scope="col">Coverage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
 ${rows}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
+              <p class="article-meta evidence-map-note">Claims are paraphrased for comparison; use the direct source links for the full record.</p>
             </div>
-            <p class="article-meta evidence-map-note">Claims are paraphrased for comparison; use the direct source links for the full record.</p>
-          </section>`;
+          </details>`;
+}
+
+function normalizeArticleEvidenceMapDisclosureHtml(body) {
+  const html = String(body || "");
+  let normalized = html.replace(
+    /<section class="([^"]*\barticle-evidence-map\b[^"]*)"([^>]*)>([\s\S]*?)<\/section>/gi,
+    (section, classes, attributes, inner) => {
+      const heading = inner.match(
+        /<h2 class="h3" id="([^"]+)">([\s\S]*?)<\/h2>/i,
+      );
+      if (!heading) return section;
+      const content = inner.replace(heading[0], "").trim();
+      return `<details class="${classes}"${attributes}>
+            <summary class="evidence-map-summary">
+              <span class="evidence-map-title" id="${heading[1]}">${heading[2]}</span>
+              <span class="evidence-map-toggle-label" aria-hidden="true">Sources</span>
+            </summary>
+            <div class="evidence-map-content">
+              ${content}
+            </div>
+          </details>`;
+    },
+  );
+  if (
+    /<details class="[^"]*\barticle-evidence-map\b/i.test(normalized) &&
+    !normalized.includes(".evidence-map-summary{") &&
+    !normalized.includes("evidence-map-disclosure-v1") &&
+    normalized.includes("</head>")
+  ) {
+    const disclosurePatch =
+      '<style>/*evidence-map-disclosure-v1*/.article-evidence-map{padding:0!important;overflow:hidden}.evidence-map-summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.25rem;cursor:pointer;color:var(--btn-bg);list-style:none}.evidence-map-summary::-webkit-details-marker{display:none}.evidence-map-summary:hover{background:#e7f0e7}.article-evidence-map[open] .evidence-map-summary{border-bottom:1px solid var(--border)}.evidence-map-title{font-size:clamp(1.05rem,2vw,1.25rem);font-weight:700;line-height:1.35}.evidence-map-toggle-label{display:inline-flex;align-items:center;gap:.4rem;flex:0 0 auto;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}.evidence-map-toggle-label::after{content:"+";display:inline-flex;align-items:center;justify-content:center;width:1.5rem;height:1.5rem;border:1px solid var(--border);border-radius:999px;font-size:1rem;line-height:1}.article-evidence-map[open] .evidence-map-toggle-label::after{content:"−"}.evidence-map-content{padding:1.25rem}</style>';
+    normalized = normalized.replace(
+      "</head>",
+      `${disclosurePatch}</head>`,
+    );
+  }
+  return normalized;
 }
 
 function buildAuthorityLinksBlock(content, _pillars = []) {
@@ -2017,7 +2062,14 @@ function sourcePageRelevanceTokens(value) {
     .filter((word) => word.length >= 3 && !SOURCE_PAGE_RELEVANCE_STOPWORDS.has(word));
 }
 
-function selectPrimarySourcePage(eventText, pages) {
+const DEDICATED_EVENT_SOURCE_PAGE_RE =
+  /\b(?:ambush|assassination|attack|battle|bombing|case|collapse|convention|crash|disaster|fire|flight\s+\d+|incident|massacre|revolution|siege|treaty|uprising)\b/i;
+
+function selectPrimarySourcePage(
+  eventText,
+  pages,
+  { preferDedicatedEventPage = true } = {},
+) {
   const normalizedPages = normalizeSourcePages(pages);
   if (normalizedPages.length <= 1) return normalizedPages[0] || null;
   const eventTokens = new Set(sourcePageRelevanceTokens(eventText));
@@ -2034,7 +2086,22 @@ function selectPrimarySourcePage(eventText, pages) {
     const normalizedTitle = normalizeForCompare(page.pageTitle);
     const exactTitleBonus = normalizedTitle && eventNormalized.includes(normalizedTitle) ? 12 : 0;
     const eventPageBonus = SOURCE_EVENT_PERSON_PAGE_RE.test(page.pageTitle) ? 8 : 0;
-    const score = titleOverlap * 18 + extractCoverage * 100 + exactTitleBonus + eventPageBonus;
+    const dedicatedEventBonus =
+      preferDedicatedEventPage &&
+      normalizedTitle &&
+      eventNormalized.includes(normalizedTitle) &&
+      DEDICATED_EVENT_SOURCE_PAGE_RE.test(page.pageTitle)
+        ? 36
+        : 0;
+    const broadContextPenalty =
+      preferDedicatedEventPage && isBroadEventContextPage(page) ? 35 : 0;
+    const score =
+      titleOverlap * 18 +
+      extractCoverage * 100 +
+      exactTitleBonus +
+      eventPageBonus +
+      dedicatedEventBonus -
+      broadContextPenalty;
     if (score > bestScore) {
       best = page;
       bestScore = score;
@@ -2380,6 +2447,25 @@ function isGenericEventPageTitle(pageTitle) {
   return genericTitles.has(normalized);
 }
 
+function isBroadEventContextPage(event) {
+  if (isGenericEventPageTitle(event?.pageTitle)) return true;
+  const description = String(
+    event?.pageDescription || event?.description || "",
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!description) return false;
+  return (
+    /^(?:country|former country|historical country|sovereign state|city|capital|largest city|political entity)\b/i.test(
+      description,
+    ) ||
+    /^\d{3,4}\s*[–—-]\s*\d{2,4}\s+(?:war|conflict)\b/i.test(description) ||
+    /\b(?:war|armed conflict)\s+in\s+(?:asia|africa|europe|america|the middle east|southeast asia)\b/i.test(
+      description,
+    )
+  );
+}
+
 function eventFamiliesFromText(...values) {
   const haystack = normalizeTopicMatchText(values.filter(Boolean).join(" "));
   if (!haystack) return [];
@@ -2413,154 +2499,44 @@ function collectRecentEventFamilies(index, targetDate, days = EVENT_FAMILY_REPEA
 
 function filterRecentEventFamilyRepeats(events, recentFamilies) {
   if (!Array.isArray(events) || events.length === 0) {
-    return { candidates: [], suppressed: [], fallbackUsed: false };
+    return {
+      candidates: [],
+      repeated: [],
+      suppressed: [],
+      fallbackUsed: false,
+    };
   }
   const recent = new Set(Array.isArray(recentFamilies) ? recentFamilies : []);
   if (recent.size === 0) {
-    return { candidates: events, suppressed: [], fallbackUsed: false };
+    return {
+      candidates: events,
+      repeated: [],
+      suppressed: [],
+      fallbackUsed: false,
+    };
   }
 
   const annotated = events.map((event) => ({
     ...event,
     eventFamilies: eventFamiliesForCandidate(event),
   }));
-  const suppressed = annotated.filter((event) =>
+  const repeated = annotated.filter((event) =>
     event.eventFamilies.some((family) => recent.has(family)),
   );
-  const candidates = annotated.filter((event) =>
-    event.eventFamilies.every((family) => !recent.has(family)),
-  );
 
-  // Keep publication possible on unusually narrow dates where every usable
-  // event repeats a recent family; otherwise the cooldown is a hard filter.
-  return candidates.length > 0
-    ? { candidates, suppressed, fallbackUsed: false }
-    : { candidates: annotated, suppressed, fallbackUsed: suppressed.length > 0 };
+  // Event-family variety is a ranking hint, never an eligibility restriction.
+  // The shared ranker applies a small, visible tie-breaker to repeated
+  // families while keeping every otherwise qualified candidate selectable.
+  return {
+    candidates: annotated,
+    repeated,
+    suppressed: [],
+    fallbackUsed: false,
+  };
 }
 
-function scoreBlogEventCandidate(event) {
-  const haystack = normalizeTopicMatchText(
-    `${event?.pageTitle || ""} ${event?.text || ""}`,
-  );
-  const title = normalizeTopicMatchText(event?.pageTitle || "");
-  let score = 0;
-
-  // Dedicated event pages are usually a better article seed than broad country
-  // or institution pages attached to an event blurb.
-  if (/^\d{4}\b/.test(title)) score += 10;
-
-  // --- Editorial tone balance (2026-06-26) ----------------------------------
-  // The daily feed used to read as a relentless catalogue of tragedies: disaster
-  // and violence keywords were worth +28 with another +24 for death verbs, while
-  // discoveries, inventions, and cultural milestones were worth nothing (and
-  // foundings were actively penalised). The weights below give constructive,
-  // world-shaping events equal footing with catastrophe so the most significant
-  // event of a date wins on merit rather than on body count.
-
-  // Tragedy / violence / disaster — significant, but no longer auto-dominant.
-  if (
-    /\b(crash|flight|helicopter|disaster|bomb\w*|shooting|massacre|assassinat\w*|deport\w*|wildfire|fire|explo\w*|earthquake|tsunami|famine|epidemic|pandemic|hijack\w*|genocide)\b/.test(
-      haystack,
-    )
-  ) {
-    score += 14;
-  }
-  // Armed conflict / political upheaval (tragedy-adjacent, kept moderate).
-  if (
-    /\b(battle|war|warfare|invasion|invades|coup|revolution|crisis|siege|uprising|rebellion|insurgency)\b/.test(
-      haystack,
-    )
-  ) {
-    score += 14;
-  }
-  // Royal/papal successions used to triple-dip: the election/coronation token
-  // earned the +22 milestone bonus, the pope/king/emperor token earned the +20
-  // figure bonus, and a "death of ..." predecessor added +10 — so any obscure
-  // medieval succession out-scored genuinely famous events (July 11 2026:
-  // Pope Adrian V at 60 beat To Kill a Mockingbird at 44 and Srebrenica at 26).
-  // A succession now earns one modest bonus and must prove real-world fame
-  // through the pageview notability re-rank instead.
-  if (ROYAL_SUCCESSION_PATTERN.test(haystack)) {
-    score += 12;
-  } else {
-    // Constructive / world-shaping milestones — discoveries, inventions, science,
-    // medicine, culture, civil rights, exploration, independence, and peace. Given
-    // equal footing with catastrophe so triumphs surface as often as tragedies.
-    if (
-      /\b(discover\w*|invent\w*|breakthrough|premiere|publish\w*|founded|founding|establish\w*|independence|treaty|peace|elect(?:ed|ion|oral|s)|coronation|crown\w*|expedition|spaceflight|orbit\w*|vaccine|nobel|unveil\w*|inaugurat\w*|charter\w*|abolish\w*|suffrage)\b/.test(
-        haystack,
-      )
-    ) {
-      score += 22;
-    }
-    // Globally recognised figures — a significance and person-richness signal.
-    if (
-      /\b(president|prime minister|foreign minister|king|queen|emperor|pope|monarch|supreme leader|head of state|john f kennedy|martin luther king|winston churchill|napoleon|atat rk|ataturk|anne boleyn)\b/.test(
-        haystack,
-      )
-    ) {
-      score += 20;
-    }
-  }
-  // Human-loss outcomes — kept low so loss does not dominate selection by itself.
-  if (
-    /\b(kill\w*|dead|dies|death|beheaded|surrenders|defeat|defeats)\b/.test(
-      haystack,
-    )
-  ) {
-    score += 10;
-  }
-  // Neutral state-action verbs.
-  if (/\b(ratifies|cedes|annexes)\b/.test(haystack)) {
-    score += 8;
-  }
-  if (
-    /\b(global audience|billion|world s first|first man made|first national|all on board|foreign minister|president of iran|treaty of guadalupe hidalgo|turkish war of independence|nullification crisis|battle of rocroi)\b/.test(
-      haystack,
-    )
-  ) {
-    score += 22;
-  }
-  if (Number.parseInt(event?.year, 10) >= 1900) score += 4;
-  if (event?.hasThumbnail) score += 4;
-  if (Number.parseInt(event?.extractLength, 10) >= 450) score += 4;
-
-  if (isGenericEventPageTitle(event?.pageTitle)) score -= 22;
-  if (
-    /\b(sports?|football club|club|team|league|match|cycling|race|birthday salute|commemoration day|awareness day|testing day|mother s day)\b/.test(
-      haystack,
-    )
-  ) {
-    score -= 32;
-  }
-  // Founded / established / opened are no longer penalised — they are now positive
-  // signals above (a nation founded, a landmark opened). Only genuinely low-value
-  // personal/administrative items stay suppressed.
-  if (/\b(birthday|appointed)\b/.test(haystack)) {
-    score -= 8;
-  }
-  if (/\b(local|regional|vocational school|municipal)\b/.test(haystack)) {
-    score -= 10;
-  }
-  // Natural/astronomical phenomena are not human-history events; penalise heavily so
-  // they never out-score major historical events that share a date.
-  if (/\b(asteroid|meteorite|comet|near-earth|meteor shower)\b/.test(haystack)) score -= 30;
-
-  return score;
-}
-
-function rankBlogEventCandidates(events) {
-  return events
-    .map((event) => ({
-      ...event,
-      editorialScore: scoreBlogEventCandidate(event),
-    }))
-    .sort((a, b) => {
-      if (b.editorialScore !== a.editorialScore) {
-        return b.editorialScore - a.editorialScore;
-      }
-      return Number.parseInt(b.year, 10) - Number.parseInt(a.year, 10);
-    });
+function rankBlogEventCandidates(events, options = {}) {
+  return rankHistoricalEventCandidates(events, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -2571,15 +2547,16 @@ function rankBlogEventCandidates(events) {
 // fails open (bonus 0, editorial order preserved).
 // ---------------------------------------------------------------------------
 const PAGEVIEW_RERANK_TOP_N = 8;
-const PAGEVIEW_NOTABILITY_MAX_BONUS = 55;
+const PAGEVIEW_NOTABILITY_MAX_BONUS = 18;
 
 function pageviewNotabilityBonus(monthlyViews) {
   const views = Number(monthlyViews);
   if (!Number.isFinite(views) || views <= 1000) return 0;
-  // log scale: 10k/month → +20, 100k → +40, capped at +55 (~1M+).
+  // Pageviews are a tie-breaker, not a replacement for editorial significance:
+  // 10k/month → +6, 100k → +12, capped at +18 (~1M+).
   return Math.min(
     PAGEVIEW_NOTABILITY_MAX_BONUS,
-    Math.round((Math.log10(views) - 3) * 20),
+    Math.round((Math.log10(views) - 3) * 6),
   );
 }
 
@@ -2610,17 +2587,37 @@ async function applyPageviewNotabilityRerank(candidates, fetchImpl = fetch) {
   const tail = candidates.slice(PAGEVIEW_RERANK_TOP_N);
   const views = await Promise.all(
     head.map((candidate) =>
-      fetchMonthlyPageviews(candidate.pageTitle, fetchImpl).catch(() => 0),
+      fetchMonthlyPageviews(
+        candidate.notabilityPageTitle || candidate.pageTitle,
+        fetchImpl,
+      ).catch(() => 0),
     ),
   );
-  const boosted = head.map((candidate, i) => ({
-    ...candidate,
-    monthlyPageviews: views[i],
-    notabilityScore: pageviewNotabilityBonus(views[i]),
-    combinedScore:
-      (Number.parseInt(candidate.editorialScore, 10) || 0) +
-      pageviewNotabilityBonus(views[i]),
-  }));
+  const boosted = head.map((candidate, i) => {
+    const notabilityContext = {
+      pageTitle: candidate.notabilityPageTitle || candidate.pageTitle,
+      pageDescription:
+        candidate.notabilityPageDescription || candidate.pageDescription,
+    };
+    const notabilityScore = isBroadEventContextPage(notabilityContext)
+      ? 0
+      : pageviewNotabilityBonus(views[i]);
+    // This is deliberately neutral, not a topic penalty. A country, city, or
+    // whole-war event keeps its complete editorial score and remains eligible;
+    // only pageviews that describe the surrounding subject rather than the
+    // date-specific event are excluded from the optional popularity bonus.
+    return {
+      ...candidate,
+      monthlyPageviews: views[i],
+      notabilityScore,
+      combinedScore:
+        (Number.parseInt(
+          candidate.selectionScore ?? candidate.editorialScore,
+          10,
+        ) || 0) +
+        notabilityScore,
+    };
+  });
   boosted.sort((a, b) => {
     if (b.combinedScore !== a.combinedScore) {
       return b.combinedScore - a.combinedScore;
@@ -2721,13 +2718,30 @@ async function chooseEventForDate(
     allEvents = (eventsData?.events || [])
       .map((event) => {
         const sourcePages = normalizeSourcePages(event?.pages || []);
-        const firstPage = selectPrimarySourcePage(event?.text, sourcePages) || {};
+        const firstPage =
+          selectPrimarySourcePage(event?.text, sourcePages, {
+            preferDedicatedEventPage: true,
+          }) || {};
+        const notabilityPage =
+          selectPrimarySourcePage(event?.text, sourcePages, {
+            preferDedicatedEventPage: false,
+          }) || firstPage;
         return {
           year: event?.year,
           text: String(event?.text || "").replace(/\s+/g, " ").trim(),
           pageTitle: String(firstPage.pageTitle || "").trim(),
           pageUrl: String(firstPage.pageUrl || "").trim(),
-          hasThumbnail: !!firstPage.imageUrl,
+          pageDescription: String(firstPage.description || "").trim(),
+          notabilityPageTitle: String(
+            notabilityPage.pageTitle || firstPage.pageTitle || "",
+          ).trim(),
+          notabilityPageDescription: String(
+            notabilityPage.description || firstPage.description || "",
+          ).trim(),
+          // A dedicated event page can be the best source even when its feed
+          // entry has no thumbnail. Any relevant page in the same event record
+          // can still supply the article image later.
+          hasThumbnail: sourcePages.some((page) => !!page.imageUrl),
           // Keep the Wikipedia intro extract (not just its length): it grounds the
           // body generation and the credibility gate (2026-06-20). The feed
           // already provides this; no extra fetch needed.
@@ -2747,17 +2761,15 @@ async function chooseEventForDate(
         );
       });
     const familyGuard = filterRecentEventFamilyRepeats(candidateEvents, recentEventFamilies);
-    if (familyGuard.suppressed.length > 0 && !familyGuard.fallbackUsed) {
+    if (familyGuard.repeated.length > 0) {
       console.log(
-        `Event selector: removed ${familyGuard.suppressed.length} candidate(s) repeating recent event families: ${recentEventFamilies.join(", ")}.`,
-      );
-    } else if (familyGuard.fallbackUsed) {
-      console.warn(
-        `Event selector: every qualified candidate repeats a recent event family; allowing fallback selection from ${recentEventFamilies.join(", ")}.`,
+        `Event selector: retaining ${familyGuard.repeated.length} candidate(s) from recent event families with a soft variety tie-breaker: ${recentEventFamilies.join(", ")}.`,
       );
     }
     candidateEvents = familyGuard.candidates;
-    candidateEvents = rankBlogEventCandidates(candidateEvents);
+    candidateEvents = rankBlogEventCandidates(candidateEvents, {
+      recentEventFamilies,
+    });
     try {
       candidateEvents = await applyPageviewNotabilityRerank(candidateEvents);
       const preview = candidateEvents
@@ -9227,6 +9239,7 @@ const WIKIPEDIA_REFERENCE_DISCOVERY_TIMEOUT_MS = 5_000;
 const INDEPENDENT_REFERENCE_DOCUMENT_TIMEOUT_MS = 5_000;
 const INDEPENDENT_SOURCE_CANDIDATE_BUDGET_MS = 12_000;
 const WIKIPEDIA_SOURCE_EXPANSION_TIMEOUT_MS = 6_000;
+const INDEPENDENT_REFERENCE_HTML_LIMIT = 600_000;
 
 function sourceFetchTimeoutMs(value, fallback) {
   const parsed = Number(value);
@@ -9301,7 +9314,12 @@ async function fetchExpandedWikipediaSourcePage(
 }
 
 const INDEPENDENT_REFERENCE_FETCH_LIMIT = 4;
-const SOURCE_READY_EVENT_CANDIDATE_LIMIT = 3;
+// Source checks proceed in bounded waves. The old hard limit of three could
+// declare that a date had no usable topic while dozens of qualified events
+// remained. Five keeps the Free-plan external-subrequest worst case bounded
+// while allowing a second wave when the first shortlist has weak references.
+const SOURCE_READY_EVENT_CANDIDATE_WAVE_SIZE = 3;
+const SOURCE_READY_EVENT_CANDIDATE_LIMIT = 5;
 const BLOCKED_REFERENCE_HOSTS = new Set([
   "amazon.com",
   "books.google.com",
@@ -9339,6 +9357,26 @@ function canonicalIndependentReferenceUrl(value) {
   }
   if (parsed.protocol === "http:") parsed.protocol = "https:";
   if (parsed.protocol !== "https:") return "";
+  const decodedPathname = (() => {
+    try {
+      return decodeURIComponent(parsed.pathname);
+    } catch {
+      return parsed.pathname;
+    }
+  })();
+  const nasaTechnicalReportId =
+    parsed.hostname.toLowerCase() === "hdl.handle.net"
+      ? decodedPathname.match(/^\/2060\/(\d+)\/?$/)?.[1]
+      : "";
+  if (nasaTechnicalReportId) {
+    // NASA's old hdl.handle.net references redirect to the stable NTRS HTML
+    // citation page. Canonicalizing before the fetch avoids spending a scarce
+    // external subrequest on the redirect and gives the verifier readable HTML
+    // instead of a legacy resolver response.
+    parsed = new URL(
+      `https://ntrs.nasa.gov/citations/${nasaTechnicalReportId}`,
+    );
+  }
   parsed.hash = "";
   for (const key of [...parsed.searchParams.keys()]) {
     if (/^(?:utm_|fbclid$|gclid$|mc_)/i.test(key)) parsed.searchParams.delete(key);
@@ -9380,6 +9418,32 @@ function independentReferenceAuthorityScore(value) {
   if (/(?:reuters\.com|apnews\.com|bbc\.(?:com|co\.uk)|nytimes\.com|washingtonpost\.com|time\.com|britannica\.com)$/.test(hostname)) return 60;
   if (hostname.endsWith(".org")) return 35;
   return 20;
+}
+
+function independentReferenceResilienceScore(value) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return 0;
+  }
+  const hostname = parsed.hostname.toLowerCase().replace(/^www\./, "");
+  if (
+    hostname === "ntrs.nasa.gov" &&
+    /^\/citations\/\d+\/?$/i.test(parsed.pathname)
+  ) {
+    return 45;
+  }
+  if (
+    /^(?:dfrc|history|hq)\.nasa\.gov$/.test(hostname) &&
+    /\.html?$/i.test(parsed.pathname)
+  ) {
+    // These legacy hosts dominate authority-only ranking but now commonly
+    // return 404s, internal errors, or PDF redirects. Keep them eligible as a
+    // fallback while trying stable first-party HTML records first.
+    return -45;
+  }
+  return 0;
 }
 
 function citationLabelFromWikitext(wikitext, url) {
@@ -9461,13 +9525,18 @@ async function fetchWikipediaExternalReferenceCandidates(
     const hostname = new URL(pageUrl).hostname.toLowerCase().replace(/^www\./, "");
     const hostCount = perHost.get(hostname) || 0;
     if (hostCount >= 2) continue;
-    const citationTitle = citationLabelFromWikitext(wikitext, pageUrl);
+    const citationTitle =
+      citationLabelFromWikitext(wikitext, String(link)) ||
+      citationLabelFromWikitext(wikitext, pageUrl);
     const referenceTokens = sourcePageRelevanceTokens(`${pageUrl} ${citationTitle}`);
     const overlap = referenceTokens.filter((token) => evidenceTokens.has(token));
     candidates.push({
       pageUrl,
       citationTitle,
-      score: independentReferenceAuthorityScore(pageUrl) + overlap.length * 12,
+      score:
+        independentReferenceAuthorityScore(pageUrl) +
+        independentReferenceResilienceScore(pageUrl) +
+        overlap.length * 12,
     });
     seenUrls.add(pageUrl);
     perHost.set(hostname, hostCount + 1);
@@ -9570,11 +9639,67 @@ async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch, opt
     ),
     candidateBudgetMs,
   );
-  const candidates = await fetchWikipediaExternalReferenceCandidates(
-    selectedEvent,
-    fetchImpl,
-    { timeoutMs: referenceListTimeoutMs },
+  const sourcePages = normalizeSourcePages(selectedEvent?.sourcePages || []);
+  const contextualPage = selectPrimarySourcePage(
+    selectedEvent?.sourceText || selectedEvent?.text || "",
+    sourcePages,
+    { preferDedicatedEventPage: false },
   );
+  const referenceSubjects = [
+    {
+      pageTitle:
+        selectedEvent?.sourcePageTitle ||
+        selectedEvent?.pageTitle ||
+        wikiTitleFromUrl(selectedEvent?.wikiUrl),
+      pageUrl: selectedEvent?.wikiUrl || "",
+      extract: selectedEvent?.sourceExtract || selectedEvent?.extract || "",
+    },
+    contextualPage,
+  ]
+    .map((page) => normalizeSourcePage(page))
+    .filter((page, index, list) => {
+      if (!page) return false;
+      const key = normalizeTopicMatchText(page.pageUrl || page.pageTitle);
+      return (
+        key &&
+        list.findIndex(
+          (candidate) =>
+            normalizeTopicMatchText(
+              candidate?.pageUrl || candidate?.pageTitle,
+            ) === key,
+        ) === index
+      );
+    })
+    .slice(0, 2);
+  // A date-specific Wikipedia page can have only archival/PDF references while
+  // its broader contextual page carries the usable NASA, museum, or government
+  // source. Search both reference lists concurrently, then rank their combined
+  // candidates by authority. The document-fetch cap below remains unchanged,
+  // so this adds at most one lightweight Wikipedia API subrequest.
+  const referenceLists = await Promise.all(
+    referenceSubjects.map((page) =>
+      fetchWikipediaExternalReferenceCandidates(
+        {
+          ...selectedEvent,
+          sourcePageTitle: page.pageTitle,
+          wikiUrl: page.pageUrl,
+          sourceExtract: page.extract || selectedEvent?.sourceExtract || "",
+        },
+        fetchImpl,
+        { timeoutMs: referenceListTimeoutMs },
+      ).catch(() => []),
+    ),
+  );
+  const seenCandidates = new Set();
+  const candidates = referenceLists
+    .flat()
+    .filter((candidate) => {
+      const key = canonicalIndependentReferenceUrl(candidate?.pageUrl);
+      if (!key || seenCandidates.has(key)) return false;
+      seenCandidates.add(key);
+      return true;
+    })
+    .sort((a, b) => b.score - a.score);
   for (const candidate of candidates.slice(0, INDEPENDENT_REFERENCE_FETCH_LIMIT)) {
     const remainingBudgetMs = deadline - Date.now();
     if (remainingBudgetMs <= 0) {
@@ -9608,7 +9733,15 @@ async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch, opt
         }
         const contentLength = Number.parseInt(response.headers?.get?.("content-length"), 10);
         if (Number.isFinite(contentLength) && contentLength > 3_000_000) return null;
-        const html = String(await response.text()).slice(0, 140000);
+        // Modern institutional pages often place the article body after a
+        // sizeable application shell. NASA's current X-15 page, for example,
+        // carries the relevant 1963/Walker passage about 250 KB into otherwise
+        // valid HTML. The response has already been downloaded by text(); keep
+        // enough of it for verification without raising the 3 MB response cap.
+        const html = String(await response.text()).slice(
+          0,
+          INDEPENDENT_REFERENCE_HTML_LIMIT,
+        );
         return verifyIndependentSourceDocument(
           selectedEvent,
           candidate,
@@ -9626,23 +9759,51 @@ async function discoverIndependentCitation(selectedEvent, fetchImpl = fetch, opt
 
 async function selectSourceReadyCandidate(candidates, fetchImpl = fetch, options = {}) {
   const list = Array.isArray(candidates) ? candidates : [];
-  for (const candidate of list.slice(0, SOURCE_READY_EVENT_CANDIDATE_LIMIT)) {
-    const selectedEvent = {
-      ...candidate,
-      eventTitle: eventTitleFromCandidate(candidate.pageTitle, candidate),
-      historicalYear: Number.parseInt(candidate.year, 10),
-      sourcePageTitle: candidate.pageTitle,
-      sourceText: candidate.text,
-      sourceExtract: candidate.extract,
-      wikiUrl: candidate.pageUrl,
-      sourcePages: candidate.sourcePages || [],
-    };
-    const citation = await discoverIndependentCitation(selectedEvent, fetchImpl, options);
-    if (!citation) continue;
-    return {
-      ...candidate,
-      sourcePages: normalizeSourcePages([...(candidate.sourcePages || []), citation]),
-    };
+  const configuredLimit = Number.parseInt(options?.candidateLimit, 10);
+  const candidateLimit = Math.min(
+    list.length,
+    Number.isInteger(configuredLimit) && configuredLimit > 0
+      ? configuredLimit
+      : SOURCE_READY_EVENT_CANDIDATE_LIMIT,
+  );
+  const configuredWaveSize = Number.parseInt(options?.waveSize, 10);
+  const waveSize =
+    Number.isInteger(configuredWaveSize) && configuredWaveSize > 0
+      ? configuredWaveSize
+      : SOURCE_READY_EVENT_CANDIDATE_WAVE_SIZE;
+
+  for (let waveStart = 0; waveStart < candidateLimit; waveStart += waveSize) {
+    const waveEnd = Math.min(candidateLimit, waveStart + waveSize);
+    if (waveStart > 0) {
+      console.warn(
+        `Event selector: no source-ready topic in candidates 1-${waveStart}; checking bounded fallback candidates ${waveStart + 1}-${waveEnd}.`,
+      );
+    }
+    for (const candidate of list.slice(waveStart, waveEnd)) {
+      const selectedEvent = {
+        ...candidate,
+        eventTitle: eventTitleFromCandidate(candidate.pageTitle, candidate),
+        historicalYear: Number.parseInt(candidate.year, 10),
+        sourcePageTitle: candidate.pageTitle,
+        sourceText: candidate.text,
+        sourceExtract: candidate.extract,
+        wikiUrl: candidate.pageUrl,
+        sourcePages: candidate.sourcePages || [],
+      };
+      const citation = await discoverIndependentCitation(
+        selectedEvent,
+        fetchImpl,
+        options,
+      );
+      if (!citation) continue;
+      return {
+        ...candidate,
+        sourcePages: normalizeSourcePages([
+          ...(candidate.sourcePages || []),
+          citation,
+        ]),
+      };
+    }
   }
   return null;
 }
@@ -11846,7 +12007,7 @@ function assertArticleStructure(html) {
     ["featured image alt text", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\balt="[^"]{5,}"/i],
     ["short answer card", /ai-answer-card/i],
     ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
-    ["source-backed evidence map", /<section class="article-evidence-map\b/i],
+    ["collapsed source-backed evidence map", /<details class="article-evidence-map\b/i],
     ["original-value module", /data-original-value-module="(?:sourced-timeline|source-comparison)"/i],
     ["evidence-map central claim", /class="evidence-map-claim"[\s\S]*?<strong>Central claim checked:<\/strong>\s*[^<\s]/i],
     ["independent evidence-map source", /data-evidence-role="independent"/i],
@@ -17226,7 +17387,16 @@ ${breadcrumbJsonLd}
       .authority-links-row{display:flex;flex-wrap:wrap;gap:8px}
       .authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;font-weight:400;color:var(--btn-bg);background:#fff;text-decoration:none}
       .authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
-      .article-evidence-map{border:1px solid var(--border);border-radius:10px;background:var(--bg-alt);padding:1.25rem}
+      .article-evidence-map{border:1px solid var(--border);border-radius:10px;background:var(--bg-alt);overflow:hidden}
+      .evidence-map-summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.25rem;cursor:pointer;color:var(--btn-bg);list-style:none}
+      .evidence-map-summary::-webkit-details-marker{display:none}
+      .evidence-map-summary:hover{background:#e7f0e7}
+      .article-evidence-map[open] .evidence-map-summary{border-bottom:1px solid var(--border)}
+      .evidence-map-title{font-size:clamp(1.05rem,2vw,1.25rem);font-weight:700;line-height:1.35}
+      .evidence-map-toggle-label{display:inline-flex;align-items:center;gap:.4rem;flex:0 0 auto;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+      .evidence-map-toggle-label::after{content:"+";display:inline-flex;align-items:center;justify-content:center;width:1.5rem;height:1.5rem;border:1px solid var(--border);border-radius:999px;font-size:1rem;line-height:1}
+      .article-evidence-map[open] .evidence-map-toggle-label::after{content:"−"}
+      .evidence-map-content{padding:1.25rem}
       .evidence-map-intro{margin:0 0 .85rem;color:var(--text-muted)}
       .evidence-map-claim{margin:0 0 1rem;padding:.9rem 1rem;border-left:3px solid var(--btn-bg);background:#fff}
       .evidence-map-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#fff}
@@ -18908,15 +19078,19 @@ function normalizeArticleAssetVersionsHtml(body) {
 function prepareHtmlResponse(body) {
   return normalizeHistoryEntityCanonicalLinksHtml(
     normalizeArticleAssetVersionsHtml(
-      normalizeArticleEntityStripPresentationHtml(
-        normalizeStackedTitleHtml(
-          normalizeImageAltHtml(
-            normalizeCrawlableLinksHtml(
-              normalizeSearchPreviewHtml(
-                normalizeHeadingAuditHtml(
-                  normalizeAiAnswerCardHtml(
-                    normalizeArticleLayoutHtml(
-                      stripDynSliderFiguresHtml(stripGoogleFundingChoices(body)),
+      normalizeArticleEvidenceMapDisclosureHtml(
+        normalizeArticleEntityStripPresentationHtml(
+          normalizeStackedTitleHtml(
+            normalizeImageAltHtml(
+              normalizeCrawlableLinksHtml(
+                normalizeSearchPreviewHtml(
+                  normalizeHeadingAuditHtml(
+                    normalizeAiAnswerCardHtml(
+                      normalizeArticleLayoutHtml(
+                        stripDynSliderFiguresHtml(
+                          stripGoogleFundingChoices(body),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -19026,6 +19200,7 @@ export const __contentGenerationTestHooks = {
   evidenceMapRowsFromContent,
   validateEvidenceMapForPublish,
   buildEvidenceMapBlock,
+  normalizeArticleEvidenceMapDisclosureHtml,
   relevantOpenLibraryBooks,
   commercialRecommendationsAreRelevant,
   buildAmazonRelatedBlock,

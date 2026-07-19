@@ -362,6 +362,17 @@ test("future articles show the verified evidence comparison near the overview", 
   const visibleText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
   assert.equal(validation.ok, true, JSON.stringify(validation.reasons));
+  assert.match(
+    html,
+    /<section class="article-evidence-map article-analysis mt-5" style="margin-top:2rem!important"/,
+  );
+  assert.match(html, /<details class="analysis-disclosure mt-2">/);
+  assert.match(html, /<summary class="analysis-disclosure-summary">/);
+  assert.match(
+    html,
+    /class="analysis-disclosure-body evidence-map-content"/,
+  );
+  assert.doesNotMatch(html, /evidence-map-summary|evidence-map-toggle-label/);
   assert.match(html, /Evidence Map: How We Checked the Central Claim/);
   assert.match(html, /Spanish Civil War · Wikipedia/);
   assert.match(html, /The Spanish Civil War · Imperial War Museums/);

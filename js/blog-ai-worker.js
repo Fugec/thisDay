@@ -1332,12 +1332,11 @@ function buildEvidenceMapBlock(content) {
     })
     .join("\n");
 
-  return `<details class="article-evidence-map mt-5" data-original-value-module="source-comparison" aria-labelledby="evidence-map-heading">
-            <summary class="evidence-map-summary">
-              <span class="evidence-map-title" id="evidence-map-heading">Evidence Map: How We Checked the Central Claim</span>
-              <span class="evidence-map-toggle-label" aria-hidden="true">Sources</span>
-            </summary>
-            <div class="evidence-map-content">
+  return `<section class="article-evidence-map article-analysis mt-5" style="margin-top:2rem!important" data-original-value-module="source-comparison" aria-labelledby="evidence-map-heading">
+            <h2 class="h3" id="evidence-map-heading">Evidence Map: How We Checked the Central Claim</h2>
+            <details class="analysis-disclosure mt-2">
+              <summary class="analysis-disclosure-summary">What the sources verify and how they were used</summary>
+              <div class="analysis-disclosure-body evidence-map-content">
               <p class="evidence-map-intro">This comparison separates the event page selected for the account from the independently verified page used to corroborate it.</p>
               <p class="evidence-map-claim"><strong>Central claim checked:</strong> ${esc(centralClaim)}</p>
               <div class="evidence-map-table-wrap">
@@ -1355,44 +1354,58 @@ ${rows}
                 </table>
               </div>
               <p class="article-meta evidence-map-note">Claims are paraphrased for comparison; use the direct source links for the full record.</p>
-            </div>
-          </details>`;
+              </div>
+            </details>
+          </section>`;
 }
 
 function normalizeArticleEvidenceMapDisclosureHtml(body) {
-  const html = String(body || "");
+  const html = String(body || "")
+    .replace(/<style>\/\*evidence-map-disclosure-v1\*\/[\s\S]*?<\/style>/gi, "")
+    .replace(/\.article-evidence-map\{[^}]*\}/gi, "")
+    .replace(/\.evidence-map-summary(?::[^{]+|\[[^\]]+\]\s+\.evidence-map-summary)?\{[^}]*\}/gi, "")
+    .replace(/\.article-evidence-map\[open\]\s+\.evidence-map-summary\{[^}]*\}/gi, "")
+    .replace(/\.evidence-map-title\{[^}]*\}/gi, "")
+    .replace(/\.evidence-map-toggle-label(?:::[^{]+)?\{[^}]*\}/gi, "")
+    .replace(/\.article-evidence-map\[open\]\s+\.evidence-map-toggle-label::after\{[^}]*\}/gi, "")
+    .replace(/\.evidence-map-content\{[^}]*\}/gi, "");
+  const canonicalShell = (attributes, headingId, heading, content) => {
+    const cleanAttributes = String(attributes || "")
+      .replace(/\sstyle="[^"]*"/gi, "")
+      .replace(/\saria-labelledby="[^"]*"/gi, "");
+    return `<section class="article-evidence-map article-analysis mt-5" style="margin-top:2rem!important"${cleanAttributes} aria-labelledby="${headingId}">
+            <h2 class="h3" id="${headingId}">${heading}</h2>
+            <details class="analysis-disclosure mt-2">
+              <summary class="analysis-disclosure-summary">What the sources verify and how they were used</summary>
+              <div class="analysis-disclosure-body evidence-map-content">
+                ${content.trim()}
+              </div>
+            </details>
+          </section>`;
+  };
   let normalized = html.replace(
+    /<details class="[^"]*\barticle-evidence-map\b[^"]*"([^>]*)>\s*<summary class="evidence-map-summary">([\s\S]*?)<\/summary>\s*<div class="evidence-map-content">([\s\S]*?)<\/div>\s*<\/details>/gi,
+    (details, attributes, summary, content) => {
+      const heading = summary.match(
+        /<span class="evidence-map-title" id="([^"]+)">([\s\S]*?)<\/span>/i,
+      );
+      return heading
+        ? canonicalShell(attributes, heading[1], heading[2], content)
+        : details;
+    },
+  );
+  normalized = normalized.replace(
     /<section class="([^"]*\barticle-evidence-map\b[^"]*)"([^>]*)>([\s\S]*?)<\/section>/gi,
     (section, classes, attributes, inner) => {
+      if (/\banalysis-disclosure\b/.test(inner)) return section;
       const heading = inner.match(
         /<h2 class="h3" id="([^"]+)">([\s\S]*?)<\/h2>/i,
       );
       if (!heading) return section;
       const content = inner.replace(heading[0], "").trim();
-      return `<details class="${classes}"${attributes}>
-            <summary class="evidence-map-summary">
-              <span class="evidence-map-title" id="${heading[1]}">${heading[2]}</span>
-              <span class="evidence-map-toggle-label" aria-hidden="true">Sources</span>
-            </summary>
-            <div class="evidence-map-content">
-              ${content}
-            </div>
-          </details>`;
+      return canonicalShell(attributes, heading[1], heading[2], content);
     },
   );
-  if (
-    /<details class="[^"]*\barticle-evidence-map\b/i.test(normalized) &&
-    !normalized.includes(".evidence-map-summary{") &&
-    !normalized.includes("evidence-map-disclosure-v1") &&
-    normalized.includes("</head>")
-  ) {
-    const disclosurePatch =
-      '<style>/*evidence-map-disclosure-v1*/.article-evidence-map{padding:0!important;overflow:hidden}.evidence-map-summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.25rem;cursor:pointer;color:var(--btn-bg);list-style:none}.evidence-map-summary::-webkit-details-marker{display:none}.evidence-map-summary:hover{background:#e7f0e7}.article-evidence-map[open] .evidence-map-summary{border-bottom:1px solid var(--border)}.evidence-map-title{font-size:clamp(1.05rem,2vw,1.25rem);font-weight:700;line-height:1.35}.evidence-map-toggle-label{display:inline-flex;align-items:center;gap:.4rem;flex:0 0 auto;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}.evidence-map-toggle-label::after{content:"+";display:inline-flex;align-items:center;justify-content:center;width:1.5rem;height:1.5rem;border:1px solid var(--border);border-radius:999px;font-size:1rem;line-height:1}.article-evidence-map[open] .evidence-map-toggle-label::after{content:"−"}.evidence-map-content{padding:1.25rem}</style>';
-    normalized = normalized.replace(
-      "</head>",
-      `${disclosurePatch}</head>`,
-    );
-  }
   return normalized;
 }
 
@@ -12242,7 +12255,8 @@ function assertArticleStructure(html) {
     ["featured image alt text", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\balt="[^"]{5,}"/i],
     ["short answer card", /ai-answer-card/i],
     ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
-    ["collapsed source-backed evidence map", /<details class="article-evidence-map\b/i],
+    ["source-backed evidence map", /<section class="article-evidence-map article-analysis mt-5\b/i],
+    ["collapsed evidence-map disclosure", /<section class="article-evidence-map article-analysis mt-5\b[\s\S]*?<details class="analysis-disclosure mt-2\b/i],
     ["original-value module", /data-original-value-module="(?:sourced-timeline|source-comparison)"/i],
     ["evidence-map central claim", /class="evidence-map-claim"[\s\S]*?<strong>Central claim checked:<\/strong>\s*[^<\s]/i],
     ["independent evidence-map source", /data-evidence-role="independent"/i],
@@ -17641,16 +17655,6 @@ ${breadcrumbJsonLd}
       .authority-links-row{display:flex;flex-wrap:wrap;gap:8px}
       .authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;font-weight:400;color:var(--btn-bg);background:#fff;text-decoration:none}
       .authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
-      .article-evidence-map{border:1px solid var(--border);border-radius:10px;background:var(--bg-alt);overflow:hidden}
-      .evidence-map-summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.25rem;cursor:pointer;color:var(--btn-bg);list-style:none}
-      .evidence-map-summary::-webkit-details-marker{display:none}
-      .evidence-map-summary:hover{background:#e7f0e7}
-      .article-evidence-map[open] .evidence-map-summary{border-bottom:1px solid var(--border)}
-      .evidence-map-title{font-size:clamp(1.05rem,2vw,1.25rem);font-weight:700;line-height:1.35}
-      .evidence-map-toggle-label{display:inline-flex;align-items:center;gap:.4rem;flex:0 0 auto;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-      .evidence-map-toggle-label::after{content:"+";display:inline-flex;align-items:center;justify-content:center;width:1.5rem;height:1.5rem;border:1px solid var(--border);border-radius:999px;font-size:1rem;line-height:1}
-      .article-evidence-map[open] .evidence-map-toggle-label::after{content:"−"}
-      .evidence-map-content{padding:1.25rem}
       .evidence-map-intro{margin:0 0 .85rem;color:var(--text-muted)}
       .evidence-map-claim{margin:0 0 1rem;padding:.9rem 1rem;border-left:3px solid var(--btn-bg);background:#fff}
       .evidence-map-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#fff}

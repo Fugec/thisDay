@@ -407,6 +407,10 @@ const ENTITY_RECOVERY_CRON = "50 0 * * *";
 // recovery. A source-rich candidate can require a long structured AI response,
 // so it receives its own scheduled invocation and external-subrequest budget.
 const EVERGREEN_HISTORY_RECOVERY_CRON = "55 0 * * *";
+// A second isolated invocation repairs at most one older pending companion.
+// Keeping backlog work separate prevents an old failure from displacing the
+// current day's required edition at 00:55.
+const EVERGREEN_HISTORY_BACKLOG_CRON = "25 1 * * *";
 const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const MIN_RELEVANT_COMMERCIAL_BOOKS = 2;
 const COMMERCIAL_RELEVANCE_STOPWORDS = new Set([
@@ -426,6 +430,7 @@ const BLOG_HISTORY_QUALITY_GATE_VERSION = 2;
 const EVERGREEN_HISTORY_EDITION_VERSION = 1;
 const ARTICLE_ORIGINAL_VALUE_GATE_VERSION = 1;
 const MIN_EVERGREEN_HISTORY_BODY_WORDS = 650;
+const MIN_EVERGREEN_HISTORY_EVIDENCE_WORDS = 700;
 const ARTICLE_HERO_CSS =
   `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
 const ARTICLE_ENTITY_STRIP_STYLE =
@@ -3109,10 +3114,28 @@ export default {
           return;
         }
         if (cron === EVERGREEN_HISTORY_RECOVERY_CRON) {
-          const guarded = await prepareBlogKvBudget(env, "maintenance");
+          // The companion edition is required publication content, not
+          // optional entity maintenance. Let it use the protected enrichment
+          // reserve so a daily article that was already accepted below the
+          // content-start threshold can still receive its /history/ page and
+          // visible discovery card.
+          const guarded = await prepareBlogKvBudget(env, "enrich");
+          if (!guarded.budget.allowPhase) return;
+          const scheduledDate = Number.isFinite(Number(event?.scheduledTime))
+            ? new Date(Number(event.scheduledTime))
+            : new Date();
+          await recoverPendingEvergreenHistory(guarded.env, {
+            preferPostSlug: buildSlug(scheduledDate),
+          }).catch((err) =>
+            console.warn(`Blog AI: evergreen history pass failed — ${err.message}`),
+          );
+          return;
+        }
+        if (cron === EVERGREEN_HISTORY_BACKLOG_CRON) {
+          const guarded = await prepareBlogKvBudget(env, "enrich");
           if (!guarded.budget.allowPhase) return;
           await recoverPendingEvergreenHistory(guarded.env).catch((err) =>
-            console.warn(`Blog AI: evergreen history pass failed — ${err.message}`),
+            console.warn(`Blog AI: evergreen history backlog pass failed — ${err.message}`),
           );
           return;
         }
@@ -7803,6 +7826,7 @@ async function generateAndStore(
         suppressPersonProfileLink(content);
         return unlinkedArticlePeople(content);
       });
+    assertEvergreenCompanionQueuedForPublish(entityMeta, slug);
 
     await savePublishedPost(env, {
       slug,
@@ -8709,6 +8733,7 @@ async function enrichPublishedPost(
       suppressPersonProfileLink(enriched);
       return unlinkedArticlePeople(enriched);
     });
+  assertEvergreenCompanionQueuedForPublish(entityMeta, slug);
 
   await chk("pre-save");
   await savePublishedPost(env, {
@@ -8909,6 +8934,74 @@ function evergreenHistoryEvidenceWordCount(evidence) {
     .filter(Boolean).length;
 }
 
+function extractEvergreenHistoryArticleParagraphsFromHtml(html) {
+  const source = String(html || "");
+  const main = source.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || source;
+  const paragraphs = [];
+  const seen = new Set();
+  for (const match of main.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)) {
+    const text = decodeSourceDocumentText(match[1]);
+    const wordCount = text.split(/\s+/).filter(Boolean).length;
+    const normalized = normalizeTopicMatchText(text);
+    if (
+      wordCount < 55 ||
+      wordCount > 180 ||
+      !normalized ||
+      seen.has(normalized)
+    ) {
+      continue;
+    }
+    seen.add(normalized);
+    paragraphs.push(text);
+    if (paragraphs.length >= 18) break;
+  }
+  return paragraphs;
+}
+
+async function restorePendingEvergreenHistoryEvidenceFromPost(env, entity) {
+  if (
+    !env?.BLOG_AI_KV ||
+    entity?.type !== "event" ||
+    entity.historyQualityGateVersion !== BLOG_HISTORY_QUALITY_GATE_VERSION ||
+    entity.needsEvergreenRefresh !== true ||
+    evergreenHistoryEvidenceWordCount(entity.evergreenEvidence) >=
+      MIN_EVERGREEN_HISTORY_EVIDENCE_WORDS
+  ) {
+    return entity;
+  }
+  const sourcePostSlug =
+    entity.sourcePostSlug ||
+    (Array.isArray(entity.relatedPosts) ? entity.relatedPosts[0] : "");
+  if (!sourcePostSlug) return entity;
+  const postHtml = await env.BLOG_AI_KV
+    .get(`${KV_POST_PREFIX}${sourcePostSlug}`)
+    .catch(() => null);
+  const recoveredParagraphs =
+    extractEvergreenHistoryArticleParagraphsFromHtml(postHtml);
+  if (recoveredParagraphs.length === 0) return entity;
+  const existingEvidence =
+    entity.evergreenEvidence && typeof entity.evergreenEvidence === "object"
+      ? entity.evergreenEvidence
+      : {};
+  const articleParagraphs = [
+    ...(Array.isArray(existingEvidence.articleParagraphs)
+      ? existingEvidence.articleParagraphs
+      : []),
+    ...recoveredParagraphs,
+  ];
+  const seen = new Set();
+  entity.evergreenEvidence = {
+    ...existingEvidence,
+    articleParagraphs: articleParagraphs.filter((paragraph) => {
+      const normalized = normalizeTopicMatchText(paragraph);
+      if (!normalized || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    }).slice(0, 18),
+  };
+  return entity;
+}
+
 function evergreenHistoryCandidateEligibility(entity, content, { primaryEvent = false } = {}) {
   const sources = verifiedEvergreenHistorySources(content);
   const hasIndependentSource = sources.some((page) => {
@@ -8936,7 +9029,10 @@ function evergreenHistoryCandidateEligibility(entity, content, { primaryEvent = 
   }
   if (sources.length < 2) reasons.push("fewer than two verified direct sources");
   if (!hasIndependentSource) reasons.push("missing an independently verified source");
-  if (evergreenHistoryEvidenceWordCount(evidence) < 700) {
+  if (
+    evergreenHistoryEvidenceWordCount(evidence) <
+    MIN_EVERGREEN_HISTORY_EVIDENCE_WORDS
+  ) {
     reasons.push("source and article evidence is too thin");
   }
   return {
@@ -9130,6 +9226,66 @@ function isHistoryEntityDiscoveryLinkEligible(entity) {
   if (entity.historyLinkEligible === true) return true;
   if (entity.historyLinkEligible === false) return false;
   return entityContentWordCount(entity) >= 300;
+}
+
+function validateEvergreenCompanionQueueForPublish(entityMeta) {
+  const companions = (Array.isArray(entityMeta) ? entityMeta : []).filter(
+    (entity) =>
+      entity?.type === "event" &&
+      entity.primaryHistoryEntity === true,
+  );
+  const reasons = [];
+  if (companions.length !== 1) {
+    reasons.push(
+      `expected exactly one primary history companion, found ${companions.length}`,
+    );
+  }
+  const companion = companions[0];
+  if (companion) {
+    if (
+      companion.historyQualityGateVersion !==
+      BLOG_HISTORY_QUALITY_GATE_VERSION
+    ) {
+      reasons.push("primary history companion is not on the current quality gate");
+    }
+    if (!hasDirectWikipediaEntitySource(companion.wikiUrl)) {
+      reasons.push("primary history companion lacks a direct event identity");
+    }
+    if (
+      !String(companion.url || "").startsWith("/history/") ||
+      !/-\d{1,4}\/$/.test(String(companion.url || ""))
+    ) {
+      reasons.push("primary history companion lacks a distinct subject-and-year URL");
+    }
+    if (
+      companion.needsEvergreenRefresh !== true &&
+      !isHistoryEntityDiscoveryLinkEligible(companion)
+    ) {
+      reasons.push("primary history companion is neither ready nor durably queued");
+    }
+    if (
+      companion.needsEvergreenRefresh === true &&
+      evergreenHistoryEvidenceWordCount(companion.evergreenEvidence) <
+        MIN_EVERGREEN_HISTORY_EVIDENCE_WORDS
+    ) {
+      reasons.push("queued history companion lacks its complete evidence package");
+    }
+  }
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    companion: companion || null,
+  };
+}
+
+function assertEvergreenCompanionQueuedForPublish(entityMeta, slug) {
+  const validation = validateEvergreenCompanionQueueForPublish(entityMeta);
+  if (!validation.ok) {
+    throw new Error(
+      `Refusing to publish ${slug}: history companion contract failed — ${validation.reasons.join("; ")}`,
+    );
+  }
+  return validation.companion;
 }
 
 function blogEntityQualityEligible(entity) {
@@ -11047,6 +11203,29 @@ async function upsertEntityRecord(env, draftEntity) {
     firstSeenAt: existing?.firstSeenAt || draftEntity.firstSeenAt,
     updatedAt: new Date().toISOString(),
   };
+  const existingEvergreenEvidenceWords =
+    evergreenHistoryEvidenceWordCount(existing?.evergreenEvidence);
+  const draftEvergreenEvidenceWords =
+    evergreenHistoryEvidenceWordCount(draftEntity?.evergreenEvidence);
+  if (
+    existing?.type === "event" &&
+    existingEvergreenEvidenceWords > draftEvergreenEvidenceWords
+  ) {
+    // The 00:50 entity-strip recovery rebuilds content from the compact blog
+    // index, which intentionally omits full article paragraphs and source
+    // extracts. Never let that smaller recovery payload erase the evidence
+    // queued at publication for the required 00:55 companion edition.
+    entity.evergreenEvidence = existing.evergreenEvidence;
+    if (
+      Array.isArray(existing.sourceLinks) &&
+      existing.sourceLinks.length >
+        (Array.isArray(draftEntity.sourceLinks)
+          ? draftEntity.sourceLinks.length
+          : 0)
+    ) {
+      entity.sourceLinks = existing.sourceLinks;
+    }
+  }
   const existingEvergreenReady =
     existing?.type === "event" &&
     evergreenHistoryEditionQuality(existing).ok;
@@ -11175,9 +11354,15 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       normalizedWikipediaEntityIdentity(entry.wikiUrl);
     if (!identity) continue;
     const current = historyByIdentity.get(identity);
+    const entryIsCurrentEvergreen =
+      entry.historyQualityGateVersion === BLOG_HISTORY_QUALITY_GATE_VERSION;
+    const currentIsCurrentEvergreen =
+      current?.historyQualityGateVersion === BLOG_HISTORY_QUALITY_GATE_VERSION;
     if (
       !current ||
+      (entryIsCurrentEvergreen && !currentIsCurrentEvergreen) ||
       (
+        entryIsCurrentEvergreen === currentIsCurrentEvergreen &&
         entry.historyLinkEligible === true &&
         current.historyLinkEligible !== true
       )
@@ -11221,12 +11406,17 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
     const existingHistoryIdentity = eventIdentity
       ? historyByIdentity.get(eventIdentity)
       : null;
+    const currentEvergreenHistoryIdentity =
+      existingHistoryIdentity?.historyQualityGateVersion ===
+        BLOG_HISTORY_QUALITY_GATE_VERSION
+        ? existingHistoryIdentity
+        : null;
     const usesEvergreenHistoryGate =
       type === "event" &&
       (
+        resolvedTerm.isPrimaryEvent === true ||
         !existingHistoryIdentity ||
-        existingHistoryIdentity.historyQualityGateVersion ===
-          BLOG_HISTORY_QUALITY_GATE_VERSION
+        Boolean(currentEvergreenHistoryIdentity)
       );
     if (eventIdentity && seenEventIdentities.has(eventIdentity)) continue;
     if (eventIdentity) seenEventIdentities.add(eventIdentity);
@@ -11257,17 +11447,17 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
         })
       : null;
     let slugPart =
-      type === "event" && existingHistoryIdentity?.slug
-        ? existingHistoryIdentity.slug
+      type === "event" && currentEvergreenHistoryIdentity?.slug
+        ? currentEvergreenHistoryIdentity.slug
         : type === "event" && resolvedTerm.isPrimaryEvent === true
           ? buildEvergreenHistorySlug(historySeed, content) || initialSlugPart
         : initialSlugPart;
     let url = type === "person"
       ? `/people/${slugPart}/`
-      : existingHistoryIdentity?.url || `/history/${slugPart}/`;
+      : currentEvergreenHistoryIdentity?.url || `/history/${slugPart}/`;
     let storageSlug =
-      type === "event" && existingHistoryIdentity?.storageSlug
-        ? existingHistoryIdentity.storageSlug
+      type === "event" && currentEvergreenHistoryIdentity?.storageSlug
+        ? currentEvergreenHistoryIdentity.storageSlug
         : slugPart;
     if (type === "event") {
       const normalizedHistory = normalizeArticleHistoryEntityMeta({
@@ -11468,10 +11658,11 @@ async function recoverRecentEntityStrips(env, { maxPosts = 3, lookbackDays = 3 }
   return repaired;
 }
 
-async function recoverPendingEvergreenHistory(env, { limit = 1 } = {}) {
-  const indexRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
-  const index = indexRaw ? JSON.parse(indexRaw) : [];
-  const candidates = index
+function selectPendingEvergreenHistoryCandidates(
+  index,
+  { limit = 1, preferPostSlug = "" } = {},
+) {
+  return (Array.isArray(index) ? index : [])
     .filter((entry) =>
       entry?.type === "event" &&
       entry.historyQualityGateVersion === BLOG_HISTORY_QUALITY_GATE_VERSION &&
@@ -11479,10 +11670,31 @@ async function recoverPendingEvergreenHistory(env, { limit = 1 } = {}) {
       entry.slug &&
       entry.wikiUrl,
     )
-    .sort((a, b) =>
-      new Date(a.updatedAt || 0) - new Date(b.updatedAt || 0),
-    )
+    .sort((a, b) => {
+      const aPreferred =
+        Boolean(preferPostSlug) &&
+        Array.isArray(a.relatedPosts) &&
+        a.relatedPosts.includes(preferPostSlug);
+      const bPreferred =
+        Boolean(preferPostSlug) &&
+        Array.isArray(b.relatedPosts) &&
+        b.relatedPosts.includes(preferPostSlug);
+      if (aPreferred !== bPreferred) return aPreferred ? -1 : 1;
+      return new Date(a.updatedAt || 0) - new Date(b.updatedAt || 0);
+    })
     .slice(0, Math.max(1, Math.min(Number(limit) || 1, 2)));
+}
+
+async function recoverPendingEvergreenHistory(
+  env,
+  { limit = 1, preferPostSlug = "" } = {},
+) {
+  const indexRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
+  const index = indexRaw ? JSON.parse(indexRaw) : [];
+  const candidates = selectPendingEvergreenHistoryCandidates(index, {
+    limit,
+    preferPostSlug,
+  });
   const result = {
     selected: candidates.length,
     promoted: 0,
@@ -11521,6 +11733,7 @@ async function recoverPendingEvergreenHistory(env, { limit = 1 } = {}) {
         entity.resolvedPageTitle || wiki.resolvedPageTitle || "";
     }
     if (entity.intro || entity.summary) delete entity.needsWikiRefresh;
+    entity = await restorePendingEvergreenHistoryEvidenceFromPost(env, entity);
     const edition = await generateEvergreenHistoryEdition(env, entity);
     if (!edition) {
       entity.historyLinkEligible = false;
@@ -19218,12 +19431,18 @@ export const __contentGenerationTestHooks = {
   unlinkedArticlePerson,
   hydrateArticleEntityImages,
   blogEntityQualityEligible,
+  validateEvergreenCompanionQueueForPublish,
   normalizedWikipediaEntityIdentity,
   buildEvergreenHistorySlug,
+  evergreenHistoryEvidenceWordCount,
   evergreenHistoryCandidateEligibility,
   evergreenHistoryEditionQuality,
+  extractEvergreenHistoryArticleParagraphsFromHtml,
   normalizeEvergreenHistoryEdition,
+  restorePendingEvergreenHistoryEvidenceFromPost,
+  selectPendingEvergreenHistoryCandidates,
   syncEvergreenHistoryDiscoveryForEntity,
+  upsertEntityRecord,
   filterGroundingIssues,
   verifyArticleGrounding,
   normalizeContentMetadata,

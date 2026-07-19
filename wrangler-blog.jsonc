@@ -61,13 +61,16 @@
   // 00:50 runs the dedicated entity-recovery pass (ENTITY_RECOVERY_CRON): a fresh
   // invocation with full subrequest budget re-links any people strips the budget-starved
   // 00:05 generation left unlinked. Must stay after the 00:35 failsafe.
-  // 00:55 promotes at most one source-qualified evergreen history candidate in
-  // a separate invocation so long-form generation cannot delay publication or
-  // person recovery.
+  // 00:55 promotes the daily article's required evergreen history companion in
+  // a separate invocation so long-form generation cannot delay the date-based
+  // article or person recovery. It uses the protected enrichment KV reserve,
+  // not the optional-maintenance budget.
+  // 01:25 retries at most one older pending companion in a separate invocation,
+  // so backlog repair never displaces the current day's 00:55 edition.
   // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 13:00 UTC
   // (about 09:00 Eastern during daylight saving time).
   "triggers": {
-    "crons": ["5,10,12,15 0 * * *", "50 0 * * *", "55 0 * * *"],
+    "crons": ["5,10,12,15 0 * * *", "50,55 0 * * *", "25 1 * * *"],
   },
 
   // KV namespaces — blog posts/index and shared events/quiz cache.

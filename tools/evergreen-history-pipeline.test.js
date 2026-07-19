@@ -192,6 +192,45 @@ test("only a primary event with independent evidence becomes an evergreen candid
   );
 });
 
+test("publication requires exactly one complete or durably queued companion", () => {
+  const candidate = hooks.evergreenHistoryCandidateEligibility(
+    historySeed(),
+    sourceRichContent(),
+    { primaryEvent: true },
+  );
+  const pending = {
+    ...historySeed(),
+    slug: candidate.slug,
+    url: `/history/${candidate.slug}/`,
+    primaryHistoryEntity: true,
+    historyQualityGateVersion: 2,
+    historyLinkEligible: false,
+    needsEvergreenRefresh: true,
+    evergreenEvidence: candidate.evidence,
+    sourceLinks: candidate.sourceLinks,
+  };
+
+  const accepted =
+    hooks.validateEvergreenCompanionQueueForPublish([pending]);
+  assert.equal(accepted.ok, true, accepted.reasons.join("; "));
+
+  const missing = hooks.validateEvergreenCompanionQueueForPublish([]);
+  assert.equal(missing.ok, false);
+  assert.match(missing.reasons.join("; "), /exactly one primary/i);
+
+  const evidenceLost =
+    hooks.validateEvergreenCompanionQueueForPublish([{
+      ...pending,
+      evergreenEvidence: {
+        ...candidate.evidence,
+        articleParagraphs: [],
+        sourcePages: [],
+      },
+    }]);
+  assert.equal(evidenceLost.ok, false);
+  assert.match(evidenceLost.reasons.join("; "), /evidence package/i);
+});
+
 test("the edition gate requires deep, distinct, source-backed content", () => {
   const ready = readyEntity();
   const quality = hooks.evergreenHistoryEditionQuality(ready);
@@ -279,4 +318,135 @@ test("a qualified edition upgrades the related article metadata and visible card
   assert.match(html, /class="story-topic-card"/);
   assert.match(html, /Why Did Apollo 11 Need a Manual Landing Decision\?/);
   assert.match(html, /Read the full history/);
+});
+
+test("entity-strip recovery cannot erase a pending companion's richer evidence", async () => {
+  const content = sourceRichContent();
+  const candidate = hooks.evergreenHistoryCandidateEligibility(
+    historySeed(),
+    content,
+    { primaryEvent: true },
+  );
+  assert.equal(candidate.ok, true, candidate.reasons.join("; "));
+  const existing = {
+    ...historySeed(),
+    slug: candidate.slug,
+    url: `/history/${candidate.slug}/`,
+    canonicalIdentity: candidate.canonicalIdentity,
+    sourceLinks: candidate.sourceLinks,
+    evergreenEvidence: candidate.evidence,
+    historyQualityGateVersion: 2,
+    historyLinkEligible: false,
+    needsEvergreenRefresh: true,
+    relatedPosts: ["20-july-2026"],
+  };
+  const compactRecoveryDraft = {
+    ...existing,
+    sourceLinks: candidate.sourceLinks.slice(0, 1),
+    evergreenEvidence: {
+      ...candidate.evidence,
+      articleParagraphs: [],
+      sourcePages: candidate.evidence.sourcePages.map((page) => ({
+        pageTitle: page.pageTitle,
+        pageUrl: page.pageUrl,
+      })),
+    },
+  };
+  const values = new Map([
+    ["entity-v1:event:apollo-11-1969", JSON.stringify(existing)],
+  ]);
+  const env = {
+    BLOG_AI_KV: {
+      async get(key) {
+        return values.get(key) ?? null;
+      },
+      async put(key, value) {
+        values.set(key, value);
+      },
+    },
+  };
+
+  const saved = await hooks.upsertEntityRecord(env, compactRecoveryDraft);
+
+  assert.equal(saved.needsEvergreenRefresh, true);
+  assert.equal(
+    hooks.evergreenHistoryEvidenceWordCount(saved.evergreenEvidence),
+    hooks.evergreenHistoryEvidenceWordCount(existing.evergreenEvidence),
+  );
+  assert.equal(saved.sourceLinks.length, candidate.sourceLinks.length);
+});
+
+test("a pending companion self-heals evidence from its stored daily article", async () => {
+  const articleParagraphs = Array.from({ length: 8 }, (_, index) =>
+    `<p>${words(`published${index}`, 95)}.</p>`,
+  ).join("");
+  const postHtml =
+    `<html><body><main><p>Published metadata is too short.</p>` +
+    `${articleParagraphs}<p>Open the quiz.</p></main></body></html>`;
+  const entity = {
+    ...historySeed(),
+    slug: "apollo-11-1969",
+    url: "/history/apollo-11-1969/",
+    historyQualityGateVersion: 2,
+    needsEvergreenRefresh: true,
+    sourcePostSlug: "20-july-2026",
+    relatedPosts: ["20-july-2026"],
+    evergreenEvidence: {
+      articleTitle: "Apollo 11 Lands on the Moon — July 20, 1969",
+      articleParagraphs: [],
+      sourcePages: [],
+    },
+  };
+  const env = {
+    BLOG_AI_KV: {
+      async get(key) {
+        return key === "post:20-july-2026" ? postHtml : null;
+      },
+    },
+  };
+
+  const restored =
+    await hooks.restorePendingEvergreenHistoryEvidenceFromPost(env, entity);
+
+  assert.equal(
+    hooks.extractEvergreenHistoryArticleParagraphsFromHtml(postHtml).length,
+    8,
+  );
+  assert.ok(
+    hooks.evergreenHistoryEvidenceWordCount(restored.evergreenEvidence) >= 700,
+  );
+});
+
+test("the current companion is selected before an older retry backlog", () => {
+  const pending = (slug, postSlug, updatedAt) => ({
+    type: "event",
+    slug,
+    wikiUrl: `https://en.wikipedia.org/wiki/${slug}`,
+    historyQualityGateVersion: 2,
+    needsEvergreenRefresh: true,
+    relatedPosts: [postSlug],
+    updatedAt,
+  });
+  const older = pending(
+    "older-event-1944",
+    "18-july-2026",
+    "2026-07-18T00:55:00.000Z",
+  );
+  const current = pending(
+    "current-event-1969",
+    "20-july-2026",
+    "2026-07-20T00:15:00.000Z",
+  );
+
+  assert.equal(
+    hooks.selectPendingEvergreenHistoryCandidates(
+      [older, current],
+      { preferPostSlug: "20-july-2026" },
+    )[0].slug,
+    current.slug,
+  );
+  assert.equal(
+    hooks.selectPendingEvergreenHistoryCandidates([current, older])[0].slug,
+    older.slug,
+  );
 });

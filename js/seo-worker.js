@@ -4493,6 +4493,19 @@ function buildDynamicOverview(featured, events, mDisplay, day) {
   };
 }
 
+const DATE_STORY_FLOAT_CSS = `.date-story-float{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));z-index:1040;width:min(720px,calc(100% - 24px));display:grid;grid-template-columns:88px minmax(0,1fr) auto;gap:.8rem;align-items:center;margin:0;padding:.8rem .9rem;border:1px solid var(--cbr);border-radius:9px;background:var(--bg-alt);box-shadow:0 18px 42px rgba(27,58,45,.22);opacity:0;pointer-events:none;transform:translate(-50%,calc(100% + 32px));transition:opacity .22s ease,transform .22s ease}
+.date-story-float-visible{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+.date-story-float-image{width:88px;height:68px;object-fit:cover;border-radius:7px;display:block;background:rgba(0,0,0,.06)}
+.date-story-float-image-placeholder{display:flex;align-items:center;justify-content:center;color:var(--btn-bg);font-size:1.25rem}
+.date-story-float-copy{display:flex;flex-direction:column;gap:2px}
+.date-story-float-kicker{font-size:12px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
+.date-story-float-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.35;color:var(--tc)}
+.date-story-float-description{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;color:var(--mu);font-size:13px;line-height:1.4}
+.date-story-float-link{display:inline-flex;align-items:center;gap:.35rem;color:var(--btn-bg);font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+.date-story-float-link:hover,.date-story-float-link:focus-visible{color:var(--btn-bg);text-decoration:none}
+@media(max-width:575px){.date-story-float{grid-template-columns:64px minmax(0,1fr);gap:.65rem;padding:.65rem .7rem}.date-story-float-image{width:64px;height:64px}.date-story-float-link{grid-column:2;justify-self:start}}
+@media(prefers-reduced-motion:reduce){.date-story-float{transition:none}}`;
+
 function getSharedPageStyles() {
   return (
     `:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08);--cb:var(--bg);--cbr:var(--border);--tc:var(--text);--mu:var(--text-muted);--lc:var(--btn-bg);--ftc:#fff;--fb:var(--bg-alt)}
@@ -4631,6 +4644,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .tl-card-actions .tl-btn{margin-top:0}
 @media(min-width:900px){.major-events-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:575px){.major-events-summary-head{display:block}.major-events-summary-head p{margin-top:.35rem}.major-event-item{grid-template-columns:auto minmax(0,1fr)}.major-event-actions{grid-column:2;justify-content:flex-start}}
+${DATE_STORY_FLOAT_CSS}
 
 /* ── Events Timeline ─────────────────────────────────────────── */
 .tl-wrap{position:relative;padding:4px 0 8px}
@@ -5201,9 +5215,10 @@ else{moreWrap.style.display='none';if(moreBtn){moreBtn.style.display='';moreBtn.
   const deathTimelineHtml = topDeaths
     .map((d, i) => renderPersonTimelineItem(d, i, true))
     .join("");
-  const relatedBlogHtml = buildRelatedBlogCard(
+  const floatingDateStoryHtml = buildFloatingDateStory(
     relatedBlogEntry,
-    `${mDisplay} ${day} in the Blog`,
+    mDisplay,
+    day,
   );
   const relatedQuestionsHtml = buildEventRelatedQuestionsBlock({
     mDisplay,
@@ -5355,7 +5370,6 @@ ${siteNav()}
   </div>`
       : ""
   }
-  ${relatedBlogHtml}
   ${relatedQuestionsHtml}
   ${buildEventAnswerBlock({ mDisplay, day, featured, events, evEraRange })}
   <div class="card-box">
@@ -5386,6 +5400,7 @@ ${siteNav()}
     </div>
   </div>
 </main>
+${floatingDateStoryHtml}
 ${dateEngagementScript}
 ${buildEventAnchorNavigationScript()}
 ${siteFooter("yr")}
@@ -5838,6 +5853,88 @@ function buildRelatedBlogCard(entry, heading = "Related Story") {
   </div>`;
 }
 
+function buildFloatingDateStory(entry, mDisplay = "", day = 0) {
+  const storyUrl =
+    typeof safeBlogStoryUrl === "function" ? safeBlogStoryUrl(entry) : "";
+  if (!storyUrl) return "";
+
+  const title = escapeHtml(
+    entry.title || "Read the related historical story",
+  );
+  const description = escapeHtml(
+    entry.description || "Explore the complete story and its historical context.",
+  );
+  const image = entry.imageUrl
+    ? `<img src="/image-proxy?src=${encodeURIComponent(entry.imageUrl)}&w=240&q=80" alt="" width="88" height="68" class="date-story-float-image" loading="lazy">`
+    : `<span class="date-story-float-image date-story-float-image-placeholder" aria-hidden="true"><i class="bi bi-journal-richtext"></i></span>`;
+  const dateLabel =
+    mDisplay && Number(day) > 0 ? ` for ${mDisplay} ${Number(day)}` : "";
+
+  return `<aside id="date-story-float" class="major-event-item date-story-float" aria-label="Featured article${escapeHtml(dateLabel)}" aria-hidden="true" inert>
+    ${image}
+    <span class="major-event-copy date-story-float-copy">
+      <span class="date-story-float-kicker">From the blog</span>
+      <strong class="date-story-float-title">${title}</strong>
+      <span class="date-story-float-description">${description}</span>
+    </span>
+    <a href="${escapeHtml(storyUrl)}" class="major-event-source date-story-float-link">Read More<i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+  </aside>
+  <script id="date-story-float-script">(function(){
+var card=document.getElementById('date-story-float');
+var trigger=document.querySelector('.dyn-slider-shell');
+if(!card||!trigger){if(card)card.remove();return;}
+var ticking=false;
+function syncDateStoryFloat(){
+var visible=trigger.getBoundingClientRect().top<=window.innerHeight*.72;
+card.classList.toggle('date-story-float-visible',visible);
+card.setAttribute('aria-hidden',visible?'false':'true');
+if(visible)card.removeAttribute('inert');else card.setAttribute('inert','');
+ticking=false;
+}
+function requestDateStoryFloatSync(){
+if(ticking)return;
+ticking=true;
+window.requestAnimationFrame(syncDateStoryFloat);
+}
+window.addEventListener('scroll',requestDateStoryFloatSync,{passive:true});
+window.addEventListener('resize',requestDateStoryFloatSync,{passive:true});
+syncDateStoryFloat();
+})();</script>`;
+}
+
+function ensureFloatingDateStoryHtml(
+  html,
+  entry,
+  mDisplay = "",
+  day = 0,
+) {
+  const source = String(html || "");
+  const floatingStory = buildFloatingDateStory(entry, mDisplay, day);
+  if (!source || !floatingStory) return source;
+  const needsStylePatch = !/\.date-story-float\{position:fixed/.test(source);
+  const stylePatch = needsStylePatch
+    ? `<style id="date-story-float-style">${DATE_STORY_FLOAT_CSS}</style>`
+    : "";
+  const withStylePatch =
+    stylePatch && source.includes("</head>")
+      ? source.replace("</head>", `${stylePatch}</head>`)
+      : source;
+  const floatingStoryPayload = `${withStylePatch === source ? stylePatch : ""}${floatingStory}`;
+
+  const existingFloatingStory =
+    /<aside id="date-story-float"[\s\S]*?<\/aside>\s*<script id="date-story-float-script">[\s\S]*?<\/script>/;
+  if (existingFloatingStory.test(withStylePatch)) {
+    return withStylePatch.replace(
+      existingFloatingStory,
+      floatingStoryPayload,
+    );
+  }
+  return withStylePatch.replace(
+    "</body>",
+    `${floatingStoryPayload}</body>`,
+  );
+}
+
 function dateRouteKey(monthName, day) {
   const normalizedMonth = String(monthName || "").toLowerCase();
   const normalizedDay = parseInt(day, 10);
@@ -5885,13 +5982,28 @@ function buildPublishedDateRouteMap(index) {
 async function findMatchingDateBlogEntry(env, monthName, day) {
   if (!env?.BLOG_AI_KV) return null;
   try {
-    const index = await env.BLOG_AI_KV.get("index", { type: "json" });
-    return buildPublishedDateRouteMap(index).get(dateRouteKey(monthName, day)) || null;
+    const now = Date.now();
+    if (
+      !findMatchingDateBlogEntry.cachedRoutes ||
+      now >= findMatchingDateBlogEntry.cacheExpiresAt
+    ) {
+      const index = await env.BLOG_AI_KV.get("index", { type: "json" });
+      findMatchingDateBlogEntry.cachedRoutes =
+        buildPublishedDateRouteMap(index);
+      findMatchingDateBlogEntry.cacheExpiresAt = now + 5 * 60 * 1000;
+    }
+    return (
+      findMatchingDateBlogEntry.cachedRoutes.get(
+        dateRouteKey(monthName, day),
+      ) || null
+    );
   } catch (_) {
     /* ignore */
   }
   return null;
 }
+findMatchingDateBlogEntry.cachedRoutes = null;
+findMatchingDateBlogEntry.cacheExpiresAt = 0;
 
 function buildBreadcrumbSchema(items) {
   return JSON.stringify({
@@ -6096,9 +6208,10 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     { name: "On This Day", item: `${siteUrl}/events/` },
     { name: `Born on ${mDisplay} ${day}`, item: canonical },
   ]);
-  const relatedBlogHtml = buildRelatedBlogCard(
+  const floatingDateStoryHtml = buildFloatingDateStory(
     relatedBlogEntry,
-    `${mDisplay} ${day} in the Blog`,
+    mDisplay,
+    day,
   );
 
   // Timeline item renderer for born page
@@ -6251,7 +6364,6 @@ ${siteNav()}
          data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
-  ${relatedBlogHtml}
   ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange, personLinks })}
   ${buildDateClusterCard(monthName, day, mDisplay, "born")}
   ${topEvents.length > 0 ? `
@@ -6277,6 +6389,7 @@ ${siteNav()}
     </div>
   </div>
 </main>
+${floatingDateStoryHtml}
 ${dateEngagementScript}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "born-date", pageSlug: `${monthName}-${day}` })}
@@ -6443,9 +6556,10 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     { name: "On This Day", item: `${siteUrl}/events/` },
     { name: `Died on ${mDisplay} ${day}`, item: canonical },
   ]);
-  const relatedBlogHtml = buildRelatedBlogCard(
+  const floatingDateStoryHtml = buildFloatingDateStory(
     relatedBlogEntry,
-    `${mDisplay} ${day} in the Blog`,
+    mDisplay,
+    day,
   );
 
   // Timeline item renderer for died page
@@ -6596,7 +6710,6 @@ ${siteNav()}
          data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
          data-ad-format="auto" data-full-width-responsive="true"></ins>
   </div>
-  ${relatedBlogHtml}
   ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange, personLinks })}
   ${buildDateClusterCard(monthName, day, mDisplay, "died")}
   ${topEvents.length > 0 ? `
@@ -6622,6 +6735,7 @@ ${siteNav()}
     </div>
   </div>
 </main>
+${floatingDateStoryHtml}
 ${dateEngagementScript}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "died-date", pageSlug: `${monthName}-${day}` })}
@@ -6822,7 +6936,18 @@ async function handleBornPage(request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        const relatedBlogEntry = await findMatchingDateBlogEntry(
+          env,
+          monthName,
+          day,
+        );
+        const withFloatingStory = ensureFloatingDateStoryHtml(
+          cached,
+          relatedBlogEntry,
+          MONTH_DISPLAY_NAMES[monthNum],
+          day,
+        );
+        const patched = withFloatingStory.includes('ai-card-patch-v2') ? withFloatingStory : withFloatingStory.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
         return new Response(withSpec, {
           headers: {
@@ -6921,7 +7046,18 @@ async function handleDiedPage(request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        const relatedBlogEntry = await findMatchingDateBlogEntry(
+          env,
+          monthName,
+          day,
+        );
+        const withFloatingStory = ensureFloatingDateStoryHtml(
+          cached,
+          relatedBlogEntry,
+          MONTH_DISPLAY_NAMES[monthNum],
+          day,
+        );
+        const patched = withFloatingStory.includes('ai-card-patch-v2') ? withFloatingStory : withFloatingStory.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
         return new Response(withSpec, {
           headers: {
@@ -7309,8 +7445,18 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const normalizedControls = ensureEventAnchorNavigationHtml(
-          normalizeCachedDatePageControlsHtml(cached, { monthName, day }),
+        const relatedBlogEntry = await findMatchingDateBlogEntry(
+          env,
+          monthName,
+          day,
+        );
+        const normalizedControls = ensureFloatingDateStoryHtml(
+          ensureEventAnchorNavigationHtml(
+            normalizeCachedDatePageControlsHtml(cached, { monthName, day }),
+          ),
+          relatedBlogEntry,
+          MONTH_DISPLAY_NAMES[monthNum],
+          day,
         );
         const patched = normalizedControls.includes('ai-card-patch-v2') ? normalizedControls : normalizedControls.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
@@ -9999,16 +10145,35 @@ export default {
       const cached = await caches.default.match(cacheKey);
       if (cached) {
         const cachedDateRoute = url.pathname.match(
-          /^\/events\/([a-z]+)\/(\d+)\/?$/,
+          /^\/(events|born|died)\/([a-z]+)\/(\d+)\/?$/,
         );
-        const cachedBody = cachedDateRoute
-          ? ensureEventAnchorNavigationHtml(
-              normalizeCachedDatePageControlsHtml(await cached.text(), {
-                monthName: cachedDateRoute[1],
-                day: Number(cachedDateRoute[2]),
+        let cachedBody = cached.body;
+        if (cachedDateRoute) {
+          const pageType = cachedDateRoute[1];
+          const monthName = cachedDateRoute[2];
+          const day = Number(cachedDateRoute[3]);
+          const monthNum = MONTH_NUM_MAP[monthName];
+          const relatedBlogEntry = await findMatchingDateBlogEntry(
+            env,
+            monthName,
+            day,
+          );
+          let datePageHtml = await cached.text();
+          if (pageType === "events") {
+            datePageHtml = ensureEventAnchorNavigationHtml(
+              normalizeCachedDatePageControlsHtml(datePageHtml, {
+                monthName,
+                day,
               }),
-            )
-          : cached.body;
+            );
+          }
+          cachedBody = ensureFloatingDateStoryHtml(
+            datePageHtml,
+            relatedBlogEntry,
+            MONTH_DISPLAY_NAMES[monthNum] || "",
+            day,
+          );
+        }
         const r = new Response(cachedBody, {
           status: cached.status,
           statusText: cached.statusText,
@@ -10059,6 +10224,9 @@ export const __datePageEngagementTestHooks = {
   buildEventAnchorNavigationScript,
   ensureEventAnchorNavigationHtml,
   normalizeCachedDatePageControlsHtml,
+  buildFloatingDateStory,
+  ensureFloatingDateStoryHtml,
+  buildPublishedDateRouteMap,
 };
 
 export const __personIdentityTestHooks = {

@@ -60,11 +60,11 @@ test("cached date pages receive the same control classes without a KV rewrite", 
   );
   assert.match(
     seoWorker,
-    /const normalizedControls = ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /const normalizedControls = ensureFloatingDateStoryHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
   );
   assert.match(
     seoWorker,
-    /const kvKey = `gen-post-v48-[\s\S]*?const normalizedControls = ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /const kvKey = `gen-post-v48-[\s\S]*?const normalizedControls = ensureFloatingDateStoryHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
   );
   assert.match(seoWorker, /navigationBlock\.match\(\/<a\\b/);
   assert.match(seoWorker, /link\.includes\(className\)/);
@@ -255,11 +255,11 @@ test("event fragments reveal hidden chronology cards before scrolling", () => {
   );
   assert.match(
     seoWorker,
-    /ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /ensureFloatingDateStoryHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
   );
   assert.match(
     seoWorker,
-    /normalizeCachedDatePageControlsHtml\(await cached\.text\(\), \{\s*monthName: cachedDateRoute\[1\],\s*day: Number\(cachedDateRoute\[2\]\),\s*\}\)/,
+    /if \(pageType === "events"\) \{\s*datePageHtml = ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(datePageHtml, \{\s*monthName,\s*day,\s*\}\),\s*\)/,
   );
 });
 

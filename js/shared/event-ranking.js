@@ -25,6 +25,12 @@ const VIOLENCE_OR_DISASTER_PATTERN =
   /\b(crash|crashes|crashed|disaster|bomb\w*|shooting|massacre|assassinat\w*|deport\w*|wildfire|fire|explo\w*|earthquake|tsunami|famine|epidemic|pandemic|hijack\w*|genocide)\b/;
 const ARMED_CONFLICT_PATTERN =
   /\b(battle|war|warfare|invasion|invades|coup|revolution|crisis|siege|uprising|rebellion|insurgency)\b/;
+const CONSTRUCTIVE_MILESTONE_PATTERN =
+  /\b(discover\w*|invent\w*|breakthrough|premiere|publish\w*|founded|founding|establish\w*|independence|treaty|peace|elect(?:ed|ion|oral|s)|coronation|crown\w*|expedition|spaceflight|orbit\w*|vaccine|nobel|unveil\w*|inaugurat\w*|charter\w*|abolish\w*|suffrage)\b/;
+const ROUTINE_RESULT_PATTERN =
+  /\b(regular season|preseason|friendly match|league match|exhibition match|qualifying match|is traded to|signs? (?:for|with) (?:the )?[a-z0-9 ]{2,40} club|appointed (?:head )?coach|scores? (?:his|her|their) \d+(?:st|nd|rd|th) career)\b/;
+const ROUTINE_ASTRONOMY_PATTERN =
+  /\b(passes within [a-z0-9,. ]{0,45}(?:earth|moon)|closest approach to (?:earth|the moon)|meteor shower peaks?)\b/;
 
 export function normalizeRankingText(value) {
   return String(value || "")
@@ -60,7 +66,9 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
 
   // Dedicated year-prefixed event pages are usually a stronger article seed
   // than a country, institution, or person page attached to the feed entry.
-  if (/^\d{4}\b/.test(title)) add(10, "dedicated dated event page");
+  // This is deliberately a small source-quality tie-breaker: a dated title is
+  // not evidence that the underlying event is historically more important.
+  if (/^\d{4}\b/.test(title)) add(6, "dedicated dated event page");
 
   // Destructive events remain historically important, but human loss alone
   // must not dominate constructive and civic milestones.
@@ -68,7 +76,7 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
   const hasArmedConflict = ARMED_CONFLICT_PATTERN.test(haystack);
   if (hasViolenceOrDisaster || hasArmedConflict) {
     add(
-      14,
+      hasArmedConflict && !hasViolenceOrDisaster ? 14 : 8,
       hasViolenceOrDisaster && hasArmedConflict
         ? "violence, disaster, or armed conflict"
         : hasViolenceOrDisaster
@@ -85,16 +93,19 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
     const constructiveHaystack = haystack
       .replace(/\bwars? of [a-z0-9 ]{0,50}\bindependence\b/g, " ")
       .replace(/\bwar of national liberation\b/g, " ");
+    const hasNonDestructiveLaunch =
+      /\blaunch\w*\b/.test(constructiveHaystack) &&
+      !hasViolenceOrDisaster &&
+      !hasArmedConflict;
     if (
-      /\b(discover\w*|invent\w*|breakthrough|premiere|publish\w*|founded|founding|establish\w*|independence|treaty|peace|elect(?:ed|ion|oral|s)|coronation|crown\w*|expedition|launch\w*|spaceflight|orbit\w*|vaccine|nobel|unveil\w*|inaugurat\w*|charter\w*|abolish\w*|suffrage)\b/.test(
-        constructiveHaystack,
-      )
+      CONSTRUCTIVE_MILESTONE_PATTERN.test(constructiveHaystack) ||
+      hasNonDestructiveLaunch
     ) {
       add(22, "constructive or world-shaping milestone");
     }
     if (
       /\b(john f kennedy|martin luther king|winston churchill|napoleon|atat rk|ataturk|anne boleyn)\b/.test(
-        haystack,
+        title,
       )
     ) {
       add(20, "globally significant public figure");
@@ -103,7 +114,7 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
         haystack,
       )
     ) {
-      add(8, "national political officeholder");
+      add(12, "national political officeholder");
     }
   }
 
@@ -121,25 +132,19 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
     add(14, "first, landmark, or record");
   }
 
+  const humanLossHaystack = haystack
+    .replace(/\bdeath penalty\b/g, " ")
+    .replace(/\bto kill a mockingbird\b/g, " ");
   if (
     /\b(kill\w*|dead|dies|death|beheaded|surrenders|defeat|defeats)\b/.test(
-      haystack,
+      humanLossHaystack,
     )
   ) {
-    add(10, "human-loss outcome");
+    add(4, "human-loss outcome");
   }
   if (/\b(ratifies|cedes|annexes)\b/.test(haystack)) {
     add(8, "state action");
   }
-  if (
-    /\b(global audience|billion|all on board|foreign minister|president of iran|treaty of guadalupe hidalgo|turkish war of independence|nullification crisis|battle of rocroi)\b/.test(
-      haystack,
-    )
-  ) {
-    add(22, "explicit global-significance phrase");
-  }
-
-  if (Number.parseInt(event?.year, 10) >= 1900) add(4, "modern source context");
   if (event?.hasThumbnail) add(4, "usable image");
   if (Number.parseInt(event?.extractLength, 10) >= 450) {
     add(4, "substantive source extract");
@@ -148,23 +153,18 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
   if (sharedIsGenericEventPageTitle(event?.pageTitle)) {
     add(-22, "generic source page");
   }
-  if (
-    /\b(sports?|football club|club|team|league|match|cycling|race|birthday salute|commemoration day|awareness day|testing day|mother s day)\b/.test(
-      haystack,
-    )
-  ) {
-    add(-32, "routine sports or commemorative item");
-  }
-  if (/\b(birthday|appointed)\b/.test(haystack)) {
-    add(-8, "routine personal or administrative item");
-  }
-  if (/\b(local|regional|vocational school|municipal)\b/.test(haystack)) {
-    add(-10, "primarily local scope");
+  // Topic categories never affect eligibility and are not penalized merely
+  // for being sports, astronomy, local history, or a commemoration. Only a
+  // narrowly recognizable routine result receives a modest tie-breaker.
+  if (ROUTINE_RESULT_PATTERN.test(haystack)) {
+    add(-8, "routine result or transaction");
   }
   if (
-    /\b(asteroid|meteorite|comet|near earth|meteor shower)\b/.test(haystack)
+    ROUTINE_ASTRONOMY_PATTERN.test(haystack) &&
+    !LANDMARK_PATTERN.test(haystack) &&
+    !CONSTRUCTIVE_MILESTONE_PATTERN.test(haystack)
   ) {
-    add(-30, "natural or astronomical phenomenon");
+    add(-8, "routine astronomical occurrence");
   }
 
   const recentFamilies = new Set(

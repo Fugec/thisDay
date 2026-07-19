@@ -7120,11 +7120,14 @@ async function generateAndStore(
         { type: "json" },
       );
       if (blocked) {
-        for (const title of [blocked.pageTitle, blocked.eventTitle]) {
-          if (title) takenAllTime.push(title);
+        const blockedEvents = Array.isArray(blocked.events) ? blocked.events : [blocked];
+        for (const blockedEvent of blockedEvents) {
+          for (const title of [blockedEvent?.pageTitle, blockedEvent?.eventTitle]) {
+            if (title) takenAllTime.push(title);
+          }
         }
         console.warn(
-          `Blog AI: excluding grounding-blocked event "${blocked.pageTitle || blocked.eventTitle}" for ${buildSlug(now)}.`,
+          `Blog AI: excluding ${blockedEvents.length} grounding-blocked event(s) for ${buildSlug(now)}: ${blockedEvents.map((e) => e?.pageTitle || e?.eventTitle).filter(Boolean).join(", ")}.`,
         );
       }
     } catch (err) {
@@ -8493,6 +8496,11 @@ async function enrichPublishedPost(
       ...scanIntraPageDuplication(content),
     ];
     if (boundedIssues.length > 0) {
+      // Bounded mode cannot repair, and a stored draft that keeps failing this
+      // scan wedges every later recovery round on the same rejection. Block the
+      // event and drop the draft/source package so the next round regenerates a
+      // different topic instead.
+      await markGroundingBlockedEvent(env, slug, content, boundedIssues);
       throw new Error(
         `Bounded recovery rejected the draft before publication: ${boundedIssues.join("; ")}`,
       );
@@ -14047,7 +14055,10 @@ const GROUNDING_CLAIM_RISK_RULES = [
   },
   {
     label: "coercive outcome",
-    claim: /\b(?:compel(?:led|s|ling)?|forc(?:e[ds]?|ing))\b/i,
+    // Claim side matches only unambiguous coercion verbs. Bare "force(s)" is
+    // usually the military noun ("invading forces", "Allied forces"), which is
+    // not a coercion claim and would demand support the source can never give.
+    claim: /\b(?:compel(?:led|s|ling)?|forc(?:ed|ing))\b/i,
     support: /\b(?:compel(?:led|s|ling)?|forc(?:e[ds]?|ing))\b/i,
   },
   {
@@ -14566,14 +14577,24 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
 
 async function markGroundingBlockedEvent(env, slug, content, reasons) {
   try {
+    const key = `${KV_BLOCKED_EVENT_PREFIX}${slug}`;
+    // Accumulate: a second blocked event the same day must not un-block the
+    // first, or regeneration can bounce between the same two bad topics.
+    const existing = await env.BLOG_AI_KV.get(key, { type: "json" }).catch(() => null);
+    const events = Array.isArray(existing?.events)
+      ? existing.events
+      : existing
+        ? [existing]
+        : [];
+    events.push({
+      pageTitle: content?.sourcePageTitle || "",
+      eventTitle: content?.eventTitle || "",
+      reasons: (Array.isArray(reasons) ? reasons : []).slice(0, 5),
+      ts: new Date().toISOString(),
+    });
     await env.BLOG_AI_KV.put(
-      `${KV_BLOCKED_EVENT_PREFIX}${slug}`,
-      JSON.stringify({
-        pageTitle: content?.sourcePageTitle || "",
-        eventTitle: content?.eventTitle || "",
-        reasons: (Array.isArray(reasons) ? reasons : []).slice(0, 5),
-        ts: new Date().toISOString(),
-      }),
+      key,
+      JSON.stringify({ events }),
       { expirationTtl: 3 * 86_400 },
     );
     await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`);

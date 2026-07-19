@@ -281,6 +281,113 @@ test("legacy article people strips adopt the homepage presentation at serve time
   );
 });
 
+test("legacy quiz float bars adopt the compact floating-card presentation", () => {
+  const legacy = `<html><head><style>.kept{color:red}#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;background:#fff}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:#1a3a2d;color:#fff}#tdq-float-btn:hover{background:#1a3a2d}</style></head><body>
+<div id="tdq-float-bar"><button id="tdq-float-btn"><i class="bi bi-patch-question-fill"></i> Quiz This Day</button></div>
+<script>(function(){var bar=document.getElementById('tdq-float-bar');function showBar(){bar.classList.add('tdq-float-visible');}function hideBar(){bar.classList.remove('tdq-float-visible');}})();</script>
+</body></html>`;
+
+  const normalized = blogHooks.normalizeTdqFloatBarHtml(legacy);
+
+  assert.match(normalized, /id="tdq-float-card-style"/);
+  assert.match(
+    normalized,
+    /#tdq-float-bar\{position:fixed;left:50%;bottom:max\(12px,env\(safe-area-inset-bottom\)\);z-index:1040;width:min\(720px,calc\(100% - 24px\)\);display:grid;grid-template-columns:88px minmax\(0,1fr\) auto/,
+  );
+  assert.match(
+    normalized,
+    /border:1px solid var\(--border,#cfe0cf\);border-radius:9px;background:var\(--bg-alt,#f2f7f2\);box-shadow:0 18px 42px rgba\(27,58,45,.22\)/,
+  );
+  assert.match(
+    normalized,
+    /<aside id="tdq-float-bar" class="major-event-item tdq-float-bar" aria-label="Article quiz" aria-hidden="true" inert>/,
+  );
+  assert.match(normalized, /class="tdq-float-kicker">Quick quiz<\/span>/);
+  assert.match(normalized, /class="tdq-float-title">Test Your Knowledge<\/strong>/);
+  assert.match(normalized, /id="tdq-float-btn"[^>]*>Start Quiz<i class="bi bi-arrow-right"/);
+  assert.match(normalized, /\.kept\{color:red\}/);
+  assert.doesNotMatch(normalized, /bottom:0;left:0;right:0/);
+  assert.match(
+    normalized,
+    /function showBar\(\)\{bar\.classList\.add\('tdq-float-visible'\);bar\.setAttribute\('aria-hidden','false'\);bar\.removeAttribute\('inert'\);\}/,
+  );
+  assert.match(
+    normalized,
+    /function hideBar\(\)\{bar\.classList\.remove\('tdq-float-visible'\);bar\.setAttribute\('aria-hidden','true'\);bar\.setAttribute\('inert',''\);\}/,
+  );
+  assert.equal(blogHooks.normalizeTdqFloatBarHtml(normalized), normalized);
+});
+
+test("stored quiz float bars are retriggered on the Did You Know slider", () => {
+  const storedPost = `<html><head></head><body>
+<article>
+<h2 class="h3">Did You Know?</h2>
+<section class="dyn-slider-shell" aria-label="Did you know"></section>
+<h2 class="h3">First Reports From the Scene</h2>
+</article>
+<aside id="tdq-float-bar" class="major-event-item tdq-float-bar" aria-label="Article quiz" aria-hidden="true" inert></aside>
+<script>
+  (function(){
+    var bar=document.getElementById('tdq-float-bar');
+    // Trigger: show/hide bar based on Eyewitness heading scroll position
+    var h2s=document.querySelectorAll('h2');
+    var trigger=null;
+    for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}
+    if(trigger){
+      function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else{hideBar();}}
+      window.addEventListener('scroll',updateBar,{passive:true});
+    } else {
+      document.addEventListener('scroll',function onScroll(){
+        var d=document.documentElement;
+        var total=d.scrollHeight-d.clientHeight;
+        if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}
+      },{passive:true});
+    }
+  })();
+</script>
+</body></html>`;
+
+  const normalized = blogHooks.normalizeTdqFloatBarHtml(storedPost);
+
+  assert.ok(normalized.includes(blogHooks.TDQ_FLOAT_TRIGGER_JS));
+  assert.match(
+    normalized,
+    /var trigger=document\.querySelector\('\.dyn-slider-shell'\)/,
+  );
+  assert.match(normalized, /window\.innerHeight\*\.72/);
+  assert.doesNotMatch(normalized, /indexOf\('Eyewitness'\)/);
+  assert.doesNotMatch(normalized, /var trigger=null/);
+  assert.doesNotMatch(normalized, /scrollTop\/total>0\.35/);
+  assert.equal(blogHooks.normalizeTdqFloatBarHtml(normalized), normalized);
+
+  const singleLinePost = storedPost.replace(
+    /\n\s*(?=var |for\(|if\(|document\.|window\.|\} else \{|\},\{passive|\}\s*\n)/g,
+    "",
+  );
+  const singleLineNormalized =
+    blogHooks.normalizeTdqFloatBarHtml(singleLinePost);
+  assert.doesNotMatch(singleLineNormalized, /indexOf\('Eyewitness'\)/);
+  assert.ok(singleLineNormalized.includes(blogHooks.TDQ_FLOAT_TRIGGER_JS));
+});
+
+test("the quiz float trigger uses the Did You Know slider in every template copy", () => {
+  const workerSource = readFileSync(
+    new URL("../js/blog-ai-worker.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(workerSource, /indexOf\('Eyewitness'\)/);
+  const triggerUsages =
+    workerSource.match(/\$\{TDQ_FLOAT_TRIGGER_JS\}/g) || [];
+  assert.ok(triggerUsages.length >= 2);
+  assert.match(
+    blogHooks.TDQ_FLOAT_TRIGGER_JS,
+    /^var trigger=document\.querySelector\('\.dyn-slider-shell'\);/,
+  );
+  assert.match(blogHooks.TDQ_FLOAT_TRIGGER_JS, /window\.innerHeight\*\.72/);
+  assert.match(blogHooks.TDQ_FLOAT_TRIGGER_JS, /requestAnimationFrame/);
+});
+
 test("analysis is event-labelled and collapsed behind a native disclosure", () => {
   const analysisItems = (prefix) => Array.from({ length: 3 }, (_, index) => ({
     title: `${prefix} ${index + 1}`,

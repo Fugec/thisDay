@@ -5909,8 +5909,25 @@ function ensureFloatingDateStoryHtml(
   day = 0,
 ) {
   const source = String(html || "");
+  const existingFloatingStory =
+    /<aside id="date-story-float"[\s\S]*?<\/aside>\s*<script id="date-story-float-script">[\s\S]*?<\/script>/;
+  const removeFloatingStory = (value) =>
+    String(value || "")
+      .replace(
+        /<style id="date-story-float-style">[\s\S]*?<\/style>/g,
+        "",
+      )
+      .replace(existingFloatingStory, "")
+      .replace(
+        /<aside id="date-story-float"[\s\S]*?<\/aside>/g,
+        "",
+      )
+      .replace(
+        /<script id="date-story-float-script">[\s\S]*?<\/script>/g,
+        "",
+      );
   const floatingStory = buildFloatingDateStory(entry, mDisplay, day);
-  if (!source || !floatingStory) return source;
+  if (!source || !floatingStory) return removeFloatingStory(source);
   const needsStylePatch = !/\.date-story-float\{position:fixed/.test(source);
   const stylePatch = needsStylePatch
     ? `<style id="date-story-float-style">${DATE_STORY_FLOAT_CSS}</style>`
@@ -5921,8 +5938,6 @@ function ensureFloatingDateStoryHtml(
       : source;
   const floatingStoryPayload = `${withStylePatch === source ? stylePatch : ""}${floatingStory}`;
 
-  const existingFloatingStory =
-    /<aside id="date-story-float"[\s\S]*?<\/aside>\s*<script id="date-story-float-script">[\s\S]*?<\/script>/;
   if (existingFloatingStory.test(withStylePatch)) {
     return withStylePatch.replace(
       existingFloatingStory,
@@ -5974,9 +5989,58 @@ function buildPublishedDateRouteMap(index) {
   const routes = new Map();
   for (const entry of Array.isArray(index) ? index : []) {
     const key = blogEntryDateRouteKey(entry);
-    if (key && !routes.has(key)) routes.set(key, entry);
+    if (!key) continue;
+    const current = routes.get(key);
+    const publishedAt = Date.parse(
+      entry?.publishedAt || entry?.datePublished || entry?.publicationDate || "",
+    );
+    const currentPublishedAt = Date.parse(
+      current?.publishedAt ||
+        current?.datePublished ||
+        current?.publicationDate ||
+        "",
+    );
+    const slugYear = Number.parseInt(
+      String(entry?.slug || "").match(/-(\d{4})(?:\/)?$/)?.[1] || "0",
+      10,
+    );
+    const currentSlugYear = Number.parseInt(
+      String(current?.slug || "").match(/-(\d{4})(?:\/)?$/)?.[1] || "0",
+      10,
+    );
+    const recency = Number.isFinite(publishedAt)
+      ? publishedAt
+      : slugYear
+        ? Date.UTC(slugYear, 0, 1)
+        : 0;
+    const currentRecency = Number.isFinite(currentPublishedAt)
+      ? currentPublishedAt
+      : currentSlugYear
+        ? Date.UTC(currentSlugYear, 0, 1)
+        : 0;
+    if (!current || recency > currentRecency) routes.set(key, entry);
   }
   return routes;
+}
+
+async function verifyPublishedDateBlogEntry(env, entry) {
+  const slug = String(entry?.slug || "").trim();
+  if (!safeBlogStoryUrl(entry) || !env?.BLOG_AI_KV || !slug) return null;
+  const verificationCache = findMatchingDateBlogEntry.verifiedSlugs;
+  const cached = verificationCache.get(slug);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.exists ? entry : null;
+  }
+  const storedPost = await env.BLOG_AI_KV.get(`post:${slug}`);
+  const exists =
+    typeof storedPost === "string"
+      ? storedPost.trim().length > 0
+      : Boolean(storedPost);
+  verificationCache.set(slug, {
+    exists,
+    expiresAt: Date.now() + 5 * 60 * 1000,
+  });
+  return exists ? entry : null;
 }
 
 async function findMatchingDateBlogEntry(env, monthName, day) {
@@ -5990,13 +6054,16 @@ async function findMatchingDateBlogEntry(env, monthName, day) {
       const index = await env.BLOG_AI_KV.get("index", { type: "json" });
       findMatchingDateBlogEntry.cachedRoutes =
         buildPublishedDateRouteMap(index);
+      findMatchingDateBlogEntry.verifiedSlugs = new Map();
       findMatchingDateBlogEntry.cacheExpiresAt = now + 5 * 60 * 1000;
     }
-    return (
+    const entry =
       findMatchingDateBlogEntry.cachedRoutes.get(
         dateRouteKey(monthName, day),
-      ) || null
-    );
+      ) || null;
+    return entry
+      ? await verifyPublishedDateBlogEntry(env, entry)
+      : null;
   } catch (_) {
     /* ignore */
   }
@@ -6004,6 +6071,7 @@ async function findMatchingDateBlogEntry(env, monthName, day) {
 }
 findMatchingDateBlogEntry.cachedRoutes = null;
 findMatchingDateBlogEntry.cacheExpiresAt = 0;
+findMatchingDateBlogEntry.verifiedSlugs = new Map();
 
 function buildBreadcrumbSchema(items) {
   return JSON.stringify({
@@ -7615,9 +7683,12 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     getBlogIndexEntries(env),
     loadPersonEntityLinkMap(env),
   ]);
-  const relatedBlogEntry =
+  const indexedBlogEntry =
     buildPublishedDateRouteMap(blogIndex).get(dateRouteKey(monthName, day)) ||
     null;
+  const relatedBlogEntry = indexedBlogEntry
+    ? await verifyPublishedDateBlogEntry(env, indexedBlogEntry)
+    : null;
   const html = generateEventsDateHTML(
     monthName,
     day,
@@ -7628,7 +7699,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     quizData,
     relatedBlogEntry,
     personLinks,
-    blogIndex,
+    relatedBlogEntry ? [relatedBlogEntry] : [],
   );
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
@@ -10227,6 +10298,7 @@ export const __datePageEngagementTestHooks = {
   buildFloatingDateStory,
   ensureFloatingDateStoryHtml,
   buildPublishedDateRouteMap,
+  findMatchingDateBlogEntry,
 };
 
 export const __personIdentityTestHooks = {

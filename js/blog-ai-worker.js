@@ -424,6 +424,35 @@ const COMMERCIAL_RELEVANCE_STOPWORDS = new Set([
 ]);
 const BLOG_NAV_WIDTH_FIX_CSS =
   `.nav-inner{max-width:1920px!important;margin:0 auto!important}`;
+const TDQ_FLOAT_BAR_CSS =
+  `#tdq-float-bar{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));z-index:1040;width:min(720px,calc(100% - 24px));display:grid;grid-template-columns:88px minmax(0,1fr) auto;gap:.8rem;align-items:center;margin:0;padding:.8rem .9rem;border:1px solid var(--border,#cfe0cf);border-radius:9px;background:var(--bg-alt,#f2f7f2);box-shadow:0 18px 42px rgba(27,58,45,.22);opacity:0;pointer-events:none;transform:translate(-50%,calc(100% + 32px));transition:opacity .22s ease,transform .22s ease;font-family:Lora,serif}
+#tdq-float-bar.tdq-float-visible{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
+.tdq-float-visual{width:88px;height:68px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.06);color:var(--btn-bg,#1b3a2d);font-size:1.25rem}
+.tdq-float-copy{display:flex;min-width:0;flex-direction:column;gap:2px}
+.tdq-float-kicker{font-size:12px;font-weight:600;color:var(--text-muted,#5c7a65);text-transform:uppercase;letter-spacing:.05em}
+.tdq-float-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.35;color:var(--text,#1a2e20)}
+.tdq-float-description{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;color:var(--text-muted,#5c7a65);font-size:13px;line-height:1.4}
+#tdq-float-btn{appearance:none;display:inline-flex;align-items:center;gap:.35rem;margin:0;padding:0;border:0;background:transparent;color:var(--btn-bg,#1b3a2d);font:inherit;font-size:13px;font-weight:600;line-height:1.4;text-decoration:none;white-space:nowrap;cursor:pointer}
+#tdq-float-btn:hover,#tdq-float-btn:focus-visible{background:transparent;color:var(--btn-bg,#1b3a2d);text-decoration:none}
+#tdq-float-btn:focus-visible{outline:2px solid var(--btn-bg,#1b3a2d);outline-offset:4px;border-radius:2px}
+@media(max-width:575px){#tdq-float-bar{grid-template-columns:64px minmax(0,1fr);gap:.65rem;padding:.65rem .7rem}.tdq-float-visual{width:64px;height:64px}#tdq-float-btn{grid-column:2;justify-self:start}}
+@media(prefers-reduced-motion:reduce){#tdq-float-bar{transition:none}}`;
+const TDQ_FLOAT_BAR_HTML =
+  `<aside id="tdq-float-bar" class="major-event-item tdq-float-bar" aria-label="Article quiz" aria-hidden="true" inert>
+    <span class="tdq-float-visual" aria-hidden="true"><i class="bi bi-patch-question-fill"></i></span>
+    <span class="major-event-copy tdq-float-copy">
+      <span class="tdq-float-kicker">Quick quiz</span>
+      <strong class="tdq-float-title">Test Your Knowledge</strong>
+      <span class="tdq-float-description">5 questions, under a minute.</span>
+    </span>
+    <button type="button" id="tdq-float-btn" class="major-event-source tdq-float-action">Start Quiz<i class="bi bi-arrow-right" aria-hidden="true"></i></button>
+  </aside>`;
+// The float bar anchors on the Did You Know slider, the same structural
+// trigger the date pages use. Section headings vary per pillar so heading
+// text is never a reliable anchor. showBar/hideBar are defined by the
+// surrounding float-bar script.
+const TDQ_FLOAT_TRIGGER_JS =
+  "var trigger=document.querySelector('.dyn-slider-shell');if(trigger){var ticking=false;var syncBar=function(){if(trigger.getBoundingClientRect().top<=window.innerHeight*.72){showBar();}else{hideBar();}ticking=false;};var requestSync=function(){if(ticking)return;ticking=true;window.requestAnimationFrame(syncBar);};window.addEventListener('scroll',requestSync,{passive:true});window.addEventListener('resize',requestSync,{passive:true});syncBar();}";
 const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
 const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const BLOG_HISTORY_QUALITY_GATE_VERSION = 2;
@@ -4775,16 +4804,11 @@ export default {
             "<style>.tdq-opt:hover{border-color:var(--accent,#9dc43a)!important;background:rgba(157,196,58,.07)!important}.tdq-opt-selected{border-color:var(--accent,#9dc43a)!important;background:rgba(157,196,58,.15)!important}.tdq-opt-selected .tdq-opt-key{background:var(--btn-bg,#1b3a2d)!important}</style></head>",
           );
         }
-        // Patch float bar background to white on already-stored posts
-        patchedHtml = patchedHtml.replaceAll(
-          "background:rgba(27,58,45,.96);backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.3)",
-          "background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15)",
-        );
         // Inject floating quiz bar into stored posts that don't have it yet
         if (!patchedHtml.includes("tdq-float-bar")) {
-          const floatCss = `<style>#tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}#tdq-float-bar.tdq-float-visible{transform:translateY(0)}#tdq-float-btn{background:#1a3a2d;border:none;border-radius:100px;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(26,58,45,.25);max-width:320px;width:100%}#tdq-float-btn:hover{background:#1a3a2d;box-shadow:0 2px 16px rgba(26,58,45,.35)}</style>`;
-          const floatHtml = `<div id="tdq-float-bar"><button id="tdq-float-btn"><i class="bi bi-patch-question-fill"></i> Quiz This Day</button></div>`;
-          const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');}function hideBar(){bar.classList.remove('tdq-float-visible');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});var h2s=document.querySelectorAll('h2');var trigger=null;for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}if(trigger){function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else{hideBar();}}window.addEventListener('scroll',updateBar,{passive:true});}else{document.addEventListener('scroll',function onScroll(){var d=document.documentElement;var total=d.scrollHeight-d.clientHeight;if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}},{passive:true});}})();<\/script>`;
+          const floatCss = `<style id="tdq-float-card-style">${TDQ_FLOAT_BAR_CSS}</style>`;
+          const floatHtml = TDQ_FLOAT_BAR_HTML;
+          const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');bar.setAttribute('aria-hidden','false');bar.removeAttribute('inert');}function hideBar(){bar.classList.remove('tdq-float-visible');bar.setAttribute('aria-hidden','true');bar.setAttribute('inert','');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});${TDQ_FLOAT_TRIGGER_JS}})();<\/script>`;
           const bodyClose = patchedHtml.includes("</body>")
             ? "</body>"
             : "</html>";
@@ -4792,18 +4816,6 @@ export default {
             .replace("</head>", floatCss + "</head>")
             .replace(bodyClose, floatHtml + "\n" + floatJs + "\n" + bodyClose);
         }
-        // Normalize float bar button colors on already-stored posts.
-        // Some historic posts shipped with a light-green float button; keep it consistent with the site's primary button color.
-        patchedHtml = patchedHtml
-          .replace(
-            /#tdq-float-btn\{background:(?:var\(--accent,#9dc43a\)|#9dc43a);border:none;border-radius:100px;color:[^;]+;/g,
-            "#tdq-float-btn{background:#1a3a2d;border:none;border-radius:100px;color:#fff;",
-          )
-          .replace(
-            /#tdq-float-btn:hover\{background:[^;]+;/g,
-            "#tdq-float-btn:hover{background:#1a3a2d;",
-          );
-
 
         // Patch old amber/orange quiz colors → green palette
         if (
@@ -18003,26 +18015,17 @@ ${analysisBadItems}
 
   <div id="tdq-sentinel" style="height:1px"></div>
 
-  <!-- Floating quiz bar — slides up when user reaches Eyewitness section -->
-  <style>
-    #tdq-float-bar{position:fixed;bottom:0;left:0;right:0;z-index:1020;background:#fff;backdrop-filter:blur(4px);box-shadow:0 -2px 16px rgba(27,58,45,.15);transform:translateY(100%);transition:transform .35s cubic-bezier(.22,.61,.36,1);padding:10px 16px;padding-bottom:max(10px,env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:center}
-    #tdq-float-bar.tdq-float-visible{transform:translateY(0)}
-    #tdq-float-btn{background:#1a3a2d;border:none;border-radius:100px;color:#fff;font-weight:700;font-size:.95rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 28px;box-shadow:0 2px 12px rgba(26,58,45,.25);max-width:320px;width:100%}
-    #tdq-float-btn:hover{background:#1a3a2d;box-shadow:0 2px 16px rgba(26,58,45,.35)}
-  </style>
-  <div id="tdq-float-bar">
-    <button id="tdq-float-btn">
-      <i class="bi bi-patch-question-fill"></i> Quiz This Day
-    </button>
-  </div>
+  <!-- Floating quiz bar — slides up when the Did You Know slider scrolls in -->
+  <style id="tdq-float-card-style">${TDQ_FLOAT_BAR_CSS}</style>
+  ${TDQ_FLOAT_BAR_HTML}
   <script>
   (function(){
     var bar=document.getElementById('tdq-float-bar');
     var btn=document.getElementById('tdq-float-btn');
     var closeBtn=document.getElementById('tdq-close');
     if(!bar||!btn)return;
-    function showBar(){bar.classList.add('tdq-float-visible');}
-    function hideBar(){bar.classList.remove('tdq-float-visible');}
+    function showBar(){bar.classList.add('tdq-float-visible');bar.setAttribute('aria-hidden','false');bar.removeAttribute('inert');}
+    function hideBar(){bar.classList.remove('tdq-float-visible');bar.setAttribute('aria-hidden','true');bar.setAttribute('inert','');}
     btn.addEventListener('click',function(){
       hideBar();
       var overlay=document.getElementById('tdq-overlay');
@@ -18033,20 +18036,8 @@ ${analysisBadItems}
       if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();
     });
     if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});
-    // Trigger: show/hide bar based on Eyewitness heading scroll position
-    var h2s=document.querySelectorAll('h2');
-    var trigger=null;
-    for(var i=0;i<h2s.length;i++){if(h2s[i].textContent.indexOf('Eyewitness')!==-1){trigger=h2s[i];break;}}
-    if(trigger){
-      function updateBar(){var rect=trigger.getBoundingClientRect();if(rect.top<window.innerHeight){showBar();}else{hideBar();}}
-      window.addEventListener('scroll',updateBar,{passive:true});
-    } else {
-      document.addEventListener('scroll',function onScroll(){
-        var d=document.documentElement;
-        var total=d.scrollHeight-d.clientHeight;
-        if(total>0&&d.scrollTop/total>0.35){showBar();document.removeEventListener('scroll',onScroll);}
-      },{passive:true});
-    }
+    // Trigger: show/hide bar once the Did You Know slider scrolls in
+    ${TDQ_FLOAT_TRIGGER_JS}
   })();
   </script>
 
@@ -19333,20 +19324,72 @@ function normalizeArticleAssetVersionsHtml(body) {
   );
 }
 
+function normalizeTdqFloatBarHtml(body) {
+  const source = String(body || "");
+  if (!source.includes('id="tdq-float-bar"')) return source;
+
+  let html = source
+    .replace(
+      /<style\b[^>]*\bid="tdq-float-card-style"[^>]*>[\s\S]*?<\/style>/gi,
+      "",
+    )
+    .replace(
+      /<style([^>]*)>([\s\S]*?)<\/style>/gi,
+      (style, attributes, css) => {
+        if (!/#tdq-float-(?:bar|btn)/i.test(css)) return style;
+        const cleaned = css
+          .replace(
+            /#tdq-float-bar(?:\.tdq-float-visible)?\s*\{[^{}]*\}/gi,
+            "",
+          )
+          .replace(
+            /#tdq-float-btn(?::(?:hover|focus-visible))?\s*\{[^{}]*\}/gi,
+            "",
+          )
+          .trim();
+        return cleaned ? `<style${attributes}>${cleaned}</style>` : "";
+      },
+    )
+    .replace(
+      /<(?:div|aside)\b[^>]*\bid="tdq-float-bar"[^>]*>[\s\S]*?<\/(?:div|aside)>/i,
+      TDQ_FLOAT_BAR_HTML,
+    )
+    .replace(
+      "function showBar(){bar.classList.add('tdq-float-visible');}",
+      "function showBar(){bar.classList.add('tdq-float-visible');bar.setAttribute('aria-hidden','false');bar.removeAttribute('inert');}",
+    )
+    .replace(
+      "function hideBar(){bar.classList.remove('tdq-float-visible');}",
+      "function hideBar(){bar.classList.remove('tdq-float-visible');bar.setAttribute('aria-hidden','true');bar.setAttribute('inert','');}",
+    )
+    .replace(
+      /(?:\/\/ Trigger:[^\n]*\n\s*)?var h2s=document\.querySelectorAll\('h2'\);\s*var trigger=null;\s*for\(var i=0;i<h2s\.length;i\+\+\)\{if\(h2s\[i\]\.textContent\.indexOf\('Eyewitness'\)!==-1\)\{trigger=h2s\[i\];break;\}\}\s*if\(trigger\)\{\s*function updateBar\(\)\{var rect=trigger\.getBoundingClientRect\(\);if\(rect\.top<window\.innerHeight\)\{showBar\(\);\}else\{hideBar\(\);\}\}\s*window\.addEventListener\('scroll',updateBar,\{passive:true\}\);\s*\}\s*else\s*\{\s*document\.addEventListener\('scroll',function onScroll\(\)\{\s*var d=document\.documentElement;\s*var total=d\.scrollHeight-d\.clientHeight;\s*if\(total>0&&d\.scrollTop\/total>0\.35\)\{showBar\(\);document\.removeEventListener\('scroll',onScroll\);\}\s*\},\{passive:true\}\);\s*\}/g,
+      TDQ_FLOAT_TRIGGER_JS,
+    );
+
+  const style = `<style id="tdq-float-card-style">${TDQ_FLOAT_BAR_CSS}</style>`;
+  html = html.includes("</head>")
+    ? html.replace("</head>", `${style}</head>`)
+    : `${style}${html}`;
+  return html;
+}
+
 function prepareHtmlResponse(body) {
   return normalizeHistoryEntityCanonicalLinksHtml(
-    normalizeArticleAssetVersionsHtml(
-      normalizeArticleEvidenceMapDisclosureHtml(
-        normalizeArticleEntityStripPresentationHtml(
-          normalizeStackedTitleHtml(
-            normalizeImageAltHtml(
-              normalizeCrawlableLinksHtml(
-                normalizeSearchPreviewHtml(
-                  normalizeHeadingAuditHtml(
-                    normalizeAiAnswerCardHtml(
-                      normalizeArticleLayoutHtml(
-                        stripDynSliderFiguresHtml(
-                          stripGoogleFundingChoices(body),
+    normalizeTdqFloatBarHtml(
+      normalizeArticleAssetVersionsHtml(
+        normalizeArticleEvidenceMapDisclosureHtml(
+          normalizeArticleEntityStripPresentationHtml(
+            normalizeStackedTitleHtml(
+              normalizeImageAltHtml(
+                normalizeCrawlableLinksHtml(
+                  normalizeSearchPreviewHtml(
+                    normalizeHeadingAuditHtml(
+                      normalizeAiAnswerCardHtml(
+                        normalizeArticleLayoutHtml(
+                          stripDynSliderFiguresHtml(
+                            stripGoogleFundingChoices(body),
+                          ),
                         ),
                       ),
                     ),
@@ -19465,6 +19508,8 @@ export const __contentGenerationTestHooks = {
   validateEvidenceMapForPublish,
   buildEvidenceMapBlock,
   normalizeArticleEvidenceMapDisclosureHtml,
+  normalizeTdqFloatBarHtml,
+  TDQ_FLOAT_TRIGGER_JS,
   relevantOpenLibraryBooks,
   commercialRecommendationsAreRelevant,
   buildAmazonRelatedBlock,

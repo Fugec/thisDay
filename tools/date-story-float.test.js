@@ -158,6 +158,11 @@ test("cached date pages receive or refresh one floating story without a KV rewri
     cached,
   );
 
+  const removed = hooks.ensureFloatingDateStoryHtml(inserted, null, "July", 19);
+  assert.doesNotMatch(removed, /id="date-story-float"/);
+  assert.doesNotMatch(removed, /id="date-story-float-script"/);
+  assert.doesNotMatch(removed, /id="date-story-float-style"/);
+
   assert.match(
     seoWorker,
     /\^\\\/\(events\|born\|died\)\\\/\(\[a-z\]\+\)\\\/\(\\d\+\)\\\/\?\$/,
@@ -169,6 +174,69 @@ test("cached date pages receive or refresh one floating story without a KV rewri
       ) || []
     ).length >= 2,
   );
+});
+
+test("date-page stories require a stored published post and advance automatically", async () => {
+  const futureStory = {
+    ...story,
+    slug: "19-july-2027",
+    publishedAt: "2027-07-19T00:15:00.000Z",
+  };
+  const routes = hooks.buildPublishedDateRouteMap([
+    story,
+    futureStory,
+    { slug: "20-july-2027", title: "Tomorrow's article" },
+  ]);
+
+  assert.equal(routes.get("july-19")?.slug, "19-july-2027");
+  assert.equal(routes.get("july-20")?.slug, "20-july-2027");
+
+  const resetCache = () => {
+    hooks.findMatchingDateBlogEntry.cachedRoutes = null;
+    hooks.findMatchingDateBlogEntry.cacheExpiresAt = 0;
+    hooks.findMatchingDateBlogEntry.verifiedSlugs = new Map();
+  };
+  const index = [{ ...futureStory }];
+
+  resetCache();
+  const missingReads = [];
+  const missing = await hooks.findMatchingDateBlogEntry(
+    {
+      BLOG_AI_KV: {
+        async get(key, options = {}) {
+          missingReads.push(key);
+          if (key === "index") {
+            return options.type === "json" ? index : JSON.stringify(index);
+          }
+          return null;
+        },
+      },
+    },
+    "july",
+    19,
+  );
+  assert.equal(missing, null);
+  assert.deepEqual(missingReads, ["index", "post:19-july-2027"]);
+
+  resetCache();
+  const published = await hooks.findMatchingDateBlogEntry(
+    {
+      BLOG_AI_KV: {
+        async get(key, options = {}) {
+          if (key === "index") {
+            return options.type === "json" ? index : JSON.stringify(index);
+          }
+          return key === "post:19-july-2027"
+            ? "<!doctype html><title>Published</title>"
+            : null;
+        },
+      },
+    },
+    "july",
+    19,
+  );
+  assert.equal(published?.slug, "19-july-2027");
+  resetCache();
 });
 
 test("the floating story appears at the DYK threshold and hides above it", () => {

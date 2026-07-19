@@ -50,6 +50,12 @@ import {
   archiveUsablePosts,
   getArchivePostsForPillar,
 } from "./shared/archive-indexability.js";
+import {
+  getKvWriteBudget,
+  kvOptionalWritesAllowed,
+  publicKvWriteBudget,
+  withKvWriteBudget,
+} from "./shared/kv-write-budget.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -119,10 +125,54 @@ function addHtmlMarker(html, marker) {
 }
 
 function blogKvBackgroundWritesPaused(env) {
+  if (!kvOptionalWritesAllowed(env)) return true;
   const raw = String(env?.BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL || "").trim();
   if (!raw) return false;
   const until = Date.parse(raw);
   return Number.isFinite(until) && Date.now() < until;
+}
+
+async function optionalBlogKvPut(env, key, value, options) {
+  if (blogKvBackgroundWritesPaused(env) || !env?.BLOG_AI_KV) return false;
+  try {
+    await env.BLOG_AI_KV.put(key, value, options);
+    return true;
+  } catch (err) {
+    console.warn(`Blog: optional KV write skipped for ${key} — ${err.message}`);
+    return false;
+  }
+}
+
+async function prepareBlogKvBudget(env, phase) {
+  const budget = await getKvWriteBudget(env, phase);
+  if (budget.allowPhase && budget.allowOptionalWrites) {
+    console.log(`Blog KV budget: ${budget.reason}`);
+  } else {
+    console.warn(`Blog KV budget: ${budget.reason}`);
+  }
+  return {
+    budget,
+    env: withKvWriteBudget(env, budget),
+  };
+}
+
+function kvBudgetBlockedResponse(budget) {
+  return jsonResponse(
+    {
+      status: "quota-blocked",
+      message: budget.reason,
+      kvBudget: publicKvWriteBudget(budget),
+    },
+    429,
+    {
+      "Retry-After": String(
+        Math.max(
+          1,
+          Math.ceil((Date.parse(budget.resetAt) - Date.now()) / 1_000),
+        ),
+      ),
+    },
+  );
 }
 
 function repairAttemptKey(slug, type) {
@@ -131,6 +181,7 @@ function repairAttemptKey(slug, type) {
 
 async function canRunRepairAttempt(env, slug, type, limit = REPAIR_ATTEMPT_LIMIT, ttl = REPAIR_ATTEMPT_TTL) {
   if (!env?.BLOG_AI_KV || !slug || !type) return false;
+  if (blogKvBackgroundWritesPaused(env)) return false;
   try {
     const key = repairAttemptKey(slug, type);
     const raw = await env.BLOG_AI_KV.get(key);
@@ -209,6 +260,11 @@ async function recordPipelineFailure(
   stepState.lastFailureMessage = message;
   stepState.streak = streak;
   state.steps[step] = stepState;
+
+  if (streak >= 2) {
+    stepState.lastAlertDate = today;
+    state.steps[step] = stepState;
+  }
   await savePipelineState(env, state);
 
   if (streak >= 2) {
@@ -219,9 +275,6 @@ async function recordPipelineFailure(
       message,
       streak,
     });
-    stepState.lastAlertDate = today;
-    state.steps[step] = stepState;
-    await savePipelineState(env, state);
   }
 }
 
@@ -2992,8 +3045,12 @@ export default {
           cron === DAILY_PUBLICATION_CRON &&
           scheduledMinute === DRAFT_PREPARATION_MINUTE
         ) {
-          await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
-          await maybePrepareBlogDraftSource(env);
+          const guarded = await prepareBlogKvBudget(env, "prepare");
+          if (!guarded.budget.allowPhase) return;
+          if (guarded.budget.allowOptionalWrites) {
+            await checkAndUpdateAiModel(guarded.env, guarded.env.BLOG_AI_KV);
+          }
+          await maybePrepareBlogDraftSource(guarded.env);
           return;
         }
         // Promote the 00:10 draft in a fresh invocation with its own external
@@ -3002,20 +3059,26 @@ export default {
           cron === DAILY_PUBLICATION_CRON &&
           scheduledMinute === DRAFT_ENRICHMENT_MINUTE
         ) {
-          await recoverPendingBlogDraft(env);
+          const guarded = await prepareBlogKvBudget(env, "enrich");
+          if (!guarded.budget.allowPhase) return;
+          await recoverPendingBlogDraft(guarded.env);
           return;
         }
         // Dedicated entity-recovery cron: its own invocation has a fresh subrequest
         // budget, so it can re-resolve people strips that the budget-starved generation
         // cron left unlinked. Runs after the 00:05 generation and 00:35 failsafe.
         if (cron === ENTITY_RECOVERY_CRON) {
-          await recoverRecentEntityStrips(env).catch((err) =>
+          const guarded = await prepareBlogKvBudget(env, "maintenance");
+          if (!guarded.budget.allowPhase) return;
+          await recoverRecentEntityStrips(guarded.env).catch((err) =>
             console.warn(`Blog AI: entity recovery pass failed — ${err.message}`),
           );
           return;
         }
         if (cron === EVERGREEN_HISTORY_RECOVERY_CRON) {
-          await recoverPendingEvergreenHistory(env).catch((err) =>
+          const guarded = await prepareBlogKvBudget(env, "maintenance");
+          if (!guarded.budget.allowPhase) return;
+          await recoverPendingEvergreenHistory(guarded.env).catch((err) =>
             console.warn(`Blog AI: evergreen history pass failed — ${err.message}`),
           );
           return;
@@ -3033,8 +3096,12 @@ export default {
         } else if (cron && cron !== DAILY_PUBLICATION_CRON) {
           console.warn(`Blog AI: unrecognized cron "${cron}" using draft generation path.`);
         }
-        await checkAndUpdateAiModel(env, env.BLOG_AI_KV);
-        await maybeGenerateBlogPost(env, ctx, {
+        const guarded = await prepareBlogKvBudget(env, "generate");
+        if (!guarded.budget.allowPhase) return;
+        if (guarded.budget.allowOptionalWrites) {
+          await checkAndUpdateAiModel(guarded.env, guarded.env.BLOG_AI_KV);
+        }
+        await maybeGenerateBlogPost(guarded.env, ctx, {
           preferWorkersAIForArticle:
             cron === DAILY_PUBLICATION_CRON && scheduledMinute === 12,
         });
@@ -3106,24 +3173,31 @@ export default {
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
+      const guarded = await prepareBlogKvBudget(env, "prepare");
+      if (!guarded.budget.allowPhase) {
+        return kvBudgetBlockedResponse(guarded.budget);
+      }
+      const budgetEnv = guarded.env;
       try {
-        const result = await maybePrepareBlogDraftSource(env);
+        const result = await maybePrepareBlogDraftSource(budgetEnv);
         return jsonResponse({
           status: "ok",
           slug: buildSlug(new Date()),
           message: "Blog draft source prepared.",
           result,
+          kvBudget: publicKvWriteBudget(guarded.budget),
         });
       } catch (err) {
         const today = todayDateString();
         console.error(`Blog AI: /blog/prepare-draft failed — ${err.message}`);
-        await recordPipelineFailure(env, {
+        await recordPipelineFailure(budgetEnv, {
           step: "blog",
           slug: today,
           message: err.message,
           date: new Date(),
         });
-        await env.BLOG_AI_KV.put(
+        await optionalBlogKvPut(
+          budgetEnv,
           `error:${today}`,
           `Draft preparation endpoint failed: ${err.message}`,
           { expirationTtl: 7 * 86_400 },
@@ -3139,10 +3213,15 @@ export default {
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
+      const guarded = await prepareBlogKvBudget(env, "generate");
+      if (!guarded.budget.allowPhase) {
+        return kvBudgetBlockedResponse(guarded.budget);
+      }
+      const budgetEnv = guarded.env;
       try {
         const preferWorkersAIForArticle =
           url.searchParams.get("prefer-workers-ai") === "true";
-        await generateAndStore(env, null, null, null, null, {
+        await generateAndStore(budgetEnv, null, null, null, null, {
           lightweightPublish: true,
           enrichDraft: false,
           preferWorkersAIForArticle,
@@ -3151,17 +3230,19 @@ export default {
           status: "ok",
           slug: buildSlug(new Date()),
           message: "Blog draft generated.",
+          kvBudget: publicKvWriteBudget(guarded.budget),
         });
       } catch (err) {
         const today = todayDateString();
         console.error(`Blog AI: /blog/generate-draft failed — ${err.message}`);
-        await recordPipelineFailure(env, {
+        await recordPipelineFailure(budgetEnv, {
           step: "blog",
           slug: today,
           message: err.message,
           date: new Date(),
         });
-        await env.BLOG_AI_KV.put(
+        await optionalBlogKvPut(
+          budgetEnv,
           `error:${today}`,
           `Draft endpoint failed: ${err.message}`,
           { expirationTtl: 7 * 86_400 },
@@ -3183,6 +3264,11 @@ export default {
       if (!validPublish && !validYtRegen) {
         return jsonResponse({ status: "unauthorized" }, 401);
       }
+      const guarded = await prepareBlogKvBudget(env, "publish");
+      if (!guarded.budget.allowPhase) {
+        return kvBudgetBlockedResponse(guarded.budget);
+      }
+      const budgetEnv = guarded.env;
       try {
         const publishUrl = new URL(request.url);
         const forcedEvent = publishUrl.searchParams.get("force-event") || null;
@@ -3192,24 +3278,29 @@ export default {
         // response path (up to ~100s Cloudflare edge timeout) rather than in
         // ctx.waitUntil which is capped at 30s for HTTP handlers on the free
         // plan. The cron handler passes its own ctx for the normal daily path.
-        await generateAndStore(env, null, forcedEvent, forceDate, forceImage, {
+        await generateAndStore(budgetEnv, null, forcedEvent, forceDate, forceImage, {
           lightweightPublish: true,
         });
         console.log(`Blog AI: /blog/publish complete. ${aiUsageSummary()}`);
-        return jsonResponse({ status: "ok", message: "Blog post published." });
+        return jsonResponse({
+          status: "ok",
+          message: "Blog post published.",
+          kvBudget: publicKvWriteBudget(guarded.budget),
+        });
       } catch (err) {
         console.error(
           `Blog AI: /blog/publish generation failed — ${err.message}`,
         );
         console.log(`Blog AI: /blog/publish failed. ${aiUsageSummary()}`);
         const today = todayDateString();
-        await recordPipelineFailure(env, {
+        await recordPipelineFailure(budgetEnv, {
           step: "blog",
           slug: today,
           message: err.message,
           date: new Date(),
         });
-        await env.BLOG_AI_KV.put(
+        await optionalBlogKvPut(
+          budgetEnv,
           `error:${today}`,
           `Publish endpoint failed: ${err.message}`,
           { expirationTtl: 7 * 86_400 },
@@ -3228,44 +3319,61 @@ export default {
       if (!slug) {
         return jsonResponse({ status: "error", message: "Provide ?slug=X" }, 400);
       }
+      const guarded = await prepareBlogKvBudget(env, "enrich");
+      if (!guarded.budget.allowPhase) {
+        return kvBudgetBlockedResponse(guarded.budget);
+      }
+      const budgetEnv = guarded.env;
       // Default requests return immediately and run enrichment in ctx.waitUntil.
       // Manual recovery can request ?sync=true to keep the work in the response
       // path when background lifetime is too short to promote an existing draft.
       // Diagnostic: confirm this handler was reached (not inside ctx.waitUntil)
-      await env.BLOG_AI_KV.put(
+      await optionalBlogKvPut(
+        budgetEnv,
         `debug:enrich-handler:${slug}`,
         JSON.stringify({ ts: new Date().toISOString(), slug }),
         { expirationTtl: 7 * 86_400 },
-      ).catch(() => {});
+      );
       const recordEnrichError = async (err) => {
         console.error(`Blog AI: enrichment failed for ${slug} — ${err.message}`);
-        await recordPipelineFailure(env, {
+        await recordPipelineFailure(budgetEnv, {
           step: "blog",
           slug,
           message: err.message,
           date: new Date(),
         });
-        await env.BLOG_AI_KV.put(
+        await optionalBlogKvPut(
+          budgetEnv,
           `debug:enrich-error:${slug}`,
           JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), ts: new Date().toISOString() }),
           { expirationTtl: 7 * 86_400 },
-        ).catch(() => {});
+        );
       };
       const boundedRecovery =
         enrichUrl.searchParams.get("bounded") === "true";
       if (enrichUrl.searchParams.get("sync") === "true") {
         try {
-          await enrichPublishedPost(env, slug, { boundedRecovery });
-          return jsonResponse({ status: "ok", slug, message: "Enrichment completed." });
+          await enrichPublishedPost(budgetEnv, slug, { boundedRecovery });
+          return jsonResponse({
+            status: "ok",
+            slug,
+            message: "Enrichment completed.",
+            kvBudget: publicKvWriteBudget(guarded.budget),
+          });
         } catch (err) {
           await recordEnrichError(err);
           return jsonResponse({ status: "error", slug, message: err.message }, 500);
         }
       }
       ctx.waitUntil(
-        enrichPublishedPost(env, slug, { boundedRecovery }).catch(recordEnrichError),
+        enrichPublishedPost(budgetEnv, slug, { boundedRecovery }).catch(recordEnrichError),
       );
-      return jsonResponse({ status: "ok", slug, message: "Enrichment started." });
+      return jsonResponse({
+        status: "ok",
+        slug,
+        message: "Enrichment started.",
+        kvBudget: publicKvWriteBudget(guarded.budget),
+      });
     }
 
     if (path === "/blog/backfill-entities" && request.method === "POST") {
@@ -5404,7 +5512,8 @@ async function recoverPendingBlogDraft(env) {
         message: err.message,
         date: new Date(),
       });
-      await env.BLOG_AI_KV.put(
+      await optionalBlogKvPut(
+        env,
         `debug:enrich-error:${draftSlug}`,
         JSON.stringify({
           error: err.message,
@@ -5413,7 +5522,7 @@ async function recoverPendingBlogDraft(env) {
           source: "draftRecovery",
         }),
         { expirationTtl: 7 * 86_400 },
-      ).catch(() => {});
+      );
       throw err;
     }
   }
@@ -5454,6 +5563,12 @@ async function maybeGenerateBlogPost(
       console.log(
         `Blog AI: last post was ${diffDays} day(s) ago — skipping (need ${EVERY_OTHER_DAYS}).`,
       );
+      if (blogKvBackgroundWritesPaused(env)) {
+        console.warn(
+          "Blog AI: entity refresh skipped because optional KV writes are paused.",
+        );
+        return;
+      }
       // Post is already published — safe to spend subrequests on entity refresh.
       try {
         const entityIdxRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
@@ -5611,7 +5726,8 @@ async function maybeGenerateBlogPost(
       message: errMsg,
       date: new Date(),
     });
-    await env.BLOG_AI_KV.put(
+    await optionalBlogKvPut(
+      env,
       `error:${today}`,
       `Generation failed: ${errMsg}`,
       { expirationTtl: 7 * 86_400 },
@@ -7644,11 +7760,13 @@ async function generateAndStore(
       expirationTtl: 90 * 86_400,
     });
     const bookCoverUrl = await fetchBookCover(content.bookSearchQuery).catch(() => null);
-    const entityMeta = await upsertEntitiesForContent(env, content, slug, now, pillars).catch((err) => {
-      console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
-      suppressPersonProfileLink(content);
-      return unlinkedArticlePeople(content);
-    });
+    const entityMeta = blogKvBackgroundWritesPaused(env)
+      ? publicationReserveArticlePeople(content, slug)
+      : await upsertEntitiesForContent(env, content, slug, now, pillars).catch((err) => {
+        console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
+        suppressPersonProfileLink(content);
+        return unlinkedArticlePeople(content);
+      });
 
     await savePublishedPost(env, {
       slug,
@@ -7677,11 +7795,12 @@ async function generateAndStore(
         message: err.message,
         date: new Date(),
       });
-      return env.BLOG_AI_KV.put(
+      return optionalBlogKvPut(
+        env,
         `debug:enrich-error:${slug}`,
         JSON.stringify({ error: err.message, stack: err.stack?.slice(0, 500), ts: new Date().toISOString() }),
         { expirationTtl: 7 * 86_400 },
-      ).catch(() => {});
+      );
     };
     if (ctx?.waitUntil) {
       ctx.waitUntil(enrichPublishedPost(env, slug).catch(enrichErr));
@@ -8269,7 +8388,11 @@ async function savePublishedPost(
   await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, checkedHtml);
   if (safeEntityMeta.length > 0) {
     const lightweightEntities = compactArticleEntityMeta(safeEntityMeta);
-    await env.BLOG_AI_KV.put(`post-entities:${slug}`, JSON.stringify(lightweightEntities)).catch(() => {});
+    await optionalBlogKvPut(
+      env,
+      `post-entities:${slug}`,
+      JSON.stringify(lightweightEntities),
+    );
   }
 
   const deduped = [...existingIndex].filter((e) => e.slug !== slug);
@@ -8312,13 +8435,24 @@ async function enrichPublishedPost(
   slug,
   { boundedRecovery = false } = {},
 ) {
-  // Diagnostic checkpoint writer — expires in 7 days so we can diagnose failures
-  const chk = (step) =>
-    env.BLOG_AI_KV.put(
+  // Persist only milestone checkpoints. Earlier code rewrote this one debug
+  // key at every enrichment step, spending 14+ puts on a successful article.
+  const persistedCheckpoints = new Set([
+    "started",
+    "pre-final-grounding",
+    "pre-save",
+    "done",
+  ]);
+  const chk = (step) => {
+    console.log(`Blog AI: enrich ${slug} checkpoint ${step}`);
+    if (!persistedCheckpoints.has(step)) return Promise.resolve(false);
+    return optionalBlogKvPut(
+      env,
       `debug:enrich-step:${slug}`,
       JSON.stringify({ step, ts: new Date().toISOString() }),
       { expirationTtl: 7 * 86_400 },
-    ).catch(() => {});
+    );
+  };
 
   await chk("started");
 
@@ -8519,11 +8653,20 @@ async function enrichPublishedPost(
   // and keeps the enrichment invocation well under the 50-subrequest budget.
   // Entities are flagged needsWikiRefresh so the cron entity-refresh loop
   // generates their AI overview cards within 1–3 days.
-  const entityMeta = await upsertEntitiesForContent(env, enriched, slug, date, pillars, { skipAiGeneration: true }).catch((err) => {
-    console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
-    suppressPersonProfileLink(enriched);
-    return unlinkedArticlePeople(enriched);
-  });
+  const entityMeta = blogKvBackgroundWritesPaused(env)
+    ? publicationReserveArticlePeople(enriched, slug)
+    : await upsertEntitiesForContent(
+      env,
+      enriched,
+      slug,
+      date,
+      pillars,
+      { skipAiGeneration: true },
+    ).catch((err) => {
+      console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
+      suppressPersonProfileLink(enriched);
+      return unlinkedArticlePeople(enriched);
+    });
 
   await chk("pre-save");
   await savePublishedPost(env, {
@@ -9923,6 +10066,14 @@ function unlinkedArticlePeople(content) {
     .filter((term) => normalizeEntityType(term?.type) === "person" && term?.term)
     .map(unlinkedArticlePerson)
     .filter((person) => person.slug && person.name);
+}
+
+function publicationReserveArticlePeople(content, slug) {
+  console.warn(
+    `Entity graph writes skipped for ${slug} to preserve the KV publication reserve.`,
+  );
+  suppressPersonProfileLink(content);
+  return unlinkedArticlePeople(content);
 }
 
 function findEntityFact(sentences, patterns, fallback = "") {
@@ -11830,7 +11981,7 @@ async function hydrateArticleEntityImages(env, entityMeta) {
             profileLinkEligible: true,
             profileSubjectVerified: true,
           };
-          env.BLOG_AI_KV.put(key, JSON.stringify(profile)).catch(() => {});
+          void optionalBlogKvPut(env, key, JSON.stringify(profile));
         } else if (
           record &&
           (
@@ -11845,10 +11996,11 @@ async function hydrateArticleEntityImages(env, entityMeta) {
             updatedAt: new Date().toISOString(),
           };
           identityRecord = rejectedProfile;
-          env.BLOG_AI_KV.put(
+          void optionalBlogKvPut(
+            env,
             key,
             JSON.stringify(rejectedProfile),
-          ).catch(() => {});
+          );
         }
       }
 
@@ -11918,7 +12070,7 @@ async function hydrateArticleEntityImages(env, entityMeta) {
           next.imageUrl = imageUrl;
           changed = true;
           profile.imageUrl = imageUrl;
-          env.BLOG_AI_KV.put(key, JSON.stringify(profile)).catch(() => {});
+          void optionalBlogKvPut(env, key, JSON.stringify(profile));
         }
       }
     }
@@ -15430,7 +15582,12 @@ async function fetchKeyPersonImages(env, keyTerms) {
       // Cache miss — fetch from Wikipedia (steps 1+2 only, no Commons text search for persons).
       const imageUrl = await fetchWikipediaImage(kt.term, kt.wikiUrl, { skipCommonsSearch: true });
       if (!imageUrl) continue;
-      env.BLOG_AI_KV.put(cacheKey, JSON.stringify({ imageUrl }), { expirationTtl: KV_PERSON_IMAGE_TTL }).catch(() => {});
+      void optionalBlogKvPut(
+        env,
+        cacheKey,
+        JSON.stringify({ imageUrl }),
+        { expirationTtl: KV_PERSON_IMAGE_TTL },
+      );
       results.push({ name: kt.term, imageUrl, wikiUrl: kt.wikiUrl });
     } catch {
       // skip this person
@@ -18768,10 +18925,13 @@ function htmlResponse(body, status = 200) {
   });
 }
 
-function jsonResponse(obj, status = 200) {
+function jsonResponse(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...extraHeaders,
+    },
   });
 }
 

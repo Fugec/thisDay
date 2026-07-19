@@ -10,6 +10,10 @@ name: Blog Post Failsafe
 # workflow still polls KV for up to 10 minutes as a replication/race safety
 # check before declaring success.
 #
+# Each write-capable Worker endpoint performs an account-wide KV analytics
+# preflight. HTTP 429 means the publication reserve is exhausted until the
+# 00:00 UTC reset; the workflow must stop instead of spending three retries.
+#
 # Required GitHub secrets:
 #   CF_ACCOUNT_ID        — Cloudflare account ID
 #   CF_API_TOKEN         — Cloudflare API token (KV read permission)
@@ -68,6 +72,10 @@ jobs:
             PREPARE_BODY=$(echo "$PREPARE_RESULT" | head -n -1)
             PREPARE_HTTP_STATUS=$(echo "$PREPARE_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
             echo "Source preparation response (HTTP $PREPARE_HTTP_STATUS): $PREPARE_BODY"
+            if [ "$PREPARE_HTTP_STATUS" = "429" ]; then
+              echo "::error::Cloudflare KV write budget blocked source preparation until the UTC reset"
+              exit 1
+            fi
             if [ "$PREPARE_HTTP_STATUS" != "200" ]; then
               echo "::error::Blog source preparation failed with HTTP status $PREPARE_HTTP_STATUS"
               exit 1
@@ -90,6 +98,10 @@ jobs:
                 DRAFT_CREATED=true
                 break
               fi
+              if [ "$DRAFT_HTTP_STATUS" = "429" ]; then
+                echo "::error::Cloudflare KV write budget blocked draft generation until the UTC reset"
+                break
+              fi
               if [ "$DRAFT_ATTEMPT" != "3" ]; then
                 sleep 5
               fi
@@ -108,6 +120,10 @@ jobs:
           BODY=$(echo "$RESULT" | head -n -1)
           HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
           echo "Blog worker response (HTTP $HTTP_STATUS): $BODY"
+          if [ "$HTTP_STATUS" = "429" ]; then
+            echo "::error::Cloudflare KV write budget blocked enrichment until the UTC reset"
+            exit 1
+          fi
           if [ "$HTTP_STATUS" != "200" ]; then
             echo "::error::Blog enrichment failed with HTTP status $HTTP_STATUS"
             exit 1

@@ -31,9 +31,17 @@
   // authenticated draft/enrich endpoints through workers.dev.
 
   "vars": {
-    // Temporary write pause while today's free KV write quota recovers.
-    // Cloudflare KV free limits reset at 00:00 UTC.
-    "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "2026-05-22T00:00:00Z",
+    // Account-wide KV analytics guard. Free-plan puts reset at 00:00 UTC.
+    // <850: normal; >=850: optional writes off; >=950: do not start new
+    // content; an existing draft may still enrich until 980.
+    "KV_USAGE_ACCOUNT_ID": "b1b63aec792a52fb199b8ebfb8eed4b1",
+    "KV_DAILY_WRITE_LIMIT": "1000",
+    "KV_OPTIONAL_WRITE_STOP": "850",
+    "KV_CONTENT_START_STOP": "950",
+    "KV_ENRICHMENT_STOP": "980",
+    // Emergency manual override retained for incidents where analytics itself
+    // is unavailable. Use an ISO UTC timestamp; leave empty normally.
+    "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "",
   },
 
   // Routes — this worker handles:
@@ -83,6 +91,11 @@
   },
 
   // Secrets (set via `wrangler secret put <NAME> --config wrangler-blog.jsonc`):
+  //   CLOUDFLARE_ANALYTICS_READ — preferred least-privilege Account Analytics
+  //                               Read token used by the KV budget guard
+  //   CF_ANALYTICS_API_TOKEN — Account Analytics Read; optional override for
+  //                            older deployments
+  //   CF_API_TOKEN           — model lookup and KV analytics fallback token
   //   PUBLISH_SECRET          — authorises POST /blog/publish
   //   YOUTUBE_REGEN_SECRET    — authorises POST /blog/publish from youtube-upload
   //   SEARCH_PING_SECRET      — authorises POST /search-ping

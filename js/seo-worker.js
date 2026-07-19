@@ -48,6 +48,10 @@ import {
   getArchiveHistoricalYear,
 } from "./shared/archive-indexability.js";
 import { rankHistoricalEventCandidates } from "./shared/event-ranking.js";
+import {
+  matchHistoricalEventsToBlogStories,
+  safeBlogStoryUrl,
+} from "./shared/event-story-matching.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -116,6 +120,31 @@ function serializeInlineJson(value) {
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
     .replace(/&/g, "\\u0026");
+}
+
+function historicalEventAnchorId(event) {
+  const rawYear = String(event?.year ?? "").trim();
+  const year = rawYear
+    .replace(/^-/, "bc-")
+    .replace(/[^a-z0-9-]+/gi, "-")
+    .replace(/(^-|-$)/g, "") || "unknown";
+  const normalizedText = String(
+    event?.text || event?.description || event?.title || "",
+  )
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  let hash = 2166136261;
+  for (let index = 0; index < normalizedText.length; index += 1) {
+    hash ^= normalizedText.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const label =
+    normalizedText.slice(0, 48).replace(/-+$/g, "") || "historical-event";
+  return `event-${year}-${label}-${(hash >>> 0).toString(36)}`;
 }
 
 function pickRandomHomepageHighlights(events, count = 3, randomFn = Math.random) {
@@ -4542,7 +4571,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .era-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
 .era-chip{padding:5px 14px;border:1.5px solid var(--cbr);border-radius:20px;background:var(--cb);color:var(--tc);font-size:13px;font-family:inherit;cursor:pointer;transition:all .15s}
 .era-chip:hover{border-color:var(--btn-bg);background:var(--bg-alt)}
-.era-chip-active{background:var(--btn-bg);color:var(--btn-text);border-color:var(--btn-bg)}
+.era-chip-active{background:var(--bg-alt);color:var(--btn-bg);border-color:var(--btn-bg)}
 .tdq-opt{display:flex;align-items:center;gap:10px;width:100%;padding:9px 14px;border:1.5px solid var(--cbr);border-radius:8px;background:transparent;color:var(--tc);font-family:inherit;text-align:left;cursor:pointer;font-size:.9rem;transition:background .15s,border-color .15s;user-select:none}
 .tdq-opt:disabled{opacity:1;cursor:default}
 .tdq-opt:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.tdq-opt-selected{border-color:var(--btn-bg)!important;background:rgba(157,196,58,.15)!important;font-weight:500}
@@ -4583,10 +4612,6 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
 
 .date-top-navigation{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:.75rem;align-items:center;margin:0 0 1rem}
-.date-top-navigation .date-top-link{display:flex;align-items:center;gap:.5rem;min-height:44px;padding:.65rem .85rem;border:1.5px solid var(--cbr);border-radius:8px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px}
-.date-top-navigation .date-top-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
-.date-top-navigation .date-top-link-next{justify-content:flex-end;text-align:right}
-.date-top-navigation .date-top-calendar{justify-content:center;font-weight:600}
 .date-view-tabs{display:flex;gap:.5rem;overflow-x:auto;margin:0 0 1.25rem;padding:0 0 .2rem;scrollbar-width:thin}
 .date-view-tab{display:inline-flex;align-items:center;gap:.45rem;flex:0 0 auto;padding:.55rem .8rem;border:1px solid var(--cbr);border-radius:999px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px;white-space:nowrap}
 .date-view-tab:hover{background:var(--bg-alt);color:var(--tc);text-decoration:none}
@@ -4600,8 +4625,13 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .major-event-copy{min-width:0;font-size:14px;line-height:1.45;color:var(--tc)}
 .major-event-source{display:inline-flex;align-items:center;gap:.35rem;color:var(--btn-bg);font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
 .major-event-source:hover{text-decoration:underline}
+.major-event-actions{display:flex;align-items:center;justify-content:flex-end;gap:.65rem;flex-wrap:wrap}
+.major-event-story{display:inline-flex;align-items:center;gap:.35rem;padding:.32rem .58rem;border-radius:999px;background:var(--btn-bg);color:#fff;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
+.major-event-story:hover{background:#2a4d3a;color:#fff;text-decoration:none}
+.tl-card-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-top:12px}
+.tl-card-actions .tl-btn{margin-top:0}
 @media(min-width:900px){.major-events-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:575px){.date-top-navigation{grid-template-columns:1fr 1fr}.date-top-calendar{grid-column:1/-1;grid-row:1}.date-top-navigation .date-top-link-prev{grid-column:1}.date-top-navigation .date-top-link-next{grid-column:2}.major-events-summary-head{display:block}.major-events-summary-head p{margin-top:.35rem}.major-event-item{grid-template-columns:auto minmax(0,1fr)}.major-event-source{grid-column:2}}
+@media(max-width:575px){.major-events-summary-head{display:block}.major-events-summary-head p{margin-top:.35rem}.major-event-item{grid-template-columns:auto minmax(0,1fr)}.major-event-actions{grid-column:2;justify-content:flex-start}}
 
 /* ── Events Timeline ─────────────────────────────────────────── */
 .tl-wrap{position:relative;padding:4px 0 8px}
@@ -4739,6 +4769,7 @@ function generateEventsDateHTML(
   quizData = null,
   relatedBlogEntry = null,
   personLinks = null,
+  blogIndex = [],
 ) {
   const mNum = MONTH_NUM_MAP[monthName] || 1;
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
@@ -4749,10 +4780,24 @@ function generateEventsDateHTML(
 
   const rankedEvents = rankDateEventsBySignificance(events);
   const featured = rankedEvents[0] || null;
+  const dateStoryCandidates = (Array.isArray(blogIndex) ? blogIndex : []).filter(
+    (entry) =>
+      blogEntryDateRouteKey(entry) === dateRouteKey(monthName, day),
+  );
+  const eventStoryLinks =
+    typeof matchHistoricalEventsToBlogStories === "function"
+      ? matchHistoricalEventsToBlogStories(rankedEvents, dateStoryCandidates)
+      : new Map();
+  const featuredAnchorId = featured ? historicalEventAnchorId(featured) : "";
+  const featuredStoryUrl =
+    featured && typeof safeBlogStoryUrl === "function"
+      ? safeBlogStoryUrl(eventStoryLinks.get(featured))
+      : "";
   const majorEventsSummary = buildMajorEventsSummary(
     rankedEvents.slice(1, 5),
     mDisplay,
     day,
+    eventStoryLinks,
   );
   const others = events.filter((e) => e !== featured);
   // Preview strips: strongest 20 profiles (not the oldest 20), year-sorted so
@@ -4783,6 +4828,13 @@ function generateEventsDateHTML(
     featured?.pages?.[0]?.thumbnail?.source ||
     null;
   const featWiki = featured?.pages?.[0]?.content_urls?.desktop?.page || "";
+  const featuredEventActions =
+    featuredStoryUrl || featWiki
+      ? `<div class="tl-card-actions">
+        ${featuredStoryUrl ? `<a href="${escapeHtml(featuredStoryUrl)}" class="site-btn site-btn-primary tl-btn"><i class="bi bi-journal-richtext"></i>Read our story</a>` : ""}
+        ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn tl-btn" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia source</a>` : ""}
+      </div>`
+      : "";
   const commentaryParas = featured
     ? workerCommentary(featured.year, featured.text)
     : [
@@ -5006,8 +5058,13 @@ function generateEventsDateHTML(
   // Events timeline — alternating left/right layout with center line
   const renderTimelineItem = (e, idx) => {
     const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
+    const storyUrl =
+      typeof safeBlogStoryUrl === "function"
+        ? safeBlogStoryUrl(eventStoryLinks.get(e))
+        : "";
     const th = e.pages?.[0]?.thumbnail?.source || "";
     const yearStr = escapeHtml(String(e.year));
+    const eventAnchorId = historicalEventAnchorId(e);
     const fullText = e.text;
     const dotIdx = fullText.indexOf(". ");
     const titleText = dotIdx > 0 ? escapeHtml(fullText.slice(0, dotIdx + 1)) : escapeHtml(fullText);
@@ -5029,11 +5086,18 @@ function generateEventsDateHTML(
     <div class="tl-card-title">${titleText}</div>
     ${descText ? `<div class="tl-card-desc">${descText}</div>` : pageDesc ? `<div class="tl-card-desc">${pageDesc}</div>` : ""}
     ${pageExtract ? `<div class="tl-card-extract">${pageExtract}</div>` : ""}
-    ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>` : ""}
+    ${
+      storyUrl || w
+        ? `<div class="tl-card-actions">
+        ${storyUrl ? `<a href="${escapeHtml(storyUrl)}" class="site-btn site-btn-primary tl-btn">Read our story</a>` : ""}
+        ${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn tl-btn">Wikipedia source</a>` : ""}
+      </div>`
+        : ""
+    }
   </div>
 </div>`;
     const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago">${yearStr}</span></div>`;
-    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}" data-year="${parseInt(e.year, 10) || 0}">
+    return `<div id="${escapeHtml(eventAnchorId)}" class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}" data-year="${parseInt(e.year, 10) || 0}">
   <div class="tl-body">${card}</div>
   ${node}
   <div class="tl-media"></div>
@@ -5218,7 +5282,7 @@ ${siteNav()}
   ${
     featured || others.length > 0
       ? `
-  ${featImg && featured ? `<div class="article-hero-wrap">
+  ${featImg && featured ? `<div id="${escapeHtml(featuredAnchorId)}" class="article-hero-wrap">
     <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${escapeHtml(featured.text.substring(0, 80))}" class="article-hero-img" loading="eager"/>
     <div class="article-hero-overlay"></div>
     <div class="article-hero-content">
@@ -5235,11 +5299,12 @@ ${siteNav()}
       </div>
     </div>
   </div>` : ""}
-  <div class="card-box" style="padding:0;overflow:hidden">
+  <div${featured && !featImg ? ` id="${escapeHtml(featuredAnchorId)}"` : ""} class="card-box" style="padding:0;overflow:hidden">
     <div style="padding:20px 24px">
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${featTitle}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
+    ${featuredEventActions}
     ${majorEventsSummary}
     ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
@@ -5323,6 +5388,7 @@ ${siteNav()}
   </div>
 </main>
 ${dateEngagementScript}
+${buildEventAnchorNavigationScript()}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "events-date", pageSlug: `${monthName}-${day}` })}
 </body></html>`;
@@ -5461,15 +5527,130 @@ function buildDateTopNavigation({
 
   return `<nav aria-label="${escapeHtml(mDisplay)} ${day} date navigation">
     <div class="date-top-navigation">
-      <a href="/events/${prevMonthName}/${prevDay}/" class="date-top-link date-top-link-prev" rel="prev"><i class="bi bi-arrow-left"></i><span>${escapeHtml(prevMonthDisplay)} ${prevDay}</span></a>
-      <a href="/" class="date-top-link date-top-calendar" aria-label="Open date calendar"><i class="bi bi-calendar3"></i><span>${escapeHtml(mDisplay)} ${day}</span></a>
-      <a href="/events/${nextMonthName}/${nextDay}/" class="date-top-link date-top-link-next" rel="next"><span>${escapeHtml(nextMonthDisplay)} ${nextDay}</span><i class="bi bi-arrow-right"></i></a>
+      <a href="/events/${prevMonthName}/${prevDay}/" class="btn date-top-link date-top-link-prev" rel="prev"><i class="bi bi-chevron-left"></i><span>${escapeHtml(prevMonthDisplay)} ${prevDay}</span></a>
+      <a href="/" class="btn date-top-link date-top-calendar" aria-label="Open date calendar"><i class="bi bi-calendar3"></i><span>${escapeHtml(mDisplay)} ${day}</span></a>
+      <a href="/events/${nextMonthName}/${nextDay}/" class="btn date-top-link date-top-link-next" rel="next"><span>${escapeHtml(nextMonthDisplay)} ${nextDay}</span><i class="bi bi-chevron-right"></i></a>
     </div>
     <div class="date-view-tabs" aria-label="Explore this date">${tabs}</div>
   </nav>`;
 }
 
-function buildMajorEventsSummary(events, mDisplay, day) {
+function buildEventAnchorNavigationScript() {
+  return `<script id="event-anchor-navigation">(function(){
+var historicalEventAnchorId=${historicalEventAnchorId.toString()};
+function assignEventAnchors(){
+var schemas=document.querySelectorAll('script[type="application/ld+json"]');
+for(var schemaIndex=0;schemaIndex<schemas.length;schemaIndex+=1){
+try{
+var schema=JSON.parse(schemas[schemaIndex].textContent||'{}');
+if(schema&&schema['@type']==='ItemList'&&Array.isArray(schema.itemListElement)&&schema.itemListElement.length){
+var featuredItem=schema.itemListElement[0]&&schema.itemListElement[0].item;
+var featuredText=featuredItem&&(featuredItem.description||featuredItem.name);
+var featuredYear=featuredItem&&(featuredItem.temporalCoverage||featuredItem.startDate);
+if(featuredText&&featuredYear){
+var featuredId=historicalEventAnchorId({year:featuredYear,description:featuredText});
+if(!document.getElementById(featuredId)){
+var main=document.querySelector('main');
+var featuredTarget=main&&(main.querySelector('.article-hero-wrap')||main.querySelector('.card-box'));
+if(featuredTarget)featuredTarget.id=featuredId;
+}
+}
+break;
+}
+}catch(_){}
+}
+document.querySelectorAll('.tl-item').forEach(function(item){
+if(item.id&&item.id.indexOf('event-')===0)return;
+var featured=item.querySelector('.tl-feat-body');
+var title=item.querySelector('.tl-card-title');
+var description=item.querySelector('.tl-card-desc');
+var text=featured?featured.textContent:[title&&title.textContent,description&&description.textContent].filter(Boolean).join(' ');
+var badge=item.querySelector('.event-years-ago');
+var year=item.getAttribute('data-year')||(badge&&badge.textContent)||'';
+if(text)item.id=historicalEventAnchorId({year:year,description:text.trim()});
+});
+}
+function revealEventAnchor(){
+assignEventAnchors();
+var id='';
+try{id=decodeURIComponent(location.hash.slice(1));}catch(_){id=location.hash.slice(1);}
+if(id.indexOf('event-')!==0)return;
+var target=document.getElementById(id);
+if(!target)return;
+var moreWrap=target.closest('#events-more');
+var moreBtn=document.getElementById('events-more-btn');
+if(moreWrap){moreWrap.style.display='block';if(moreBtn)moreBtn.style.display='none';}
+target.style.display='';
+requestAnimationFrame(function(){target.scrollIntoView({block:'center'});});
+}
+revealEventAnchor();
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',revealEventAnchor,{once:true});
+window.addEventListener('hashchange',revealEventAnchor);
+})();</script>`;
+}
+
+function ensureEventAnchorNavigationHtml(html) {
+  const source = String(html || "");
+  if (!source || source.includes('id="event-anchor-navigation"')) return source;
+  return source.replace(
+    "</body>",
+    `${buildEventAnchorNavigationScript()}</body>`,
+  );
+}
+
+function normalizeCachedDatePageControlsHtml(html) {
+  const source = String(html || "");
+  if (!source) return source;
+
+  const withVisibleEraSelection = source
+    .replace(
+      ".era-chip-active{background:var(--btn-bg);color:var(--btn-text);border-color:var(--btn-bg)}",
+      ".era-chip-active{background:var(--bg-alt);color:var(--btn-bg);border-color:var(--btn-bg)}",
+    )
+    .replace(
+      ".date-top-navigation .date-top-link{display:flex;align-items:center;gap:.5rem;min-height:44px;padding:.65rem .85rem;border:1.5px solid var(--cbr);border-radius:8px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px}",
+      "",
+    )
+    .replace(
+      ".date-top-navigation .date-top-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}",
+      "",
+    )
+    .replace(
+      ".date-top-navigation .date-top-link-next{justify-content:flex-end;text-align:right}",
+      "",
+    )
+    .replace(
+      ".date-top-navigation .date-top-calendar{justify-content:center;font-weight:600}",
+      "",
+    )
+    .replace(
+      ".date-top-navigation{grid-template-columns:1fr 1fr}",
+      "",
+    )
+    .replace(
+      ".date-top-calendar{grid-column:1/-1;grid-row:1}",
+      "",
+    )
+    .replace(
+      ".date-top-navigation .date-top-link-prev{grid-column:1}",
+      "",
+    )
+    .replace(
+      ".date-top-navigation .date-top-link-next{grid-column:2}",
+      "",
+    );
+
+  return withVisibleEraSelection.replace(
+    /<div class="date-top-navigation">([\s\S]*?)<\/div>/,
+    (navigationBlock) =>
+      navigationBlock
+        .replace(/class="date-top-link/g, 'class="btn date-top-link')
+        .replace(/bi-arrow-left/g, "bi-chevron-left")
+        .replace(/bi-arrow-right/g, "bi-chevron-right"),
+  );
+}
+
+function buildMajorEventsSummary(events, mDisplay, day, storyLinks = new Map()) {
   const items = (Array.isArray(events) ? events : []).slice(0, 4);
   if (!items.length) return "";
 
@@ -5480,10 +5661,23 @@ function buildMajorEventsSummary(events, mDisplay, day) {
           (page) => page?.content_urls?.desktop?.page,
         ) || {};
       const sourceUrl = sourcePage?.content_urls?.desktop?.page || "";
+      const story =
+        storyLinks && typeof storyLinks.get === "function"
+          ? storyLinks.get(event)
+          : null;
+      const storyUrl =
+        typeof safeBlogStoryUrl === "function" ? safeBlogStoryUrl(story) : "";
+      const actions =
+        storyUrl || sourceUrl
+          ? `<span class="major-event-actions">
+            ${storyUrl ? `<a href="${escapeHtml(storyUrl)}" class="major-event-story">Read story<i class="bi bi-arrow-right"></i></a>` : ""}
+            ${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" class="major-event-source" target="_blank" rel="noopener noreferrer">Source<i class="bi bi-box-arrow-up-right"></i></a>` : ""}
+          </span>`
+          : "";
       return `<li class="major-event-item">
         <span class="major-event-year">${escapeHtml(String(event?.year || ""))}</span>
         <span class="major-event-copy">${escapeHtml(String(event?.text || "").trim())}</span>
-        ${sourceUrl ? `<a href="${escapeHtml(sourceUrl)}" class="major-event-source" target="_blank" rel="noopener noreferrer">Source<i class="bi bi-box-arrow-up-right"></i></a>` : ""}
+        ${actions}
       </li>`;
     })
     .join("");
@@ -6993,7 +7187,10 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const patched = cached.includes('ai-card-patch-v2') ? cached : cached.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
+        const normalizedControls = ensureEventAnchorNavigationHtml(
+          normalizeCachedDatePageControlsHtml(cached),
+        );
+        const patched = normalizedControls.includes('ai-card-patch-v2') ? normalizedControls : normalizedControls.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
         const mdHref = `/events/${monthName}/${day}.md`;
         const withMd = withSpec.includes('text/markdown') ? withSpec : withSpec.replace('</head>', `<link rel="alternate" type="text/markdown" href="${mdHref}"/></head>`);
@@ -7146,10 +7343,13 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     ? buildQuizHTML(quizData, mDisplayForQuiz, day)
     : "";
 
-  const [relatedBlogEntry, personLinks] = await Promise.all([
-    findMatchingDateBlogEntry(env, monthName, day),
+  const [blogIndex, personLinks] = await Promise.all([
+    getBlogIndexEntries(env),
     loadPersonEntityLinkMap(env),
   ]);
+  const relatedBlogEntry =
+    buildPublishedDateRouteMap(blogIndex).get(dateRouteKey(monthName, day)) ||
+    null;
   const html = generateEventsDateHTML(
     monthName,
     day,
@@ -7160,6 +7360,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     quizData,
     relatedBlogEntry,
     personLinks,
+    blogIndex,
   );
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
@@ -7954,16 +8155,20 @@ async function handleFetchRequest(request, env, ctx) {
     ogImageUrl = `/og-image?title=${encodeURIComponent(dynamicTitle)}&date=${encodeURIComponent(formattedDate)}`;
   }
   const homepageVideoCards = await buildHomepageVideoCards(env).catch(() => "");
+  const homepageEventsPath = `/events/${MONTHS_ALL[today.getMonth()]}/${today.getDate()}/`;
   const homepageHighlightsHtml = pickRandomHomepageHighlights(
     eventsData?.events,
     3,
   )
     .map(
       (event) =>
-        `<div class="hero-highlight" role="listitem">` +
+        `<a href="${homepageEventsPath}#${historicalEventAnchorId(event)}" class="hero-highlight" role="listitem">` +
         `<span class="hero-highlight-year">${escapeHtml(String(event.year ?? "—"))}</span>` +
+        `<span class="hero-highlight-copy">` +
         `<span class="hero-highlight-text">${escapeHtml(String(event.text || ""))}</span>` +
-        `</div>`,
+        `<span class="major-event-source">Read more</span>` +
+        `</span>` +
+        `</a>`,
     )
     .join("");
 
@@ -8473,7 +8678,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=35>; rel=preload; as=style",
+      "</css/custom.css?v=37>; rel=preload; as=style",
     ].join(", "),
   );
 
@@ -9671,7 +9876,12 @@ export default {
     if (cacheKey) {
       const cached = await caches.default.match(cacheKey);
       if (cached) {
-        const r = new Response(cached.body, {
+        const cachedBody = /^\/events\/[a-z]+\/\d+\/?$/.test(url.pathname)
+          ? ensureEventAnchorNavigationHtml(
+              normalizeCachedDatePageControlsHtml(await cached.text()),
+            )
+          : cached.body;
+        const r = new Response(cachedBody, {
           status: cached.status,
           statusText: cached.statusText,
           headers: new Headers(cached.headers),
@@ -9717,6 +9927,10 @@ export const __datePageEngagementTestHooks = {
   fullYearsSinceDate,
   buildQuizHookCard,
   buildRelatedQuestionsBlock,
+  historicalEventAnchorId,
+  buildEventAnchorNavigationScript,
+  ensureEventAnchorNavigationHtml,
+  normalizeCachedDatePageControlsHtml,
 };
 
 export const __personIdentityTestHooks = {

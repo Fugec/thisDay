@@ -201,6 +201,31 @@ function getResponsiveImageSrcset(
     .join(", ");
 }
 
+function historicalEventAnchorId(event) {
+  const rawYear = String(event?.year ?? "").trim();
+  const year = rawYear
+    .replace(/^-/, "bc-")
+    .replace(/[^a-z0-9-]+/gi, "-")
+    .replace(/(^-|-$)/g, "") || "unknown";
+  const normalizedText = String(
+    event?.text || event?.description || event?.title || "",
+  )
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  let hash = 2166136261;
+  for (let index = 0; index < normalizedText.length; index += 1) {
+    hash ^= normalizedText.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const label =
+    normalizedText.slice(0, 48).replace(/-+$/g, "") || "historical-event";
+  return `event-${year}-${label}-${(hash >>> 0).toString(36)}`;
+}
+
 function pickRandomDailyHighlights(
   events,
   count = 3,
@@ -232,6 +257,9 @@ async function populateHeroHighlights() {
   if (!list || list.dataset.heroHighlightsReady === "true") return;
 
   const today = new Date();
+  const todayEventsPath = `/events/${today
+    .toLocaleString("en-US", { month: "long" })
+    .toLowerCase()}/${today.getDate()}/`;
   const eventsData = await fetchWikipediaEvents(
     today.getMonth() + 1,
     today.getDate(),
@@ -250,9 +278,10 @@ async function populateHeroHighlights() {
 
   const fragment = document.createDocumentFragment();
   selected.forEach((event) => {
-    const row = document.createElement("div");
+    const row = document.createElement("a");
     row.className = "hero-highlight";
     row.setAttribute("role", "listitem");
+    row.href = `${todayEventsPath}#${historicalEventAnchorId(event)}`;
 
     const year = document.createElement("span");
     year.className = "hero-highlight-year";
@@ -264,7 +293,15 @@ async function populateHeroHighlights() {
       event.title || event.description || "Historical event",
     ).trim();
 
-    row.append(year, text);
+    const readMore = document.createElement("span");
+    readMore.className = "major-event-source";
+    readMore.textContent = "Read more";
+
+    const copy = document.createElement("span");
+    copy.className = "hero-highlight-copy";
+    copy.append(text, readMore);
+
+    row.append(year, copy);
     fragment.appendChild(row);
   });
 

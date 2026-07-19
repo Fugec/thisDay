@@ -23,6 +23,19 @@ function loadClientPicker() {
   return context.pick;
 }
 
+function loadEventAnchor(source) {
+  const match = source.match(
+    /(function historicalEventAnchorId[\s\S]*?\n})\n\nfunction pickRandom/,
+  );
+  assert.ok(match, "event anchor helper must be extractable");
+  const context = {};
+  vm.runInNewContext(
+    `${match[1]}\nthis.anchor = historicalEventAnchorId;`,
+    context,
+  );
+  return context.anchor;
+}
+
 test("hero uses the supplied desktop/mobile content structure", () => {
   assert.match(indexHtml, /<div class="hero-inner">/);
   assert.match(indexHtml, /Events, birthdays and milestones for any date — sourced from\s+Wikipedia\./);
@@ -119,5 +132,57 @@ test("highlights reuse preloaded daily data and receive Worker SSR", () => {
   assert.match(
     seoWorker,
     /data-hero-highlights-ready", "true"/,
+  );
+  assert.match(
+    script,
+    /document\.createElement\("a"\)[\s\S]*?row\.href = `\$\{todayEventsPath\}#\$\{historicalEventAnchorId\(event\)\}`/,
+  );
+  assert.match(
+    seoWorker,
+    /<a href="\$\{homepageEventsPath\}#\$\{historicalEventAnchorId\(event\)\}" class="hero-highlight" role="listitem">/,
+  );
+  assert.match(
+    script,
+    /readMore\.className = "major-event-source";[\s\S]*?readMore\.textContent = "Read more";[\s\S]*?copy\.append\(text, readMore\)/,
+  );
+  assert.match(
+    seoWorker,
+    /<span class="hero-highlight-copy">[\s\S]*?<span class="major-event-source">Read more<\/span>/,
+  );
+  assert.match(
+    css,
+    /\.hero-highlight \{[\s\S]*?color: inherit;[\s\S]*?text-decoration: none;/,
+  );
+  assert.match(
+    css,
+    /\.hero-highlight \.major-event-source \{[\s\S]*?color: var\(--btn-bg\);[\s\S]*?font-size: 13px;[\s\S]*?font-weight: 600;/,
+  );
+});
+
+test("homepage and date pages derive the same stable event fragment", () => {
+  const clientAnchor = loadEventAnchor(script);
+  const workerAnchor = loadEventAnchor(seoWorker);
+  const text =
+    "A specific 2019 historical event is recorded with punctuation & accents.";
+  const fromHomepage = clientAnchor({
+    year: 2019,
+    title: "A specific 2019 historical event",
+    description: text,
+  });
+  const fromDatePage = workerAnchor({ year: 2019, text });
+
+  assert.equal(fromHomepage, fromDatePage);
+  assert.match(fromHomepage, /^event-2019-/);
+  assert.notEqual(
+    fromHomepage,
+    clientAnchor({ year: 2019, description: `${text} Different event.` }),
+  );
+  assert.match(
+    seoWorker,
+    /id="\$\{escapeHtml\(featuredAnchorId\)\}" class="article-hero-wrap"/,
+  );
+  assert.match(
+    seoWorker,
+    /id="\$\{escapeHtml\(eventAnchorId\)\}" class="tl-item/,
   );
 });

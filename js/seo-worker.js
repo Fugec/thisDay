@@ -397,7 +397,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v48/born-v30) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v48/born-v31) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
@@ -5539,11 +5539,14 @@ function buildDateTopNavigation({
     })
     .join("");
 
+  const routeBase = views.some((view) => view.type === currentType)
+    ? currentType
+    : "events";
   return `<nav aria-label="${escapeHtml(mDisplay)} ${day} date navigation">
     <div class="month-nav date-top-navigation">
-      <a href="/events/${prevMonthName}/${prevDay}/" class="btn date-top-link date-top-link-prev" rel="prev" aria-label="Previous day: ${escapeHtml(prevMonthDisplay)} ${prevDay}"><i class="bi bi-chevron-left" aria-hidden="true"></i></a>
+      <a href="/${routeBase}/${prevMonthName}/${prevDay}/" class="btn date-top-link date-top-link-prev" rel="prev" aria-label="Previous day: ${escapeHtml(prevMonthDisplay)} ${prevDay}"><i class="bi bi-chevron-left" aria-hidden="true"></i></a>
       <h2 class="date-top-current">${escapeHtml(mDisplay)} ${day}</h2>
-      <a href="/events/${nextMonthName}/${nextDay}/" class="btn date-top-link date-top-link-next" rel="next" aria-label="Next day: ${escapeHtml(nextMonthDisplay)} ${nextDay}"><i class="bi bi-chevron-right" aria-hidden="true"></i></a>
+      <a href="/${routeBase}/${nextMonthName}/${nextDay}/" class="btn date-top-link date-top-link-next" rel="next" aria-label="Next day: ${escapeHtml(nextMonthDisplay)} ${nextDay}"><i class="bi bi-chevron-right" aria-hidden="true"></i></a>
     </div>
     <div class="date-view-tabs" aria-label="Explore this date">${tabs}</div>
   </nav>`;
@@ -5787,7 +5790,13 @@ function normalizeCachedDatePageControlsHtml(
   );
 }
 
-function buildMajorEventsSummary(events, mDisplay, day, storyLinks = new Map()) {
+function buildMajorEventsSummary(
+  events,
+  mDisplay,
+  day,
+  storyLinks = new Map(),
+  { heading = "", description = "" } = {},
+) {
   const items = (Array.isArray(events) ? events : []).slice(0, 4);
   if (!items.length) return "";
 
@@ -5822,8 +5831,8 @@ function buildMajorEventsSummary(events, mDisplay, day, storyLinks = new Map()) 
   return `<section class="major-events-summary" aria-labelledby="major-events-heading">
     <div class="major-events-summary-head">
       <div>
-        <h2 class="h5 mb-1" id="major-events-heading">More major events on ${escapeHtml(mDisplay)} ${day}</h2>
-        <p>The featured story and these ranked highlights form a quick summary. Every recorded event remains available in the chronology below.</p>
+        <h2 class="h5 mb-1" id="major-events-heading">${escapeHtml(heading || `More major events on ${mDisplay} ${day}`)}</h2>
+        <p>${escapeHtml(description || "The featured story and these ranked highlights form a quick summary. Every recorded event remains available in the chronology below.")}</p>
       </div>
     </div>
     <ol class="major-events-list">${rows}</ol>
@@ -6228,7 +6237,25 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       : "";
   const dateEngagementScript = buildDateEngagementScript(monthName, day);
 
-  const topEvents = (eventsData?.events || []).slice(0, 3);
+  const rankedDateEvents = rankDateEventsBySignificance(eventsData?.events || []);
+  const dateEventStoryLinks =
+    typeof matchHistoricalEventsToBlogStories === "function"
+      ? matchHistoricalEventsToBlogStories(
+          rankedDateEvents,
+          relatedBlogEntry ? [relatedBlogEntry] : [],
+        )
+      : new Map();
+  const majorEventsSummary = buildMajorEventsSummary(
+    rankedDateEvents.slice(0, 4),
+    mDisplay,
+    day,
+    dateEventStoryLinks,
+    {
+      heading: `Major events on ${mDisplay} ${day}`,
+      description:
+        "The most significant recorded events of this date, ranked. The complete chronology lives on the events page.",
+    },
+  );
 
   // Schema — ItemList with jobTitle
   const personListSchema =
@@ -6330,17 +6357,6 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     visibleTlHtml += renderBornTlItem(b, i);
   });
 
-  // Events snippet — left-border accent style
-  const eventsSnippetHtml = topEvents
-    .map((e) => {
-      const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
-      return `<div class="d-flex gap-2 align-items-start mb-2 pb-2" style="border-bottom:1px solid var(--cbr)">
-  <span class="yr flex-shrink-0 event-years-ago ms-2">${escapeHtml(String(e.year))}</span>
-  <div style="font-size:.88rem;line-height:1.45">${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
-</div>`;
-    })
-    .join("");
-
   return `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(pageTitle)}</title>
@@ -6387,6 +6403,7 @@ ${siteNav()}
     </ol>
   </nav>
   <h1 class="mb-2">Famous Birthdays on ${escapeHtml(mDisplay)} ${day}</h1>
+  ${buildDateTopNavigationForRoute(monthName, day, "born")}
   ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${births.length} source records</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
@@ -6434,10 +6451,9 @@ ${siteNav()}
   </div>
   ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange, personLinks })}
   ${buildDateClusterCard(monthName, day, mDisplay, "born")}
-  ${topEvents.length > 0 ? `
+  ${majorEventsSummary ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
-    ${eventsSnippetHtml}
+    ${majorEventsSummary}
     <a href="/events/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
   </div>` : ""}
   <div class="ad-unit-container my-4">
@@ -6576,7 +6592,25 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       : "";
   const dateEngagementScript = buildDateEngagementScript(monthName, day);
 
-  const topEvents = (eventsData?.events || []).slice(0, 3);
+  const rankedDateEvents = rankDateEventsBySignificance(eventsData?.events || []);
+  const dateEventStoryLinks =
+    typeof matchHistoricalEventsToBlogStories === "function"
+      ? matchHistoricalEventsToBlogStories(
+          rankedDateEvents,
+          relatedBlogEntry ? [relatedBlogEntry] : [],
+        )
+      : new Map();
+  const majorEventsSummary = buildMajorEventsSummary(
+    rankedDateEvents.slice(0, 4),
+    mDisplay,
+    day,
+    dateEventStoryLinks,
+    {
+      heading: `Major events on ${mDisplay} ${day}`,
+      description:
+        "The most significant recorded events of this date, ranked. The complete chronology lives on the events page.",
+    },
+  );
 
   // Schema — ItemList with jobTitle
   const personListSchema =
@@ -6678,17 +6712,6 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     visibleDiedTlHtml += renderDiedTlItem(d, i);
   });
 
-  // Events snippet — consistent style with born page
-  const eventsSnippetHtml = topEvents
-    .map((e) => {
-      const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
-      return `<div class="d-flex gap-2 align-items-start mb-2 pb-2" style="border-bottom:1px solid var(--cbr)">
-  <span class="yr flex-shrink-0 event-years-ago ms-2">${escapeHtml(String(e.year))}</span>
-  <div style="font-size:.88rem;line-height:1.45">${escapeHtml(e.text)}${w ? ` <a href="${escapeHtml(w)}" class="small text-muted" target="_blank" rel="noopener noreferrer">Wikipedia &rarr;</a>` : ""}</div>
-</div>`;
-    })
-    .join("");
-
   return `<!DOCTYPE html><html lang="en">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>${escapeHtml(pageTitle)}</title>
@@ -6735,6 +6758,7 @@ ${siteNav()}
     </ol>
   </nav>
   <h1 class="mb-2">Notable Deaths on ${escapeHtml(mDisplay)} ${day}</h1>
+  ${buildDateTopNavigationForRoute(monthName, day, "died")}
   ${featImg ? "" : `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
     <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${deaths.length} source records</span>
     ${eraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(eraRange)}</span>` : ""}
@@ -6780,10 +6804,9 @@ ${siteNav()}
   </div>
   ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange, personLinks })}
   ${buildDateClusterCard(monthName, day, mDisplay, "died")}
-  ${topEvents.length > 0 ? `
+  ${majorEventsSummary ? `
   <div class="card-box">
-    <h2 class="h4 mb-3"><i class="bi bi-calendar-event me-2" style="color:#1a1a1a"></i>Also on ${escapeHtml(mDisplay)} ${day} in History</h2>
-    ${eventsSnippetHtml}
+    ${majorEventsSummary}
     <a href="/events/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
   </div>` : ""}
   <div class="ad-unit-container my-4">
@@ -6996,7 +7019,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v30-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v31-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -7106,7 +7129,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v29-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v30-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";

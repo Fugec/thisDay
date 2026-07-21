@@ -35,6 +35,9 @@ on:
 jobs:
   ensure-post:
     runs-on: ubuntu-latest
+    # Worst case: 3 attempts (~30 min each) + 2×90-min provider cooldown waits
+    # ≈ 4.5h. Bound it well under GitHub's 6h hard limit as a runaway guard.
+    timeout-minutes: 350
 
     steps:
       - name: Check if today's post exists and trigger if missing
@@ -48,6 +51,7 @@ jobs:
 
           KV_URL="https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/post:${SLUG}"
           DRAFT_URL="https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/draft:${SLUG}"
+          DRAFT_SOURCE_URL="https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/draft-source-v1:${SLUG}"
           # Direct Worker hostname bypasses thisday.info zone bot challenges.
           # Both endpoints still require PUBLISH_SECRET.
           WORKER_URL="https://thisday-blog-ai-worker.kapetanovic-armin.workers.dev"
@@ -63,18 +67,74 @@ jobs:
             exit 0
           fi
 
-          # ── Phase 2+3: up to two draft→enrich recovery rounds ───────────
-          # A bounded enrichment rejection self-heals on the Worker side: the
-          # Worker blocks the rejected event and deletes the draft/source
-          # package. Round 2 then regenerates a different topic in fresh
-          # invocations instead of losing the day to the same stored draft.
+          # ── Phase 2+3: draft→enrich recovery, with provider-cooldown retry ─
+          # Two failure classes are handled differently:
+          #  • A bounded enrichment rejection self-heals on the Worker side (it
+          #    blocks the event + deletes the draft/source); round 2 then
+          #    regenerates a DIFFERENT topic in fresh invocations.
+          #  • AI provider exhaustion (all draft attempts 502, or enrich 5xx)
+          #    means every provider is rate-limited right now (e.g. all Groq
+          #    keys 429 with a ~1h cooldown, observed 2026-07-21). Retrying
+          #    immediately just fails again, so the whole sequence WAITS 90 min
+          #    for the cooldown to clear and retries (up to MAX_COOLDOWN_RETRIES
+          #    times) so the day's post + enrichment still complete once the
+          #    providers recover, instead of losing the day. Content rejections
+          #    keep regenerating immediately; KV write-budget 429s still stop.
+          MAX_COOLDOWN_RETRIES=2
+          COOLDOWN_SECONDS=5400   # 90 min — covers the observed ~54-91 min Groq cooldowns
           PUBLISH_OK=false
+          for COOLDOWN_CYCLE in $(seq 0 "$MAX_COOLDOWN_RETRIES"); do
+          if [ "$COOLDOWN_CYCLE" -gt 0 ]; then
+            echo "AI providers appear rate-limited/exhausted. Waiting 90 min for the cooldown to clear, then retry ${COOLDOWN_CYCLE}/${MAX_COOLDOWN_RETRIES}..."
+            sleep "$COOLDOWN_SECONDS"
+            # A later worker cron may have published during the wait.
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" "$KV_URL")
+            echo "Post-cooldown KV status for post:${SLUG} → HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "post:${SLUG} was published during the cooldown wait — nothing more to do."
+              PUBLISH_OK=true
+              break
+            fi
+          fi
+          PROVIDER_EXHAUSTED=false
+          FORCE_REGEN=false
           for ROUND in 1 2; do
             # ── Phase 2: Ensure a lightweight draft exists ────────────────
-            DRAFT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
-              "$DRAFT_URL")
-            echo "Round ${ROUND}: KV status for draft:${SLUG} → HTTP $DRAFT_STATUS"
+            if [ "$FORCE_REGEN" = "true" ]; then
+              # A round-1 bounded rejection self-heals on the Worker side (it
+              # blocks the event and deletes the draft + source package), but
+              # Cloudflare KV deletes are eventually consistent: reading
+              # draft:${SLUG} right after the delete can still return the
+              # just-removed value (HTTP 200). That stale read previously made
+              # round 2 skip regeneration and re-enrich the SAME rejected draft,
+              # losing the day (the 2026-07-21 Sirimavo Bandaranaike wedge).
+              # Issue an explicit best-effort delete, then WAIT until the draft
+              # AND its source are observably gone before regenerating a
+              # different topic — never trust a single immediate read here.
+              echo "Round ${ROUND}: round-1 bounded rejection — forcing a fresh topic (waiting for the KV delete to propagate)..."
+              curl -s -o /dev/null -X DELETE -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" "$DRAFT_URL" || true
+              curl -s -o /dev/null -X DELETE -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" "$DRAFT_SOURCE_URL" || true
+              for SETTLE in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                sleep 10
+                DS=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" "$DRAFT_URL")
+                SS=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" "$DRAFT_SOURCE_URL")
+                echo "Round ${ROUND}: waiting for delete — draft → HTTP $DS, source → HTTP $SS (attempt ${SETTLE}/12)"
+                if [ "$DS" != "200" ] && [ "$SS" != "200" ]; then
+                  break
+                fi
+              done
+              # Force the regenerate branch regardless of the final read so we
+              # can never re-enrich the rejected draft.
+              DRAFT_STATUS=404
+            else
+              DRAFT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+                -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+                "$DRAFT_URL")
+              echo "Round ${ROUND}: KV status for draft:${SLUG} → HTTP $DRAFT_STATUS"
+            fi
 
             if [ "$DRAFT_STATUS" != "200" ]; then
               echo "Draft for ${SLUG} is missing — preparing its source in a dedicated invocation..."
@@ -89,11 +149,13 @@ jobs:
                 exit 1
               fi
               if [ "$PREPARE_HTTP_STATUS" != "200" ]; then
-                echo "::error::Blog source preparation failed with HTTP status $PREPARE_HTTP_STATUS"
-                exit 1
+                echo "Source preparation failed (HTTP $PREPARE_HTTP_STATUS) — likely AI provider exhaustion; will retry after cooldown."
+                PROVIDER_EXHAUSTED=true
+                break
               fi
 
               DRAFT_CREATED=false
+              DRAFT_KV_BLOCKED=false
               for DRAFT_ATTEMPT in 1 2 3; do
                 echo "Generating draft:${SLUG} from the prepared source in fresh invocation ${DRAFT_ATTEMPT}/3..."
                 DRAFT_ENDPOINT="$WORKER_URL/blog/generate-draft"
@@ -111,16 +173,21 @@ jobs:
                   break
                 fi
                 if [ "$DRAFT_HTTP_STATUS" = "429" ]; then
-                  echo "::error::Cloudflare KV write budget blocked draft generation until the UTC reset"
+                  DRAFT_KV_BLOCKED=true
                   break
                 fi
                 if [ "$DRAFT_ATTEMPT" != "3" ]; then
                   sleep 5
                 fi
               done
-              if [ "$DRAFT_CREATED" != "true" ]; then
-                echo "::error::Blog draft generation failed in all three fresh Worker invocations"
+              if [ "$DRAFT_KV_BLOCKED" = "true" ]; then
+                echo "::error::Cloudflare KV write budget blocked draft generation until the UTC reset"
                 exit 1
+              fi
+              if [ "$DRAFT_CREATED" != "true" ]; then
+                echo "Draft generation failed all three invocations — likely AI provider exhaustion (502/timeout); will retry after cooldown."
+                PROVIDER_EXHAUSTED=true
+                break
               fi
             fi
 
@@ -142,14 +209,29 @@ jobs:
             fi
             if [ "$ROUND" = "1" ] && echo "$BODY" | grep -q "Bounded recovery rejected"; then
               echo "Bounded gate rejected the draft — the Worker blocked its event and deleted the draft/source. Regenerating a different topic in round 2..."
+              FORCE_REGEN=true
               continue
             fi
-            echo "::error::Blog enrichment failed with HTTP status $HTTP_STATUS"
+            # Any other enrich failure (5xx / provider error, or a round-2
+            # bounded rejection) is retryable after a cooldown: on a degraded
+            # -provider day the fresh topic was generated weak, and a retry once
+            # Groq recovers produces a clean, passing draft.
+            echo "Enrichment failed (HTTP $HTTP_STATUS) — treating as provider exhaustion; will retry after cooldown."
+            PROVIDER_EXHAUSTED=true
+            break
+          done
+
+          if [ "$PUBLISH_OK" = "true" ]; then
+            break
+          fi
+          if [ "$PROVIDER_EXHAUSTED" != "true" ]; then
+            echo "::error::Blog publication failed for a non-retryable reason."
             exit 1
+          fi
           done
 
           if [ "$PUBLISH_OK" != "true" ]; then
-            echo "::error::Blog publication failed in both recovery rounds"
+            echo "::error::Blog publication still failing after ${MAX_COOLDOWN_RETRIES} provider-cooldown retries (90 min each)."
             exit 1
           fi
 

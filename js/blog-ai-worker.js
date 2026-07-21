@@ -6859,7 +6859,7 @@ async function improveArticleQuality(env, content, issues, source = null) {
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      { maxTokens: 4000, timeoutMs: 50_000 },
+      { maxTokens: 3000, timeoutMs: 50_000 },
     );
   } catch (err) {
     console.warn(`improveArticleQuality: AI call failed (${err.message}) — keeping original`);
@@ -8573,22 +8573,43 @@ async function enrichPublishedPost(
   let pillars;
   if (boundedRecovery) {
     await chk("bounded-preflight");
+    // Repair BEFORE validating. The bounded gate used to reject any imperfect
+    // draft outright and block its topic. That assumed a bad TOPIC, but when
+    // generation degrades to the weak Workers-AI fallback (cumulative Groq TPM
+    // burst on 2026-07-21), the topic is fine and the DRAFT is weak
+    // (cross-section duplication, filler phrases, thin facts). Rejecting then
+    // burned every good event of the day. Run the same source-grounded repair
+    // passes the daily non-bounded path uses first — small, TPM-friendly calls
+    // that dedup, strip filler, and expand — then apply the strict validation.
+    // These are a strict subset of the non-bounded sync pipeline, so the
+    // synchronous request budget already accommodates them.
+    let repaired = content;
+    const bannedViolations = scanBannedPhrases(repaired);
+    if (bannedViolations.length > 0) {
+      repaired = await fixBannedPhrases(env, repaired, bannedViolations, groundingSource);
+    }
+    const preRepairIssues = [
+      ...scanArticleQuality(repaired),
+      ...scanIntraPageDuplication(repaired),
+    ];
+    if (preRepairIssues.length > 0) {
+      repaired = await improveArticleQuality(env, repaired, preRepairIssues, groundingSource);
+    }
     const boundedIssues = [
-      ...scanBannedPhrases(content),
-      ...scanArticleQuality(content),
-      ...scanIntraPageDuplication(content),
+      ...scanBannedPhrases(repaired),
+      ...scanArticleQuality(repaired),
+      ...scanIntraPageDuplication(repaired),
     ];
     if (boundedIssues.length > 0) {
-      // Bounded mode cannot repair, and a stored draft that keeps failing this
-      // scan wedges every later recovery round on the same rejection. Block the
-      // event and drop the draft/source package so the next round regenerates a
-      // different topic instead.
+      // Still failing after one repair pass: the draft is genuinely unfixable
+      // (or the topic's source is too thin). Block the event and drop the
+      // draft/source package so the next round regenerates a different topic.
       await markGroundingBlockedEvent(env, slug, content, boundedIssues);
       throw new Error(
         `Bounded recovery rejected the draft before publication: ${boundedIssues.join("; ")}`,
       );
     }
-    enriched = content;
+    enriched = repaired;
     pillars = classifyPillarsDeterministically(enriched);
     await chk("bounded-preflight-passed");
   } else {
@@ -14935,7 +14956,7 @@ async function repairGroundingContradictions(env, content, reasons, source, call
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      { maxTokens: 4000, timeoutMs: 50_000 },
+      { maxTokens: 3000, timeoutMs: 50_000 },
     );
   } catch (err) {
     console.warn(`repairGroundingContradictions: AI call failed (${err.message}) — keeping original`);
@@ -15883,7 +15904,7 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
         { role: "system", content: paraSystemPrompt },
         { role: "user", content: paraUserMessage },
       ],
-      { maxTokens: 4000, timeoutMs: 50_000 },
+      { maxTokens: 3000, timeoutMs: 50_000 },
     );
   } catch (err) {
     console.warn(`Paragraph expert: AI call failed (${err.message}) — skipping pass`);

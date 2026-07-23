@@ -23,6 +23,12 @@
  *   npx wrangler secret put GROQ_API_KEY_3 --config wrangler-blog.jsonc
  *   npx wrangler secret put GROQ_API_KEY_4 --config wrangler.jsonc
  *   npx wrangler secret put GROQ_API_KEY_4 --config wrangler-blog.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_5 --config wrangler.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_5 --config wrangler-blog.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_6 --config wrangler.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_6 --config wrangler-blog.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_7 --config wrangler.jsonc
+ *   npx wrangler secret put GROQ_API_KEY_7 --config wrangler-blog.jsonc
  *
  * @module shared/ai-call
  */
@@ -80,6 +86,7 @@ const NVIDIA_TEXT_MAX_TOKENS = 4096; // Documented max_tokens range for this NIM
 // Module-level cache survives across requests within the same Worker instance.
 // Cache TTL: 1 hour. On a cold start only one /v1/models fetch per provider.
 let _groqModelCache = { model: null, models: null, at: 0 };
+let _groqKeyRotationCursor = 0;
 const _MODEL_CACHE_TTL_MS = 3_600_000; // 1 hour
 
 /**
@@ -89,6 +96,7 @@ const _MODEL_CACHE_TTL_MS = 3_600_000; // 1 hour
  */
 export function __resetGroqModelCacheForTests() {
   _groqModelCache = { model: null, models: null, at: 0 };
+  _groqKeyRotationCursor = 0;
 }
 const _providerKeyCooldowns = new Map();
 const _DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
@@ -181,11 +189,18 @@ function scoreModelForTextGen(modelId) {
  */
 const _MIN_CONTEXT_WINDOW = 8_192;
 const _MIN_MAX_COMPLETION_TOKENS = 4_096;
+// Verified live against /v1/models on all 7 configured Groq keys (2026-07-22,
+// identical catalog across keys — same account). "qwen/qwen3-32b" (formerly
+// listed here) is no longer in the active catalog at all; "openai/gpt-oss-120b"
+// (score 1230, the actual #2 behind GROQ_MODEL's 1280) was missing. Ordered by
+// scoreModelForTextGen ranking so an emergency fallback (live query itself
+// failed) still tries models in the same order dynamic resolution would.
 const _GROQ_FALLBACK_MODEL_CANDIDATES = [
   GROQ_MODEL,
-  "qwen/qwen3-32b",
+  "openai/gpt-oss-120b",
   "qwen/qwen3.6-27b",
   "openai/gpt-oss-20b",
+  "llama-3.1-8b-instant",
 ];
 
 function uniqueModelIds(models) {
@@ -534,6 +549,8 @@ export function hasAnyTextAIProvider(env) {
     env?.GROQ_API_KEY_3 ||
     env?.GROQ_API_KEY_4 ||
     env?.GROQ_API_KEY_5 ||
+    env?.GROQ_API_KEY_6 ||
+    env?.GROQ_API_KEY_7 ||
     getOpenRouterKeys(env).length > 0 ||
     env?.NVIDIA_API_KEY,
   );
@@ -637,6 +654,8 @@ export async function callWorkersAIDirect(env, messages, options = {}) {
  * @param {string}   [env.GROQ_API_KEY_3] Groq API key secret (optional rotation)
  * @param {string}   [env.GROQ_API_KEY_4] Groq API key secret (optional rotation)
  * @param {string}   [env.GROQ_API_KEY_5] Groq API key secret (optional rotation)
+ * @param {string}   [env.GROQ_API_KEY_6] Groq API key secret (optional rotation)
+ * @param {string}   [env.GROQ_API_KEY_7] Groq API key secret (optional rotation)
  * @param {object}   [env.BLOG_AI_KV]   KV for resolving the best CF model name
  * @param {Array}    messages            OpenAI-style chat messages array
  * @param {object}   [opts]
@@ -704,7 +723,24 @@ async function callAIProviders(
   let providerAttempts = 0;
 
   // Resolve key arrays up front so model resolution can use the first available key.
-  const groqKeys = [env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3, env.GROQ_API_KEY_4, env.GROQ_API_KEY_5].filter(Boolean);
+  const configuredGroqKeys = [env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3, env.GROQ_API_KEY_4, env.GROQ_API_KEY_5, env.GROQ_API_KEY_6, env.GROQ_API_KEY_7].filter(Boolean);
+  // Chunked article generation makes several large calls in one Worker
+  // invocation. Starting each call at key 1 repeatedly drains that key's TPM
+  // allowance while later rotation keys remain idle. Rotate the starting key
+  // per call, preserving the same bounded attempt count and fallback budget.
+  const rotationStart = configuredGroqKeys.length > 0
+    ? _groqKeyRotationCursor % configuredGroqKeys.length
+    : 0;
+  const groqKeys = configuredGroqKeys.length > 0
+    ? [
+        ...configuredGroqKeys.slice(rotationStart),
+        ...configuredGroqKeys.slice(0, rotationStart),
+      ]
+    : [];
+  if (configuredGroqKeys.length > 1) {
+    _groqKeyRotationCursor =
+      (_groqKeyRotationCursor + 1) % configuredGroqKeys.length;
+  }
 
   // Dynamically resolve Groq text models (cached 1h).
   // On a warm Worker instance this is synchronous (cache hit, 0 subrequests).

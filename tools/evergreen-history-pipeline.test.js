@@ -231,6 +231,23 @@ test("publication requires exactly one complete or durably queued companion", ()
   assert.match(evidenceLost.reasons.join("; "), /evidence package/i);
 });
 
+test("automatic publication preflight requires a source-ready primary companion", () => {
+  const accepted = hooks.validatePrimaryEvergreenCandidateForContent({
+    ...sourceRichContent(),
+    wikiUrl: "https://en.wikipedia.org/wiki/Apollo_11",
+    sourcePageTitle: "Apollo 11",
+  });
+  assert.equal(accepted.ok, true, accepted.reasons.join("; "));
+
+  const rejected = hooks.validatePrimaryEvergreenCandidateForContent({
+    ...sourceRichContent(),
+    wikiUrl: "",
+    sourcePageTitle: "",
+  });
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.reasons.join("; "), /Wikipedia identity/i);
+});
+
 test("the edition gate requires deep, distinct, source-backed content", () => {
   const ready = readyEntity();
   const quality = hooks.evergreenHistoryEditionQuality(ready);
@@ -448,5 +465,15 @@ test("the current companion is selected before an older retry backlog", () => {
   assert.equal(
     hooks.selectPendingEvergreenHistoryCandidates([current, older])[0].slug,
     older.slug,
+  );
+  assert.deepEqual(
+    hooks.selectPendingEvergreenHistoryCandidates(
+      [older],
+      {
+        preferPostSlug: "20-july-2026",
+        requirePostSlug: true,
+      },
+    ),
+    [],
   );
 });

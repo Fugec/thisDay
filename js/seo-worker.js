@@ -52,6 +52,11 @@ import {
   matchHistoricalEventsToBlogStories,
   safeBlogStoryUrl,
 } from "./shared/event-story-matching.js";
+import {
+  fetchCachedOpenLibraryRelatedBooks,
+  fetchCachedWikidataRelatedFilms,
+  normalizeWikidataEntityId,
+} from "./shared/related-media.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -397,10 +402,11 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v48/born-v31) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v50/born-v33) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
+const HISTORY_EDGE_CACHE_VERSION = 2;
 // Routes eligible for CF Cache API storage. Quiz pages are excluded because
 // the blog worker busts their KV key (quiz-page-v31) on publish; the CF Cache
 // has no hook into that invalidation path.
@@ -425,7 +431,9 @@ function isEdgeCacheable(url, request) {
 // isEdgeCacheable), so stripping the query prevents cache fragmentation and
 // junk-param entry flooding while improving the hit rate across tracking params.
 function edgeCacheKey(url) {
-  return `${url.origin}${url.pathname}`;
+  return /^\/history\/[a-z0-9-]+\/?$/.test(url.pathname)
+    ? `${url.origin}${url.pathname}?__history_v=${HISTORY_EDGE_CACHE_VERSION}`
+    : `${url.origin}${url.pathname}`;
 }
 
 // --- Helper function to fetch daily events from Wikipedia API ---
@@ -990,9 +998,46 @@ const ENTITY_INLINE_AD = `<div class="ad-unit-container my-4">
        data-full-width-responsive="true"></ins>
 </div>`;
 
+function entityRelatedMediaTopic(entity) {
+  return String(
+    entity?.summaryTitle ||
+      wikiTitleFromEntityUrl(entity?.wikiUrl) ||
+      entity?.name ||
+      "",
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function entityAmazonSearchUrl(title, author = "") {
+  const query = [title, author].filter(Boolean).join(" ").trim();
+  return `https://www.amazon.com/s?k=${encodeURIComponent(query || "history books")}&tag=thisday0c-20`;
+}
+
+function buildEntityRelatedBookCards(books) {
+  return (Array.isArray(books) ? books : [])
+    .filter((book) => book?.title)
+    .slice(0, 5)
+    .map((book) => {
+      const cover = book.coverUrl
+        ? `<span class="amazon-card-cover"><img src="${escapeHtml(book.coverUrl)}" alt="${escapeHtml(book.title)} cover" loading="lazy"></span>`
+        : '<span class="amazon-card-cover amazon-card-cover-fallback" aria-hidden="true"><i class="bi bi-book"></i></span>';
+      const meta = [book.author, book.firstPublishYear]
+        .filter(Boolean)
+        .join(" · ");
+      return `<a class="amazon-product-card" href="${escapeHtml(entityAmazonSearchUrl(book.title, book.author))}" target="_blank" rel="sponsored noopener noreferrer">
+        ${cover}
+        <strong>${escapeHtml(book.title)}</strong>
+        <small>${escapeHtml(meta || "View on Amazon")}</small>
+      </a>`;
+    })
+    .join("");
+}
+
 function buildEntityBookOrAdSlot(entity) {
+  const exactTopic = entityRelatedMediaTopic(entity);
   const topic = [
-    entity.name,
+    exactTopic,
     entity.description,
     entity.sourcePostTitle,
     ...(Array.isArray(entity.relatedTopics) ? entity.relatedTopics : []),
@@ -1007,19 +1052,56 @@ function buildEntityBookOrAdSlot(entity) {
     .filter((word) => word.length >= 4 && !["history", "world", "first", "second", "person", "article", "related"].includes(word))
     .slice(0, 14)
     .join(" ");
+  const cards = buildEntityRelatedBookCards(entity.relatedBooks);
+  const hasServerBooks = (Array.isArray(entity.relatedBooks)
+    ? entity.relatedBooks
+    : []).filter((book) => book?.title).length >= 2;
 
-  return `<div class="entity-book-slot my-4" data-entity-book-slot data-query="${escapeHtml(`${entity.name} biography history`)}" data-keywords="${escapeHtml(keywords)}" data-amazon-tag="thisday0c-20">
-    <section class="amazon-related mt-4 p-3 rounded" aria-label="Related book recommendations" style="display:none">
+  return `<div class="entity-book-slot my-4"${hasServerBooks ? "" : " data-entity-book-slot"} data-query="${escapeHtml(exactTopic)}" data-keywords="${escapeHtml(keywords)}" data-amazon-tag="thisday0c-20">
+    <section class="amazon-related mt-4 p-3 rounded" aria-label="Related book recommendations"${hasServerBooks ? "" : ' style="display:none"'}>
       <div class="amazon-related-head"><span class="amazon-kicker">Related books</span></div>
       <div class="amazon-slider-shell">
         <button type="button" class="amazon-slider-btn" aria-label="Previous related books" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
-        <div class="amazon-slider-wrap"><div class="amazon-slider-track" aria-live="polite"></div></div>
+        <div class="amazon-slider-wrap"><div class="amazon-slider-track" aria-live="polite">${cards}</div></div>
         <button type="button" class="amazon-slider-btn" aria-label="Next related books" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
       </div>
       <small class="article-meta d-block mt-2">Book covers from Open Library. As an Amazon Associate I earn from qualifying purchases.</small>
     </section>
-    <div class="entity-book-fallback">${ENTITY_INLINE_AD}</div>
+    ${hasServerBooks ? "" : `<div class="entity-book-fallback">${ENTITY_INLINE_AD}</div>`}
   </div>`;
+}
+
+function buildEntityRelatedFilmsBlock(entity) {
+  const films = (Array.isArray(entity?.relatedMovies)
+    ? entity.relatedMovies
+    : [])
+    .filter(
+      (film) =>
+        film?.title &&
+        /^tt\d{5,12}$/.test(String(film?.imdbId || "")),
+    )
+    .slice(0, 5);
+  if (films.length < 2) return "";
+
+  const cards = films
+    .map((film) => {
+      const meta = film.year ? String(film.year) : "Film";
+      return `<a class="amazon-product-card related-film-card" href="https://www.imdb.com/title/${escapeHtml(film.imdbId)}/" target="_blank" rel="noopener noreferrer" aria-label="View ${escapeHtml(film.title)} on IMDb">
+        <span class="amazon-card-cover amazon-card-cover-fallback related-film-cover" aria-hidden="true"><i class="bi bi-film"></i></span>
+        <strong>${escapeHtml(film.title)}</strong>
+        <small>${escapeHtml(meta)} · View on IMDb</small>
+      </a>`;
+    })
+    .join("");
+  return `<section class="amazon-related related-films mt-4 p-3 rounded" aria-label="Related films and documentaries">
+    <div class="amazon-related-head"><span class="amazon-kicker">Related films and documentaries</span></div>
+    <div class="amazon-slider-shell">
+      <button type="button" class="amazon-slider-btn" aria-label="Previous related films" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
+      <div class="amazon-slider-wrap"><div class="amazon-slider-track">${cards}</div></div>
+      <button type="button" class="amazon-slider-btn" aria-label="Next related films" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
+    </div>
+    <small class="article-meta d-block mt-2">Exact-topic matches from Wikidata. Title links open on IMDb; ratings and descriptions are not imported.</small>
+  </section>`;
 }
 
 function renderEntityInlineFigure(img, altFallback = "") {
@@ -1138,7 +1220,7 @@ function buildEntityBodySections(entity) {
           `<div class="entity-body-section">
             <h2 class="h3">${escapeHtml(section.heading)}</h2>
             ${section.paragraphs.map((paragraph) => `<p>${escapeHtml(ensureCompleteSentences(paragraph))}</p>`).join("")}
-          </div>${renderEntityInlineFigure(inlineImages[i], entity.name)}${i === 0 ? buildEntityBookOrAdSlot(entity) : ""}${i === 1 ? `<div class="entity-career-ad">${ENTITY_INLINE_AD}</div>` : ""}`,
+          </div>${renderEntityInlineFigure(inlineImages[i], entity.name)}${i === 0 ? buildEntityBookOrAdSlot(entity) : ""}${i === 1 ? `<div class="entity-career-ad">${ENTITY_INLINE_AD}</div>` : ""}${i === 2 ? buildEntityRelatedFilmsBlock(entity) : ""}`,
       )
       .join("")}
   </section>`;
@@ -1473,10 +1555,48 @@ async function fetchEntityMediaImages(pageTitle, heroUrl = "", max = 2) {
     const key = wikimediaImageKeyFromUrl(src);
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    const caption = String(item.caption?.text || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+    const caption = String(item.caption?.text || "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\[\d+\]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     out.push({ src, caption: caption.length > 160 ? "" : caption });
   }
   return out;
+}
+
+async function fetchCachedEntityMediaImages(
+  pageTitle,
+  heroUrl = "",
+  max = 2,
+  { cache = globalThis.caches?.default } = {},
+) {
+  const cleanTitle = String(pageTitle || "").replace(/\s+/g, " ").trim();
+  if (!cleanTitle) return [];
+  const heroKey = wikimediaImageKeyFromUrl(heroUrl) || "no-hero";
+  const request = new Request(
+    `https://thisday.info/__related-media-cache/images/${encodeURIComponent(cleanTitle.toLowerCase())}/${encodeURIComponent(heroKey)}.json`,
+  );
+  if (cache?.match) {
+    const cached = await cache.match(request).catch(() => null);
+    if (cached?.ok) {
+      const images = await cached.json().catch(() => null);
+      if (Array.isArray(images)) return images.slice(0, max);
+    }
+  }
+  const images = await fetchEntityMediaImages(cleanTitle, heroUrl, max);
+  if (cache?.put) {
+    await cache.put(
+      request,
+      new Response(JSON.stringify(images), {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "public, max-age=2592000",
+        },
+      }),
+    ).catch(() => {});
+  }
+  return images;
 }
 
 function cleanWikiExtract(value) {
@@ -2536,7 +2656,37 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   entity = syncEntitySourcePostFromIndex(entity, posts);
   entity = await hydrateSparseEntity(env, entity, type, ctx);
   entity.relatedTopics = inferEntityTopicPillars(entity, type);
-  if (type === "person") {
+  const entityMediaTitle =
+    wikiTitleFromEntityUrl(entity.wikiUrl) || entity.name;
+  if (type === "event") {
+    const relatedMediaTopic = entityRelatedMediaTopic(entity);
+    const wikidataEntityId = normalizeWikidataEntityId(
+      entity.wikidataEntityId,
+    );
+    const [inlineImages, relatedBooks, relatedMovies] = await Promise.all([
+      entity.wikiUrl
+        ? fetchCachedEntityMediaImages(
+            entityMediaTitle,
+            entity.imageUrl,
+            2,
+          ).catch(() => [])
+        : Promise.resolve([]),
+      relatedMediaTopic
+        ? fetchCachedOpenLibraryRelatedBooks(
+            relatedMediaTopic,
+          ).catch(() => [])
+        : Promise.resolve([]),
+      wikidataEntityId
+        ? fetchCachedWikidataRelatedFilms(
+            wikidataEntityId,
+          ).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+    entity.inlineImages = inlineImages;
+    entity.relatedBooks = relatedBooks;
+    entity.relatedMovies = relatedMovies;
+    entity.relatedMoviesSubjectQid = wikidataEntityId;
+  } else if (type === "person") {
     // Always normalise person bodies to the clean two-section layout at render
     // time (deterministic, no KV write). This replaces stale three-section or
     // malformed stored sections (e.g. a trailing empty "Section" block) so
@@ -2546,7 +2696,11 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     // Up to two inline article images from the Wikipedia media-list (edge-cached
     // with the page; fail-open to text-only when the person has no usable media).
     entity.inlineImages = entity.wikiUrl
-      ? await fetchEntityMediaImages(wikiTitleFromEntityUrl(entity.wikiUrl) || entity.name, entity.imageUrl, 2).catch(() => [])
+      ? await fetchCachedEntityMediaImages(
+          entityMediaTitle,
+          entity.imageUrl,
+          2,
+        ).catch(() => [])
       : [];
   }
   if (type === "person" && url.searchParams.has("repair")) {
@@ -2671,7 +2825,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     .pillar-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center}.pillar-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);font-size:13px;text-decoration:none}.pillar-pill-featured{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff}
     .dyn-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.dyn-slider-wrap::-webkit-scrollbar{display:none}.dyn-slider-track{display:flex;gap:14px;padding-bottom:4px}.dyn-slide{flex:0 0 240px;max-width:240px;min-height:220px;scroll-snap-align:start;background:var(--btn-bg);color:#fff;padding:2rem 1.75rem;display:flex;flex-direction:column;justify-content:center;gap:1rem;border-radius:10px}.dyn-slide img,.dyn-slide figure,.dyn-slider-wrap figure{display:none!important}.dyn-slide p{font-size:15px;line-height:1.6;color:var(--accent);margin:0}.dyn-slide .dyn-fact{font-size:15px;color:#fff;margin:0;line-height:1.6}.slider-controls{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}.slider-btn{width:38px;height:38px;border:1px solid var(--border);border-radius:50%;background:#fff;color:var(--btn-bg);display:inline-flex;align-items:center;justify-content:center;cursor:pointer}.slider-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}.slider-btn:disabled{opacity:.35;cursor:default}
     .entity-hero-image img{max-width:100%;height:auto;display:block;margin:0 auto;border-radius:8px}.entity-body{border-top:1px solid var(--border);padding-top:1.5rem}.entity-body-section+ .entity-body-section{margin-top:1.75rem}.entity-body p{font-size:15px;line-height:1.75;margin-bottom:1rem}.entity-inline-figure{margin:1.25rem 0;text-align:center}.entity-inline-figure img{max-width:100%;height:auto;border-radius:8px;border:1px solid var(--border)}.entity-inline-figure figcaption{margin-top:.4rem}.history-comparison{border-top:1px solid var(--border);padding-top:1.5rem}.history-comparison-scroll{overflow-x:auto}.history-comparison-table{width:100%;min-width:680px;border-collapse:collapse;font-size:14px;line-height:1.55}.history-comparison-table th,.history-comparison-table td{padding:12px 14px;border:1px solid var(--border);vertical-align:top;text-align:left}.history-comparison-table th{background:var(--btn-bg);color:#fff;font-weight:600}.history-comparison-table td:first-child{font-weight:600;color:var(--btn-bg);background:var(--bg-alt)}.article-timeline{margin:1.75rem 0}.article-timeline h2{margin-bottom:1rem}.article-timeline .tl-list{list-style:none;margin:0;padding:0;border-left:2px solid var(--border)}.article-timeline .tl-entry{position:relative;padding:0 0 1rem 1.25rem}.article-timeline .tl-entry:last-child{padding-bottom:0}.article-timeline .tl-entry::before{content:"";position:absolute;left:-7px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--btn-bg);border:2px solid var(--bg)}.article-timeline .tl-entry.tl-birth::before,.article-timeline .tl-entry.tl-death::before{background:var(--accent)}.article-timeline .tl-date{display:block;font-size:13px;font-weight:600;color:var(--btn-bg)}.article-timeline .tl-label{display:block;font-size:15px;line-height:1.6;color:var(--text)}.authority-links{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;padding:18px}.authority-links-label{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);display:block;margin:0 0 8px}.authority-links-note{font-size:14px;line-height:1.55;margin:0 0 12px}.authority-links-row{display:flex;flex-wrap:wrap;gap:8px}.authority-link{display:inline-flex;align-items:center;padding:6px 12px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--btn-bg);background:#fff;text-decoration:none}.authority-link:hover{background:var(--bg-alt);border-color:var(--btn-bg);text-decoration:none}
-    .amazon-related{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px}.amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}.amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}.amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}.amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.amazon-slider-wrap::-webkit-scrollbar{display:none}.amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.amazon-product-card{flex:0 0 170px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}.amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.amazon-product-card small{color:var(--text-muted)}.amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden}.amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}@media(min-width:768px){.amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
+    .amazon-related{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px}.amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}.amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}.amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}.amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.amazon-slider-wrap::-webkit-scrollbar{display:none}.amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.amazon-product-card{flex:0 0 170px;min-height:240px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}.amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.amazon-product-card small{color:var(--text-muted)}.amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--btn-bg);font-size:30px}.amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}.amazon-card-cover-fallback{background:linear-gradient(135deg,#f9fbf7,#e7f0e7)}.related-film-cover{font-size:42px}@media(min-width:768px){.amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
     .entity-grid{display:grid;grid-template-columns:1fr;gap:14px}@media(min-width:720px){.entity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}.entity-card{padding:16px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,.72);text-decoration:none;color:inherit}.entity-card:hover{background:var(--bg-alt);text-decoration:none;color:inherit}.border{border:1px solid var(--border)!important;box-shadow:none}.nav-inner{max-width:1920px!important;margin:0 auto!important}
     .entity-description{font-size:1rem;color:var(--text-muted);font-style:italic;line-height:1.4}.entity-dates{font-size:13px;color:var(--text-muted)}
     ${NAV_CSS}
@@ -4624,7 +4778,9 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .date-cluster-link i{font-size:1rem;flex-shrink:0}
 .date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
 
-.date-view-tabs{display:flex;gap:.5rem;overflow-x:auto;margin:0 0 1.25rem;padding:0 0 .2rem;scrollbar-width:thin}
+.date-view-tabs{display:flex;gap:.5rem;overflow-x:auto;margin:0 0 1.25rem;padding:0 0 .2rem;scrollbar-width:none;-ms-overflow-style:none}
+.date-view-tabs::-webkit-scrollbar{display:none}
+.date-top-navigation{padding:40px 0}
 .date-view-tab{display:inline-flex;align-items:center;gap:.45rem;flex:0 0 auto;padding:.55rem .8rem;border:1px solid var(--cbr);border-radius:999px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px;white-space:nowrap}
 .date-view-tab:hover{background:var(--bg-alt);color:var(--tc);text-decoration:none}
 .date-view-tab-active{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff!important}
@@ -4802,12 +4958,8 @@ function generateEventsDateHTML(
       ? matchHistoricalEventsToBlogStories(rankedEvents, dateStoryCandidates)
       : new Map();
   const featuredAnchorId = featured ? historicalEventAnchorId(featured) : "";
-  const featuredStoryUrl =
-    featured && typeof safeBlogStoryUrl === "function"
-      ? safeBlogStoryUrl(eventStoryLinks.get(featured))
-      : "";
   const majorEventsSummary = buildMajorEventsSummary(
-    rankedEvents.slice(1, 5),
+    rankedEvents.slice(1, 4),
     mDisplay,
     day,
     eventStoryLinks,
@@ -4841,13 +4993,6 @@ function generateEventsDateHTML(
     featured?.pages?.[0]?.thumbnail?.source ||
     null;
   const featWiki = featured?.pages?.[0]?.content_urls?.desktop?.page || "";
-  const featuredEventActions =
-    featuredStoryUrl || featWiki
-      ? `<div class="tl-card-actions">
-        ${featuredStoryUrl ? `<a href="${escapeHtml(featuredStoryUrl)}" class="site-btn site-btn-primary tl-btn"><i class="bi bi-journal-richtext"></i>Read our story</a>` : ""}
-        ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn tl-btn" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Wikipedia source</a>` : ""}
-      </div>`
-      : "";
   const commentaryParas = featured
     ? workerCommentary(featured.year, featured.text)
     : [
@@ -5318,9 +5463,8 @@ ${siteNav()}
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${featTitle}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
-    ${featuredEventActions}
     ${majorEventsSummary}
-    ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${others.length > 0 ? `
     ${eraChipsHtml}
@@ -5797,7 +5941,7 @@ function buildMajorEventsSummary(
   storyLinks = new Map(),
   { heading = "", description = "" } = {},
 ) {
-  const items = (Array.isArray(events) ? events : []).slice(0, 4);
+  const items = (Array.isArray(events) ? events : []).slice(0, 3);
   if (!items.length) return "";
 
   const rows = items
@@ -6246,7 +6390,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
         )
       : new Map();
   const majorEventsSummary = buildMajorEventsSummary(
-    rankedDateEvents.slice(0, 4),
+    rankedDateEvents.slice(0, 3),
     mDisplay,
     day,
     dateEventStoryLinks,
@@ -6437,7 +6581,7 @@ ${siteNav()}
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
-    ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${othersB.length > 0 ? `
     <div class="tl-wrap">${visibleTlHtml}</div>` : ""}
@@ -6601,7 +6745,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
         )
       : new Map();
   const majorEventsSummary = buildMajorEventsSummary(
-    rankedDateEvents.slice(0, 4),
+    rankedDateEvents.slice(0, 3),
     mDisplay,
     day,
     dateEventStoryLinks,
@@ -6790,7 +6934,7 @@ ${siteNav()}
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
-    ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : `<div class="commentary"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`}
+    ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${othersD.length > 0 ? `
     <div class="tl-wrap">${visibleDiedTlHtml}</div>` : ""}
@@ -7019,7 +7163,7 @@ async function handleBornPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v31-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v33-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -7129,7 +7273,7 @@ async function handleDiedPage(request, env, ctx, url) {
     return new Response("Not Found", { status: 404 });
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v30-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v32-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -7528,7 +7672,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v48-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v50-${hostKey}-${monthName}-${day}`;
   const bypassCache =
     url.searchParams.get("fresh") === "1" ||
     url.searchParams.get("nocache") === "1";
@@ -10339,6 +10483,11 @@ export const __historyEvergreenTestHooks = {
   applyHistoryEvergreenPage,
   buildHistoryEvergreenComparison,
   buildEntitySourceLinks,
+  entityRelatedMediaTopic,
+  buildEntityBookOrAdSlot,
+  buildEntityRelatedFilmsBlock,
+  buildEntityBodySections,
+  fetchCachedEntityMediaImages,
   entityBodyWordCount,
   seoEvergreenHistoryEditionEligible,
   seoHistoryEntityQualityEligible,

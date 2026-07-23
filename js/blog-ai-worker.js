@@ -59,6 +59,9 @@ import {
 import {
   rankHistoricalEventCandidates,
 } from "./shared/event-ranking.js";
+import {
+  fetchCachedWikidataRelatedFilms,
+} from "./shared/related-media.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -129,6 +132,10 @@ function addHtmlMarker(html, marker) {
 
 function blogKvBackgroundWritesPaused(env) {
   if (!kvOptionalWritesAllowed(env)) return true;
+  return blogKvEmergencyWritesPaused(env);
+}
+
+function blogKvEmergencyWritesPaused(env) {
   const raw = String(env?.BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL || "").trim();
   if (!raw) return false;
   const until = Date.parse(raw);
@@ -144,6 +151,19 @@ async function optionalBlogKvPut(env, key, value, options) {
     console.warn(`Blog: optional KV write skipped for ${key} — ${err.message}`);
     return false;
   }
+}
+
+async function blogKvPutIfChanged(env, key, value, options, { optional = false } = {}) {
+  if (!env?.BLOG_AI_KV) return false;
+  if (optional && blogKvBackgroundWritesPaused(env)) return false;
+  const nextValue = String(value);
+  const currentValue = await env.BLOG_AI_KV.get(key).catch(() => null);
+  if (currentValue === nextValue) return false;
+  if (optional) {
+    return optionalBlogKvPut(env, key, nextValue, options);
+  }
+  await env.BLOG_AI_KV.put(key, nextValue, options);
+  return true;
 }
 
 async function prepareBlogKvBudget(env, phase) {
@@ -216,7 +236,11 @@ async function getPipelineState(env) {
 }
 
 async function savePipelineState(env, state) {
-  await env.BLOG_AI_KV.put(PIPELINE_STATE_KEY, JSON.stringify(state));
+  await blogKvPutIfChanged(
+    env,
+    PIPELINE_STATE_KEY,
+    JSON.stringify(state),
+  );
 }
 
 async function notifyPipelineIssue(env, issue) {
@@ -396,23 +420,30 @@ const EVERY_OTHER_DAYS = 1; // Generate every N days
 // 18, 2026 incident); enrichment has its own similarly large budget (June 22).
 // A comma-list is one Cloudflare cron trigger but produces independent
 // scheduled invocations. This preserves the account's five-trigger allowance.
-const DAILY_PUBLICATION_CRON = "5,10,12,15 0 * * *";
-const DRAFT_PREPARATION_MINUTE = 5;
-const DRAFT_GENERATION_MINUTES = new Set([10, 12]);
-const DRAFT_ENRICHMENT_MINUTE = 15;
-// Cron string (must match a trigger in wrangler-blog.jsonc) for the dedicated
-// entity-recovery pass that re-links people strips with a fresh subrequest budget.
-const ENTITY_RECOVERY_CRON = "50 0 * * *";
-// Evergreen history generation is isolated from both publication and person
-// recovery. A source-rich candidate can require a long structured AI response,
-// so it receives its own scheduled invocation and external-subrequest budget.
-const EVERGREEN_HISTORY_RECOVERY_CRON = "55 0 * * *";
+const DAILY_PUBLICATION_CRON = "5,10,12,15,18,20,25 0 * * *";
+const DRAFT_PREPARATION_MINUTES = new Set([5, 18]);
+const DRAFT_GENERATION_MINUTES = new Set([10, 12, 20]);
+const DRAFT_ENRICHMENT_MINUTES = new Set([15, 25]);
+const WORKERS_AI_GENERATION_MINUTES = new Set([12, 20]);
+// Cloudflare reports event.cron as the exact configured expression, including
+// comma lists. Dispatch the shared 00:50/00:55 trigger by scheduled minute;
+// comparing it with separate "50 ..." / "55 ..." strings makes neither branch
+// match and previously sent both invocations into article generation.
+const RECOVERY_CRON = "50,55 0 * * *";
+const ENTITY_RECOVERY_MINUTE = 50;
+const EVERGREEN_HISTORY_RECOVERY_MINUTE = 55;
 // A second isolated invocation repairs at most one older pending companion.
 // Keeping backlog work separate prevents an old failure from displacing the
 // current day's required edition at 00:55.
 const EVERGREEN_HISTORY_BACKLOG_CRON = "25 1 * * *";
+// Retry only the current day's still-pending companion after provider
+// cooldowns. These invocations are GET-only when the queue is empty and never
+// consume the older backlog handled by the isolated 01:25 pass.
+const EVERGREEN_HISTORY_RETRY_CRON = "55 6,12,18 * * *";
 const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const MIN_RELEVANT_COMMERCIAL_BOOKS = 2;
+const MIN_RELATED_FILMS = 2;
+const RELATED_FILMS_CHECK_TTL_MS = 30 * 86_400_000;
 const COMMERCIAL_RELEVANCE_STOPWORDS = new Set([
   "about", "after", "against", "also", "among", "before", "began", "begin",
   "begins", "book", "books", "cause", "caused", "civil", "companion",
@@ -458,6 +489,33 @@ const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const BLOG_HISTORY_QUALITY_GATE_VERSION = 2;
 const EVERGREEN_HISTORY_EDITION_VERSION = 1;
 const ARTICLE_ORIGINAL_VALUE_GATE_VERSION = 1;
+const MIN_AUTOMATIC_TIMELINE_ENTRIES = 5;
+const MIN_AUTOMATIC_INLINE_FIGURES = 2;
+const POST_PUBLISH_ENRICHMENT_VERSION = 1;
+const POST_PUBLISH_ENRICHMENT_TTL = 7 * 86_400;
+const POST_PUBLISH_NOTIFICATION_DEADLINE_MS = 30 * 60 * 1_000;
+
+function scheduledBlogPhase(cron, scheduledMinute) {
+  if (cron === DAILY_PUBLICATION_CRON) {
+    if (DRAFT_PREPARATION_MINUTES.has(scheduledMinute)) return "prepare";
+    if (DRAFT_GENERATION_MINUTES.has(scheduledMinute)) return "generate";
+    if (DRAFT_ENRICHMENT_MINUTES.has(scheduledMinute)) return "enrich";
+    return "ignore";
+  }
+  if (cron === RECOVERY_CRON) {
+    if (scheduledMinute === ENTITY_RECOVERY_MINUTE) return "entity-recovery";
+    if (scheduledMinute === EVERGREEN_HISTORY_RECOVERY_MINUTE) {
+      return "history-recovery";
+    }
+    return "ignore";
+  }
+  if (cron === EVERGREEN_HISTORY_BACKLOG_CRON) return "history-backlog";
+  if (cron === EVERGREEN_HISTORY_RETRY_CRON) return "history-recovery";
+  // Retain manual scheduled-event compatibility only when no configured cron
+  // expression is supplied. Unknown real cron strings fail closed instead of
+  // unexpectedly spending AI capacity or writing publication state.
+  return cron ? "ignore" : "generate";
+}
 const MIN_EVERGREEN_HISTORY_BODY_WORDS = 650;
 const MIN_EVERGREEN_HISTORY_EVIDENCE_WORDS = 700;
 const ARTICLE_HERO_CSS =
@@ -1689,10 +1747,23 @@ function validateCuriosityTitleForPublish(content) {
     content?.sourcePageTitle,
     ...sourcePagesFromContent(content).map((page) => page.pageTitle),
   ].filter(Boolean).join(" ");
+  const sourceSubjectText = [
+    content?.sourcePageTitle,
+    ...sourcePagesFromContent(content).map((page) => page.pageTitle),
+  ].filter(Boolean).join(" ");
   const questionTokens = [...new Set(sourcePageRelevanceTokens(question))];
   const topicTokens = new Set(sourcePageRelevanceTokens(topicText));
+  const sourceSubjectTokens = new Set(
+    sourcePageRelevanceTokens(sourceSubjectText),
+  );
   const topicOverlap = questionTokens.filter((token) => topicTokens.has(token));
-  const requiredTopicOverlap = Math.min(2, topicTokens.size);
+  // A one-token canonical identity such as "Landsat 1" cannot contribute two
+  // substantive tokens. Base the overlap floor on that source identity when
+  // available, rather than unrelated actor/verb tokens in the event clause.
+  const requiredTopicOverlap = Math.min(
+    2,
+    sourceSubjectTokens.size || topicTokens.size,
+  );
   if (requiredTopicOverlap > 0 && topicOverlap.length < requiredTopicOverlap) {
     reasons.push("public question title does not retain a recognizable event subject");
   }
@@ -1738,20 +1809,29 @@ function repairCuriosityTitleFromSource(content) {
       (word) => word.charAt(0).toUpperCase() + word.slice(1),
     );
     const article = /^(?:a|an|the)\b/i.test(subject) ? "" : "the ";
-    const candidate = `How Did ${article}${subject} Unfold?`;
-    if (
-      candidate.length < CURIOSITY_TITLE_MIN_LENGTH ||
-      candidate.length > CURIOSITY_TITLE_MAX_LENGTH
-    ) {
-      continue;
-    }
-    const validation = validateCuriosityTitleForPublish({
-      ...content,
-      curiosityTitle: candidate,
-    });
-    if (validation.ok) {
-      content.curiosityTitle = candidate;
-      return candidate;
+    const candidates = [
+      `How Did ${article}${subject} Unfold?`,
+      // Very short canonical subjects (for example "Landsat 1") leave the
+      // neutral chronology repair below the 35-character public-title floor.
+      // "Story" adds no factual claim and keeps the exact source identity.
+      `How Did ${article}${subject} Story Unfold?`,
+      `How Did the Story of ${subject} Unfold?`,
+    ];
+    for (const candidate of candidates) {
+      if (
+        candidate.length < CURIOSITY_TITLE_MIN_LENGTH ||
+        candidate.length > CURIOSITY_TITLE_MAX_LENGTH
+      ) {
+        continue;
+      }
+      const validation = validateCuriosityTitleForPublish({
+        ...content,
+        curiosityTitle: candidate,
+      });
+      if (validation.ok) {
+        content.curiosityTitle = candidate;
+        return candidate;
+      }
     }
   }
   return "";
@@ -2614,7 +2694,13 @@ function rankBlogEventCandidates(events, options = {}) {
 // derived from their Wikipedia page's monthly pageviews. Every failure path
 // fails open (bonus 0, editorial order preserved).
 // ---------------------------------------------------------------------------
-const PAGEVIEW_RERANK_TOP_N = 8;
+// Cut from 8 to 4 (2026-07-22): each candidate here costs one parallel
+// external subrequest, and this runs during source SELECTION — the same
+// Free-plan invocation that then hands off a cached source to /blog/generate-draft.
+// See the KNOWN ISSUE note at the top of generateAndStore for the full
+// subrequest-ceiling picture (2026-07-22 Godfrey of Bouillon / recurring
+// draft-generation 500s: "Too many subrequests by single Worker invocation").
+const PAGEVIEW_RERANK_TOP_N = 4;
 const PAGEVIEW_NOTABILITY_MAX_BONUS = 18;
 
 function pageviewNotabilityBonus(monthlyViews) {
@@ -3116,15 +3202,15 @@ export default {
     const scheduledMinute = Number.isFinite(Number(event?.scheduledTime))
       ? new Date(Number(event.scheduledTime)).getUTCMinutes()
       : new Date().getUTCMinutes();
+    const phase = scheduledBlogPhase(cron, scheduledMinute);
     ctx.waitUntil(
       (async () => {
         // Vet and cache today's source package without starting article AI.
-        // The 00:10 generation invocation then begins with a fresh external
-        // subrequest budget instead of inheriting source-discovery fetches.
-        if (
-          cron === DAILY_PUBLICATION_CRON &&
-          scheduledMinute === DRAFT_PREPARATION_MINUTE
-        ) {
+        // The 00:05/00:18 preparation invocation lets the following generation
+        // begin with a fresh external-subrequest budget. The 00:18/00:20/00:25
+        // sequence is a Cloudflare-native recovery round for a draft rejected
+        // by the 00:15 final-grounding gate, before the GitHub failsafe.
+        if (phase === "prepare") {
           const guarded = await prepareBlogKvBudget(env, "prepare");
           if (!guarded.budget.allowPhase) return;
           if (guarded.budget.allowOptionalWrites) {
@@ -3133,66 +3219,95 @@ export default {
           await maybePrepareBlogDraftSource(guarded.env);
           return;
         }
-        // Promote the 00:10 draft in a fresh invocation with its own external
-        // subrequest budget. Do not combine generation and enrichment here.
-        if (
-          cron === DAILY_PUBLICATION_CRON &&
-          scheduledMinute === DRAFT_ENRICHMENT_MINUTE
-        ) {
+        // Promote a draft in a fresh invocation with its own external
+        // subrequest budget. Daily cron recovery is current-day-only so an
+        // older stranded draft cannot consume today's protected reserve.
+        if (phase === "enrich") {
           const guarded = await prepareBlogKvBudget(env, "enrich");
           if (!guarded.budget.allowPhase) return;
-          await recoverPendingBlogDraft(guarded.env);
+          await recoverPendingBlogDraft(guarded.env, { maxDaysBack: 0 });
           return;
         }
         // Dedicated entity-recovery cron: its own invocation has a fresh subrequest
         // budget, so it can re-resolve people strips that the budget-starved generation
         // cron left unlinked. Runs after the 00:05 generation and 00:35 failsafe.
-        if (cron === ENTITY_RECOVERY_CRON) {
+        if (phase === "entity-recovery") {
           const guarded = await prepareBlogKvBudget(env, "maintenance");
-          if (!guarded.budget.allowPhase) return;
-          await recoverRecentEntityStrips(guarded.env).catch((err) =>
-            console.warn(`Blog AI: entity recovery pass failed — ${err.message}`),
-          );
-          return;
-        }
-        if (cron === EVERGREEN_HISTORY_RECOVERY_CRON) {
-          // The companion edition is required publication content, not
-          // optional entity maintenance. Let it use the protected enrichment
-          // reserve so a daily article that was already accepted below the
-          // content-start threshold can still receive its /history/ page and
-          // visible discovery card.
-          const guarded = await prepareBlogKvBudget(env, "enrich");
           if (!guarded.budget.allowPhase) return;
           const scheduledDate = Number.isFinite(Number(event?.scheduledTime))
             ? new Date(Number(event.scheduledTime))
             : new Date();
+          const recovery = await recoverRecentPostPublishEnrichment(
+            guarded.env,
+            {
+              preferSlug: buildSlug(scheduledDate),
+              limit: 1,
+            },
+          ).catch((err) => {
+            console.warn(`Blog AI: post-publish recovery pass failed — ${err.message}`);
+            return { selected: 0 };
+          });
+          if (recovery.selected === 0) {
+            await recoverRecentEntityStrips(guarded.env).catch((err) =>
+              console.warn(`Blog AI: entity recovery pass failed — ${err.message}`),
+            );
+          }
+          return;
+        }
+        if (phase === "history-recovery") {
+          const guarded = await prepareBlogKvBudget(env, "maintenance");
+          if (!guarded.budget.allowPhase) return;
+          const scheduledDate = Number.isFinite(Number(event?.scheduledTime))
+            ? new Date(Number(event.scheduledTime))
+            : new Date();
+          const preferredSlug = buildSlug(scheduledDate);
+          await recoverRecentPostPublishEnrichment(guarded.env, {
+            preferSlug: preferredSlug,
+            limit: 1,
+          }).catch((err) =>
+            console.warn(`Blog AI: post-publish recovery pass failed — ${err.message}`),
+          );
           await recoverPendingEvergreenHistory(guarded.env, {
             preferPostSlug: buildSlug(scheduledDate),
+            requirePostSlug: true,
           }).catch((err) =>
             console.warn(`Blog AI: evergreen history pass failed — ${err.message}`),
           );
+          await maybeFinalizePostPublishEnrichment(
+            guarded.env,
+            preferredSlug,
+          ).catch((err) =>
+            console.warn(`Blog AI: post-publish finalization failed — ${err.message}`),
+          );
           return;
         }
-        if (cron === EVERGREEN_HISTORY_BACKLOG_CRON) {
-          const guarded = await prepareBlogKvBudget(env, "enrich");
+        if (phase === "history-backlog") {
+          const guarded = await prepareBlogKvBudget(env, "maintenance");
           if (!guarded.budget.allowPhase) return;
-          await recoverPendingEvergreenHistory(guarded.env).catch((err) =>
-            console.warn(`Blog AI: evergreen history backlog pass failed — ${err.message}`),
+          await recoverRecentPostPublishEnrichment(guarded.env, {
+            limit: 1,
+          }).catch((err) =>
+            console.warn(`Blog AI: post-publish backlog pass failed — ${err.message}`),
           );
+          const result = await recoverPendingEvergreenHistory(guarded.env).catch((err) => {
+            console.warn(`Blog AI: evergreen history backlog pass failed — ${err.message}`);
+            return { promotedPostSlugs: [] };
+          });
+          for (const postSlug of result.promotedPostSlugs || []) {
+            await maybeFinalizePostPublishEnrichment(
+              guarded.env,
+              postSlug,
+            ).catch((err) =>
+              console.warn(`Blog AI: post-publish finalization failed — ${err.message}`),
+            );
+          }
           return;
         }
-        // The 00:10 generation and 00:12 missing-draft retry invocations
-        // deliberately fall through here. Keeping the default path also
-        // preserves manual scheduled-event compatibility.
-        if (
-          cron === DAILY_PUBLICATION_CRON &&
-          !DRAFT_GENERATION_MINUTES.has(scheduledMinute)
-        ) {
+        if (phase === "ignore") {
           console.warn(
-            `Blog AI: unexpected publication minute ${scheduledMinute}; using draft generation path.`,
+            `Blog AI: ignoring unrecognized scheduled dispatch cron="${cron}" minute=${scheduledMinute}.`,
           );
-        } else if (cron && cron !== DAILY_PUBLICATION_CRON) {
-          console.warn(`Blog AI: unrecognized cron "${cron}" using draft generation path.`);
+          return;
         }
         const guarded = await prepareBlogKvBudget(env, "generate");
         if (!guarded.budget.allowPhase) return;
@@ -3201,7 +3316,9 @@ export default {
         }
         await maybeGenerateBlogPost(guarded.env, ctx, {
           preferWorkersAIForArticle:
-            cron === DAILY_PUBLICATION_CRON && scheduledMinute === 12,
+            cron === DAILY_PUBLICATION_CRON &&
+            WORKERS_AI_GENERATION_MINUTES.has(scheduledMinute),
+          skipMaintenanceWhenPublished: cron === DAILY_PUBLICATION_CRON,
         });
       })(),
     );
@@ -3256,6 +3373,8 @@ export default {
         hasGroq3: Boolean(env.GROQ_API_KEY_3),
         hasGroq4: Boolean(env.GROQ_API_KEY_4),
         hasGroq5: Boolean(env.GROQ_API_KEY_5),
+        hasGroq6: Boolean(env.GROQ_API_KEY_6),
+        hasGroq7: Boolean(env.GROQ_API_KEY_7),
         hasOpenRouter: Boolean(env.OPENROUTER_API_KEY || env.OPENRUITER_API_KEY || env.OPENNRUITER_API_KEY),
         hasOpenRouter2: Boolean(env.OPENROUTER_API_KEY_2 || env.OPENRUITER_API_KEY_2 || env.OPENNRUITER_API_KEY_2),
         hasOpenRouter3: Boolean(env.OPENROUTER_API_KEY_3 || env.OPENRUITER_API_KEY_3 || env.OPENNRUITER_API_KEY_3),
@@ -3333,6 +3452,14 @@ export default {
       } catch (err) {
         const today = todayDateString();
         console.error(`Blog AI: /blog/generate-draft failed — ${err.message}`);
+        // Marked known issue (2026-07-22): Cloudflare's Free-plan 50-subrequest-
+        // per-invocation ceiling. Distinct greppable tag so a future
+        // `wrangler tail` / KV error-record search can tell this failure mode
+        // apart from AI content/validation failures at a glance. See the
+        // KNOWN ISSUE note above generateAndStore for the full mechanism.
+        if (/too many subrequests/i.test(err.message)) {
+          console.error(`BLOG_SUBREQUEST_CEILING_HIT slug=${today}`);
+        }
         await recordPipelineFailure(budgetEnv, {
           step: "blog",
           slug: today,
@@ -4519,7 +4646,10 @@ export default {
           );
         }
         // Inject quiz CTA + popup for old posts that don't have it
-        if (!patchedHtml.includes("tdq-cta-btn")) {
+        if (
+          !patchedHtml.includes("tdq-cta-btn") &&
+          !patchedHtml.includes("quiz-deferred")
+        ) {
           const quizCta = `
           <!-- Quiz CTA -->
           <div class="authority-links mt-4">
@@ -4805,7 +4935,10 @@ export default {
           );
         }
         // Inject floating quiz bar into stored posts that don't have it yet
-        if (!patchedHtml.includes("tdq-float-bar")) {
+        if (
+          !patchedHtml.includes("tdq-float-bar") &&
+          !patchedHtml.includes("quiz-deferred")
+        ) {
           const floatCss = `<style id="tdq-float-card-style">${TDQ_FLOAT_BAR_CSS}</style>`;
           const floatHtml = TDQ_FLOAT_BAR_HTML;
           const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');bar.setAttribute('aria-hidden','false');bar.removeAttribute('inert');}function hideBar(){bar.classList.remove('tdq-float-visible');bar.setAttribute('aria-hidden','true');bar.setAttribute('inert','');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});${TDQ_FLOAT_TRIGGER_JS}})();<\/script>`;
@@ -5204,7 +5337,12 @@ export default {
             env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, entityStripFixedHtml).catch(() => {}),
           );
         }
-        return htmlResponse(entityStripFixedHtml);
+        const relatedMediaHtml =
+          await injectRelatedFilmsIntoStoredArticleHtml(
+            entityStripFixedHtml,
+            articleEntitiesRaw,
+          );
+        return htmlResponse(relatedMediaHtml);
       }
     }
 
@@ -5312,7 +5450,10 @@ export default {
         );
       }
       // Inject quiz CTA + popup if no quiz present
-      if (!html.includes("tdq-cta-btn")) {
+      if (
+        !html.includes("tdq-cta-btn") &&
+        !html.includes("quiz-deferred")
+      ) {
         const quizCta = `
           <div class="authority-links mt-4">
             <span class="authority-links-label">Test Your Knowledge</span>
@@ -5563,8 +5704,15 @@ async function maybePrepareBlogDraftSource(env) {
   });
 }
 
-async function recoverPendingBlogDraft(env) {
-  for (let daysBack = 0; daysBack <= 3; daysBack++) {
+async function recoverPendingBlogDraft(
+  env,
+  { maxDaysBack = 3 } = {},
+) {
+  const boundedMaxDaysBack = Math.min(
+    3,
+    Math.max(0, Number.parseInt(String(maxDaysBack), 10) || 0),
+  );
+  for (let daysBack = 0; daysBack <= boundedMaxDaysBack; daysBack++) {
     const draftDate = new Date();
     draftDate.setDate(draftDate.getDate() - daysBack);
     const draftSlug = buildSlug(draftDate);
@@ -5614,7 +5762,10 @@ async function recoverPendingBlogDraft(env) {
 async function maybeGenerateBlogPost(
   env,
   ctx,
-  { preferWorkersAIForArticle = false } = {},
+  {
+    preferWorkersAIForArticle = false,
+    skipMaintenanceWhenPublished = false,
+  } = {},
 ) {
   const today = todayDateString(); // "YYYY-MM-DD"
   const todaySlug = buildSlug(new Date());
@@ -5630,7 +5781,7 @@ async function maybeGenerateBlogPost(
   }
   if (todayDraft && (!todayPost || !todayInIndex)) {
     console.log(
-      `Blog AI: draft:${todaySlug} already exists — awaiting the ${DRAFT_ENRICHMENT_MINUTE}-minute enrichment phase.`,
+      `Blog AI: draft:${todaySlug} already exists — awaiting the next enrichment phase.`,
     );
     return;
   }
@@ -5641,6 +5792,12 @@ async function maybeGenerateBlogPost(
       (new Date(today) - new Date(lastGen)) / 86_400_000,
     );
     if (diffDays < EVERY_OTHER_DAYS && todayPost && todayInIndex) {
+      if (skipMaintenanceWhenPublished) {
+        console.log(
+          `Blog AI: post:${todaySlug} is already public — scheduled generation retry skipped.`,
+        );
+        return;
+      }
       console.log(
         `Blog AI: last post was ${diffDays} day(s) ago — skipping (need ${EVERY_OTHER_DAYS}).`,
       );
@@ -5784,7 +5941,9 @@ async function maybeGenerateBlogPost(
 
   // Mark today as attempted before generating so tomorrow's cron always starts
   // from today's date regardless of whether generation succeeds or fails.
-  await env.BLOG_AI_KV.put(KV_LAST_GEN_KEY, today);
+  if (lastGen !== today) {
+    await env.BLOG_AI_KV.put(KV_LAST_GEN_KEY, today);
+  }
 
   try {
     await generateAndStore(env, ctx, null, null, null, {
@@ -5793,9 +5952,13 @@ async function maybeGenerateBlogPost(
       preferWorkersAIForArticle,
     });
     console.log(
-      `Blog AI: draft generated successfully; the ${DRAFT_ENRICHMENT_MINUTE}-minute cron phase will enrich it.`,
+      "Blog AI: draft generated successfully; the next cron phase will enrich it.",
     );
-    await env.BLOG_AI_KV.delete(`error:${today}`).catch(() => {});
+    const errorKey = `error:${today}`;
+    const priorError = await env.BLOG_AI_KV.get(errorKey).catch(() => null);
+    if (priorError) {
+      await env.BLOG_AI_KV.delete(errorKey).catch(() => {});
+    }
   } catch (err) {
     // Persist the failure and stop. A complete pipeline retry inside this same
     // invocation would inherit the already-spent subrequest allowance. The
@@ -6369,7 +6532,7 @@ const ARTICLE_BODY_FIELDS = [
   "conclusionParagraphs",
 ];
 
-const MIN_REAL_ARTICLE_BODY_WORDS = 850;
+const MIN_REAL_ARTICLE_BODY_WORDS = 750;
 
 // The chunked fallback writes exactly 8 body paragraphs (2 each across the four
 // ARTICLE_BODY_FIELDS). This per-paragraph floor must be high enough that a
@@ -6663,6 +6826,69 @@ function extractFirstJsonObject(value) {
   return cleaned.slice(start);
 }
 
+function extractJsonObjectCandidates(value) {
+  const cleaned = String(value || "")
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+  const candidates = [];
+  for (let start = cleaned.indexOf("{"); start !== -1;) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let i = start; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1) {
+      candidates.push(cleaned.slice(start));
+      break;
+    }
+    candidates.push(cleaned.slice(start, end + 1));
+    start = cleaned.indexOf("{", end + 1);
+  }
+  return candidates;
+}
+
+function parseLargestCompleteJsonObject(value) {
+  const candidates = extractJsonObjectCandidates(value)
+    .sort((a, b) => b.length - a.length);
+  for (const candidate of candidates) {
+    for (const source of [candidate, sanitizeJsonControlChars(candidate)]) {
+      try {
+        const parsed = JSON.parse(source);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return { parsed, candidate };
+        }
+      } catch {
+        // Try the next sanitized/candidate form.
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * AI models routinely emit raw newlines, tabs, or other control characters
  * INSIDE JSON string values instead of the escaped \n / \t sequences JSON
@@ -6709,6 +6935,8 @@ function sanitizeJsonControlChars(json) {
 }
 
 function parseJsonObjectFromAI(value, label) {
+  const complete = parseLargestCompleteJsonObject(value);
+  if (complete) return complete.parsed;
   const json = extractFirstJsonObject(value);
   if (!json) throw new Error(`${label}: no JSON object returned`);
   try {
@@ -6933,11 +7161,13 @@ async function generateLearningBlocks(env, content) {
   ].join("\n\n").replace(/<[^>]+>/g, " ").slice(0, 6000);
   const extract = String(content.wikiExtract || content.sourceExtract || "").slice(0, 2000);
   const sourceMaterial = sourceBoundRepairContext(groundingSourceFromContent(content), 4000);
-  if (!body.trim()) return;
+  if (!body.trim()) {
+    return { ok: false, transient: false, reason: "article body is empty" };
+  }
 
   const systemPrompt =
     "You add a factual timeline to a finished history article. Output STRICT JSON only.\n" +
-    "timeline: 4-7 dated entries showing lead-up, the event, and aftermath. " +
+    "timeline: 5-7 dated entries showing lead-up, the event, and aftermath. " +
     "Use ONLY dates that appear in the supplied article body or source material; never invent a date. " +
     "Each label must describe only people, places, institutions, and events named in the article body or source material; never invent a name, institution, report, study, victim, or source. " +
     "Each entry: {\"year\":\"1215\",\"date\":\"June 15, 1215\",\"label\":\"...\",\"kind\":\"leadup|event|aftermath\"}. " +
@@ -6956,13 +7186,21 @@ async function generateLearningBlocks(env, content) {
     ], { maxTokens: 1500, timeoutMs: 40_000 });
   } catch (err) {
     console.warn(`generateLearningBlocks: AI call failed (${err.message}) — skipping`);
-    return;
+    return { ok: false, transient: true, reason: err.message };
   }
   const cleaned = String(raw || "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) { console.warn("generateLearningBlocks: no JSON — skipping"); return; }
+  if (!match) {
+    console.warn("generateLearningBlocks: no JSON — skipping");
+    return { ok: false, transient: true, reason: "model response contained no JSON" };
+  }
   let parsed;
-  try { parsed = JSON.parse(match[0]); } catch { console.warn("generateLearningBlocks: parse error — skipping"); return; }
+  try {
+    parsed = JSON.parse(match[0]);
+  } catch {
+    console.warn("generateLearningBlocks: parse error — skipping");
+    return { ok: false, transient: true, reason: "model response JSON was malformed" };
+  }
 
   if (Array.isArray(parsed.timeline)) {
     content.timeline = parsed.timeline
@@ -6974,16 +7212,26 @@ async function generateLearningBlocks(env, content) {
         kind: ["leadup", "event", "aftermath"].includes(e.kind) ? e.kind : "leadup",
       }))
       .filter((e) => e.label && (e.year || e.date));
+    return {
+      ok: true,
+      transient: false,
+      count: content.timeline.length,
+    };
   }
+  return { ok: false, transient: true, reason: "model response omitted timeline" };
 }
 
 function groundLearningBlocks(content) {
+  const sourceMaterial = sourceMaterialForGrounding(
+    groundingSourceFromContent(content),
+  );
   const corpus = normalizeForCompare([
     ...(content.overviewParagraphs || []),
     ...(content.eyewitnessOrChronicle || []),
     ...(content.aftermathParagraphs || []),
     ...(content.conclusionParagraphs || []),
     String(content.wikiExtract || content.sourceExtract || ""),
+    sourceMaterial,
   ].join(" "));
   // Year = the LAST 1-4 digit run, so "June 15, 1215" yields 1215 (not the day "15").
   const yearOf = (e) => {
@@ -7015,9 +7263,64 @@ function groundLearningBlocks(content) {
         return true;
       })
       .sort((a, b) => yearNum(a) - yearNum(b));
-    if (kept.length >= 3) content.timeline = kept;
+    if (kept.length >= MIN_AUTOMATIC_TIMELINE_ENTRIES) content.timeline = kept;
     else delete content.timeline;
   }
+}
+
+async function ensureAutomaticTimelineForPublish(
+  env,
+  content,
+  slug,
+  { boundedRecovery = false } = {},
+) {
+  groundLearningBlocks(content);
+  let validation = validateSourcedTimelineForPublish(content, {
+    minimumEntries: MIN_AUTOMATIC_TIMELINE_ENTRIES,
+  });
+  if (validation.ok) return validation;
+
+  const generation = await generateLearningBlocks(env, content);
+  groundLearningBlocks(content);
+  validation = validateSourcedTimelineForPublish(content, {
+    minimumEntries: MIN_AUTOMATIC_TIMELINE_ENTRIES,
+  });
+  if (validation.ok) return validation;
+
+  const reasons = [
+    `sourced timeline contract: ${validation.reasons.join("; ")}`,
+  ];
+  if (generation?.transient === true) {
+    throw new Error(
+      `Refusing to publish ${slug}: timeline provider attempt failed — ${generation.reason || "unknown provider error"}`,
+    );
+  }
+  await markGroundingBlockedEvent(env, slug, content, reasons);
+  const prefix = boundedRecovery
+    ? "Bounded recovery rejected the draft before publication"
+    : `Refusing to publish ${slug}`;
+  throw new Error(`${prefix}: ${reasons.join("; ")}`);
+}
+
+async function attemptAutomaticTimelineEnrichment(env, content, slug) {
+  groundLearningBlocks(content);
+  let validation = validateSourcedTimelineForPublish(content, {
+    minimumEntries: MIN_AUTOMATIC_TIMELINE_ENTRIES,
+  });
+  if (validation.ok) return validation;
+
+  const generation = await generateLearningBlocks(env, content);
+  groundLearningBlocks(content);
+  validation = validateSourcedTimelineForPublish(content, {
+    minimumEntries: MIN_AUTOMATIC_TIMELINE_ENTRIES,
+  });
+  if (!validation.ok) {
+    delete content.timeline;
+    console.warn(
+      `Blog: deferred timeline enrichment for ${slug} — ${generation?.reason || validation.reasons.join("; ")}`,
+    );
+  }
+  return validation;
 }
 
 // Person life-and-career timeline for /people/{slug}/ pages. Same
@@ -7126,6 +7429,25 @@ async function generateEntityTimeline(env, entity) {
 
 /**
  * Calls the Claude API, builds the HTML page, and persists everything to KV.
+ *
+ * KNOWN ISSUE (marked 2026-07-22, root-caused during a recurring
+ * /blog/generate-draft 500 investigation): a single Worker invocation on
+ * Cloudflare's Free plan gets 50 external subrequests total (confirmed
+ * against current Cloudflare docs — Paid plan gets 10,000). Every provider
+ * fetch inside callAI (Groq per key/model, OpenRouter, NVIDIA, Workers AI)
+ * counts against that ceiling, and so does every Wikipedia/pageview/image
+ * fetch during source selection. Before this date, four separate SEO/E-E-A-T
+ * "contract" checks below (semantic, citation, curiosity-title, evidence-map)
+ * EACH independently triggered a full regeneration — its own complete callAI
+ * provider-chain attempt — on any single failure, up to MAX_CONTENT_ATTEMPTS
+ * times. Live evidence: a /blog/generate-draft call with an already-cached
+ * source still failed with Cloudflare's literal "Too many subrequests by
+ * single Worker invocation" error on the very first real Groq attempt,
+ * meaning something earlier in the same invocation had already spent nearly
+ * the whole budget — these compounding regenerations were the prime suspect.
+ * Fix: the four checks are now evaluated together and only trigger ONE
+ * regeneration when several fail at once (a genuinely weak draft), not one
+ * regeneration per isolated polish miss — see failingPolishChecks below.
  */
 async function generateAndStore(
   env,
@@ -7392,6 +7714,7 @@ async function generateAndStore(
               sourceMaterial,
               stricterGrounding,
               groundingFeedback,
+              groundingSource?.pageTitle || selectedEvent?.sourcePageTitle || "",
             );
           } catch (fallbackErr) {
             console.warn(
@@ -7441,80 +7764,42 @@ async function generateAndStore(
       throw new Error(`${dateValidation.reason} [attempts: ${attemptFailures.join(" | ")}]`);
     }
 
-    const semanticValidation = validateContentSemanticsForPublish(content);
-    if (!semanticValidation.ok) {
-      const reason = semanticValidation.reasons.join("; ");
-      attemptFailures.push(`attempt ${attempt} semantics: ${reason}`);
-      if (attempt < MAX_CONTENT_ATTEMPTS) {
-        const avoid = [...takenAllTime, content?.title].filter(Boolean);
-        console.warn(
-          `Blog AI: semantic publication contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
-        );
-        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
-        continue;
-      }
-      throw new Error(
-        `Article failed semantic publication contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
+    // Combined SEO/E-E-A-T polish gate (2026-07-22) — see the KNOWN ISSUE note
+    // above generateAndStore. A cheap local repair runs first (no network
+    // cost), then all four checks are scored together: 1-2 isolated misses
+    // are logged and the draft proceeds; only POLISH_REGEN_THRESHOLD+
+    // simultaneous failures (a broadly weak draft, not a missing nice-to-have)
+    // spends a full regeneration, and even that never throws on exhaustion —
+    // it publishes with a warning instead of blocking the day over polish.
+    const cheapCuriosityRepair = repairCuriosityTitleFromSource(content);
+    if (cheapCuriosityRepair) {
+      console.warn(
+        `Blog AI: replaced an invalid public question title with source-page chronology: "${cheapCuriosityRepair}".`,
       );
     }
-
-    const citationValidation = validateDirectCitationsForPublish(content);
-    if (!citationValidation.ok) {
-      const reason = citationValidation.reasons.join("; ");
-      attemptFailures.push(`attempt ${attempt} citations: ${reason}`);
-      if (attempt < MAX_CONTENT_ATTEMPTS) {
+    const POLISH_REGEN_THRESHOLD = 3;
+    const polishChecks = [
+      ["semantics", validateContentSemanticsForPublish(content)],
+      ["citations", validateDirectCitationsForPublish(content)],
+      ["public title", validateCuriosityTitleForPublish(content)],
+      ["evidence map", validateEvidenceMapForPublish(content)],
+    ];
+    const failingPolishChecks = polishChecks.filter(([, result]) => !result.ok);
+    if (failingPolishChecks.length > 0) {
+      const reason = failingPolishChecks
+        .map(([label, result]) => `${label}: ${result.reasons.join("; ")}`)
+        .join(" | ");
+      if (failingPolishChecks.length >= POLISH_REGEN_THRESHOLD && attempt < MAX_CONTENT_ATTEMPTS) {
+        attemptFailures.push(`attempt ${attempt} polish (${failingPolishChecks.length}/4): ${reason}`);
         const avoid = [...takenAllTime, content?.title].filter(Boolean);
         console.warn(
-          `Blog AI: direct-citation contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
+          `Blog AI: ${failingPolishChecks.length}/4 SEO polish contracts failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
         );
         content = await generateArticleContent(avoid, true, currentGroundingFeedback);
         continue;
       }
-      throw new Error(
-        `Article failed direct-citation contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
-      );
-    }
-
-    let curiosityTitleValidation = validateCuriosityTitleForPublish(content);
-    if (!curiosityTitleValidation.ok) {
-      const repairedCuriosityTitle = repairCuriosityTitleFromSource(content);
-      if (repairedCuriosityTitle) {
-        curiosityTitleValidation = validateCuriosityTitleForPublish(content);
-        console.warn(
-          `Blog AI: replaced an invalid public question title with source-page chronology: "${repairedCuriosityTitle}".`,
-        );
-      }
-    }
-    if (!curiosityTitleValidation.ok) {
-      const reason = curiosityTitleValidation.reasons.join("; ");
-      attemptFailures.push(`attempt ${attempt} public title: ${reason}`);
-      if (attempt < MAX_CONTENT_ATTEMPTS) {
-        const avoid = [...takenAllTime, content?.title].filter(Boolean);
-        console.warn(
-          `Blog AI: public question-title contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
-        );
-        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
-        continue;
-      }
-      throw new Error(
-        `Article failed public question-title contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
-      );
-    }
-
-    const evidenceMapValidation = validateEvidenceMapForPublish(content);
-    if (!evidenceMapValidation.ok) {
-      const reason = evidenceMapValidation.reasons.join("; ");
-      attemptFailures.push(`attempt ${attempt} evidence map: ${reason}`);
-      if (attempt < MAX_CONTENT_ATTEMPTS) {
-        const avoid = [...takenAllTime, content?.title].filter(Boolean);
-        console.warn(
-          `Blog AI: evidence-map contract failed for "${content?.title || "untitled"}" — ${reason}. Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
-        );
-        content = await generateArticleContent(avoid, true, currentGroundingFeedback);
-        continue;
-      }
-      throw new Error(
-        `Article failed evidence-map contract: ${reason} [attempts: ${attemptFailures.join(" | ")}]`,
+      console.warn(
+        `Blog AI: publishing "${content?.title || "untitled"}" with ${failingPolishChecks.length}/4 SEO polish contract(s) soft-failed — ${reason}.`,
       );
     }
 
@@ -7547,6 +7832,7 @@ async function generateAndStore(
             sourceMaterial,
             Boolean(sourceMaterial) || currentGroundingFeedback.length > 0,
             currentGroundingFeedback,
+            groundingSource?.pageTitle || selectedEvent?.sourcePageTitle || "",
           );
           // Re-run the same per-iteration gates on the chunked result so a
           // recovered body is still date-validated and structurally complete
@@ -7557,28 +7843,25 @@ async function generateAndStore(
           }
           const chunkedDate = validateContentDateForPublish(chunked, now);
           if (!chunkedDate.ok) throw new Error(chunkedDate.reason);
-          const chunkedSemantics = validateContentSemanticsForPublish(chunked);
-          if (!chunkedSemantics.ok) {
+          // Same combined polish gate as the one-shot path above: only a
+          // broadly weak chunked recovery (3+/4 failing at once) is worth
+          // discarding for yet another full regeneration.
+          repairCuriosityTitleFromSource(chunked);
+          const chunkedPolishChecks = [
+            ["semantics", validateContentSemanticsForPublish(chunked)],
+            ["citations", validateDirectCitationsForPublish(chunked)],
+            ["public title", validateCuriosityTitleForPublish(chunked)],
+            ["evidence map", validateEvidenceMapForPublish(chunked)],
+          ].filter(([, result]) => !result.ok);
+          if (chunkedPolishChecks.length >= POLISH_REGEN_THRESHOLD) {
             throw new Error(
-              `semantic publication contract failed: ${chunkedSemantics.reasons.join("; ")}`,
+              `${chunkedPolishChecks.length}/4 SEO polish contracts failed: ` +
+              chunkedPolishChecks.map(([label, result]) => `${label}: ${result.reasons.join("; ")}`).join(" | "),
             );
           }
-          const chunkedCitations = validateDirectCitationsForPublish(chunked);
-          if (!chunkedCitations.ok) {
-            throw new Error(
-              `direct-citation contract failed: ${chunkedCitations.reasons.join("; ")}`,
-            );
-          }
-          const chunkedCuriosityTitle = validateCuriosityTitleForPublish(chunked);
-          if (!chunkedCuriosityTitle.ok) {
-            throw new Error(
-              `public question-title contract failed: ${chunkedCuriosityTitle.reasons.join("; ")}`,
-            );
-          }
-          const chunkedEvidenceMap = validateEvidenceMapForPublish(chunked);
-          if (!chunkedEvidenceMap.ok) {
-            throw new Error(
-              `evidence-map contract failed: ${chunkedEvidenceMap.reasons.join("; ")}`,
+          if (chunkedPolishChecks.length > 0) {
+            console.warn(
+              `Blog AI: publishing chunked-recovered "${chunked?.title || "untitled"}" with ${chunkedPolishChecks.length}/4 SEO polish contract(s) soft-failed.`,
             );
           }
           assertRequiredContentBlocks(chunked);
@@ -7744,32 +8027,6 @@ async function generateAndStore(
       }
       content.imageUrl = workingImage;
 
-      [personImages, eventImages] = await Promise.all([
-        fetchKeyPersonImages(env, content.keyTerms).catch(() => []),
-        content.wikiUrl
-          ? fetchEventImages(content.wikiUrl, content.imageUrl, 3, content.eventTitle).catch(() => [])
-          : Promise.resolve([]),
-      ]);
-      const wikiImageTotal = personImages.length + eventImages.length;
-      if (wikiImageTotal < 3) {
-        if (attempt < MAX_CONTENT_ATTEMPTS) {
-          const avoid = [...takenAllTime, content.title].filter(Boolean);
-          console.warn(
-            `Blog AI: wiki image precheck failed for "${content.title}" (${wikiImageTotal}/3). Regenerating content (${attempt + 1}/${MAX_CONTENT_ATTEMPTS}).`,
-          );
-          content = await generateArticleContent(
-            avoid,
-            currentGroundingFeedback.length > 0,
-            currentGroundingFeedback,
-          );
-          continue;
-        }
-
-        throw new Error(
-          `IMAGE_UNAVAILABLE: wiki-only topic gate requires 3 usable Wikipedia images, got ${wikiImageTotal} for "${content.title}"`,
-        );
-      }
-
       await generateEditorialNote(env, content, now);
       const editorialQualityIssues = scanArticleQuality(content);
       if (editorialQualityIssues.length > 0) {
@@ -7825,33 +8082,23 @@ async function generateAndStore(
       content = finalGrounding.content;
       didYouKnowGroundingVerified = true;
     }
-    const quizParagraphs = [
-      ...(content.overviewParagraphs || []),
-      ...(content.eyewitnessOrChronicle || []),
-      ...(content.aftermathParagraphs || []),
-      ...(content.conclusionParagraphs || []),
-    ];
-    const quiz = await generateBlogQuiz(env, {
-      ...content,
-      keyFacts: quizParagraphs
-        .filter((paragraph) => paragraph && paragraph.length > 40 && paragraph.length < 750)
-        .slice(0, 15),
-    }, slug);
-    if (!quiz || !validateQuizQuestions(quiz.questions)) {
-      throw new Error(`Refusing to publish ${slug}: grounded five-question quiz generation failed`);
+    groundLearningBlocks(content);
+    const evergreenCandidate =
+      validatePrimaryEvergreenCandidateForContent(content);
+    if (!evergreenCandidate.ok) {
+      console.warn(
+        `Blog: evergreen companion deferred for ${slug} — ${evergreenCandidate.reasons.join("; ")}`,
+      );
     }
-    await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {
-      expirationTtl: 90 * 86_400,
-    });
     const bookCoverUrl = await fetchBookCover(content.bookSearchQuery).catch(() => null);
-    const entityMeta = blogKvBackgroundWritesPaused(env)
-      ? publicationReserveArticlePeople(content, slug)
-      : await upsertEntitiesForContent(env, content, slug, now, pillars).catch((err) => {
-        console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
-        suppressPersonProfileLink(content);
-        return unlinkedArticlePeople(content);
-      });
-    assertEvergreenCompanionQueuedForPublish(entityMeta, slug);
+    const entityMeta = unlinkedArticlePeople(content);
+    await storePostPublishEnrichmentOutbox(env, {
+      slug,
+      content,
+      publishedAt: now.toISOString(),
+      pillars,
+      didYouKnowGroundingVerified,
+    });
 
     await savePublishedPost(env, {
       slug,
@@ -7865,6 +8112,9 @@ async function generateAndStore(
       entityMeta,
       verifiedFeaturedImage: content.imageUrl,
       didYouKnowGroundingVerified,
+      requireAutomaticEnrichment: false,
+      quizReady: false,
+      hydrateOptionalAssets: false,
     });
   }
 
@@ -7898,11 +8148,7 @@ async function generateAndStore(
       }
     }
   } else if (!lightweightPublish) {
-    if (ctx?.waitUntil) {
-      ctx.waitUntil(runPostPublishExtras(env, slug, content, { scheduleEnrichment: false }));
-    } else {
-      await runPostPublishExtras(env, slug, content, { scheduleEnrichment: false });
-    }
+    await invalidateCorePublicationCaches();
   }
 
   console.log(
@@ -8310,6 +8556,171 @@ function normalizeEventTitleAction(content) {
   }
 }
 
+function postPublishEnrichmentKey(slug) {
+  return `${KV_DRAFT_PREFIX}${slug}`;
+}
+
+async function storePostPublishEnrichmentOutbox(
+  env,
+  {
+    slug,
+    content,
+    publishedAt,
+    pillars = [],
+    didYouKnowGroundingVerified = false,
+    entitiesAttemptedAt = "",
+  },
+) {
+  const key = postPublishEnrichmentKey(slug);
+  const existingRaw = await env.BLOG_AI_KV.get(key).catch(() => null);
+  let existing = {};
+  try {
+    existing = existingRaw ? JSON.parse(existingRaw) : {};
+  } catch {}
+  const existingState = existing?.postPublishEnrichment || {};
+  const next = {
+    content,
+    publishedAt,
+    postPublished: true,
+    pillars: Array.isArray(pillars) ? pillars : [],
+    didYouKnowGroundingVerified: didYouKnowGroundingVerified === true,
+    postPublishEnrichment: {
+      version: POST_PUBLISH_ENRICHMENT_VERSION,
+      createdAt:
+        existingState.createdAt ||
+        existing?.publishedAt ||
+        publishedAt ||
+        new Date().toISOString(),
+      ...(existingState.notifiedAt
+        ? { notifiedAt: existingState.notifiedAt }
+        : {}),
+      ...(
+        entitiesAttemptedAt ||
+        existingState.entitiesAttemptedAt
+          ? {
+              entitiesAttemptedAt:
+                entitiesAttemptedAt || existingState.entitiesAttemptedAt,
+            }
+          : {}
+      ),
+    },
+  };
+  await blogKvPutIfChanged(
+    env,
+    key,
+    JSON.stringify(next),
+    { expirationTtl: POST_PUBLISH_ENRICHMENT_TTL },
+  );
+  return next;
+}
+
+async function invalidateCorePublicationCaches() {
+  if (!globalThis.caches?.default) return;
+  await Promise.allSettled([
+    globalThis.caches.default.delete(
+      new Request("https://thisday.info/sitemap.xml"),
+    ),
+    globalThis.caches.default.delete(
+      new Request("https://thisday.info/rss.xml"),
+    ),
+    globalThis.caches.default.delete(
+      new Request("https://thisday.info/news-sitemap.xml"),
+    ),
+  ]);
+}
+
+async function postPublishEnrichmentStatus(env, slug, draft = null) {
+  const payload = draft || (() => null)();
+  const content = payload?.content || {};
+  const [html, quizRaw, entityRaw] = await Promise.all([
+    env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`).catch(() => null),
+    env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`).catch(() => null),
+    env.BLOG_AI_KV.get(`post-entities:${slug}`).catch(() => null),
+  ]);
+  let entityMeta = [];
+  try {
+    entityMeta = entityRaw ? JSON.parse(entityRaw) : [];
+  } catch {}
+  const timeline = validateSourcedTimelineForPublish(content, {
+    minimumEntries: MIN_AUTOMATIC_TIMELINE_ENTRIES,
+  });
+  const figureCount = countRenderedInlineArticleFigures(html);
+  const quizReady = Boolean(parseValidBlogQuiz(quizRaw));
+  const evergreenReady = Boolean(
+    html?.includes('data-history-entity-link="1"'),
+  );
+  const entitiesAttempted = Boolean(
+    payload?.postPublishEnrichment?.entitiesAttemptedAt,
+  );
+  const complete =
+    timeline.ok &&
+    figureCount >= MIN_AUTOMATIC_INLINE_FIGURES &&
+    quizReady &&
+    evergreenReady &&
+    entitiesAttempted;
+  return {
+    complete,
+    timelineReady: timeline.ok,
+    figureCount,
+    quizReady,
+    evergreenReady,
+    entitiesAttempted,
+    html: html || "",
+    entityMeta: Array.isArray(entityMeta) ? entityMeta : [],
+  };
+}
+
+async function maybeFinalizePostPublishEnrichment(env, slug) {
+  const key = postPublishEnrichmentKey(slug);
+  const raw = await env.BLOG_AI_KV.get(key).catch(() => null);
+  if (!raw) return { found: false, complete: false, notified: false };
+  let draft;
+  try {
+    draft = JSON.parse(raw);
+  } catch {
+    return { found: false, complete: false, notified: false };
+  }
+  if (!draft?.postPublished || !draft?.content) {
+    return { found: false, complete: false, notified: false };
+  }
+  const status = await postPublishEnrichmentStatus(env, slug, draft);
+  const createdAt = Date.parse(
+    draft.postPublishEnrichment?.createdAt ||
+      draft.publishedAt ||
+      "",
+  );
+  const deadlineReached =
+    Number.isFinite(createdAt) &&
+    Date.now() - createdAt >= POST_PUBLISH_NOTIFICATION_DEADLINE_MS;
+  const alreadyNotified = Boolean(
+    draft.postPublishEnrichment?.notifiedAt,
+  );
+  let notified = alreadyNotified;
+  if ((status.complete || deadlineReached) && !alreadyNotified) {
+    await runPostPublishExtras(env, slug, draft.content, {
+      scheduleEnrichment: false,
+    });
+    draft.postPublishEnrichment.notifiedAt = new Date().toISOString();
+    notified = true;
+  }
+  if (status.complete && notified) {
+    await env.BLOG_AI_KV.delete(key).catch(() => {});
+  } else if (notified && !alreadyNotified) {
+    await blogKvPutIfChanged(
+      env,
+      key,
+      JSON.stringify(draft),
+      { expirationTtl: POST_PUBLISH_ENRICHMENT_TTL },
+    );
+  }
+  return {
+    found: true,
+    ...status,
+    deadlineReached,
+    notified,
+  };
+}
+
 async function savePublishedPost(
   env,
   {
@@ -8324,11 +8735,16 @@ async function savePublishedPost(
     entityMeta = [],
     verifiedFeaturedImage = null,
     didYouKnowGroundingVerified = false,
+    requireAutomaticEnrichment = false,
+    boundedRecovery = false,
+    quizReady = true,
+    recordPipeline = true,
+    hydrateOptionalAssets = true,
   },
 ) {
   const safePillars = Array.isArray(pillars) ? pillars : [];
   let safePersonImages = Array.isArray(personImages) ? personImages : [];
-  const safeEventImages = Array.isArray(eventImages) ? eventImages : [];
+  let safeEventImages = Array.isArray(eventImages) ? eventImages : [];
   let safeEntityMeta = Array.isArray(entityMeta) ? entityMeta : [];
 
   alignContentDateFields(content, { historicalDateISO: date.toISOString().slice(0, 10) });
@@ -8336,34 +8752,34 @@ async function savePublishedPost(
   if (!dateValidation.ok) {
     throw new Error(`Refusing to publish ${slug}: ${dateValidation.reason}`);
   }
-  const semanticValidation = validateContentSemanticsForPublish(content);
-  if (!semanticValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: semantic publication contract failed — ${semanticValidation.reasons.join("; ")}`,
-    );
-  }
-  const citationValidation = validateDirectCitationsForPublish(content);
-  if (!citationValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
-    );
-  }
-  const curiosityTitleValidation = validateCuriosityTitleForPublish(content);
-  if (!curiosityTitleValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
-    );
-  }
-  const evidenceMapValidation = validateEvidenceMapForPublish(content);
-  if (!evidenceMapValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: evidence-map contract failed — ${evidenceMapValidation.reasons.join("; ")}`,
-    );
-  }
+  // Same combined SEO/E-E-A-T polish gate as generateAndStore/enrichPublishedPost
+  // (2026-07-22). This is the LAST checkpoint before the KV write, so it used
+  // to independently re-throw on ANY single failing check — silently undoing
+  // the threshold-based leniency applied upstream, since every publish path
+  // routes through here. 1-2 failing checks now only warn; SAVE_POLISH_BLOCK_THRESHOLD+
+  // still blocks, since that many at once means the article is genuinely weak.
+  const SAVE_POLISH_BLOCK_THRESHOLD = 3;
   const originalValueValidation = validateOriginalValueForPublish(content);
-  if (!originalValueValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: original-value contract failed — ${originalValueValidation.reasons.join("; ")}`,
+  const savePolishChecks = [
+    ["semantic publication", validateContentSemanticsForPublish(content)],
+    ["direct-citation", validateDirectCitationsForPublish(content)],
+    ["public question-title", validateCuriosityTitleForPublish(content)],
+    ["evidence-map", validateEvidenceMapForPublish(content)],
+    ["original-value", originalValueValidation],
+  ];
+  const failingSavePolishChecks = savePolishChecks.filter(([, result]) => !result.ok);
+  if (failingSavePolishChecks.length > 0) {
+    const reasons = failingSavePolishChecks.map(
+      ([label, result]) => `${label} contract: ${result.reasons.join("; ")}`,
+    );
+    if (failingSavePolishChecks.length >= SAVE_POLISH_BLOCK_THRESHOLD) {
+      await markGroundingBlockedEvent(env, slug, content, reasons);
+      throw new Error(
+        `Refusing to publish ${slug}: ${failingSavePolishChecks.length}/5 SEO polish contracts failed — ${reasons.join(" | ")}`,
+      );
+    }
+    console.warn(
+      `Blog: publishing ${slug} with ${failingSavePolishChecks.length}/5 SEO polish contract(s) soft-failed at save time — ${reasons.join(" | ")}`,
     );
   }
   content.originalValueGateVersion = originalValueValidation.gateVersion;
@@ -8414,9 +8830,11 @@ async function savePublishedPost(
       `Blog: grounded featured-image alt text from Wikimedia filename for ${slug}`,
     );
   }
-  await hydrateContentAssetsForPublish(content, safePillars).catch((err) => {
-    console.warn(`Article asset hydration failed for ${slug}: ${err.message}`);
-  });
+  if (hydrateOptionalAssets) {
+    await hydrateContentAssetsForPublish(content, safePillars).catch((err) => {
+      console.warn(`Article asset hydration failed for ${slug}: ${err.message}`);
+    });
+  }
   safeEntityMeta = await hydrateArticleEntityImages(env, safeEntityMeta).catch((err) => {
     console.warn(`Article entity image hydration failed for ${slug}: ${err.message}`);
     return safeEntityMeta;
@@ -8432,6 +8850,21 @@ async function savePublishedPost(
   safePersonImages = safePersonImages.filter((image) =>
     linkedPeople.has(normalizeTopicMatchText(image?.name)),
   );
+  safePersonImages = uniqueSecondaryArticleImages(
+    content.imageUrl,
+    safePersonImages,
+  );
+  safeEventImages = uniqueSecondaryArticleImages(
+    content.imageUrl,
+    safePersonImages,
+    safeEventImages,
+  ).filter((image) =>
+    !safePersonImages.some(
+      (personImage) =>
+        articleImageIdentity(personImage?.imageUrl) ===
+        articleImageIdentity(image?.imageUrl),
+    ),
+  );
 
   assertRequiredContentBlocks(content);
   const rawHtml = buildPostHTML(
@@ -8442,10 +8875,18 @@ async function savePublishedPost(
     safePillars,
     bookCoverUrl,
     safeEntityMeta,
+    quizReady,
   );
   let html = injectLinks(rawHtml, content.keyTerms, existingIndex, content.eventTitle);
   if (safePersonImages.length > 0) html = injectPersonImages(html, safePersonImages);
-  if (safeEventImages.length > 0) html = injectEventImages(html, safeEventImages);
+  const remainingFigureImages = uniqueSecondaryArticleImages(
+    content.imageUrl,
+    safeEventImages,
+    safePersonImages,
+  ).filter((image) => !htmlContainsArticleImage(html, image?.imageUrl));
+  if (remainingFigureImages.length > 0) {
+    html = injectEventImages(html, remainingFigureImages);
+  }
   if (safeEntityMeta.length > 0) {
     html = injectArticleEntityStrip(html, safeEntityMeta);
     html = addHtmlMarker(html, ENTITY_STRIP_BACKFILL_MARKER);
@@ -8453,6 +8894,30 @@ async function savePublishedPost(
   html = addHtmlMarker(html, FEATURED_IMAGE_CHECK_MARKER);
   if (/<figure style="float:(?:right|left);/i.test(html)) {
     html = addHtmlMarker(html, EVENT_FIGURES_BACKFILL_MARKER);
+  }
+  if (requireAutomaticEnrichment) {
+    const automaticEnrichment =
+      validateAutomaticArticleEnrichmentForPublish({
+        content,
+        html,
+        entityMeta: safeEntityMeta,
+      });
+    if (!automaticEnrichment.ok) {
+      if (boundedRecovery) {
+        await markGroundingBlockedEvent(
+          env,
+          slug,
+          content,
+          automaticEnrichment.reasons,
+        );
+      }
+      const prefix = boundedRecovery
+        ? "Bounded recovery rejected the draft before publication"
+        : `Refusing to publish ${slug}`;
+      throw new Error(
+        `${prefix}: automatic enrichment contract failed — ${automaticEnrichment.reasons.join(" | ")}`,
+      );
+    }
   }
   const structuredDataValidation = validateArticleStructuredDataForPublish(
     html,
@@ -8471,13 +8936,19 @@ async function savePublishedPost(
   if (assetIssues.length > 0) {
     console.warn(`Blog: asset quality warnings for ${slug}: ${assetIssues.join("; ")}`);
   }
-  await env.BLOG_AI_KV.put(`${KV_POST_PREFIX}${slug}`, checkedHtml);
+  await blogKvPutIfChanged(
+    env,
+    `${KV_POST_PREFIX}${slug}`,
+    checkedHtml,
+  );
   if (safeEntityMeta.length > 0) {
     const lightweightEntities = compactArticleEntityMeta(safeEntityMeta);
-    await optionalBlogKvPut(
+    await blogKvPutIfChanged(
       env,
       `post-entities:${slug}`,
       JSON.stringify(lightweightEntities),
+      undefined,
+      { optional: true },
     );
   }
 
@@ -8506,14 +8977,25 @@ async function savePublishedPost(
   };
   deduped.unshift(entry);
   if (deduped.length > 200) deduped.splice(200);
-  await env.BLOG_AI_KV.put(KV_INDEX_KEY, JSON.stringify(deduped));
-  await recordPipelineSuccess(env, {
-    step: "blog",
-    slug,
-    date,
-  }).catch((err) => {
-    console.warn(`Blog: failed to record pipeline success for ${slug}: ${err.message}`);
-  });
+  await blogKvPutIfChanged(
+    env,
+    KV_INDEX_KEY,
+    JSON.stringify(deduped),
+  );
+  if (recordPipeline) {
+    await recordPipelineSuccess(env, {
+      step: "blog",
+      slug,
+      date,
+    }).catch((err) => {
+      console.warn(`Blog: failed to record pipeline success for ${slug}: ${err.message}`);
+    });
+  }
+  return {
+    html: checkedHtml,
+    entry,
+    entityMeta: safeEntityMeta,
+  };
 }
 
 async function enrichPublishedPost(
@@ -8523,12 +9005,7 @@ async function enrichPublishedPost(
 ) {
   // Persist only milestone checkpoints. Earlier code rewrote this one debug
   // key at every enrichment step, spending 14+ puts on a successful article.
-  const persistedCheckpoints = new Set([
-    "started",
-    "pre-final-grounding",
-    "pre-save",
-    "done",
-  ]);
+  const persistedCheckpoints = new Set();
   const chk = (step) => {
     console.log(`Blog AI: enrich ${slug} checkpoint ${step}`);
     if (!persistedCheckpoints.has(step)) return Promise.resolve(false);
@@ -8595,18 +9072,56 @@ async function enrichPublishedPost(
     if (preRepairIssues.length > 0) {
       repaired = await improveArticleQuality(env, repaired, preRepairIssues, groundingSource);
     }
-    const boundedIssues = [
+    let boundedIssues = [
       ...scanBannedPhrases(repaired),
       ...scanArticleQuality(repaired),
       ...scanIntraPageDuplication(repaired),
     ];
     if (boundedIssues.length > 0) {
-      // Still failing after one repair pass: the draft is genuinely unfixable
-      // (or the topic's source is too thin). Block the event and drop the
-      // draft/source package so the next round regenerates a different topic.
+      // One repair pass often leaves a small residual (a banned phrase the
+      // quality repair reintroduced, one still-thin paragraph). Give the
+      // draft a second, smaller repair attempt before giving up on the whole
+      // topic (2026-07-22: Godfrey of Bouillon was blocked after exactly one
+      // pass on a fixable residual banned-phrase + source-anchor set).
+      const secondBannedViolations = scanBannedPhrases(repaired);
+      if (secondBannedViolations.length > 0) {
+        repaired = await fixBannedPhrases(env, repaired, secondBannedViolations, groundingSource);
+      }
+      const secondQualityIssues = [
+        ...scanArticleQuality(repaired),
+        ...scanIntraPageDuplication(repaired),
+      ];
+      if (secondQualityIssues.length > 0) {
+        repaired = await improveArticleQuality(env, repaired, secondQualityIssues, groundingSource);
+      }
+      boundedIssues = [
+        ...scanBannedPhrases(repaired),
+        ...scanArticleQuality(repaired),
+        ...scanIntraPageDuplication(repaired),
+      ];
+    }
+    const BOUNDED_ISSUE_BLOCK_THRESHOLD = 3;
+    if (boundedIssues.length > BOUNDED_ISSUE_BLOCK_THRESHOLD) {
+      // Still showing MANY residual issues after two repair passes — a
+      // genuinely unfixable draft (or a topic whose source is too thin), not
+      // just a leftover style nit. Block the event and drop the draft/source
+      // package so the next round regenerates a different topic (restores
+      // the original design intent for badly-failing drafts specifically).
       await markGroundingBlockedEvent(env, slug, content, boundedIssues);
       throw new Error(
         `Bounded recovery rejected the draft before publication: ${boundedIssues.join("; ")}`,
+      );
+    }
+    if (boundedIssues.length > 0) {
+      // A SMALL residual (1-3 issues: a banned filler phrase, one thin
+      // paragraph) after two repair passes is style polish, not a factual or
+      // structural defect — the real correctness gates (date validation,
+      // assertRequiredContentBlocks, final source-grounding below) still
+      // apply. Blocking the whole topic over 1-3 leftover style nits
+      // repeatedly wedged the day (2026-07-22: Godfrey of Bouillon). Publish
+      // the best repaired version instead of nothing.
+      console.warn(
+        `Blog: bounded recovery publishing ${slug} with ${boundedIssues.length} residual quality issue(s) after two repair passes: ${boundedIssues.join("; ")}`,
       );
     }
     enriched = repaired;
@@ -8646,13 +9161,12 @@ async function enrichPublishedPost(
   const workingImage = verifiedFeaturedImage;
   enriched.imageUrl = verifiedFeaturedImage;
 
-  const [personImages, eventImages, bookCoverUrl] = await Promise.all([
-    fetchKeyPersonImages(env, enriched.keyTerms).catch(() => []),
-    enriched.wikiUrl
-      ? fetchEventImages(enriched.wikiUrl, enriched.imageUrl, 3, enriched.eventTitle).catch(() => [])
-      : Promise.resolve([]),
-    fetchBookCover(enriched.bookSearchQuery).catch(() => null),
-  ]);
+  // Secondary figures, portraits, and book covers are optional enrichment.
+  // Fetching them here would spend the same invocation's finite subrequest
+  // budget before final factual grounding and could still block the core post.
+  const personImages = [];
+  const eventImages = [];
+  const bookCoverUrl = null;
   await chk("post-images");
 
   // If the primary image check failed, fall back to the first event figure already
@@ -8683,45 +9197,52 @@ async function enrichPublishedPost(
   }
 
   await chk("pre-learning-blocks");
-  try {
-    if (!boundedRecovery || !validateSourcedTimelineForPublish(enriched).ok) {
-      await generateLearningBlocks(env, enriched);
-    }
-    groundLearningBlocks(enriched);
-  } catch (err) {
-    console.warn(`Blog: learning-blocks pass failed for ${slug}: ${err.message}`);
-    delete enriched.timeline;
-  }
+  groundLearningBlocks(enriched);
 
   normalizeContentMetadata(enriched);
-  const semanticValidation = validateContentSemanticsForPublish(enriched);
-  if (!semanticValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: semantic publication contract failed — ${semanticValidation.reasons.join("; ")}`,
+  const evergreenCandidate =
+    validatePrimaryEvergreenCandidateForContent(enriched);
+  if (!evergreenCandidate.ok) {
+    console.warn(
+      `Blog: evergreen companion deferred for ${slug} — ${evergreenCandidate.reasons.join("; ")}`,
     );
   }
-  const citationValidation = validateDirectCitationsForPublish(enriched);
-  if (!citationValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: direct-citation contract failed — ${citationValidation.reasons.join("; ")}`,
+  // The five checks below (semantic / citation / curiosity-title /
+  // evidence-map / original-value) are SEO/E-E-A-T polish, not the core
+  // publication contract (image, people strip, facts, Did You Know,
+  // analysis — enforced separately by assertRequiredContentBlocks and the
+  // rendered-HTML checks in savePublishedPost). Each used to throw and
+  // refuse to publish on its own, which repeatedly wedged whole days on a
+  // narrow polish failure (e.g. needing 2 independent non-Wikipedia
+  // publishers, or an exact question-title format) even when the article
+  // itself was sound. 2026-07-22: a single isolated miss (1-2 of 5) now only
+  // warns and publishes — a 7/10 article ships instead of nothing. But
+  // ENRICH_POLISH_BLOCK_THRESHOLD+ failing at once signals a broadly weak
+  // article, not a missing nice-to-have, so that still blocks and rotates the
+  // topic (matching the bounded-recovery gate's same threshold below). Date
+  // validity and factual grounding remain unconditional hard gates because a
+  // wrong date or a false claim is worse than a weak polish showing.
+  const ENRICH_POLISH_BLOCK_THRESHOLD = 3;
+  const enrichPolishChecks = [
+    ["semantic publication", validateContentSemanticsForPublish(enriched)],
+    ["direct-citation", validateDirectCitationsForPublish(enriched)],
+    ["public question-title", validateCuriosityTitleForPublish(enriched)],
+    ["evidence-map", validateEvidenceMapForPublish(enriched)],
+    ["original-value", validateOriginalValueForPublish(enriched)],
+  ];
+  const failingEnrichPolishChecks = enrichPolishChecks.filter(([, result]) => !result.ok);
+  if (failingEnrichPolishChecks.length > 0) {
+    const reasons = failingEnrichPolishChecks.map(
+      ([label, result]) => `${label} contract: ${result.reasons.join("; ")}`,
     );
-  }
-  const curiosityTitleValidation = validateCuriosityTitleForPublish(enriched);
-  if (!curiosityTitleValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
-    );
-  }
-  const evidenceMapValidation = validateEvidenceMapForPublish(enriched);
-  if (!evidenceMapValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: evidence-map contract failed — ${evidenceMapValidation.reasons.join("; ")}`,
-    );
-  }
-  const originalValueValidation = validateOriginalValueForPublish(enriched);
-  if (!originalValueValidation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: original-value contract failed — ${originalValueValidation.reasons.join("; ")}`,
+    if (failingEnrichPolishChecks.length >= ENRICH_POLISH_BLOCK_THRESHOLD) {
+      await markGroundingBlockedEvent(env, slug, enriched, reasons);
+      throw new Error(
+        `Refusing to publish ${slug}: ${failingEnrichPolishChecks.length}/5 SEO polish contracts failed — ${reasons.join(" | ")}`,
+      );
+    }
+    console.warn(
+      `Blog: publishing ${slug} with ${failingEnrichPolishChecks.length}/5 SEO polish contract(s) soft-failed — ${reasons.join(" | ")}`,
     );
   }
 
@@ -8740,46 +9261,18 @@ async function enrichPublishedPost(
     await chk("post-final-grounding");
   }
 
-  const quizParagraphs = [
-    ...(enriched.overviewParagraphs || []),
-    ...(enriched.eyewitnessOrChronicle || []),
-    ...(enriched.aftermathParagraphs || []),
-    ...(enriched.conclusionParagraphs || []),
-  ];
-  const quizContent = {
-    ...enriched,
-    keyFacts: quizParagraphs
-      .filter((paragraph) => paragraph && paragraph.length > 40 && paragraph.length < 750)
-      .slice(0, 15),
-  };
-  const quiz = await generateBlogQuiz(env, quizContent, slug);
-  if (!quiz || !Array.isArray(quiz.questions) || quiz.questions.length !== 5) {
-    throw new Error(`Refusing to publish ${slug}: grounded five-question quiz generation failed`);
-  }
-  await env.BLOG_AI_KV.put(`quiz-v3:blog:${slug}`, JSON.stringify(quiz), {
-    expirationTtl: 90 * 86_400,
-  });
+  // The public core only needs visible people labels. Profile validation and
+  // evergreen entity writes run in the isolated recovery invocation so they
+  // cannot exhaust the publication subrequest or KV budget.
+  const entityMeta = unlinkedArticlePeople(enriched);
 
-  await chk("pre-entities");
-  // Skip AI card generation here — saves ~2 subrequests per entity (up to ~18 total)
-  // and keeps the enrichment invocation well under the 50-subrequest budget.
-  // Entities are flagged needsWikiRefresh so the cron entity-refresh loop
-  // generates their AI overview cards within 1–3 days.
-  const entityMeta = blogKvBackgroundWritesPaused(env)
-    ? publicationReserveArticlePeople(enriched, slug)
-    : await upsertEntitiesForContent(
-      env,
-      enriched,
-      slug,
-      date,
-      pillars,
-      { skipAiGeneration: true },
-    ).catch((err) => {
-      console.warn(`Entity graph update failed for ${slug}: ${err.message}`);
-      suppressPersonProfileLink(enriched);
-      return unlinkedArticlePeople(enriched);
-    });
-  assertEvergreenCompanionQueuedForPublish(entityMeta, slug);
+  await storePostPublishEnrichmentOutbox(env, {
+    slug,
+    content: enriched,
+    publishedAt,
+    pillars,
+    didYouKnowGroundingVerified,
+  });
 
   await chk("pre-save");
   await savePublishedPost(env, {
@@ -8794,13 +9287,211 @@ async function enrichPublishedPost(
     entityMeta,
     verifiedFeaturedImage,
     didYouKnowGroundingVerified,
+    requireAutomaticEnrichment: false,
+    boundedRecovery,
+    quizReady: false,
+    hydrateOptionalAssets: false,
   });
   await chk("saved");
 
-  await env.BLOG_AI_KV.delete(`${KV_DRAFT_PREFIX}${slug}`).catch(() => {});
-  await runPostPublishExtras(env, slug, enriched, { scheduleEnrichment: false });
+  await invalidateCorePublicationCaches();
   await chk("done");
-  console.log(`Blog AI: ${slug} enrichment complete. ${aiUsageSummary()}`);
+  console.log(
+    `Blog AI: ${slug} core published; optional enrichment queued. ${aiUsageSummary()}`,
+  );
+}
+
+async function recoverPublishedPostEnrichment(env, slug) {
+  const draftKey = postPublishEnrichmentKey(slug);
+  const [draftRaw, postRaw, indexRaw] = await Promise.all([
+    env.BLOG_AI_KV.get(draftKey).catch(() => null),
+    env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`).catch(() => null),
+    env.BLOG_AI_KV.get(KV_INDEX_KEY).catch(() => null),
+  ]);
+  if (!draftRaw || !postRaw || !indexRaw) {
+    return { found: false, complete: false };
+  }
+  let draft;
+  let existingIndex;
+  try {
+    draft = JSON.parse(draftRaw);
+    existingIndex = JSON.parse(indexRaw);
+  } catch {
+    return { found: false, complete: false };
+  }
+  if (!draft?.postPublished || !draft?.content || !draft?.publishedAt) {
+    return { found: false, complete: false };
+  }
+  if (!Array.isArray(existingIndex) || !existingIndex.some((entry) => entry.slug === slug)) {
+    return { found: false, complete: false };
+  }
+  const lastAttemptAt = Date.parse(
+    draft.postPublishEnrichment?.entitiesAttemptedAt || "",
+  );
+  if (
+    Number.isFinite(lastAttemptAt) &&
+    Date.now() - lastAttemptAt < POST_PUBLISH_NOTIFICATION_DEADLINE_MS
+  ) {
+    return {
+      found: true,
+      ...(await maybeFinalizePostPublishEnrichment(env, slug)),
+    };
+  }
+
+  const content = draft.content;
+  const date = new Date(draft.publishedAt);
+  const pillars = Array.isArray(draft.pillars)
+    ? draft.pillars
+    : classifyPillarsDeterministically(content);
+
+  await attemptAutomaticTimelineEnrichment(env, content, slug);
+
+  const [personImages, eventImages, bookCoverUrl] = await Promise.all([
+    fetchKeyPersonImages(env, content.keyTerms).catch(() => []),
+    content.wikiUrl
+      ? fetchEventImages(
+          content.wikiUrl,
+          content.imageUrl,
+          4,
+          content.eventTitle,
+        ).catch(() => [])
+      : Promise.resolve([]),
+    fetchBookCover(content.bookSearchQuery).catch(() => null),
+  ]);
+
+  const quizKey = `quiz-v3:blog:${slug}`;
+  let quizRaw = await env.BLOG_AI_KV.get(quizKey).catch(() => null);
+  let quizReady = Boolean(parseValidBlogQuiz(quizRaw));
+  if (!quizReady) {
+    const quizParagraphs = [
+      ...(content.overviewParagraphs || []),
+      ...(content.eyewitnessOrChronicle || []),
+      ...(content.aftermathParagraphs || []),
+      ...(content.conclusionParagraphs || []),
+    ];
+    const quiz = await generateBlogQuiz(env, {
+      ...content,
+      keyFacts: quizParagraphs
+        .filter(
+          (paragraph) =>
+            paragraph &&
+            paragraph.length > 40 &&
+            paragraph.length < 750,
+        )
+        .slice(0, 15),
+    }, slug).catch(() => null);
+    if (quiz && validateQuizQuestions(quiz.questions)) {
+      quizRaw = JSON.stringify(quiz);
+      await blogKvPutIfChanged(
+        env,
+        quizKey,
+        quizRaw,
+        { expirationTtl: 90 * 86_400 },
+        { optional: true },
+      );
+      quizReady = true;
+    } else {
+      console.warn(`Blog: quiz enrichment remains pending for ${slug}`);
+    }
+  }
+
+  const entitiesAttemptedAt =
+    draft.postPublishEnrichment?.entitiesAttemptedAt ||
+    new Date().toISOString();
+  const entityMeta = await upsertEntitiesForContent(
+    env,
+    content,
+    slug,
+    date,
+    pillars,
+    { skipAiGeneration: true },
+  ).catch((err) => {
+    console.warn(`Blog: entity enrichment remains pending for ${slug} — ${err.message}`);
+    return unlinkedArticlePeople(content);
+  });
+
+  if (!blogKvBackgroundWritesPaused(env)) {
+    await hydrateRelatedFilmsForContent(content, entityMeta).catch((err) => {
+      console.warn(
+        `Blog: optional related-film enrichment skipped for ${slug} — ${err.message}`,
+      );
+    });
+  }
+
+  await savePublishedPost(env, {
+    slug,
+    date,
+    content,
+    existingIndex,
+    pillars,
+    bookCoverUrl,
+    personImages,
+    eventImages,
+    entityMeta,
+    verifiedFeaturedImage: content.imageUrl,
+    didYouKnowGroundingVerified:
+      draft.didYouKnowGroundingVerified === true,
+    requireAutomaticEnrichment: false,
+    quizReady,
+    recordPipeline: false,
+  });
+  const nextDraft = await storePostPublishEnrichmentOutbox(env, {
+    slug,
+    content,
+    publishedAt: draft.publishedAt,
+    pillars,
+    didYouKnowGroundingVerified:
+      draft.didYouKnowGroundingVerified === true,
+    entitiesAttemptedAt,
+  });
+  const status = await maybeFinalizePostPublishEnrichment(
+    env,
+    slug,
+  );
+  console.log(
+    `Blog AI: post-publish enrichment ${slug} — timeline=${status.timelineReady ? "ready" : "pending"}, figures=${status.figureCount || 0}/${MIN_AUTOMATIC_INLINE_FIGURES}, quiz=${status.quizReady ? "ready" : "pending"}, evergreen=${status.evergreenReady ? "ready" : "pending"}.`,
+  );
+  return {
+    found: true,
+    draft: nextDraft,
+    ...status,
+  };
+}
+
+async function recoverRecentPostPublishEnrichment(
+  env,
+  { preferSlug = "", limit = 1 } = {},
+) {
+  const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY).catch(() => null);
+  let index = [];
+  try {
+    index = indexRaw ? JSON.parse(indexRaw) : [];
+  } catch {}
+  if (!Array.isArray(index)) return { selected: 0, completed: 0 };
+  const ordered = [
+    ...index.filter((entry) => entry?.slug === preferSlug),
+    ...index.filter((entry) => entry?.slug !== preferSlug).reverse(),
+  ];
+  let selected = 0;
+  let completed = 0;
+  for (const entry of ordered) {
+    if (selected >= Math.max(1, Number(limit) || 1)) break;
+    const draftRaw = await env.BLOG_AI_KV
+      .get(postPublishEnrichmentKey(entry.slug))
+      .catch(() => null);
+    if (!draftRaw) continue;
+    let draft;
+    try {
+      draft = JSON.parse(draftRaw);
+    } catch {
+      continue;
+    }
+    if (!draft?.postPublished || !draft?.postPublishEnrichment) continue;
+    selected += 1;
+    const result = await recoverPublishedPostEnrichment(env, entry.slug);
+    if (result.complete) completed += 1;
+  }
+  return { selected, completed };
 }
 
 function entitySlug(value) {
@@ -9091,6 +9782,21 @@ function evergreenHistoryCandidateEligibility(entity, content, { primaryEvent = 
   };
 }
 
+function validatePrimaryEvergreenCandidateForContent(content) {
+  const wikiUrl = content?.wikiUrl || content?.jsonLdUrl || "";
+  const entity = {
+    type: "event",
+    slug: entitySlug(content?.eventTitle || content?.title),
+    name: content?.eventTitle || content?.title || "",
+    wikiUrl,
+    resolvedPageTitle:
+      content?.sourcePageTitle || wikiTitleFromUrl(wikiUrl),
+  };
+  return evergreenHistoryCandidateEligibility(entity, content, {
+    primaryEvent: true,
+  });
+}
+
 function evergreenHistoryVisibleValues(entity) {
   return [
     entity?.pageHeading,
@@ -9325,11 +10031,13 @@ function validateEvergreenCompanionQueueForPublish(entityMeta) {
 }
 
 function assertEvergreenCompanionQueuedForPublish(entityMeta, slug) {
+  // Entity/people-page cross-linking polish, not core article structure.
+  // Downgraded from a hard block to a warning (2026-07-22) alongside the
+  // other SEO/E-E-A-T "contract" checks — see the note above the
+  // semantic/citation/curiosity-title/evidence-map/original-value checks.
   const validation = validateEvergreenCompanionQueueForPublish(entityMeta);
   if (!validation.ok) {
-    throw new Error(
-      `Refusing to publish ${slug}: history companion contract failed — ${validation.reasons.join("; ")}`,
-    );
+    console.warn(`Blog: history companion contract soft-failed for ${slug}: ${validation.reasons.join("; ")}`);
   }
   return validation.companion;
 }
@@ -11247,7 +11955,7 @@ async function upsertEntityRecord(env, draftEntity) {
     bodySections: hasSections(draftEntity.bodySections) ? draftEntity.bodySections : (existing?.bodySections || []),
     relatedPosts,
     firstSeenAt: existing?.firstSeenAt || draftEntity.firstSeenAt,
-    updatedAt: new Date().toISOString(),
+    updatedAt: existing?.updatedAt || new Date().toISOString(),
   };
   const existingEvergreenEvidenceWords =
     evergreenHistoryEvidenceWordCount(existing?.evergreenEvidence);
@@ -11309,7 +12017,13 @@ async function upsertEntityRecord(env, draftEntity) {
   } else if (draftEntity.needsWikiRefresh) {
     entity.needsWikiRefresh = true;
   }
-  await env.BLOG_AI_KV.put(key, JSON.stringify(entity));
+  let serialized = JSON.stringify(entity);
+  if (existingRaw === serialized) return entity;
+  if (existing) {
+    entity.updatedAt = new Date().toISOString();
+    serialized = JSON.stringify(entity);
+  }
+  await env.BLOG_AI_KV.put(key, serialized);
   return entity;
 }
 
@@ -11357,9 +12071,12 @@ async function upsertEntityIndex(env, entities) {
         : {}),
     });
   }
-  await env.BLOG_AI_KV.put(
+  await blogKvPutIfChanged(
+    env,
     KV_ENTITY_INDEX_KEY,
     JSON.stringify([...byId.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)))),
+    undefined,
+    { optional: true },
   );
 }
 
@@ -11620,9 +12337,12 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
   await upsertEntityIndex(env, saved);
   if (articleEntities.length > 0) {
     const lightweight = compactArticleEntityMeta(articleEntities);
-    await env.BLOG_AI_KV.put(
+    await blogKvPutIfChanged(
+      env,
       `post-entities:${slug}`,
       JSON.stringify(lightweight),
+      undefined,
+      { optional: true },
     ).catch(() => {});
   }
   return articleEntities;
@@ -11706,7 +12426,7 @@ async function recoverRecentEntityStrips(env, { maxPosts = 3, lookbackDays = 3 }
 
 function selectPendingEvergreenHistoryCandidates(
   index,
-  { limit = 1, preferPostSlug = "" } = {},
+  { limit = 1, preferPostSlug = "", requirePostSlug = false } = {},
 ) {
   return (Array.isArray(index) ? index : [])
     .filter((entry) =>
@@ -11714,7 +12434,15 @@ function selectPendingEvergreenHistoryCandidates(
       entry.historyQualityGateVersion === BLOG_HISTORY_QUALITY_GATE_VERSION &&
       entry.needsEvergreenRefresh === true &&
       entry.slug &&
-      entry.wikiUrl,
+      entry.wikiUrl &&
+      (
+        !requirePostSlug ||
+        (
+          Boolean(preferPostSlug) &&
+          Array.isArray(entry.relatedPosts) &&
+          entry.relatedPosts.includes(preferPostSlug)
+        )
+      ),
     )
     .sort((a, b) => {
       const aPreferred =
@@ -11733,18 +12461,20 @@ function selectPendingEvergreenHistoryCandidates(
 
 async function recoverPendingEvergreenHistory(
   env,
-  { limit = 1, preferPostSlug = "" } = {},
+  { limit = 1, preferPostSlug = "", requirePostSlug = false } = {},
 ) {
   const indexRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
   const index = indexRaw ? JSON.parse(indexRaw) : [];
   const candidates = selectPendingEvergreenHistoryCandidates(index, {
     limit,
     preferPostSlug,
+    requirePostSlug,
   });
   const result = {
     selected: candidates.length,
     promoted: 0,
     deferred: 0,
+    promotedPostSlugs: [],
   };
   for (const entry of candidates) {
     const storageSlug = entry.storageSlug || entry.slug;
@@ -11782,10 +12512,8 @@ async function recoverPendingEvergreenHistory(
     entity = await restorePendingEvergreenHistoryEvidenceFromPost(env, entity);
     const edition = await generateEvergreenHistoryEdition(env, entity);
     if (!edition) {
-      entity.historyLinkEligible = false;
-      entity.updatedAt = new Date().toISOString();
-      await env.BLOG_AI_KV.put(key, JSON.stringify(entity));
-      await upsertEntityIndex(env, [entity]);
+      // A provider miss changes no durable content state. Keep the existing
+      // pending entity untouched so a retry costs zero KV writes.
       result.deferred += 1;
       continue;
     }
@@ -11800,6 +12528,13 @@ async function recoverPendingEvergreenHistory(
     await env.BLOG_AI_KV.put(key, JSON.stringify(entity));
     await upsertEntityIndex(env, [entity]);
     await syncEvergreenHistoryDiscoveryForEntity(env, entity);
+    result.promotedPostSlugs.push(
+      ...(
+        Array.isArray(entity.relatedPosts)
+          ? entity.relatedPosts.filter(Boolean)
+          : []
+      ),
+    );
     const discoveryTasks = [];
     try {
       if (globalThis.caches?.default) {
@@ -11841,6 +12576,7 @@ async function recoverPendingEvergreenHistory(
       `Blog AI: promoted evergreen history page ${entity.url} and synced ${entity.relatedPosts?.length || 0} related article(s).`,
     );
   }
+  result.promotedPostSlugs = [...new Set(result.promotedPostSlugs)];
   return result;
 }
 
@@ -12314,6 +13050,44 @@ function assertArticleStructure(html) {
   if (missing.length > 0) {
     throw new Error(`Article structure check failed: missing ${missing.join(", ")}`);
   }
+}
+
+function countRenderedInlineArticleFigures(html) {
+  return countHtmlMatches(
+    String(html || ""),
+    /<figure\b[^>]*style="[^"]*\bfloat\s*:\s*(?:left|right)\b[^"]*"/gi,
+  );
+}
+
+function validateAutomaticArticleEnrichmentForPublish({
+  content,
+  html,
+  entityMeta,
+} = {}) {
+  const reasons = [];
+  const timeline = validateSourcedTimelineForPublish(content, {
+    minimumEntries: MIN_AUTOMATIC_TIMELINE_ENTRIES,
+  });
+  if (!timeline.ok) {
+    reasons.push(`timeline: ${timeline.reasons.join("; ")}`);
+  }
+  const figureCount = countRenderedInlineArticleFigures(html);
+  if (figureCount < MIN_AUTOMATIC_INLINE_FIGURES) {
+    reasons.push(
+      `inline figures: rendered ${figureCount}; needs ${MIN_AUTOMATIC_INLINE_FIGURES}`,
+    );
+  }
+  const companion = validateEvergreenCompanionQueueForPublish(entityMeta);
+  if (!companion.ok) {
+    reasons.push(`evergreen companion: ${companion.reasons.join("; ")}`);
+  }
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    timeline,
+    figureCount,
+    companion: companion.companion,
+  };
 }
 
 /**
@@ -13368,6 +14142,7 @@ async function generateArticleContentChunkedFallback(
   sourceMaterial = null,
   stricterGrounding = false,
   groundingFeedback = [],
+  canonicalSourcePageTitle = "",
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -13460,6 +14235,7 @@ Requirements:
       const briefTitleContext = {
         ...parsed,
         sourcePageTitle:
+          canonicalSourcePageTitle ||
           wikiTitleFromUrl(parsed.wikiUrl) ||
           forcedEvent ||
           parsed.eventTitle,
@@ -14103,11 +14879,14 @@ Writing rules:
     jsonCandidate = cleaned.slice(jsonStart);
   }
 
-  // Try clean parse first
+  // Models sometimes expose a planning preamble containing a tiny JSON
+  // example before the real article object. Prefer the largest complete,
+  // parseable object instead of slicing from the first "{" through the end.
   let parsed;
-  try {
-    parsed = JSON.parse(jsonCandidate);
-  } catch (_firstErr) {
+  const completeJson = parseLargestCompleteJsonObject(jsonCandidate);
+  if (completeJson) {
+    parsed = completeJson.parsed;
+  } else {
     // First try escaping raw control characters inside string literals — AI
     // models frequently emit literal newlines/tabs inside string values, which
     // is a formatting slip, not a truncation. Sanitizing recovers the full
@@ -16393,6 +17172,295 @@ function buildAmazonRelatedBlock(c, currentPillars = []) {
           </section>`;
 }
 
+function normalizeWikidataEntityId(value) {
+  const match = String(value || "").trim().match(/(?:^|\/)(Q[1-9]\d*)$/i);
+  return match ? match[1].toUpperCase() : "";
+}
+
+function normalizeRelatedFilm(candidate) {
+  const title = String(
+    candidate?.title ||
+      candidate?.workLabel?.value ||
+      "",
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  const imdbId = String(
+    candidate?.imdbId ||
+      candidate?.imdb?.value ||
+      "",
+  ).trim();
+  const wikidataEntityId = normalizeWikidataEntityId(
+    candidate?.wikidataEntityId ||
+      candidate?.work?.value ||
+      "",
+  );
+  if (
+    !title ||
+    title.length > 160 ||
+    /^Q[1-9]\d*$/i.test(title) ||
+    !/^tt\d{5,12}$/.test(imdbId) ||
+    !wikidataEntityId
+  ) {
+    return null;
+  }
+
+  const rawDate = String(
+    candidate?.releaseDate ||
+      candidate?.date?.value ||
+      candidate?.year ||
+      "",
+  ).trim();
+  const yearMatch = rawDate.match(/\b(18|19|20)\d{2}\b/);
+  const sitelinks = Number(
+    candidate?.sitelinks?.value ??
+      candidate?.sitelinks ??
+      0,
+  );
+  return {
+    title,
+    ...(yearMatch ? { year: Number(yearMatch[0]) } : {}),
+    imdbId,
+    wikidataEntityId,
+    sitelinks: Number.isFinite(sitelinks) && sitelinks > 0
+      ? Math.floor(sitelinks)
+      : 0,
+  };
+}
+
+function relevantRelatedFilms(content) {
+  const subjectId = normalizeWikidataEntityId(
+    content?.relatedMoviesSubjectQid,
+  );
+  if (!subjectId) return [];
+
+  const seen = new Set();
+  return (Array.isArray(content?.relatedMovies) ? content.relatedMovies : [])
+    .map(normalizeRelatedFilm)
+    .filter(Boolean)
+    .filter((film) => {
+      if (seen.has(film.imdbId)) return false;
+      seen.add(film.imdbId);
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        b.sitelinks - a.sitelinks ||
+        (b.year || 0) - (a.year || 0) ||
+        a.title.localeCompare(b.title),
+    )
+    .slice(0, 5);
+}
+
+async function fetchWikidataRelatedFilms(
+  subjectEntityId,
+  { fetchImpl = fetch } = {},
+) {
+  const subjectId = normalizeWikidataEntityId(subjectEntityId);
+  if (!subjectId) return [];
+
+  const query = `
+SELECT DISTINCT ?work ?workLabel ?imdb ?date ?sitelinks WHERE {
+  VALUES ?subject { wd:${subjectId} }
+  ?work wdt:P921 ?subject;
+        wdt:P345 ?imdb;
+        wdt:P31/wdt:P279* wd:Q11424.
+  OPTIONAL { ?work wdt:P577 ?date. }
+  OPTIONAL { ?work wikibase:sitelinks ?sitelinks. }
+  FILTER(REGEX(STR(?imdb), "^tt[0-9]+$"))
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}
+ORDER BY DESC(?sitelinks) DESC(?date)
+LIMIT 20`;
+  const endpoint = new URL("https://query.wikidata.org/sparql");
+  endpoint.searchParams.set("query", query);
+  endpoint.searchParams.set("format", "json");
+  const response = await fetchImpl(endpoint.toString(), {
+    headers: {
+      Accept: "application/sparql-results+json",
+      "User-Agent":
+        "thisDay.info related-films/1.0 (https://thisday.info/contact/)",
+    },
+  });
+  if (!response?.ok) {
+    throw new Error(
+      `Wikidata related-film query failed (${response?.status || "unknown"})`,
+    );
+  }
+  const data = await response.json();
+  const seen = new Set();
+  return (Array.isArray(data?.results?.bindings)
+    ? data.results.bindings
+    : [])
+    .map(normalizeRelatedFilm)
+    .filter(Boolean)
+    .filter((film) => {
+      if (seen.has(film.imdbId)) return false;
+      seen.add(film.imdbId);
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        b.sitelinks - a.sitelinks ||
+        (b.year || 0) - (a.year || 0) ||
+        a.title.localeCompare(b.title),
+    )
+    .slice(0, 5);
+}
+
+function primaryRelatedFilmSubjectEntity(content, entityMeta) {
+  const entities = (Array.isArray(entityMeta) ? entityMeta : []).filter(
+    (entity) =>
+      String(entity?.type || "").toLowerCase() === "event" &&
+      normalizeWikidataEntityId(entity?.wikidataEntityId),
+  );
+  if (!entities.length) return null;
+
+  const primary = entities.find(
+    (entity) => entity.primaryHistoryEntity === true,
+  );
+  if (primary) return primary;
+
+  const articleWikiIdentity = normalizedWikipediaEntityIdentity(
+    content?.wikiUrl,
+  );
+  return (
+    entities.find(
+      (entity) =>
+        articleWikiIdentity &&
+        normalizedWikipediaEntityIdentity(entity?.wikiUrl) ===
+          articleWikiIdentity,
+    ) ||
+    entities[0]
+  );
+}
+
+async function hydrateRelatedFilmsForContent(
+  content,
+  entityMeta,
+  { fetchImpl = fetch, now = Date.now() } = {},
+) {
+  const subject = primaryRelatedFilmSubjectEntity(content, entityMeta);
+  const subjectId = normalizeWikidataEntityId(
+    subject?.wikidataEntityId,
+  );
+  if (!subjectId) return content;
+
+  const existingSubjectId = normalizeWikidataEntityId(
+    content?.relatedMoviesSubjectQid,
+  );
+  const existingFilms = relevantRelatedFilms(content);
+  const checkedAt = Date.parse(
+    String(content?.relatedMoviesCheckedAt || ""),
+  );
+  if (
+    existingSubjectId === subjectId &&
+    Number.isFinite(checkedAt) &&
+    now - checkedAt >= 0 &&
+    now - checkedAt < RELATED_FILMS_CHECK_TTL_MS
+  ) {
+    if (existingFilms.length >= MIN_RELATED_FILMS) {
+      content.relatedMovies = existingFilms;
+    }
+    return content;
+  }
+
+  const films = await fetchCachedWikidataRelatedFilms(subjectId, {
+    fetchImpl,
+  });
+  content.relatedMoviesSubjectQid = subjectId;
+  content.relatedMoviesCheckedAt = new Date(now).toISOString();
+  if (films.length >= MIN_RELATED_FILMS) {
+    content.relatedMovies = films;
+  } else {
+    delete content.relatedMovies;
+  }
+  return content;
+}
+
+function buildRelatedFilmsBlock(content) {
+  const films = relevantRelatedFilms(content);
+  if (films.length < MIN_RELATED_FILMS) return "";
+
+  const cards = films
+    .map((film) => {
+      const imdbUrl = `https://www.imdb.com/title/${film.imdbId}/`;
+      const year = film.year ? String(film.year) : "Film";
+      return `<a class="amazon-product-card related-film-card" href="${esc(imdbUrl)}" target="_blank" rel="noopener noreferrer" aria-label="View ${esc(film.title)} on IMDb">` +
+        `<span class="amazon-card-cover amazon-card-cover-fallback related-film-cover" aria-hidden="true"><i class="bi bi-film"></i></span>` +
+        `<strong>${esc(film.title)}</strong>` +
+        `<small>${esc(year)} · View on IMDb</small>` +
+        `</a>`;
+    })
+    .join("");
+
+  return `<section class="amazon-related related-films mt-4 p-3 rounded" aria-label="Related films and documentaries">
+            <div class="amazon-related-head">
+              <span class="amazon-kicker">Related films and documentaries</span>
+            </div>
+            <div class="amazon-slider-shell">
+              <button type="button" class="amazon-slider-btn" aria-label="Previous related films" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
+              <div class="amazon-slider-wrap">
+                <div class="amazon-slider-track">${cards}</div>
+              </div>
+              <button type="button" class="amazon-slider-btn" aria-label="Next related films" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
+            </div>
+            <small class="article-meta d-block mt-2">Exact-topic matches from Wikidata. Title links open on IMDb; ratings and descriptions are not imported.</small>
+          </section>`;
+}
+
+function relatedFilmSubjectFromArticleEntityMeta(entityMetaRaw) {
+  let entities;
+  try {
+    entities = typeof entityMetaRaw === "string"
+      ? JSON.parse(entityMetaRaw)
+      : entityMetaRaw;
+  } catch {
+    return "";
+  }
+  const event = (Array.isArray(entities) ? entities : []).find(
+    (entity) =>
+      String(entity?.type || "").toLowerCase() === "event" &&
+      normalizeWikidataEntityId(entity?.wikidataEntityId),
+  );
+  return normalizeWikidataEntityId(event?.wikidataEntityId);
+}
+
+async function injectRelatedFilmsIntoStoredArticleHtml(
+  html,
+  entityMetaRaw,
+  { fetchImpl = fetch, cache = globalThis.caches?.default } = {},
+) {
+  const source = String(html || "");
+  if (!source || source.includes('class="amazon-related related-films')) {
+    return source;
+  }
+  const subjectId = relatedFilmSubjectFromArticleEntityMeta(entityMetaRaw);
+  if (!subjectId) return source;
+
+  const films = await fetchCachedWikidataRelatedFilms(subjectId, {
+    fetchImpl,
+    cache,
+  }).catch(() => []);
+  if (films.length < MIN_RELATED_FILMS) return source;
+  const block = buildRelatedFilmsBlock({
+    relatedMoviesSubjectQid: subjectId,
+    relatedMovies: films,
+  });
+  if (!block) return source;
+
+  const anchors = [
+    "<!-- Eyewitness / Chronicle Accounts -->",
+    "<!-- Aftermath -->",
+    "<!-- Personal Analysis -->",
+    "</article>",
+  ];
+  const anchor = anchors.find((candidate) => source.includes(candidate));
+  return anchor
+    ? source.replace(anchor, `${block}\n          ${anchor}`)
+    : source;
+}
+
 function buildArticleBodyAdBlock() {
   return `<div class="ad-unit-container article-body-ad article-body-ad-v1 mt-4 mb-4">
             <span class="ad-unit-label">Advertisement</span>
@@ -16531,10 +17599,46 @@ async function fetchEventImages(wikiUrl, coverUrl, limit = 2, fallbackTitle = ""
   }
 }
 
+function articleImageIdentity(imageUrl) {
+  return (
+    wikimediaImageFileKey(imageUrl) ||
+    String(imageUrl || "").trim().toLowerCase()
+  );
+}
+
+function uniqueSecondaryArticleImages(heroUrl, ...groups) {
+  const seen = new Set();
+  const heroKey = articleImageIdentity(heroUrl);
+  if (heroKey) seen.add(heroKey);
+  const unique = [];
+  for (const image of groups.flat()) {
+    const imageUrl = String(image?.imageUrl || "").trim();
+    if (!isProxyableArticleImageUrl(imageUrl)) continue;
+    const key = articleImageIdentity(imageUrl);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(image);
+  }
+  return unique;
+}
+
+function htmlContainsArticleImage(html, imageUrl) {
+  const source = String(html || "");
+  const url = String(imageUrl || "").trim();
+  return Boolean(
+    url &&
+    (
+      source.includes(url) ||
+      source.includes(encodeURIComponent(url))
+    )
+  );
+}
+
 /**
  * Injects event images (non-portrait) at section boundaries in the article HTML.
- * Targets Aftermath then Eyewitness/Chronicle sections; falls back to fixed
- * paragraph offsets. Uses alternating left/right floats. Min 1500-char gap enforced.
+ * Targets distinct body sections and uses alternating left/right floats.
+ * One figure per major section prevents stacking without suppressing valid
+ * images merely because two sections happen to be close in the serialized HTML.
  *
  * @param {string} html
  * @param {{name:string,imageUrl:string,wikiUrl:string}[]} eventImages
@@ -16542,6 +17646,10 @@ async function fetchEventImages(wikiUrl, coverUrl, limit = 2, fallbackTitle = ""
  */
 function injectEventImages(html, eventImages) {
   if (!eventImages || eventImages.length === 0) return html;
+  eventImages = uniqueSecondaryArticleImages("", eventImages).filter(
+    (image) => !htmlContainsArticleImage(html, image?.imageUrl),
+  );
+  if (eventImages.length === 0) return html;
 
   const figHtml = ({ imageUrl, name, wikiUrl }, float) => {
     const margin = float === "right"
@@ -16566,8 +17674,6 @@ function injectEventImages(html, eventImages) {
     "<!-- Conclusion -->",
   ];
 
-  const MIN_GAP = 1500;
-  let lastInjectedAt = -MIN_GAP;
   let floats = ["right", "left"];
   let floatIdx = 0;
   let imageIdx = 0;
@@ -16577,7 +17683,6 @@ function injectEventImages(html, eventImages) {
     const anchor = SECTION_ANCHORS[si];
     const anchorPos = html.indexOf(anchor);
     if (anchorPos === -1) continue;
-    if (anchorPos - lastInjectedAt < MIN_GAP) continue;
 
     // Find the first <p> after this anchor
     const pPos = html.indexOf("<p", anchorPos);
@@ -16596,7 +17701,6 @@ function injectEventImages(html, eventImages) {
 
     const fig = figHtml(eventImages[imageIdx], floats[floatIdx % 2]);
     html = html.slice(0, pPos) + fig + html.slice(pPos);
-    lastInjectedAt = pPos;
     floatIdx++;
     imageIdx++;
   }
@@ -17407,6 +18511,7 @@ function buildPostHTML(
   currentPillars = [],
   bookCoverUrl = null,
   entityMeta = [],
+  quizReady = true,
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -17423,6 +18528,7 @@ function buildPostHTML(
   const analysisHeading = `Analysis: ${compactAnalysisSubject(c)}`;
   const evidenceMapBlock = buildEvidenceMapBlock(c);
   const amazonRelatedBlock = buildAmazonRelatedBlock(c, currentPillars);
+  const relatedFilmsBlock = buildRelatedFilmsBlock(c);
   const articleBodyAdBlock = amazonRelatedBlock ? buildArticleBodyAdBlock() : "";
 
   const overviewParas = (c.overviewParagraphs || [])
@@ -17716,6 +18822,8 @@ ${breadcrumbJsonLd}
       .amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:#f9fbf7;display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--btn-bg);font-size:28px}
       .amazon-card-cover img{width:100%;height:100%;object-fit:cover;display:block}
       .amazon-card-cover-fallback{background:linear-gradient(135deg,#f9fbf7,#e7f0e7)}
+      .related-film-card{min-height:230px}
+      .related-film-cover{font-size:42px}
       @media(min-width:768px){.amazon-slider-btn{display:inline-flex}}
       @media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
       .article-body-ad{margin:1.5rem 0 2rem!important}
@@ -17817,6 +18925,7 @@ ${overviewParas}
 
           ${amazonRelatedBlock}
           ${articleBodyAdBlock}
+          ${relatedFilmsBlock}
 
           <!-- Eyewitness / Chronicle Accounts -->
           ${
@@ -17947,14 +19056,15 @@ ${analysisBadItems}
             </div>
           </section>`
               : "";
-            return `<!-- Quiz CTA -->
+            const quizCta = quizReady ? `<!-- Quiz CTA -->
           <div class="authority-links mt-4">
             <span class="authority-links-label">Test Your Knowledge</span>
             <p style="font-size:15px;margin:0 0 10px">Can you answer 5 questions about this event?</p>
             <div class="authority-links-row">
               <a class="authority-link" id="tdq-cta-btn" href="/quiz/" onclick="event.preventDefault();document.getElementById('tdq-overlay').style.display='block';document.getElementById('tdq-popup').style.display='block';requestAnimationFrame(function(){document.getElementById('tdq-popup').classList.add('tdq-popup-open');});document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();">Take the Quiz <i class="bi bi-arrow-right ms-1"></i></a>
             </div>
-          </div>
+          </div>` : `<!-- quiz-deferred -->`;
+            return `${quizCta}
           ${buildAuthorityLinksBlock(c, currentPillars)}
           ${relatedSection}`;
           })()}
@@ -18038,7 +19148,7 @@ ${analysisBadItems}
 
   <!-- Floating quiz bar — slides up when the Did You Know slider scrolls in -->
   <style id="tdq-float-card-style">${TDQ_FLOAT_BAR_CSS}</style>
-  ${TDQ_FLOAT_BAR_HTML}
+  ${quizReady ? TDQ_FLOAT_BAR_HTML : ""}
   <script>
   (function(){
     var bar=document.getElementById('tdq-float-bar');
@@ -18085,6 +19195,7 @@ ${analysisBadItems}
 
   <script>
   (function () {
+    if (!${quizReady ? "true" : "false"}) return;
     var slug = "${esc(slug)}";
     var quizLoaded = false;
     var selected = {};
@@ -19485,6 +20596,8 @@ export const __entityResolutionTestHooks = {
 export const __contentGenerationTestHooks = {
   sanitizeJsonControlChars,
   parseJsonObjectFromAI,
+  extractJsonObjectCandidates,
+  parseLargestCompleteJsonObject,
   isShortArticleBodyFailure,
   articleBodyWordCount,
   validateChunkedArticleBodyChunk,
@@ -19498,8 +20611,22 @@ export const __contentGenerationTestHooks = {
   articleEntityStripNeedsProfileValidation,
   unlinkedArticlePerson,
   hydrateArticleEntityImages,
+  fetchKeyPersonImages,
+  fetchEventImages,
+  uniqueSecondaryArticleImages,
+  countRenderedInlineArticleFigures,
+  validateAutomaticArticleEnrichmentForPublish,
+  blogKvPutIfChanged,
+  storePostPublishEnrichmentOutbox,
+  postPublishEnrichmentStatus,
+  maybeFinalizePostPublishEnrichment,
+  recoverPublishedPostEnrichment,
+  recoverRecentPostPublishEnrichment,
+  injectPersonImages,
+  injectEventImages,
   blogEntityQualityEligible,
   validateEvergreenCompanionQueueForPublish,
+  validatePrimaryEvergreenCandidateForContent,
   normalizedWikipediaEntityIdentity,
   buildEvergreenHistorySlug,
   evergreenHistoryEvidenceWordCount,
@@ -19511,10 +20638,17 @@ export const __contentGenerationTestHooks = {
   selectPendingEvergreenHistoryCandidates,
   syncEvergreenHistoryDiscoveryForEntity,
   upsertEntityRecord,
+  upsertEntityIndex,
+  upsertEntitiesForContent,
   filterGroundingIssues,
   verifyArticleGrounding,
   normalizeContentMetadata,
   validateContentSemanticsForPublish,
+  validateContentDateForPublish,
+  validateDirectCitationsForPublish,
+  validateSourcedTimelineForPublish,
+  ensureAutomaticTimelineForPublish,
+  validateOriginalValueForPublish,
   buildArticleEntityStrip,
   buildArticleHistoryDiscoveryCard,
   normalizeArticleEntityStripPresentationHtml,
@@ -19527,6 +20661,15 @@ export const __contentGenerationTestHooks = {
   validateCuriosityTitleForPublish,
   evidenceMapRowsFromContent,
   validateEvidenceMapForPublish,
+  auditDidYouKnowFacts,
+  assertRequiredContentBlocks,
+  assertArticleStructure,
+  scanBannedPhrases,
+  scanArticleQuality,
+  scanIntraPageDuplication,
+  savePublishedPost,
+  unlinkedArticlePeople,
+  validateQuizQuestions,
   buildEvidenceMapBlock,
   normalizeArticleEvidenceMapDisclosureHtml,
   normalizeTdqFloatBarHtml,
@@ -19534,6 +20677,14 @@ export const __contentGenerationTestHooks = {
   relevantOpenLibraryBooks,
   commercialRecommendationsAreRelevant,
   buildAmazonRelatedBlock,
+  normalizeRelatedFilm,
+  relevantRelatedFilms,
+  primaryRelatedFilmSubjectEntity,
+  fetchWikidataRelatedFilms,
+  hydrateRelatedFilmsForContent,
+  buildRelatedFilmsBlock,
+  relatedFilmSubjectFromArticleEntityMeta,
+  injectRelatedFilmsIntoStoredArticleHtml,
   buildArticleProcessDisclosure,
   normalizeArticleProcessDisclosureHtml,
   buildPillarHubHTML,

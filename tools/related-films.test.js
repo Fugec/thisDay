@@ -9,6 +9,7 @@ import {
 } from "../js/seo-worker.js";
 import {
   fetchCachedOpenLibraryRelatedBooks,
+  fetchCachedWikidataPersonFilmography,
 } from "../js/shared/related-media.js";
 
 function wikidataResponse(bindings) {
@@ -31,6 +32,7 @@ function filmBinding({
   imdb,
   date = "",
   sitelinks = 0,
+  personImdb = "",
 }) {
   return {
     work: { value: `http://www.wikidata.org/entity/${qid}` },
@@ -38,6 +40,9 @@ function filmBinding({
     imdb: { value: imdb },
     ...(date ? { date: { value: date } } : {}),
     sitelinks: { value: String(sitelinks) },
+    ...(personImdb
+      ? { personImdb: { value: personImdb } }
+      : {}),
   };
 }
 
@@ -423,4 +428,251 @@ test("evergreen layout places figures after early sections, books after section 
   assert.ok(books < secondSection && secondSection < secondFigure);
   assert.ok(secondFigure < thirdSection && thirdSection < films);
   assert.ok(films < fourthSection);
+});
+
+test("person filmography uses exact cast credits, deduplicates release dates, and keeps the IMDb profile", async () => {
+  const calls = [];
+  const filmography = await fetchCachedWikidataPersonFilmography(
+    "Q201279",
+    {
+      cache: null,
+      fetchImpl: async (url, options) => {
+        calls.push({ url, options });
+        return wikidataResponse([
+          filmBinding({
+            qid: "Q183081",
+            title: "No Country for Old Men",
+            imdb: "tt0477348",
+            date: "2008-02-29T00:00:00Z",
+            sitelinks: 79,
+            personImdb: "nm0000437",
+          }),
+          filmBinding({
+            qid: "Q183081",
+            title: "No Country for Old Men",
+            imdb: "tt0477348",
+            date: "2007-11-09T00:00:00Z",
+            sitelinks: 79,
+            personImdb: "nm0000437",
+          }),
+          filmBinding({
+            qid: "Q212965",
+            title: "The Hunger Games",
+            imdb: "tt1392170",
+            date: "2012-03-23T00:00:00Z",
+            sitelinks: 73,
+            personImdb: "nm0000437",
+          }),
+        ]);
+      },
+    },
+  );
+
+  assert.equal(calls.length, 1);
+  const query = new URL(calls[0].url).searchParams.get("query");
+  assert.match(query, /VALUES \?person \{ wd:Q201279 \}/);
+  assert.match(query, /\?work wdt:P161 \?person/);
+  assert.match(query, /wdt:P31\/wdt:P279\* wd:Q11424/);
+  assert.equal(filmography.personImdbId, "nm0000437");
+  assert.deepEqual(
+    filmography.films.map((film) => film.imdbId),
+    ["tt0477348", "tt1392170"],
+  );
+  assert.equal(filmography.films[0].year, 2007);
+});
+
+test("person profiles place selected movies after the career section", () => {
+  const html = historyHooks.buildEntityBodySections({
+    type: "person",
+    name: "Woody Harrelson",
+    bodySections: [
+      {
+        heading: "Who was Woody Harrelson?",
+        paragraphs: ["A complete biographical introduction."],
+      },
+      {
+        heading: "Career and significance",
+        paragraphs: ["A complete career paragraph."],
+      },
+    ],
+    filmography: {
+      personImdbId: "nm0000437",
+      films: [
+        {
+          title: "No Country for Old Men",
+          year: 2007,
+          imdbId: "tt0477348",
+        },
+        {
+          title: "The Hunger Games",
+          year: 2012,
+          imdbId: "tt1392170",
+        },
+      ],
+    },
+  });
+
+  assert.match(html, /Selected movies: Woody Harrelson/);
+  assert.match(html, /imdb\.com\/name\/nm0000437/);
+  assert.match(html, /imdb\.com\/title\/tt0477348/);
+  assert.ok(
+    html.indexOf("Career and significance") <
+      html.indexOf("Selected movies: Woody Harrelson"),
+  );
+  assert.ok(
+    html.indexOf("Selected movies: Woody Harrelson") <
+      html.indexOf("entity-career-ad"),
+  );
+});
+
+test("born and died pages add one actor filmography without a KV write", async () => {
+  const dateHtml = `<html><body>
+    <div class="tl-card">
+      <a href="https://en.wikipedia.org/wiki/Arthur_Treacher">Source</a>
+      <div class="tl-card-title">Arthur Treacher</div>
+      <div class="tl-card-desc">English-American actor and television personality</div>
+    </div>
+    <div class="ad-unit">Advertisement</div>
+  </body></html>`;
+  const calls = [];
+  const patched = await historyHooks.injectDatePagePersonFilmographyHtml(
+    dateHtml,
+    {
+      cache: null,
+      fetchImpl: async (url) => {
+        calls.push(url);
+        if (String(url).startsWith("https://en.wikipedia.org/w/api.php")) {
+          return {
+            ok: true,
+            async json() {
+              return {
+                query: {
+                  pages: [{
+                    title: "Arthur Treacher",
+                    pageprops: { wikibase_item: "Q710540" },
+                  }],
+                },
+              };
+            },
+          };
+        }
+        return wikidataResponse([
+          filmBinding({
+            qid: "Q100",
+            title: "First credited film",
+            imdb: "tt1234567",
+            sitelinks: 20,
+            personImdb: "nm0871553",
+          }),
+          filmBinding({
+            qid: "Q200",
+            title: "Second credited film",
+            imdb: "tt7654321",
+            sitelinks: 10,
+            personImdb: "nm0871553",
+          }),
+        ]);
+      },
+    },
+  );
+
+  assert.equal(calls.length, 2);
+  assert.match(patched, /Selected movies: Arthur Treacher/);
+  assert.match(patched, /tt1234567/);
+  assert.ok(
+    patched.indexOf("Selected movies: Arthur Treacher") <
+      patched.indexOf('<div class="ad-unit">'),
+  );
+  assert.equal(historyHooks.datePageScreenPersonCandidate(dateHtml)?.name, "Arthur Treacher");
+});
+
+test("article pages add one verified actor filmography at read time", async () => {
+  const html = `<html><body><article>
+    <section>Overview</section>
+    <!-- Eyewitness / Chronicle Accounts -->
+  </article></body></html>`;
+  const entityMeta = [{
+    type: "person",
+    name: "Woody Harrelson",
+    description: "American actor",
+    profileSubjectVerified: true,
+    wikidataEntityId: "Q201279",
+  }];
+  const patched =
+    await hooks.injectPersonFilmographyIntoStoredArticleHtml(
+      html,
+      entityMeta,
+      {
+        cache: null,
+        fetchImpl: async () => wikidataResponse([
+          filmBinding({
+            qid: "Q183081",
+            title: "No Country for Old Men",
+            imdb: "tt0477348",
+            sitelinks: 79,
+            personImdb: "nm0000437",
+          }),
+          filmBinding({
+            qid: "Q212965",
+            title: "The Hunger Games",
+            imdb: "tt1392170",
+            sitelinks: 73,
+            personImdb: "nm0000437",
+          }),
+        ]),
+      },
+    );
+
+  assert.match(patched, /Selected movies: Woody Harrelson/);
+  assert.match(patched, /tt0477348/);
+  assert.ok(
+    patched.indexOf("Selected movies: Woody Harrelson") <
+      patched.indexOf("<!-- Eyewitness / Chronicle Accounts -->"),
+  );
+});
+
+test("non-screen people do not trigger article filmography requests", async () => {
+  let calls = 0;
+  const html = "<html><body><article><!-- Aftermath --></article></body></html>";
+  const patched =
+    await hooks.injectPersonFilmographyIntoStoredArticleHtml(
+      html,
+      [{
+        type: "person",
+        name: "Virginia Norwood",
+        description: "American aerospace engineer",
+        profileSubjectVerified: true,
+        wikidataEntityId: "Q7933393",
+      }],
+      {
+        cache: null,
+        fetchImpl: async () => {
+          calls += 1;
+          throw new Error("should not be called");
+        },
+      },
+    );
+  assert.equal(calls, 0);
+  assert.equal(patched, html);
+});
+
+test("person and born/died cache keys advance without invalidating unrelated routes", () => {
+  assert.match(
+    historyHooks.edgeCacheKey(
+      new URL("https://thisday.info/people/woody-harrelson/"),
+    ),
+    /__people_media_v=1$/,
+  );
+  assert.match(
+    historyHooks.edgeCacheKey(
+      new URL("https://thisday.info/born/july/23/"),
+    ),
+    /__date_person_media_v=1$/,
+  );
+  assert.equal(
+    historyHooks.edgeCacheKey(
+      new URL("https://thisday.info/topics/science/"),
+    ),
+    "https://thisday.info/topics/science/",
+  );
 });

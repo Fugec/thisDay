@@ -60,6 +60,7 @@ import {
   rankHistoricalEventCandidates,
 } from "./shared/event-ranking.js";
 import {
+  fetchCachedWikidataPersonFilmography,
   fetchCachedWikidataRelatedFilms,
 } from "./shared/related-media.js";
 
@@ -5342,7 +5343,12 @@ export default {
             entityStripFixedHtml,
             articleEntitiesRaw,
           );
-        return htmlResponse(relatedMediaHtml);
+        const personFilmographyHtml =
+          await injectPersonFilmographyIntoStoredArticleHtml(
+            relatedMediaHtml,
+            articleEntitiesRaw,
+          );
+        return htmlResponse(personFilmographyHtml);
       }
     }
 
@@ -12740,7 +12746,12 @@ function compactArticleEntityMeta(entityMeta) {
               ? { summary: entity.summary }
               : {}),
           }
-        : {}),
+        : {
+            ...(entity.description ? { description: entity.description } : {}),
+            ...(!entity.description && entity.summary
+              ? { summary: entity.summary }
+              : {}),
+          }),
       ...(entity.profileLinkEligible === true ? { profileLinkEligible: true } : {}),
       ...(entity.profileLinkEligible === false ? { profileLinkEligible: false } : {}),
       ...(entity.profileSubjectVerified === true ? { profileSubjectVerified: true } : {}),
@@ -17461,6 +17472,138 @@ async function injectRelatedFilmsIntoStoredArticleHtml(
     : source;
 }
 
+const ARTICLE_SCREEN_PERSON_PATTERN =
+  /\b(actor|actress|film actor|film actress|film director|filmmaker|screenwriter|television actor|television actress|comedian)\b/i;
+const ARTICLE_PERSON_FILMOGRAPHY_CSS =
+  `<style id="article-person-filmography-style">` +
+  `.person-filmography{background:var(--bg-alt,#f2f7f2);border:1px solid var(--border,#cfe0cf);border-radius:10px}.person-filmography .amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.person-filmography .amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted,#5c7a65)}.person-filmography .amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.person-filmography .amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border,#cfe0cf);border-radius:999px;background:#fff;color:var(--btn-bg,#1b3a2d);font-size:18px;line-height:1;cursor:pointer}.person-filmography .amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.person-filmography .amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.person-filmography .amazon-product-card{flex:0 0 170px;min-height:230px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border,#cfe0cf);border-radius:8px;background:#fff;color:var(--btn-bg,#1b3a2d);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.person-filmography .amazon-card-cover{height:150px;border:1px solid var(--border,#cfe0cf);border-radius:7px;background:linear-gradient(135deg,#f9fbf7,#e7f0e7);display:flex;align-items:center;justify-content:center;color:var(--btn-bg,#1b3a2d);font-size:42px}@media(min-width:768px){.person-filmography .amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.person-filmography .amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}` +
+  `</style>`;
+
+function articleScreenPersonFromEntityMeta(entityMetaRaw, articleHtml = "") {
+  let entities;
+  try {
+    entities = typeof entityMetaRaw === "string"
+      ? JSON.parse(entityMetaRaw)
+      : entityMetaRaw;
+  } catch {
+    return null;
+  }
+  const articleText = String(articleHtml || "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ");
+  return (Array.isArray(entities) ? entities : []).find((entity) => {
+    const name = String(entity?.name || "").trim();
+    const nameOffset = name
+      ? articleText.toLowerCase().indexOf(name.toLowerCase())
+      : -1;
+    const nearbyArticleText = nameOffset >= 0
+      ? articleText.slice(
+          Math.max(0, nameOffset - 180),
+          nameOffset + name.length + 260,
+        )
+      : "";
+    const context =
+      `${entity?.description || ""} ${entity?.summary || ""} ${nearbyArticleText}`;
+    return (
+      String(entity?.type || "").toLowerCase() === "person" &&
+      entity?.profileSubjectVerified === true &&
+      normalizeWikidataEntityId(entity?.wikidataEntityId) &&
+      ARTICLE_SCREEN_PERSON_PATTERN.test(context)
+    );
+  }) || null;
+}
+
+function buildPersonFilmographyBlock(person, filmography) {
+  const films = (Array.isArray(filmography?.films)
+    ? filmography.films
+    : [])
+    .filter(
+      (film) =>
+        film?.title &&
+        /^tt\d{5,12}$/.test(String(film?.imdbId || "")),
+    )
+    .slice(0, 6);
+  if (films.length < 2) return "";
+  const personName = String(person?.name || "this person").trim();
+  const personImdbId = /^nm\d{5,12}$/.test(
+    String(filmography?.personImdbId || ""),
+  )
+    ? String(filmography.personImdbId)
+    : "";
+  const cards = films
+    .map((film) => {
+      const year = film.year ? String(film.year) : "Film";
+      return `<a class="amazon-product-card person-film-card" href="https://www.imdb.com/title/${esc(film.imdbId)}/" target="_blank" rel="noopener noreferrer" aria-label="View ${esc(film.title)} on IMDb">` +
+        `<span class="amazon-card-cover amazon-card-cover-fallback related-film-cover" aria-hidden="true"><i class="bi bi-film"></i></span>` +
+        `<strong>${esc(film.title)}</strong>` +
+        `<small>${esc(year)} · View on IMDb</small>` +
+        `</a>`;
+    })
+    .join("");
+  return `<section class="amazon-related person-filmography mt-4 p-3 rounded" aria-label="Selected movies featuring ${esc(personName)}">
+            <div class="amazon-related-head">
+              <span class="amazon-kicker">Selected movies: ${esc(personName)}</span>
+              ${personImdbId ? `<a class="article-meta" href="https://www.imdb.com/name/${esc(personImdbId)}/" target="_blank" rel="noopener noreferrer">Full IMDb filmography</a>` : ""}
+            </div>
+            <div class="amazon-slider-shell">
+              <button type="button" class="amazon-slider-btn" aria-label="Previous selected movies" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
+              <div class="amazon-slider-wrap">
+                <div class="amazon-slider-track">${cards}</div>
+              </div>
+              <button type="button" class="amazon-slider-btn" aria-label="Next selected movies" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
+            </div>
+            <small class="article-meta d-block mt-2">Selected exact acting credits from Wikidata. Title links open on IMDb; ratings, reviews, images, and descriptions are not imported.</small>
+          </section>`;
+}
+
+async function injectPersonFilmographyIntoStoredArticleHtml(
+  html,
+  entityMetaRaw,
+  {
+    fetchImpl = fetch,
+    cache = globalThis.caches?.default,
+  } = {},
+) {
+  const source = String(html || "");
+  if (!source || source.includes('class="amazon-related person-filmography')) {
+    return source;
+  }
+  const person = articleScreenPersonFromEntityMeta(entityMetaRaw, source);
+  const personEntityId = normalizeWikidataEntityId(
+    person?.wikidataEntityId,
+  );
+  if (!person || !personEntityId) return source;
+  const filmography = await fetchCachedWikidataPersonFilmography(
+    personEntityId,
+    { fetchImpl, cache },
+  ).catch(() => ({ films: [] }));
+  const block = buildPersonFilmographyBlock(person, filmography);
+  if (!block) return source;
+  const anchors = [
+    "<!-- Eyewitness / Chronicle Accounts -->",
+    "<!-- Aftermath -->",
+    "<!-- Personal Analysis -->",
+    "</article>",
+  ];
+  const anchor = anchors.find((candidate) => source.includes(candidate));
+  let enriched = anchor
+    ? source.replace(anchor, `${block}\n          ${anchor}`)
+    : source;
+  if (
+    enriched !== source &&
+    !enriched.includes('id="article-person-filmography-style"') &&
+    enriched.includes("</head>")
+  ) {
+    enriched = enriched.replace(
+      "</head>",
+      `${ARTICLE_PERSON_FILMOGRAPHY_CSS}</head>`,
+    );
+  }
+  return enriched;
+}
+
 function buildArticleBodyAdBlock() {
   return `<div class="ad-unit-container article-body-ad article-body-ad-v1 mt-4 mb-4">
             <span class="ad-unit-label">Advertisement</span>
@@ -20685,6 +20828,9 @@ export const __contentGenerationTestHooks = {
   buildRelatedFilmsBlock,
   relatedFilmSubjectFromArticleEntityMeta,
   injectRelatedFilmsIntoStoredArticleHtml,
+  articleScreenPersonFromEntityMeta,
+  buildPersonFilmographyBlock,
+  injectPersonFilmographyIntoStoredArticleHtml,
   buildArticleProcessDisclosure,
   normalizeArticleProcessDisclosureHtml,
   buildPillarHubHTML,

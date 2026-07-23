@@ -54,8 +54,9 @@ import {
 } from "./shared/event-story-matching.js";
 import {
   fetchCachedOpenLibraryRelatedBooks,
+  fetchCachedWikipediaWikidataId as fetchSharedWikipediaWikidataId,
+  fetchCachedWikidataPersonFilmography as fetchSharedWikidataPersonFilmography,
   fetchCachedWikidataRelatedFilms,
-  normalizeWikidataEntityId,
 } from "./shared/related-media.js";
 
 // --- Configuration Constants ---
@@ -75,6 +76,23 @@ const PROTECTED_LEGACY_PERSON_SLUGS = new Set([
   "african-american",
   "warren-anderson",
 ]);
+
+function normalizeWikidataEntityId(value) {
+  const match = String(value || "").trim().match(/(?:^|\/)(Q[1-9]\d*)$/i);
+  return match ? match[1].toUpperCase() : "";
+}
+
+async function fetchCachedWikipediaWikidataId(value, options = {}) {
+  if (typeof fetchSharedWikipediaWikidataId !== "function") return "";
+  return fetchSharedWikipediaWikidataId(value, options);
+}
+
+async function fetchCachedWikidataPersonFilmography(value, options = {}) {
+  if (typeof fetchSharedWikidataPersonFilmography !== "function") {
+    return { films: [] };
+  }
+  return fetchSharedWikidataPersonFilmography(value, options);
+}
 
 function compactHomepagePreloadPage(page) {
   if (!page || typeof page !== "object") return null;
@@ -407,6 +425,8 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
 const HISTORY_EDGE_CACHE_VERSION = 2;
+const PERSON_MEDIA_EDGE_CACHE_VERSION = 1;
+const DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 1;
 // Routes eligible for CF Cache API storage. Quiz pages are excluded because
 // the blog worker busts their KV key (quiz-page-v31) on publish; the CF Cache
 // has no hook into that invalidation path.
@@ -431,9 +451,16 @@ function isEdgeCacheable(url, request) {
 // isEdgeCacheable), so stripping the query prevents cache fragmentation and
 // junk-param entry flooding while improving the hit rate across tracking params.
 function edgeCacheKey(url) {
-  return /^\/history\/[a-z0-9-]+\/?$/.test(url.pathname)
-    ? `${url.origin}${url.pathname}?__history_v=${HISTORY_EDGE_CACHE_VERSION}`
-    : `${url.origin}${url.pathname}`;
+  if (/^\/history\/[a-z0-9-]+\/?$/.test(url.pathname)) {
+    return `${url.origin}${url.pathname}?__history_v=${HISTORY_EDGE_CACHE_VERSION}`;
+  }
+  if (/^\/people\/[a-z0-9-]+\/?$/.test(url.pathname)) {
+    return `${url.origin}${url.pathname}?__people_media_v=${PERSON_MEDIA_EDGE_CACHE_VERSION}`;
+  }
+  if (/^\/(?:born|died)\/[a-z]+\/\d+\/?$/.test(url.pathname)) {
+    return `${url.origin}${url.pathname}?__date_person_media_v=${DATE_PERSON_MEDIA_EDGE_CACHE_VERSION}`;
+  }
+  return `${url.origin}${url.pathname}`;
 }
 
 // --- Helper function to fetch daily events from Wikipedia API ---
@@ -1104,6 +1131,185 @@ function buildEntityRelatedFilmsBlock(entity) {
   </section>`;
 }
 
+function buildPersonFilmographyBlock(person) {
+  const films = (Array.isArray(person?.filmography?.films)
+    ? person.filmography.films
+    : [])
+    .filter(
+      (film) =>
+        film?.title &&
+        /^tt\d{5,12}$/.test(String(film?.imdbId || "")),
+    )
+    .slice(0, 6);
+  if (films.length < 2) return "";
+
+  const personName = String(person?.name || "this person").trim();
+  const personImdbId = /^nm\d{5,12}$/.test(
+    String(person?.filmography?.personImdbId || ""),
+  )
+    ? String(person.filmography.personImdbId)
+    : "";
+  const cards = films
+    .map((film) => {
+      const meta = film.year ? String(film.year) : "Film";
+      return `<a class="amazon-product-card person-film-card" href="https://www.imdb.com/title/${escapeHtml(film.imdbId)}/" target="_blank" rel="noopener noreferrer" aria-label="View ${escapeHtml(film.title)} on IMDb">
+        <span class="amazon-card-cover amazon-card-cover-fallback related-film-cover" aria-hidden="true"><i class="bi bi-film"></i></span>
+        <strong>${escapeHtml(film.title)}</strong>
+        <small>${escapeHtml(meta)} · View on IMDb</small>
+      </a>`;
+    })
+    .join("");
+
+  return `<section class="amazon-related person-filmography mt-4 p-3 rounded" aria-label="Selected movies featuring ${escapeHtml(personName)}">
+    <div class="amazon-related-head">
+      <span class="amazon-kicker">Selected movies: ${escapeHtml(personName)}</span>
+      ${personImdbId ? `<a class="article-meta" href="https://www.imdb.com/name/${escapeHtml(personImdbId)}/" target="_blank" rel="noopener noreferrer">Full IMDb filmography</a>` : ""}
+    </div>
+    <div class="amazon-slider-shell">
+      <button type="button" class="amazon-slider-btn" aria-label="Previous selected movies" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:-260,behavior:'smooth'})">&#8249;</button>
+      <div class="amazon-slider-wrap"><div class="amazon-slider-track">${cards}</div></div>
+      <button type="button" class="amazon-slider-btn" aria-label="Next selected movies" onclick="this.parentElement.querySelector('.amazon-slider-wrap').scrollBy({left:260,behavior:'smooth'})">&#8250;</button>
+    </div>
+    <small class="article-meta d-block mt-2">Selected exact acting credits from Wikidata. Title links open on IMDb; ratings, reviews, images, and descriptions are not imported.</small>
+  </section>`;
+}
+
+const SCREEN_CAREER_PATTERN =
+  /\b(actor|actress|film actor|film actress|film director|filmmaker|screenwriter|television actor|television actress|comedian)\b/i;
+const DATE_PERSON_FILMOGRAPHY_CSS =
+  `<style id="date-person-filmography-style">` +
+  `.person-filmography{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;margin-bottom:22px}.person-filmography .amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}.person-filmography .amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}.person-filmography .amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}.person-filmography .amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}.person-filmography .amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}.person-filmography .amazon-slider-wrap::-webkit-scrollbar{display:none}.person-filmography .amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}.person-filmography .amazon-product-card{flex:0 0 170px;min-height:230px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}.person-filmography .amazon-product-card strong{font-size:14px;color:var(--text)}.person-filmography .amazon-product-card small{color:var(--text-muted)}.person-filmography .amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:linear-gradient(135deg,#f9fbf7,#e7f0e7);display:flex;align-items:center;justify-content:center;color:var(--btn-bg);font-size:42px}@media(min-width:768px){.person-filmography .amazon-slider-btn{display:inline-flex}}@media(max-width:767px){.person-filmography .amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}` +
+  `</style>`;
+
+function decodeIdentityHtml(value) {
+  return String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (match, code) => {
+      const value = Number.parseInt(code, 10);
+      return Number.isInteger(value) && value > 0 && value <= 0x10ffff
+        ? String.fromCodePoint(value)
+        : match;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function screenPersonCandidateFromBlock(block, { hero = false } = {}) {
+  const source = String(block || "");
+  const professionMatch = hero
+    ? source.match(/class="article-hero-subtitle"[^>]*>([\s\S]*?)<\/p>/i)
+    : source.match(/class="tl-card-desc"[^>]*>([\s\S]*?)<\/div>/i);
+  const profession = decodeIdentityHtml(professionMatch?.[1]);
+  if (!SCREEN_CAREER_PATTERN.test(profession)) return null;
+  const nameMatch = hero
+    ? source.match(
+        /class="article-hero-title"[^>]*>[\s\S]*?(?:—|&mdash;)\s*([^<]+)<\/h2>/i,
+      )
+    : source.match(/class="tl-card-title"[^>]*>([^<]+)<\/div>/i);
+  const name = decodeIdentityHtml(nameMatch?.[1]);
+  if (!name || name.length > 100) return null;
+  const wikiUrl =
+    source.match(/href="(https:\/\/en\.wikipedia\.org\/wiki\/[^"]+)"/i)?.[1] ||
+    "";
+  const score =
+    (/\b(actor|actress)\b/i.test(profession) ? 8 : 0) +
+    (/\b(film director|filmmaker)\b/i.test(profession) ? 6 : 0) +
+    (/\bscreenwriter\b/i.test(profession) ? 4 : 0) +
+    (/\bcomedian\b/i.test(profession) ? 3 : 0) +
+    (/^[^,]{0,45}\b(actor|actress)\b/i.test(profession) ? 4 : 0) -
+    (/\b(basketball|football|baseball|tennis|cricket|wrestler|athlete|player)\b/i.test(
+      profession,
+    )
+      ? 10
+      : 0);
+  return { name, wikiUrl, profession, score };
+}
+
+function datePageScreenPersonCandidate(html) {
+  const source = String(html || "");
+  const candidates = [];
+  const heroStart = source.indexOf('class="article-hero-wrap"');
+  if (heroStart >= 0) {
+    const heroEnd = source.indexOf('<div class="card-box"', heroStart);
+    const candidate = screenPersonCandidateFromBlock(
+      source.slice(
+        heroStart,
+        heroEnd > heroStart ? heroEnd : heroStart + 8_000,
+      ),
+      { hero: true },
+    );
+    if (candidate) candidates.push({ ...candidate, order: -1 });
+  }
+
+  const cardMarker = '<div class="tl-card">';
+  let offset = source.indexOf(cardMarker);
+  while (offset >= 0) {
+    const next = source.indexOf(cardMarker, offset + cardMarker.length);
+    const candidate = screenPersonCandidateFromBlock(
+      source.slice(offset, next > offset ? next : offset + 4_000),
+    );
+    if (candidate) {
+      candidates.push({ ...candidate, order: candidates.length });
+    }
+    offset = next;
+  }
+  return candidates
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.order - b.order ||
+        a.name.localeCompare(b.name),
+    )[0] || null;
+}
+
+async function injectDatePagePersonFilmographyHtml(
+  html,
+  {
+    fetchImpl = fetch,
+    cache = globalThis.caches?.default,
+  } = {},
+) {
+  const source = String(html || "");
+  if (!source || source.includes('class="amazon-related person-filmography')) {
+    return source;
+  }
+  const candidate = datePageScreenPersonCandidate(source);
+  if (!candidate) return source;
+  const wikidataEntityId = await fetchCachedWikipediaWikidataId(
+    candidate.wikiUrl || candidate.name,
+    { fetchImpl, cache },
+  ).catch(() => "");
+  if (!wikidataEntityId) return source;
+  const filmography = await fetchCachedWikidataPersonFilmography(
+    wikidataEntityId,
+    { fetchImpl, cache },
+  ).catch(() => ({ films: [] }));
+  const block = buildPersonFilmographyBlock({
+    name: candidate.name,
+    filmography,
+  });
+  if (!block) return source;
+  const anchor = '<div class="ad-unit">';
+  let enriched = source.includes(anchor)
+    ? source.replace(anchor, `${block}\n  ${anchor}`)
+    : source;
+  if (
+    enriched !== source &&
+    !enriched.includes('id="date-person-filmography-style"') &&
+    enriched.includes("</head>")
+  ) {
+    enriched = enriched.replace(
+      "</head>",
+      `${DATE_PERSON_FILMOGRAPHY_CSS}</head>`,
+    );
+  }
+  return enriched;
+}
+
 function renderEntityInlineFigure(img, altFallback = "") {
   if (!img?.src) return "";
   const proxied = `/image-proxy?src=${encodeURIComponent(img.src)}&w=760&q=82`;
@@ -1220,7 +1426,7 @@ function buildEntityBodySections(entity) {
           `<div class="entity-body-section">
             <h2 class="h3">${escapeHtml(section.heading)}</h2>
             ${section.paragraphs.map((paragraph) => `<p>${escapeHtml(ensureCompleteSentences(paragraph))}</p>`).join("")}
-          </div>${renderEntityInlineFigure(inlineImages[i], entity.name)}${i === 0 ? buildEntityBookOrAdSlot(entity) : ""}${i === 1 ? `<div class="entity-career-ad">${ENTITY_INLINE_AD}</div>` : ""}${i === 2 ? buildEntityRelatedFilmsBlock(entity) : ""}`,
+          </div>${renderEntityInlineFigure(inlineImages[i], entity.name)}${i === 0 ? buildEntityBookOrAdSlot(entity) : ""}${entity.type === "person" && i === 1 ? buildPersonFilmographyBlock(entity) : ""}${i === 1 ? `<div class="entity-career-ad">${ENTITY_INLINE_AD}</div>` : ""}${entity.type !== "person" && i === 2 ? buildEntityRelatedFilmsBlock(entity) : ""}`,
       )
       .join("")}
   </section>`;
@@ -2695,13 +2901,30 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     if (rebuiltSections.length) entity.bodySections = rebuiltSections;
     // Up to two inline article images from the Wikipedia media-list (edge-cached
     // with the page; fail-open to text-only when the person has no usable media).
-    entity.inlineImages = entity.wikiUrl
-      ? await fetchCachedEntityMediaImages(
-          entityMediaTitle,
-          entity.imageUrl,
-          2,
-        ).catch(() => [])
-      : [];
+    let personEntityId = normalizeWikidataEntityId(
+      entity.wikidataEntityId,
+    );
+    if (!personEntityId && entity.wikiUrl) {
+      personEntityId = await fetchCachedWikipediaWikidataId(
+        entity.wikiUrl,
+      ).catch(() => "");
+    }
+    const [inlineImages, filmography] = await Promise.all([
+      entity.wikiUrl
+        ? fetchCachedEntityMediaImages(
+            entityMediaTitle,
+            entity.imageUrl,
+            2,
+          ).catch(() => [])
+        : Promise.resolve([]),
+      personEntityId
+        ? fetchCachedWikidataPersonFilmography(
+            personEntityId,
+          ).catch(() => ({ films: [] }))
+        : Promise.resolve({ films: [] }),
+    ]);
+    entity.inlineImages = inlineImages;
+    entity.filmography = filmography;
   }
   if (type === "person" && url.searchParams.has("repair")) {
     entity.bodySections = rebuildPersonBodySections(entity);
@@ -4854,6 +5077,23 @@ ${DATE_STORY_FLOAT_CSS}
 .topic-hub-chip-row{display:flex;flex-wrap:wrap;gap:8px}
 .topic-hub-chip{display:inline-flex;align-items:center;padding:7px 12px;border:1px solid var(--cbr);border-radius:999px;background:var(--bg-alt);color:var(--btn-bg);text-decoration:none;font-size:13px;font-weight:400}
 .topic-hub-chip:hover{background:#e7f0e7;color:var(--btn-bg);text-decoration:none}
+
+.amazon-related{background:var(--bg-alt);border:1px solid var(--border);border-radius:10px;margin-bottom:22px}
+.amazon-related-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.amazon-kicker{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
+.amazon-slider-shell{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}
+.amazon-slider-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:999px;background:#fff;color:var(--btn-bg);font-size:18px;line-height:1;cursor:pointer}
+.amazon-slider-btn:hover{border-color:var(--btn-bg);background:#f9fbf7}
+.amazon-slider-wrap{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.amazon-slider-wrap::-webkit-scrollbar{display:none}
+.amazon-slider-track{display:flex;gap:10px;padding:2px 0 4px}
+.amazon-product-card{flex:0 0 170px;min-height:230px;display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--btn-bg);font-size:14px;line-height:1.35;text-decoration:none;scroll-snap-align:start}
+.amazon-product-card:hover{border-color:var(--btn-bg);background:#f9fbf7;text-decoration:none}
+.amazon-product-card strong{font-size:14px;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.amazon-product-card small{color:var(--text-muted)}
+.amazon-card-cover{height:150px;border:1px solid var(--border);border-radius:7px;background:linear-gradient(135deg,#f9fbf7,#e7f0e7);display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--btn-bg);font-size:42px}
+@media(min-width:768px){.amazon-slider-btn{display:inline-flex}}
+@media(max-width:767px){.amazon-slider-shell{grid-template-columns:minmax(0,1fr)}}
 
 #supportPopup{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;justify-content:center;align-items:center;backdrop-filter:blur(2px);z-index:9998;opacity:0;transition:opacity .4s ease}
 #supportPopup.show{display:flex;opacity:1}
@@ -7184,7 +7424,9 @@ async function handleBornPage(request, env, ctx, url) {
         );
         const patched = withFloatingStory.includes('ai-card-patch-v2') ? withFloatingStory : withFloatingStory.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
-        return new Response(withSpec, {
+        const withFilmography =
+          await injectDatePagePersonFilmographyHtml(withSpec);
+        return new Response(withFilmography, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
@@ -7236,7 +7478,7 @@ async function handleBornPage(request, env, ctx, url) {
     loadPersonEntityLinkMap(env),
     annotatePersonNotability(eventsData?.births),
   ]);
-  const html = generateBornHTML(
+  const generatedHtml = generateBornHTML(
     "https://thisday.info",
     monthName,
     day,
@@ -7244,6 +7486,7 @@ async function handleBornPage(request, env, ctx, url) {
     relatedBlogEntry,
     personLinks,
   );
+  const html = await injectDatePagePersonFilmographyHtml(generatedHtml);
   if (env.EVENTS_KV && eventsData?.births?.length)
     ctx.waitUntil(
       env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 }).catch(
@@ -7294,7 +7537,9 @@ async function handleDiedPage(request, env, ctx, url) {
         );
         const patched = withFloatingStory.includes('ai-card-patch-v2') ? withFloatingStory : withFloatingStory.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
         const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
-        return new Response(withSpec, {
+        const withFilmography =
+          await injectDatePagePersonFilmographyHtml(withSpec);
+        return new Response(withFilmography, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
@@ -7346,7 +7591,7 @@ async function handleDiedPage(request, env, ctx, url) {
     loadPersonEntityLinkMap(env),
     annotatePersonNotability(eventsData?.deaths),
   ]);
-  const html = generateDiedHTML(
+  const generatedHtml = generateDiedHTML(
     "https://thisday.info",
     monthName,
     day,
@@ -7354,6 +7599,7 @@ async function handleDiedPage(request, env, ctx, url) {
     relatedBlogEntry,
     personLinks,
   );
+  const html = await injectDatePagePersonFilmographyHtml(generatedHtml);
   if (env.EVENTS_KV && eventsData?.deaths?.length)
     ctx.waitUntil(
       env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 }).catch(
@@ -10486,6 +10732,9 @@ export const __historyEvergreenTestHooks = {
   entityRelatedMediaTopic,
   buildEntityBookOrAdSlot,
   buildEntityRelatedFilmsBlock,
+  buildPersonFilmographyBlock,
+  datePageScreenPersonCandidate,
+  injectDatePagePersonFilmographyHtml,
   buildEntityBodySections,
   fetchCachedEntityMediaImages,
   entityBodyWordCount,
@@ -10493,6 +10742,7 @@ export const __historyEvergreenTestHooks = {
   seoHistoryEntityQualityEligible,
   handleFetchRequest,
   isEdgeCacheable,
+  edgeCacheKey,
 };
 
 export const __archiveIndexabilityTestHooks = {

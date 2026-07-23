@@ -1,6 +1,8 @@
 const RELATED_MEDIA_CACHE_TTL_SECONDS = 30 * 86_400;
 const MAX_RELATED_FILMS = 5;
 const MAX_RELATED_BOOKS = 5;
+const MAX_PERSON_FILMS = 6;
+const RELATED_MEDIA_FETCH_TIMEOUT_MS = 6_000;
 
 const RELATED_BOOK_STOPWORDS = new Set([
   "about", "after", "article", "before", "biography", "book", "books",
@@ -84,6 +86,13 @@ export function normalizeRelatedFilms(candidates, limit = MAX_RELATED_FILMS) {
     .slice(0, Math.max(1, Math.min(Number(limit) || MAX_RELATED_FILMS, 10)));
 }
 
+function relatedMediaFetchSignal() {
+  return typeof AbortSignal !== "undefined" &&
+      typeof AbortSignal.timeout === "function"
+    ? AbortSignal.timeout(RELATED_MEDIA_FETCH_TIMEOUT_MS)
+    : undefined;
+}
+
 export function relevantRelatedFilms(content) {
   const subjectId = normalizeWikidataEntityId(
     content?.relatedMoviesSubjectQid,
@@ -121,6 +130,7 @@ LIMIT 20`;
       "User-Agent":
         "thisDay.info related-films/1.0 (https://thisday.info/contact/)",
     },
+    signal: relatedMediaFetchSignal(),
   });
   if (!response?.ok) {
     throw new Error(
@@ -129,6 +139,98 @@ LIMIT 20`;
   }
   const data = await response.json();
   return normalizeRelatedFilms(data?.results?.bindings, MAX_RELATED_FILMS);
+}
+
+export function normalizePersonFilmography(
+  candidates,
+  limit = MAX_PERSON_FILMS,
+) {
+  const filmsByImdbId = new Map();
+  let personImdbId = "";
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const candidatePersonImdbId = String(
+      candidate?.personImdbId ||
+        candidate?.personImdb?.value ||
+        "",
+    ).trim();
+    if (/^nm\d{5,12}$/.test(candidatePersonImdbId)) {
+      personImdbId ||= candidatePersonImdbId;
+    }
+    const film = normalizeRelatedFilm(candidate);
+    if (!film) continue;
+    const existing = filmsByImdbId.get(film.imdbId);
+    if (!existing) {
+      filmsByImdbId.set(film.imdbId, film);
+      continue;
+    }
+    filmsByImdbId.set(film.imdbId, {
+      ...existing,
+      sitelinks: Math.max(existing.sitelinks || 0, film.sitelinks || 0),
+      ...(
+        existing.year && film.year
+          ? { year: Math.min(existing.year, film.year) }
+          : film.year
+            ? { year: film.year }
+            : {}
+      ),
+    });
+  }
+  const films = [...filmsByImdbId.values()]
+    .sort(
+      (a, b) =>
+        b.sitelinks - a.sitelinks ||
+        (b.year || 0) - (a.year || 0) ||
+        a.title.localeCompare(b.title),
+    )
+    .slice(0, Math.max(1, Math.min(Number(limit) || MAX_PERSON_FILMS, 10)));
+  return {
+    ...(personImdbId ? { personImdbId } : {}),
+    films,
+  };
+}
+
+export async function fetchWikidataPersonFilmography(
+  personEntityId,
+  { fetchImpl = fetch } = {},
+) {
+  const personId = normalizeWikidataEntityId(personEntityId);
+  if (!personId) return { films: [] };
+
+  const query = `
+SELECT DISTINCT ?work ?workLabel ?imdb ?date ?sitelinks ?personImdb WHERE {
+  VALUES ?person { wd:${personId} }
+  OPTIONAL { ?person wdt:P345 ?personImdb. }
+  ?work wdt:P161 ?person;
+        wdt:P345 ?imdb;
+        wdt:P31/wdt:P279* wd:Q11424.
+  OPTIONAL { ?work wdt:P577 ?date. }
+  OPTIONAL { ?work wikibase:sitelinks ?sitelinks. }
+  FILTER(REGEX(STR(?imdb), "^tt[0-9]+$"))
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+}
+ORDER BY DESC(?sitelinks) DESC(?date)
+LIMIT 80`;
+  const endpoint = new URL("https://query.wikidata.org/sparql");
+  endpoint.searchParams.set("query", query);
+  endpoint.searchParams.set("format", "json");
+  const response = await fetchImpl(endpoint.toString(), {
+    headers: {
+      Accept: "application/sparql-results+json",
+      "User-Agent":
+        "thisDay.info person-filmography/1.0 (https://thisday.info/contact/)",
+    },
+    signal: relatedMediaFetchSignal(),
+  });
+  if (!response?.ok) {
+    throw new Error(
+      `Wikidata person-filmography query failed (${response?.status || "unknown"})`,
+    );
+  }
+  const data = await response.json();
+  return normalizePersonFilmography(
+    data?.results?.bindings,
+    MAX_PERSON_FILMS,
+  );
 }
 
 function cacheRequest(kind, key) {
@@ -173,6 +275,104 @@ export async function fetchCachedWikidataRelatedFilms(
   const films = await fetchWikidataRelatedFilms(subjectId, { fetchImpl });
   await writeCachedJson(cache, request, films, ttlSeconds);
   return films;
+}
+
+export async function fetchCachedWikidataPersonFilmography(
+  personEntityId,
+  {
+    fetchImpl = fetch,
+    cache = globalThis.caches?.default,
+    ttlSeconds = RELATED_MEDIA_CACHE_TTL_SECONDS,
+  } = {},
+) {
+  const personId = normalizeWikidataEntityId(personEntityId);
+  if (!personId) return { films: [] };
+  const request = cacheRequest("person-filmography", personId);
+  const cached = await readCachedJson(cache, request);
+  if (cached && typeof cached === "object") {
+    return normalizePersonFilmography(
+      (Array.isArray(cached.films) ? cached.films : []).map((film) => ({
+        ...film,
+        personImdbId: cached.personImdbId,
+      })),
+      MAX_PERSON_FILMS,
+    );
+  }
+  const filmography = await fetchWikidataPersonFilmography(personId, {
+    fetchImpl,
+  });
+  await writeCachedJson(cache, request, filmography, ttlSeconds);
+  return filmography;
+}
+
+function wikipediaPageTitle(value) {
+  const source = String(value || "").trim();
+  if (!source) return "";
+  try {
+    const url = new URL(source);
+    if (
+      url.hostname === "en.wikipedia.org" &&
+      url.pathname.startsWith("/wiki/")
+    ) {
+      return decodeURIComponent(url.pathname.slice(6)).replace(/_/g, " ");
+    }
+  } catch {}
+  return source.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+}
+
+export async function fetchCachedWikipediaWikidataId(
+  wikipediaTitleOrUrl,
+  {
+    fetchImpl = fetch,
+    cache = globalThis.caches?.default,
+    ttlSeconds = RELATED_MEDIA_CACHE_TTL_SECONDS,
+  } = {},
+) {
+  const title = wikipediaPageTitle(wikipediaTitleOrUrl);
+  if (!title || title.length > 180) return "";
+  const request = cacheRequest(
+    "wikipedia-wikidata-id",
+    title.toLowerCase(),
+  );
+  const cached = await readCachedJson(cache, request);
+  if (cached && typeof cached === "object" && "wikidataEntityId" in cached) {
+    return normalizeWikidataEntityId(cached.wikidataEntityId);
+  }
+
+  const endpoint = new URL("https://en.wikipedia.org/w/api.php");
+  endpoint.searchParams.set("action", "query");
+  endpoint.searchParams.set("format", "json");
+  endpoint.searchParams.set("formatversion", "2");
+  endpoint.searchParams.set("redirects", "1");
+  endpoint.searchParams.set("prop", "pageprops");
+  endpoint.searchParams.set("ppprop", "wikibase_item");
+  endpoint.searchParams.set("titles", title);
+  endpoint.searchParams.set("origin", "*");
+  const response = await fetchImpl(endpoint.toString(), {
+    headers: {
+      Accept: "application/json",
+      "User-Agent":
+        "thisDay.info person-filmography/1.0 (https://thisday.info/contact/)",
+    },
+    signal: relatedMediaFetchSignal(),
+  });
+  if (!response?.ok) {
+    throw new Error(
+      `Wikipedia Wikidata identity lookup failed (${response?.status || "unknown"})`,
+    );
+  }
+  const data = await response.json();
+  const wikidataEntityId = normalizeWikidataEntityId(
+    data?.query?.pages?.find((page) => !page?.missing)?.pageprops
+      ?.wikibase_item,
+  );
+  await writeCachedJson(
+    cache,
+    request,
+    { wikidataEntityId },
+    ttlSeconds,
+  );
+  return wikidataEntityId;
 }
 
 function relatedBookTokens(value) {
@@ -281,6 +481,7 @@ export async function fetchCachedOpenLibraryRelatedBooks(
       headers: {
         "User-Agent": "thisDay.info related-books/1.0 (https://thisday.info)",
       },
+      signal: relatedMediaFetchSignal(),
     },
   );
   if (!response?.ok) {

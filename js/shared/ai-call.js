@@ -5,7 +5,7 @@
  *   1. Groq  (env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3, env.GROQ_API_KEY_4)
  *        — preferred when available, keeps Free-plan Workers under subrequest limits
  *   2. OpenRouter (env.OPENROUTER_API_KEY... / env.OPENRUITER_API_KEY...) — free router support
- *   3. NVIDIA NIM (env.NVIDIA_API_KEY) — meta/llama-3.3-70b-instruct, additional fallback
+ *   3. NVIDIA NIM (env.NVIDIA_API_KEY) — openai/gpt-oss-20b, additional fallback
  *   4. Workers AI (env.AI)       — @cf/meta/llama-3.3-70b-instruct-fp8-fast, last fallback
  *
  * Cerebras and Anthropic were removed from the chain on 2026-07-03 (user
@@ -79,8 +79,25 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
 const OPENROUTER_FALLBACK_MODELS = ["openai/gpt-oss-120b:free", "openai/gpt-oss-20b:free", "openrouter/free"];
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
-const NVIDIA_MODEL = "meta/llama-3.3-70b-instruct";
-const NVIDIA_TEXT_MAX_TOKENS = 4096; // Documented max_tokens range for this NIM endpoint.
+// Switched from meta/llama-3.3-70b-instruct 2026-07-24 after live-testing this
+// account's key directly against NVIDIA NIM during a real production outage
+// (the model was the reason NVIDIA "timed out" as a fallback, not a broken key
+// or a NIM outage). Measured on the free/shared tier: llama-3.3-70b-instruct
+// generates at ~11 tokens/sec (a 4096-token completion needs ~370s, our 90s
+// article-generation timeout can't reach it); openai/gpt-oss-20b generated
+// 1240 tokens in 9.4s (~130 tokens/sec) with clean, complete, accurate JSON
+// output. gpt-oss-20b is already trusted elsewhere in this chain (Groq's and
+// OpenRouter's own gpt-oss fallback tiers), so this doesn't introduce a new
+// unvetted model family, just makes NVIDIA capable of finishing within budget.
+const NVIDIA_MODEL = "openai/gpt-oss-20b";
+// NVIDIA's `max_tokens` ceiling is NOT a fixed endpoint-wide limit — it is
+// per-model. 4096 was the safe ceiling observed for llama-3.3-70b-instruct;
+// live-verified 2026-07-24 that gpt-oss-20b accepts 6144 (HTTP 200). gpt-oss
+// spends completion tokens on hidden reasoning before the visible answer
+// (reasoningCompletionBudget below adds the same +2048 headroom used for
+// Groq/OpenRouter's own gpt-oss tiers), so the base article-generation
+// maxTokens:4096 needs that room here too or large JSON output can truncate.
+const NVIDIA_TEXT_MAX_TOKENS = 6144;
 
 // ─── Dynamic model resolution ─────────────────────────────────────────────────
 // Module-level cache survives across requests within the same Worker instance.
@@ -1314,9 +1331,10 @@ async function callAIProviders(
     failureReasons.push("OpenRouter API key missing");
   }
 
-  // 3. NVIDIA NIM — meta/llama-3.3-70b-instruct via integrate.api.nvidia.com (OpenAI-compatible).
-  // The endpoint documents max_tokens as 1..4096; do not inflate beyond that
-  // or this fallback can fail with 422 exactly when Groq/OpenRouter are down.
+  // 3. NVIDIA NIM — openai/gpt-oss-20b via integrate.api.nvidia.com (OpenAI-compatible).
+  // NVIDIA_TEXT_MAX_TOKENS is this model's live-verified ceiling; do not
+  // inflate further without re-verifying, since exceeding a model's real
+  // ceiling fails with 422 exactly when Groq/OpenRouter are already down.
   const nvidiaBlockedUntil = circuitBlockedUntil("nvidia");
   if (nvidiaBlockedUntil) {
     failureReasons.push(
@@ -1336,8 +1354,12 @@ async function callAIProviders(
         body: JSON.stringify({
           model: NVIDIA_MODEL,
           messages,
-          max_tokens: Math.min(Math.max(maxTokens, 1), NVIDIA_TEXT_MAX_TOKENS),
+          max_tokens: Math.min(
+            Math.max(reasoningCompletionBudget(NVIDIA_MODEL, maxTokens), 1),
+            NVIDIA_TEXT_MAX_TOKENS,
+          ),
           temperature,
+          ...groqReasoningParams(NVIDIA_MODEL),
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });

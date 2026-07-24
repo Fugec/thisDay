@@ -28,17 +28,18 @@ jobs:
           node --check js/blog-ai-worker.js
           node --check js/shared/ai-call.js
 
+      # `tests/` is gitignored (see .gitignore) and never reaches this
+      # checkout, so it cannot appear here — `node --test` silently ignores
+      # nonexistent explicit file arguments with no warning and no failure,
+      # so a path under `tests/` in this list would look like real CI coverage
+      # while actually running zero tests. Only `tools/*.test.js` files are
+      # tracked and can be gated in CI; the `tests/` suite (routes, schema,
+      # seo-text, ai-call, date-pages, entity-resolution, content-generation,
+      # etc.) must be verified locally before merging any change to
+      # js/blog-ai-worker.js or js/shared/ai-call.js.
       - name: Run tracked blog production tests
         run: |
-          node --test \
-            tests/entity-resolution.test.js \
-            tests/content-generation.test.js \
-            tests/date-pages.test.js \
-            tests/ai-call.test.js \
-            tests/routes.test.js \
-            tests/schema.test.js \
-            tests/seo-text.test.js \
-            tools/archive-indexability.test.js \
+          FILES="tools/archive-indexability.test.js \
             tools/article-capacity-resume.test.js \
             tools/article-groq-work-distribution.test.js \
             tools/article-source-capacity.test.js \
@@ -46,7 +47,18 @@ jobs:
             tools/evergreen-history-pipeline.test.js \
             tools/person-human-identity.test.js \
             tools/blog-article-presentation.test.js \
-            tools/related-films.test.js
+            tools/related-films.test.js"
+          # node --test silently ignores a nonexistent explicit file argument
+          # instead of failing — verify every listed file actually exists
+          # before running, so a future typo'd or untracked path can't turn
+          # this gate into a silent no-op again.
+          for FILE in $FILES; do
+            if [ ! -f "$FILE" ]; then
+              echo "::error::Listed test file does not exist in this checkout: $FILE"
+              exit 1
+            fi
+          done
+          node --test $FILES
 
       - name: Dry-run blog worker bundle
         run: npx wrangler@latest deploy --dry-run --config wrangler-blog.jsonc

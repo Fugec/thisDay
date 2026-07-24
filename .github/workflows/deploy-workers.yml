@@ -23,6 +23,34 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Check blog worker syntax
+        run: |
+          node --check js/blog-ai-worker.js
+          node --check js/shared/ai-call.js
+
+      - name: Run tracked blog production tests
+        run: |
+          node --test \
+            tests/entity-resolution.test.js \
+            tests/content-generation.test.js \
+            tests/date-pages.test.js \
+            tests/ai-call.test.js \
+            tests/routes.test.js \
+            tests/schema.test.js \
+            tests/seo-text.test.js \
+            tools/archive-indexability.test.js \
+            tools/article-capacity-resume.test.js \
+            tools/article-groq-work-distribution.test.js \
+            tools/article-source-capacity.test.js \
+            tools/automatic-article-enrichment.test.js \
+            tools/evergreen-history-pipeline.test.js \
+            tools/person-human-identity.test.js \
+            tools/blog-article-presentation.test.js \
+            tools/related-films.test.js
+
+      - name: Dry-run blog worker bundle
+        run: npx wrangler@latest deploy --dry-run --config wrangler-blog.jsonc
+
       - name: Deploy SEO worker
         run: npx wrangler@latest deploy --config wrangler.jsonc
         env:

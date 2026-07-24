@@ -36,6 +36,8 @@ import {
   callWorkersAIDirect,
   hasAnyTextAIProvider,
   aiUsageSummary,
+  aiProviderRetryAt,
+  isAIProviderCapacityError,
 } from "./shared/ai-call.js";
 import { extractFirstSentence, truncateForMeta, splitSentences, normalizeForCompare } from "./shared/seo-text.js";
 import {
@@ -67,8 +69,11 @@ import {
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
 const KV_DRAFT_SOURCE_PREFIX = "draft-source-v1:";
+const KV_ARTICLE_GENERATION_PREFIX = "article-generation-v1:";
 const DRAFT_SOURCE_VERSION = 1;
 const DRAFT_SOURCE_TTL = 3 * 86_400;
+const ARTICLE_GENERATION_VERSION = 1;
+const ARTICLE_GENERATION_TTL = 7 * 86_400;
 const FEATURED_IMAGE_CHECK_MARKER = "<!-- featured-image-check-v1 -->";
 const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
 const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
@@ -196,6 +201,25 @@ function kvBudgetBlockedResponse(budget) {
         ),
       ),
     },
+  );
+}
+
+function aiCapacityDeferredResponse(error, extra = {}) {
+  const retryAt = aiProviderRetryAt(error);
+  const retryAtMs = Date.parse(retryAt);
+  const retryAfter = Number.isFinite(retryAtMs)
+    ? Math.max(1, Math.ceil((retryAtMs - Date.now()) / 1000))
+    : 60;
+  return jsonResponse(
+    {
+      status: "capacity-deferred",
+      message: error.message,
+      retryAt: retryAt || null,
+      resumeFromCheckpoint: true,
+      ...extra,
+    },
+    503,
+    { "Retry-After": String(retryAfter) },
   );
 }
 
@@ -420,12 +444,14 @@ const EVERY_OTHER_DAYS = 1; // Generate every N days
 // limit of 50 external subrequests before provider fallback even starts (July
 // 18, 2026 incident); enrichment has its own similarly large budget (June 22).
 // A comma-list is one Cloudflare cron trigger but produces independent
-// scheduled invocations. This preserves the account's five-trigger allowance.
-const DAILY_PUBLICATION_CRON = "5,10,12,15,18,20,25 0 * * *";
-const DRAFT_PREPARATION_MINUTES = new Set([5, 18]);
-const DRAFT_GENERATION_MINUTES = new Set([10, 12, 20]);
-const DRAFT_ENRICHMENT_MINUTES = new Set([15, 25]);
-const WORKERS_AI_GENERATION_MINUTES = new Set([12, 20]);
+// scheduled invocations. Generation has no same-night retry minute: durable
+// provider circuits and the chunk journal let the 00:35 failsafe resume safely
+// instead of launching overlapping or quota-draining retries.
+const DAILY_PUBLICATION_CRON = "5,10,15 0 * * *";
+const DRAFT_PREPARATION_MINUTES = new Set([5]);
+const DRAFT_GENERATION_MINUTES = new Set([10]);
+const DRAFT_ENRICHMENT_MINUTES = new Set([15]);
+const WORKERS_AI_GENERATION_MINUTES = new Set();
 // Cloudflare reports event.cron as the exact configured expression, including
 // comma lists. Dispatch the shared 00:50/00:55 trigger by scheduled minute;
 // comparing it with separate "50 ..." / "55 ..." strings makes neither branch
@@ -2943,7 +2969,11 @@ async function chooseEventForDate(
     }
     if (candidateEvents.length > 0) {
       const originalFirst = candidateEvents[0];
-      const sourceReady = await selectSourceReadyCandidate(candidateEvents);
+      const sourceReady = await selectSourceReadyCandidate(
+        candidateEvents,
+        fetch,
+        { requireArticleCapacity: true },
+      );
       if (sourceReady) {
         candidateEvents = [
           sourceReady,
@@ -2951,12 +2981,12 @@ async function chooseEventForDate(
         ];
         if (sourceReady.pageUrl !== originalFirst?.pageUrl) {
           console.warn(
-            `Event selector: skipped "${originalFirst?.pageTitle}" because no independently verified source was found; using "${sourceReady.pageTitle}".`,
+            `Event selector: skipped "${originalFirst?.pageTitle}" because it lacked a verified independent source or sufficient packed evidence; using "${sourceReady.pageTitle}".`,
           );
         }
       } else {
         console.warn(
-          `Event selector: none of the top ${Math.min(candidateEvents.length, SOURCE_READY_EVENT_CANDIDATE_LIMIT)} candidates had a reachable, relevant independent source.`,
+          `Event selector: none of the top ${Math.min(candidateEvents.length, SOURCE_READY_EVENT_CANDIDATE_LIMIT)} candidates had both a reachable independent source and enough packed evidence for a full article.`,
         );
         candidateEvents = [];
       }
@@ -3010,6 +3040,11 @@ async function chooseEventForDate(
       sourceText: selected.text,
       sourceExtract: selected.extract || "",
       sourcePages: selected.sourcePages || [],
+      articleEvidenceCapacity: selected.articleEvidenceCapacity,
+      articleSourcePagesExpanded:
+        selected.articleSourcePagesExpanded === true,
+      articleEvidenceCapacityFallback:
+        selected.articleEvidenceCapacityFallback === true,
     };
     const canonicalSourceHeadline = sourceEventHeadline(
       selected.text,
@@ -3025,6 +3060,11 @@ async function chooseEventForDate(
     console.log(
       `Event selector: using deterministic vetted candidate #${selectedIndex} "${parsed.eventTitle}".`,
     );
+    if (parsed.articleEvidenceCapacityFallback) {
+      console.warn(
+        `Event selector: "${parsed.eventTitle}" is an evidence-thin fallback candidate — no candidate for ${monthName} ${day} cleared the full article-evidence bar.`,
+      );
+    }
     return parsed;
   }
 
@@ -3207,10 +3247,11 @@ export default {
     ctx.waitUntil(
       (async () => {
         // Vet and cache today's source package without starting article AI.
-        // The 00:05/00:18 preparation invocation lets the following generation
-        // begin with a fresh external-subrequest budget. The 00:18/00:20/00:25
-        // sequence is a Cloudflare-native recovery round for a draft rejected
-        // by the 00:15 final-grounding gate, before the GitHub failsafe.
+        // The 00:05 preparation invocation lets the 00:10 generation begin
+        // with a fresh external-subrequest budget. Provider circuits and
+        // generation checkpoints replace immediate recovery rounds, so a
+        // rejected or capacity-deferred attempt cannot drain the same quota
+        // window by automatically starting another full article.
         if (phase === "prepare") {
           const guarded = await prepareBlogKvBudget(env, "prepare");
           if (!guarded.budget.allowPhase) return;
@@ -3408,6 +3449,9 @@ export default {
       } catch (err) {
         const today = todayDateString();
         console.error(`Blog AI: /blog/prepare-draft failed — ${err.message}`);
+        if (isAIProviderCapacityError(err)) {
+          return aiCapacityDeferredResponse(err, { slug: today });
+        }
         await recordPipelineFailure(budgetEnv, {
           step: "blog",
           slug: today,
@@ -3453,6 +3497,12 @@ export default {
       } catch (err) {
         const today = todayDateString();
         console.error(`Blog AI: /blog/generate-draft failed — ${err.message}`);
+        if (isAIProviderCapacityError(err)) {
+          console.warn(
+            `Blog AI: draft generation deferred for provider capacity — retry at ${aiProviderRetryAt(err) || "the next reported reset"}.`,
+          );
+          return aiCapacityDeferredResponse(err, { slug: today });
+        }
         // Marked known issue (2026-07-22): Cloudflare's Free-plan 50-subrequest-
         // per-invocation ceiling. Distinct greppable tag so a future
         // `wrangler tail` / KV error-record search can tell this failure mode
@@ -3519,6 +3569,9 @@ export default {
         );
         console.log(`Blog AI: /blog/publish failed. ${aiUsageSummary()}`);
         const today = todayDateString();
+        if (isAIProviderCapacityError(err)) {
+          return aiCapacityDeferredResponse(err, { slug: buildSlug(new Date()) });
+        }
         await recordPipelineFailure(budgetEnv, {
           step: "blog",
           slug: today,
@@ -3562,6 +3615,7 @@ export default {
       );
       const recordEnrichError = async (err) => {
         console.error(`Blog AI: enrichment failed for ${slug} — ${err.message}`);
+        if (isAIProviderCapacityError(err)) return;
         await recordPipelineFailure(budgetEnv, {
           step: "blog",
           slug,
@@ -3588,6 +3642,9 @@ export default {
           });
         } catch (err) {
           await recordEnrichError(err);
+          if (isAIProviderCapacityError(err)) {
+            return aiCapacityDeferredResponse(err, { slug });
+          }
           return jsonResponse({ status: "error", slug, message: err.message }, 500);
         }
       }
@@ -5642,7 +5699,24 @@ function preparedDraftSourceEvent(payload, date) {
   ) {
     return null;
   }
-  return { ...selectedEvent, sourcePages };
+  const normalizedEvent = { ...selectedEvent, sourcePages };
+  const capacity = articleEvidenceCapacity(normalizedEvent);
+  // A candidate the selector already approved as a last-resort, evidence-thin
+  // fallback (see selectSourceReadyCandidate) is trusted here rather than
+  // re-rejected — otherwise this second gate would silently undo that
+  // fallback and still produce a no-publish day. Any payload NOT carrying
+  // that explicit selector-set flag is held to the full capacity bar, so
+  // malformed or hand-edited KV data still fails closed.
+  if (!capacity.ok && selectedEvent.articleEvidenceCapacityFallback !== true) {
+    return null;
+  }
+  return {
+    ...normalizedEvent,
+    articleEvidenceCapacity: capacity.summary,
+    ...(selectedEvent.articleEvidenceCapacityFallback === true
+      ? { articleEvidenceCapacityFallback: true }
+      : {}),
+  };
 }
 
 async function loadPreparedDraftSource(env, date) {
@@ -7697,6 +7771,7 @@ async function generateAndStore(
         );
       } catch (err) {
         lastError = err;
+        if (isAIProviderCapacityError(err)) throw err;
         const retryableOutputFailure =
           /JSON parse failed|No JSON found|response too short|returned empty/i.test(err?.message || "");
         const chunkableFailure = shouldTryChunkedArticleFallback(err);
@@ -7726,6 +7801,7 @@ async function generateAndStore(
             console.warn(
               `Blog AI: chunked article fallback failed after one-shot error "${err.message}" — ${fallbackErr.message}`,
             );
+            if (isAIProviderCapacityError(fallbackErr)) throw fallbackErr;
             throw new Error(`${err.message}; chunked article fallback failed: ${fallbackErr.message}`);
           }
         }
@@ -7881,6 +7957,7 @@ async function generateAndStore(
           console.warn(
             `Blog AI: chunked article fallback failed — ${fallbackErr.message}.`,
           );
+          if (isAIProviderCapacityError(fallbackErr)) throw fallbackErr;
           if (attempt < MAX_CONTENT_ATTEMPTS) {
             content = await generateArticleContent(
               avoid,
@@ -10258,6 +10335,19 @@ const INDEPENDENT_REFERENCE_FETCH_LIMIT = 4;
 // while allowing a second wave when the first shortlist has weak references.
 const SOURCE_READY_EVENT_CANDIDATE_WAVE_SIZE = 3;
 const SOURCE_READY_EVENT_CANDIDATE_LIMIT = 5;
+// The article generator receives only the first 5,500 characters of source
+// material on the free-provider path. Topic readiness must therefore be judged
+// against that exact packed window, not the much larger raw sum of every
+// related biography and institutional page. A 600-word, 14-sentence pack gives
+// the eight-paragraph fallback enough distinct evidence to clear the 750-word
+// body floor without padding or recycling the same opening.
+const ARTICLE_SOURCE_PACK_MAX_CHARS = 5_500;
+const ARTICLE_SOURCE_PACK_MIN_WORDS = 600;
+const ARTICLE_SOURCE_PACK_MIN_SENTENCES = 14;
+const ARTICLE_SOURCE_PACK_MIN_PAGES = 2;
+const ARTICLE_SOURCE_PRIMARY_CHAR_CAP = 2_600;
+const ARTICLE_SOURCE_INDEPENDENT_CHAR_CAP = 2_400;
+const ARTICLE_SOURCE_SUPPORTING_CHAR_CAP = 900;
 const BLOCKED_REFERENCE_HOSTS = new Set([
   "amazon.com",
   "books.google.com",
@@ -10709,6 +10799,14 @@ async function selectSourceReadyCandidate(candidates, fetchImpl = fetch, options
     Number.isInteger(configuredWaveSize) && configuredWaveSize > 0
       ? configuredWaveSize
       : SOURCE_READY_EVENT_CANDIDATE_WAVE_SIZE;
+  // An independently-sourced candidate that only fails the evidence-capacity
+  // bar is retained as a last-resort fallback (mirroring the seven-day
+  // event-family guard's fallback pattern). Without this, a date where every
+  // top candidate is evidence-thin hard-throws with zero generation attempt —
+  // trading "weak article" for "no article at all", which is the exact
+  // no-publish failure class this project has repeatedly hit. The
+  // independent-citation requirement itself is never relaxed here.
+  let bestThinEvidenceFallback = null;
 
   for (let waveStart = 0; waveStart < candidateLimit; waveStart += waveSize) {
     const waveEnd = Math.min(candidateLimit, waveStart + waveSize);
@@ -10734,22 +10832,81 @@ async function selectSourceReadyCandidate(candidates, fetchImpl = fetch, options
         options,
       );
       if (!citation) continue;
-      return {
-        ...candidate,
+      let sourceReadyEvent = {
+        ...selectedEvent,
         sourcePages: normalizeSourcePages([
           ...(candidate.sourcePages || []),
           citation,
         ]),
       };
+      let capacity = articleEvidenceCapacity(sourceReadyEvent);
+      if (options?.requireArticleCapacity === true && !capacity.ok) {
+        // Expand the canonical event page before rejecting the topic. Feed
+        // extracts can be short even when the underlying event page is rich.
+        sourceReadyEvent = await expandSelectedEventSourcePages(
+          sourceReadyEvent,
+          fetchImpl,
+          options,
+        );
+        capacity = articleEvidenceCapacity(sourceReadyEvent);
+      }
+      if (options?.requireArticleCapacity === true && !capacity.ok) {
+        console.warn(
+          `Event selector: skipped "${candidate.pageTitle}" because its packed article evidence is too thin — ${capacity.reasons.join("; ")}.`,
+        );
+        if (
+          !bestThinEvidenceFallback ||
+          capacity.summary.wordCount >
+            bestThinEvidenceFallback.capacity.summary.wordCount
+        ) {
+          bestThinEvidenceFallback = { candidate, sourceReadyEvent, capacity };
+        }
+        continue;
+      }
+      return {
+        ...candidate,
+        pageTitle: sourceReadyEvent.sourcePageTitle || candidate.pageTitle,
+        pageUrl: sourceReadyEvent.wikiUrl || candidate.pageUrl,
+        extract: sourceReadyEvent.sourceExtract || candidate.extract,
+        sourcePages: sourceReadyEvent.sourcePages,
+        articleEvidenceCapacity: capacity.summary,
+        articleSourcePagesExpanded:
+          sourceReadyEvent.articleSourcePagesExpanded === true,
+      };
     }
+  }
+  if (options?.requireArticleCapacity === true && bestThinEvidenceFallback) {
+    const { candidate, sourceReadyEvent, capacity } = bestThinEvidenceFallback;
+    console.warn(
+      `Event selector: no candidate cleared the article-evidence bar — falling back to the best independently sourced but evidence-thin candidate "${candidate.pageTitle}" (${capacity.reasons.join("; ")}) rather than skip publication entirely.`,
+    );
+    return {
+      ...candidate,
+      pageTitle: sourceReadyEvent.sourcePageTitle || candidate.pageTitle,
+      pageUrl: sourceReadyEvent.wikiUrl || candidate.pageUrl,
+      extract: sourceReadyEvent.sourceExtract || candidate.extract,
+      sourcePages: sourceReadyEvent.sourcePages,
+      articleEvidenceCapacity: capacity.summary,
+      articleSourcePagesExpanded:
+        sourceReadyEvent.articleSourcePagesExpanded === true,
+      articleEvidenceCapacityFallback: true,
+    };
   }
   return null;
 }
 
 async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch, options = {}) {
   if (!selectedEvent) return selectedEvent;
+  // Selection may already have expanded this exact package to evaluate its
+  // prompt-sized evidence capacity. The normal preparation path calls this
+  // helper again after selection, so retain an explicit in-memory marker and
+  // avoid spending two identical Wikipedia subrequests twice.
+  if (selectedEvent.articleSourcePagesExpanded === true) return selectedEvent;
   const sourcePages = normalizeSourcePages(selectedEvent.sourcePages || []);
-  if (!sourcePages.length) return selectedEvent;
+  if (!sourcePages.length) {
+    selectedEvent.articleSourcePagesExpanded = true;
+    return selectedEvent;
+  }
   const wikipediaPages = sourcePages.filter((page) => {
     try {
       return new URL(page.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
@@ -10757,8 +10914,44 @@ async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch, 
       return false;
     }
   });
+  const primaryBeforeExpansion =
+    wikipediaPages.find((page) => {
+      const pageUrlKey = normalizeTopicMatchText(page.pageUrl);
+      const pageTitleKey = normalizeTopicMatchText(page.pageTitle);
+      return (
+        (selectedEvent.wikiUrl &&
+          pageUrlKey === normalizeTopicMatchText(selectedEvent.wikiUrl)) ||
+        (selectedEvent.sourcePageTitle &&
+          pageTitleKey === normalizeTopicMatchText(selectedEvent.sourcePageTitle))
+      );
+    }) ||
+    selectPrimarySourcePage(
+      selectedEvent.sourceText || selectedEvent.text,
+      wikipediaPages,
+    ) ||
+    wikipediaPages[0];
+  const eventEvidence = [
+    selectedEvent.eventTitle,
+    selectedEvent.sourcePageTitle,
+    selectedEvent.sourceText,
+    selectedEvent.sourceExtract,
+  ].join(" ");
+  const eventTokens = new Set(sourcePageRelevanceTokens(eventEvidence));
+  const orderedWikipediaPages = [
+    primaryBeforeExpansion,
+    ...wikipediaPages
+      .filter(
+        (page) =>
+          sourcePageIdentity(page) !== sourcePageIdentity(primaryBeforeExpansion),
+      )
+      .sort(
+        (left, right) =>
+          sourcePageEvidenceScore(right, eventTokens) -
+          sourcePageEvidenceScore(left, eventTokens),
+      ),
+  ].filter(Boolean);
   const expanded = await Promise.all(
-    wikipediaPages.slice(0, 2).map((page) =>
+    orderedWikipediaPages.slice(0, 2).map((page) =>
       fetchExpandedWikipediaSourcePage(page, 9000, fetchImpl, {
         timeoutMs: options?.wikipediaExpansionTimeoutMs,
       }),
@@ -10769,14 +10962,22 @@ async function expandSelectedEventSourcePages(selectedEvent, fetchImpl = fetch, 
     ...sourcePages,
   ]);
   selectedEvent.sourcePages = merged;
+  // Preserve the selected canonical identity. Re-ranking after expansion can
+  // otherwise promote a biography whose longer extract overlaps more event
+  // tokens than the dedicated event page. The first expanded result may
+  // legitimately resolve a Wikipedia redirect, but it still represents the
+  // already-selected primary rather than a different source.
   const primary =
-    selectPrimarySourcePage(selectedEvent.sourceText || selectedEvent.text, wikipediaPages) ||
-    wikipediaPages[0];
+    expanded[0] ||
+    primaryBeforeExpansion;
   if (primary) {
     selectedEvent.sourcePageTitle = primary.pageTitle || selectedEvent.sourcePageTitle;
     selectedEvent.sourceExtract = primary.extract || selectedEvent.sourceExtract;
     selectedEvent.wikiUrl = primary.pageUrl || selectedEvent.wikiUrl;
   }
+  selectedEvent.articleSourcePagesExpanded = true;
+  selectedEvent.articleEvidenceCapacity =
+    articleEvidenceCapacity(selectedEvent).summary;
   return selectedEvent;
 }
 
@@ -14044,9 +14245,14 @@ function startsLikeArticleReintroduction(sentence, content) {
 
 function auditChunkedArticleContinuity(content) {
   const issues = [];
+  const repairFields = new Set();
+  const addIssue = (message, field = "") => {
+    issues.push(message);
+    if (ARTICLE_BODY_FIELDS.includes(field)) repairFields.add(field);
+  };
   const anchors = chunkedArticleAnchorTokens(content);
   if (anchors.size < 4) {
-    issues.push("canonical brief does not provide enough shared anchor terms");
+    addIssue("canonical brief does not provide enough shared anchor terms");
   }
 
   const openingSignatures = new Map();
@@ -14055,19 +14261,28 @@ function auditChunkedArticleContinuity(content) {
     const sectionTokens = continuityTokenSet(sectionText);
     const sharedAnchors = sharedTokenCount(anchors, sectionTokens);
     if (sharedAnchors < 2) {
-      issues.push(`${field} is not clearly anchored to the canonical event brief`);
+      addIssue(
+        `${field} is not clearly anchored to the canonical event brief`,
+        field,
+      );
     }
 
     const firstSentence = firstParagraphSentence(content, field);
     if (field !== "overviewParagraphs" && startsLikeArticleReintroduction(firstSentence, content)) {
-      issues.push(`${field} reintroduces the event instead of continuing the article`);
+      addIssue(
+        `${field} reintroduces the event instead of continuing the article`,
+        field,
+      );
     }
 
     const signature = repeatedOpeningSignature(firstSentence);
     if (signature) {
       const previous = openingSignatures.get(signature);
       if (previous) {
-        issues.push(`${field} repeats the opening pattern used by ${previous}`);
+        addIssue(
+          `${field} repeats the opening pattern used by ${previous}`,
+          field,
+        );
       } else {
         openingSignatures.set(signature, field);
       }
@@ -14083,10 +14298,231 @@ function auditChunkedArticleContinuity(content) {
   const earlierDetailTokens = continuityTokenSet(earlierBody, anchors);
   const conclusionDetailTokens = continuityTokenSet(conclusionBody, anchors);
   if (sharedTokenCount(earlierDetailTokens, conclusionDetailTokens) < 3) {
-    issues.push("conclusion does not clearly pick up enough earlier body detail");
+    addIssue(
+      "conclusion does not clearly pick up enough earlier body detail",
+      "conclusionParagraphs",
+    );
   }
 
-  return { ok: issues.length === 0, issues };
+  return {
+    ok: issues.length === 0,
+    issues,
+    repairFields: [...repairFields],
+  };
+}
+
+async function repairChunkedArticleContinuity(
+  env,
+  model,
+  content,
+  sharedContext,
+  compactBrief,
+  continuity,
+  invokeChunkedArticleAI = callChunkedArticleAI,
+) {
+  const fields = (continuity?.repairFields || []).filter((field) =>
+    ARTICLE_BODY_FIELDS.includes(field),
+  );
+  if (fields.length === 0) return null;
+
+  const retainedBody = Object.fromEntries(
+    ARTICLE_BODY_FIELDS
+      .filter((field) => !fields.includes(field))
+      .map((field) => [field, content[field]]),
+  );
+  const requestedShape = Object.fromEntries(
+    fields.map((field) => [field, ["paragraph 1", "paragraph 2"]]),
+  );
+  const fieldGuidance = fields
+    .map((field) => `- ${field}: ${chunkedArticleBodyFieldGuidance(field)}`)
+    .join("\n");
+
+  return invokeChunkedArticleAI(
+    env,
+    model,
+    "chunked article continuity repair",
+    `CHUNKED ARTICLE FALLBACK - CONTINUITY REPAIR
+${sharedContext}
+
+Canonical brief:
+${JSON.stringify(compactBrief, null, 2)}
+
+Continuity audit failures:
+${continuity.issues.map((issue) => `- ${issue}`).join("\n")}
+
+Retained body fields:
+${JSON.stringify(retainedBody, null, 2)}
+
+Rewrite only the rejected fields as JSON:
+${JSON.stringify(requestedShape, null, 2)}
+
+Requirements:
+- Return exactly these top-level fields: ${fields.join(", ")}.
+- Keep every retained field unchanged by omitting it from the response.
+- Give every rewritten field a distinct first sentence and continue from the retained article instead of reintroducing the event and date.
+- Reuse at least three concrete details already established in the retained body, while adding different source-supported evidence.
+${fieldGuidance}
+- Each field must contain exactly 2 paragraphs.
+- Each paragraph should be 145-175 words and must contain at least ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS} words.
+- Keep every claim inside the authoritative source material. Do not invent causality, consequences, quotations, institutions, or policy lessons.
+- Never place a raw URL, hyphen, or em dash in body prose.`,
+    Math.min(3_600, 1_000 + fields.length * 850),
+    (parsed) => {
+      validateChunkedArticleBodyChunk(
+        parsed,
+        fields,
+        "chunked article continuity repair",
+      );
+      const repairedAudit = auditChunkedArticleContinuity({
+        ...content,
+        ...parsed,
+      });
+      if (!repairedAudit.ok) {
+        throw new Error(
+          `chunked article continuity repair: ${repairedAudit.issues.join("; ")}`,
+        );
+      }
+    },
+  );
+}
+
+function articleGenerationJournalKey(date) {
+  return `${KV_ARTICLE_GENERATION_PREFIX}${buildSlug(date)}`;
+}
+
+function articleGenerationSourceFingerprint(
+  canonicalSourcePageTitle,
+  sourceMaterial,
+  generationVariant = "",
+) {
+  const value =
+    `${String(canonicalSourcePageTitle || "").trim()}\u0000` +
+    `${String(sourceMaterial || "").trim()}\u0000` +
+    String(generationVariant || "").trim();
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}-${value.length}`;
+}
+
+function normalizeArticleGenerationJournal(
+  payload,
+  date,
+  sourceFingerprint,
+) {
+  if (
+    !payload ||
+    payload.version !== ARTICLE_GENERATION_VERSION ||
+    payload.slug !== buildSlug(date) ||
+    payload.sourceFingerprint !== sourceFingerprint ||
+    !payload.chunks ||
+    typeof payload.chunks !== "object"
+  ) {
+    return {
+      version: ARTICLE_GENERATION_VERSION,
+      slug: buildSlug(date),
+      sourceFingerprint,
+      createdAt: new Date().toISOString(),
+      chunks: {},
+    };
+  }
+  return {
+    ...payload,
+    chunks: { ...payload.chunks },
+  };
+}
+
+async function loadArticleGenerationJournal(
+  env,
+  date,
+  sourceFingerprint,
+) {
+  if (!env?.BLOG_AI_KV?.get) {
+    return normalizeArticleGenerationJournal(null, date, sourceFingerprint);
+  }
+  const raw = await env.BLOG_AI_KV.get(articleGenerationJournalKey(date), {
+    type: "json",
+  }).catch(() => null);
+  let payload = raw;
+  if (typeof raw === "string") {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      payload = null;
+    }
+  }
+  return normalizeArticleGenerationJournal(
+    payload,
+    date,
+    sourceFingerprint,
+  );
+}
+
+function createArticleGenerationCheckpointer(
+  env,
+  date,
+  journal,
+) {
+  let writeQueue = Promise.resolve();
+  return {
+    journal,
+    async save(name, value) {
+      journal.chunks[name] = value;
+      journal.updatedAt = new Date().toISOString();
+      const snapshot = JSON.stringify(journal);
+      writeQueue = writeQueue.then(() =>
+        blogKvPutIfChanged(
+          env,
+          articleGenerationJournalKey(date),
+          snapshot,
+          { expirationTtl: ARTICLE_GENERATION_TTL },
+        ),
+      );
+      await writeQueue;
+      return value;
+    },
+    async flush() {
+      await writeQueue;
+    },
+  };
+}
+
+function reusableArticleGenerationChunk(journal, name, validate) {
+  const value = journal?.chunks?.[name];
+  if (!value) return null;
+  try {
+    if (typeof validate === "function") validate(value);
+    console.log(`Blog: resuming validated article-generation chunk "${name}".`);
+    return value;
+  } catch (err) {
+    delete journal.chunks[name];
+    console.warn(
+      `Blog: discarded invalid article-generation chunk "${name}" — ${err.message}`,
+    );
+    return null;
+  }
+}
+
+function shouldRetryChunkOutputFailure(error) {
+  if (
+    error?.code === "AI_CAPACITY_UNAVAILABLE" ||
+    /AI provider capacity unavailable/i.test(
+      String(error?.message || error || ""),
+    )
+  ) {
+    return false;
+  }
+  const message = String(error?.message || error || "");
+  if (
+    /callAI failed|request failed|too many subrequests|timeout|timed out|aborted|429\b/i.test(
+      message,
+    )
+  ) {
+    return false;
+  }
+  return true;
 }
 
 async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, validate = null) {
@@ -14124,6 +14560,7 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
       return parsed;
     } catch (err) {
       lastError = err;
+      if (!shouldRetryChunkOutputFailure(err)) throw err;
       if (attempt < 2) {
         const rejection = String(err.message || err).slice(0, 900);
         const needsConcreteDetail =
@@ -14139,6 +14576,59 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
     }
   }
   throw lastError;
+}
+
+function canDistributeIndependentArticleWork(env) {
+  const configuredGroqKeys = [
+    { configured: Boolean(env?.GROQ_API_KEY), slot: 0 },
+    { configured: Boolean(env?.GROQ_API_KEY_2), slot: 1 },
+    { configured: Boolean(env?.GROQ_API_KEY_3), slot: 2 },
+    { configured: Boolean(env?.GROQ_API_KEY_4), slot: 3 },
+    { configured: Boolean(env?.GROQ_API_KEY_5), slot: 4 },
+    { configured: Boolean(env?.GROQ_API_KEY_6), slot: 5 },
+    { configured: Boolean(env?.GROQ_API_KEY_7), slot: 6 },
+  ].filter(({ configured }) => configured);
+  const quotaPools = String(env?.GROQ_QUOTA_POOL_IDS || "")
+    .split(",")
+    .map((value) =>
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/g, "-")
+        .slice(0, 48)
+    );
+  if (
+    configuredGroqKeys.length < 2 ||
+    configuredGroqKeys.some(({ slot }) => !quotaPools[slot])
+  ) {
+    return false;
+  }
+  const activeQuotaPools = new Set(
+    configuredGroqKeys.map(({ slot }) => quotaPools[slot]),
+  );
+  return (
+    activeQuotaPools.size >= 2 &&
+    !env?.ARTICLE_GENERATION_PREFER_WORKERS_AI
+  );
+}
+
+async function runIndependentArticleWork(
+  bodyPromise,
+  factsFactory,
+  distribute,
+) {
+  if (distribute) {
+    const [bodyResult, facts] = await Promise.allSettled([
+      bodyPromise,
+      factsFactory(),
+    ]);
+    if (bodyResult.status === "rejected") throw bodyResult.reason;
+    if (facts.status === "rejected") throw facts.reason;
+    return { bodyResult: bodyResult.value, facts: facts.value };
+  }
+  const bodyResult = await bodyPromise;
+  const facts = await factsFactory();
+  return { bodyResult, facts };
 }
 
 async function generateArticleContentChunkedFallback(
@@ -14190,14 +14680,82 @@ Grounding rules:
 - Do not use hyphens or em dashes in article body prose.
 - Every paragraph must end with normal terminal punctuation.
 ${retryFeedback}`;
+  const sourceFingerprint = articleGenerationSourceFingerprint(
+    canonicalSourcePageTitle || forcedEvent,
+    sourceMaterial,
+    JSON.stringify({
+      stricterGrounding: stricterGrounding === true,
+      groundingFeedback: groundingFeedback.map((value) =>
+        String(value || "").slice(0, 300)
+      ),
+    }),
+  );
+  const generationJournal = await loadArticleGenerationJournal(
+    env,
+    date,
+    sourceFingerprint,
+  );
+  const generationCheckpoint = createArticleGenerationCheckpointer(
+    env,
+    date,
+    generationJournal,
+  );
+  const savedChunks = generationJournal.chunks;
+  const validateBriefChunk = (parsed) => {
+    parsed.curiosityTitle = normalizeCuriosityTitleText(parsed.curiosityTitle);
+    const briefTitleContext = {
+      ...parsed,
+      sourcePageTitle:
+        canonicalSourcePageTitle ||
+        wikiTitleFromUrl(parsed.wikiUrl) ||
+        forcedEvent ||
+        parsed.eventTitle,
+      sourceText: sourceMaterial || (parsed.sourceFacts || []).join(" "),
+    };
+    let curiosityTitleValidation =
+      validateCuriosityTitleForPublish(briefTitleContext);
+    if (!curiosityTitleValidation.ok) {
+      const repaired = repairCuriosityTitleFromSource(briefTitleContext);
+      if (repaired) {
+        parsed.curiosityTitle = repaired;
+        curiosityTitleValidation =
+          validateCuriosityTitleForPublish(briefTitleContext);
+      }
+    }
+    if (!curiosityTitleValidation.ok) {
+      throw new Error(
+        `chunked article brief: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
+      );
+    }
+    requireChunkArray(parsed, "keyTerms", {
+      min: 1,
+      label: "chunked article brief",
+    });
+    const forwardedTerms = parsed.keyTerms.slice(0, 8);
+    if (
+      !forwardedTerms.some(
+        (term) =>
+          String(term?.type || "").toLowerCase() === "person" &&
+          String(term?.term || "").trim(),
+      )
+    ) {
+      throw new Error("chunked article brief: keyTerms must include one named person");
+    }
+  };
 
   console.warn(`Blog: trying chunked article fallback for ${monthName} ${day}.`);
 
-  const brief = await callChunkedArticleAI(
-    env,
-    model,
-    "chunked article brief",
-    `CHUNKED ARTICLE FALLBACK - BRIEF
+  const brief = reusableArticleGenerationChunk(
+    generationJournal,
+    "brief",
+    validateBriefChunk,
+  ) || await generationCheckpoint.save(
+    "brief",
+    await callChunkedArticleAI(
+      env,
+      model,
+      "chunked article brief",
+      `CHUNKED ARTICLE FALLBACK - BRIEF
 ${sharedContext}
 
 Return JSON only with this shape:
@@ -14240,43 +14798,9 @@ Requirements:
 - Do not put inferred significance, legacy, policy effects, security changes, mental-health effects, or moral lessons in sourceFacts.
 - imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
 - Never place a raw URL in quickFacts or any other visible prose field; URLs belong only in URL/source metadata fields.`,
-    1500,
-    (parsed) => {
-      parsed.curiosityTitle = normalizeCuriosityTitleText(parsed.curiosityTitle);
-      const briefTitleContext = {
-        ...parsed,
-        sourcePageTitle:
-          canonicalSourcePageTitle ||
-          wikiTitleFromUrl(parsed.wikiUrl) ||
-          forcedEvent ||
-          parsed.eventTitle,
-        sourceText: sourceMaterial || (parsed.sourceFacts || []).join(" "),
-      };
-      let curiosityTitleValidation =
-        validateCuriosityTitleForPublish(briefTitleContext);
-      if (!curiosityTitleValidation.ok) {
-        const repaired = repairCuriosityTitleFromSource(briefTitleContext);
-        if (repaired) {
-          parsed.curiosityTitle = repaired;
-          curiosityTitleValidation =
-            validateCuriosityTitleForPublish(briefTitleContext);
-        }
-      }
-      if (!curiosityTitleValidation.ok) {
-        throw new Error(
-          `chunked article brief: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
-        );
-      }
-      requireChunkArray(parsed, "keyTerms", { min: 1, label: "chunked article brief" });
-      // Validate the person against the SAME first-8 slice that
-      // compactChunkedArticleBrief forwards as grounding context to every body,
-      // facts, and analysis sub-prompt. A person beyond index 8 would pass a
-      // whole-array check but be dropped before it could ground the body prose.
-      const forwardedTerms = parsed.keyTerms.slice(0, 8);
-      if (!forwardedTerms.some((term) => String(term?.type || "").toLowerCase() === "person" && String(term?.term || "").trim())) {
-        throw new Error("chunked article brief: keyTerms must include one named person");
-      }
-    },
+      1500,
+      validateBriefChunk,
+    ),
   );
 
   const compactBrief = compactChunkedArticleBrief(brief);
@@ -14301,13 +14825,29 @@ Requirements:
     return merged;
   };
 
-  let bodyA;
-  try {
-    bodyA = await callChunkedArticleAI(
-      env,
-      model,
-      "chunked article body A",
-      `CHUNKED ARTICLE FALLBACK - BODY A
+  // Body prose and facts are independent once the canonical brief exists.
+  // They may overlap while preserving the body A → B dependency only when
+  // GROQ_QUOTA_POOL_IDS declares at least two verified independent pools.
+  // Otherwise they run sequentially so multiple keys from one organization
+  // cannot consume the same TPM allowance concurrently.
+  const bodyPromise = (async () => {
+    let bodyA = reusableArticleGenerationChunk(
+      generationJournal,
+      "bodyA",
+      (parsed) =>
+        validateChunkedArticleBodyChunk(
+          parsed,
+          ["overviewParagraphs", "eyewitnessOrChronicle"],
+          "checkpointed chunked article body A",
+        ),
+    );
+    if (!bodyA) {
+      try {
+        bodyA = await callChunkedArticleAI(
+          env,
+          model,
+          "chunked article body A",
+          `CHUNKED ARTICLE FALLBACK - BODY A
 ${sharedContext}
 
 Canonical brief:
@@ -14326,23 +14866,36 @@ Requirements:
 - Never place a raw URL in paragraph text. Refer to a source by name instead.
 - Do not convert chronology into causality or infer a motive, policy effect, institutional response, or preventive lesson.
 - eyewitnessOrChronicle must not invent a witness, memoir, newspaper, decree, archive, or quote. If the source names no account, analyze what the record confirms and leaves unresolved.`,
-      2300,
-      (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
-    );
-  } catch (err) {
-    console.warn(
-      `Blog: combined chunked article body A failed (${err.message}); splitting into single-section calls.`,
-    );
-    bodyA = await generateSplitBodyFields(["overviewParagraphs", "eyewitnessOrChronicle"]);
-  }
+          2300,
+          (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
+        );
+      } catch (err) {
+        if (!shouldRetryChunkOutputFailure(err)) throw err;
+        console.warn(
+          `Blog: combined chunked article body A failed (${err.message}); splitting into single-section calls.`,
+        );
+        bodyA = await generateSplitBodyFields(["overviewParagraphs", "eyewitnessOrChronicle"]);
+      }
+      await generationCheckpoint.save("bodyA", bodyA);
+    }
 
-  let bodyB;
-  try {
-    bodyB = await callChunkedArticleAI(
-      env,
-      model,
-      "chunked article body B",
-      `CHUNKED ARTICLE FALLBACK - BODY B
+    let bodyB = reusableArticleGenerationChunk(
+      generationJournal,
+      "bodyB",
+      (parsed) =>
+        validateChunkedArticleBodyChunk(
+          parsed,
+          ["aftermathParagraphs", "conclusionParagraphs"],
+          "checkpointed chunked article body B",
+        ),
+    );
+    if (!bodyB) {
+      try {
+        bodyB = await callChunkedArticleAI(
+          env,
+          model,
+          "chunked article body B",
+          `CHUNKED ARTICLE FALLBACK - BODY B
 ${sharedContext}
 
 Canonical brief:
@@ -14364,21 +14917,53 @@ Requirements:
 - If the source does not state a broader consequence, do not claim one. Continue with documented chronology, legal proceedings, named responses, or limits in the record.
 - Never place a raw URL in paragraph text. Refer to a source by name instead.
 - Conclusion must reframe the event with a concrete source fact, not a modern policy lesson, preventive recommendation, or generic reflection.`,
-      2300,
-      (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
-    );
-  } catch (err) {
-    console.warn(
-      `Blog: combined chunked article body B failed (${err.message}); splitting into single-section calls.`,
-    );
-    bodyB = await generateSplitBodyFields(["aftermathParagraphs", "conclusionParagraphs"], bodyA);
-  }
+          2300,
+          (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
+        );
+      } catch (err) {
+        if (!shouldRetryChunkOutputFailure(err)) throw err;
+        console.warn(
+          `Blog: combined chunked article body B failed (${err.message}); splitting into single-section calls.`,
+        );
+        bodyB = await generateSplitBodyFields(["aftermathParagraphs", "conclusionParagraphs"], bodyA);
+      }
+      await generationCheckpoint.save("bodyB", bodyB);
+    }
+    return { bodyA, bodyB };
+  })();
 
-  const facts = await callChunkedArticleAI(
-    env,
-    model,
-    "chunked article facts",
-    `CHUNKED ARTICLE FALLBACK - FACTS
+  const validateFactsChunk = (parsed) => {
+    requireChunkArray(parsed, "quickFacts", {
+      exact: 6,
+      label: "chunked article facts",
+    });
+    requireChunkArray(parsed, "didYouKnowFacts", {
+      min: MIN_DID_YOU_KNOW_FACTS,
+      label: "chunked article facts",
+    });
+    const didYouKnowAudit = auditDidYouKnowFacts({
+      ...compactBrief,
+      didYouKnowFacts: parsed.didYouKnowFacts,
+    });
+    if (!didYouKnowAudit.ok) {
+      throw new Error(
+        `chunked article facts: ${didYouKnowAudit.reasons.join("; ")}`,
+      );
+    }
+  };
+
+  async function generateFactsChunk() {
+    const checkpointedFacts = reusableArticleGenerationChunk(
+      generationJournal,
+      "facts",
+      validateFactsChunk,
+    );
+    if (checkpointedFacts) return checkpointedFacts;
+    const facts = await callChunkedArticleAI(
+        env,
+        model,
+        "chunked article facts",
+        `CHUNKED ARTICLE FALLBACK - FACTS
 ${sharedContext}
 
 Canonical brief:
@@ -14399,28 +14984,41 @@ Requirements:
 - Never place a raw URL in a fact. Refer to a source by name instead.
 - Every didYouKnow fact needs a concrete name, date, number, place, institution, or source.
 - Before returning, inspect every returned fact individually: each must be 35-55 words and must literally contain at least one source-backed proper name, calendar year, number, place, or institution from the canonical brief or sourceFacts.`,
-    1600,
-    (parsed) => {
-      requireChunkArray(parsed, "quickFacts", { exact: 6, label: "chunked article facts" });
-      requireChunkArray(parsed, "didYouKnowFacts", {
-        min: MIN_DID_YOU_KNOW_FACTS,
-        label: "chunked article facts",
-      });
-      const didYouKnowAudit = auditDidYouKnowFacts({
-        ...compactBrief,
-        didYouKnowFacts: parsed.didYouKnowFacts,
-      });
-      if (!didYouKnowAudit.ok) {
-        throw new Error(`chunked article facts: ${didYouKnowAudit.reasons.join("; ")}`);
-      }
-    },
-  );
+        1600,
+        validateFactsChunk,
+    );
+    await generationCheckpoint.save("facts", facts);
+    return facts;
+  }
 
-  const analysis = await callChunkedArticleAI(
-    env,
-    model,
-    "chunked article analysis",
-    `CHUNKED ARTICLE FALLBACK - ANALYSIS
+  const { bodyResult, facts } = await runIndependentArticleWork(
+    bodyPromise,
+    generateFactsChunk,
+    canDistributeIndependentArticleWork(env),
+  );
+  const { bodyA, bodyB } = bodyResult;
+
+  const validateAnalysisChunk = (parsed) => {
+    requireChunkArray(parsed, "analysisGood", {
+      exact: 3,
+      label: "chunked article analysis",
+    });
+    requireChunkArray(parsed, "analysisBad", {
+      exact: 3,
+      label: "chunked article analysis",
+    });
+  };
+  const analysis = reusableArticleGenerationChunk(
+    generationJournal,
+    "analysis",
+    validateAnalysisChunk,
+  ) || await generationCheckpoint.save(
+    "analysis",
+    await callChunkedArticleAI(
+      env,
+      model,
+      "chunked article analysis",
+      `CHUNKED ARTICLE FALLBACK - ANALYSIS
 ${sharedContext}
 
 Canonical brief:
@@ -14445,11 +15043,9 @@ Requirements:
 - Never place a raw URL in analysis or editorial text. Refer to a source by name instead.
 - Every detail must include a concrete name, date, number, institution, place, or source.
 - editorialNote must be specific to this article, stay with source-supported details, and avoid preventive lessons or modern policy prescriptions.`,
-    2200,
-    (parsed) => {
-      requireChunkArray(parsed, "analysisGood", { exact: 3, label: "chunked article analysis" });
-      requireChunkArray(parsed, "analysisBad", { exact: 3, label: "chunked article analysis" });
-    },
+      2200,
+      validateAnalysisChunk,
+    ),
   );
 
   const merged = normalizeGeneratedArticleContent({
@@ -14459,12 +15055,48 @@ Requirements:
     ...facts,
     ...analysis,
   }, date);
-  const continuity = auditChunkedArticleContinuity(merged);
+  let continuity = auditChunkedArticleContinuity(merged);
+  if (!continuity.ok && continuity.repairFields.length > 0) {
+    console.warn(
+      `Blog: repairing chunked continuity fields [${continuity.repairFields.join(", ")}] — ${continuity.issues.join("; ")}`,
+    );
+    const repairedFields = await repairChunkedArticleContinuity(
+      env,
+      model,
+      merged,
+      sharedContext,
+      compactBrief,
+      continuity,
+    );
+    if (repairedFields) {
+      Object.assign(merged, repairedFields);
+      if (
+        repairedFields.overviewParagraphs ||
+        repairedFields.eyewitnessOrChronicle
+      ) {
+        await generationCheckpoint.save("bodyA", {
+          overviewParagraphs: merged.overviewParagraphs,
+          eyewitnessOrChronicle: merged.eyewitnessOrChronicle,
+        });
+      }
+      if (
+        repairedFields.aftermathParagraphs ||
+        repairedFields.conclusionParagraphs
+      ) {
+        await generationCheckpoint.save("bodyB", {
+          aftermathParagraphs: merged.aftermathParagraphs,
+          conclusionParagraphs: merged.conclusionParagraphs,
+        });
+      }
+      continuity = auditChunkedArticleContinuity(merged);
+    }
+  }
   if (!continuity.ok) {
     throw new Error(`chunked article fallback continuity failed: ${continuity.issues.join("; ")}`);
   }
   delete merged.sourceFacts;
   validateChunkedArticleSupport(merged);
+  await generationCheckpoint.flush();
   console.warn(`Blog: chunked article fallback produced ${articleBodyWordCount(merged)} body words for ${monthName} ${day}.`);
   return merged;
 }
@@ -15181,28 +15813,332 @@ function groundingSourceFromContent(content) {
     : null;
 }
 
-function sourceMaterialForGrounding(source) {
-  if (!source) return "";
-  const sections = [];
-  if (source.text) sections.push(`Event listing: ${String(source.text).trim()}`);
-  if (source.sourceExtract) {
-    sections.push(`Primary source extract: ${String(source.sourceExtract).trim()}`);
+function sourcePageIdentity(page) {
+  const normalized = normalizeSourcePage(page);
+  return normalized
+    ? normalizeTopicMatchText(normalized.pageUrl || normalized.pageTitle)
+    : "";
+}
+
+function sourcePageEvidenceScore(page, eventTokens) {
+  const normalized = normalizeSourcePage(page);
+  if (!normalized) return -1;
+  const tokens = eventTokens instanceof Set ? eventTokens : new Set(eventTokens || []);
+  const titleTokens = sourcePageRelevanceTokens(normalized.pageTitle);
+  const extractTokens = new Set(
+    sourcePageRelevanceTokens(
+      `${normalized.extract || ""} ${(normalized.supportedClaims || []).join(" ")}`,
+    ),
+  );
+  const titleOverlap = titleTokens.filter((token) => tokens.has(token)).length;
+  let extractOverlap = 0;
+  for (const token of tokens) {
+    if (extractTokens.has(token)) extractOverlap++;
   }
-  for (const page of normalizeSourcePages(source.sourcePages || []).slice(0, 4)) {
-    if (!page.extract) continue;
-    sections.push(`${page.pageTitle || "Wikipedia source"}: ${page.extract}`);
+  return (
+    titleOverlap * 20 +
+    Math.min(12, extractOverlap) * 4 +
+    (normalized.verifiedIndependent === true ? 8 : 0)
+  );
+}
+
+function relevantSupportingSourceExtract(page, eventTokens) {
+  const normalized = normalizeSourcePage(page);
+  if (!normalized?.extract) return "";
+  const yearTokens = new Set(
+    [...eventTokens].filter((token) => /^\d{3,4}$/.test(token)),
+  );
+  const relevant = splitSentences(normalized.extract, 35).filter((sentence) => {
+    const sentenceTokens = new Set(sourcePageRelevanceTokens(sentence));
+    const overlap = [...sentenceTokens].filter((token) => eventTokens.has(token));
+    if (overlap.length >= 2) return true;
+    return (
+      overlap.length >= 1 &&
+      [...yearTokens].some((year) => sentenceTokens.has(year))
+    );
+  });
+  return relevant.join(" ");
+}
+
+function buildArticleEvidencePack(
+  source,
+  { maxChars = 16_000 } = {},
+) {
+  const boundedMaxChars = Math.max(
+    500,
+    Number.isFinite(Number(maxChars)) ? Math.floor(Number(maxChars)) : 16_000,
+  );
+  if (!source) {
+    return {
+      text: "",
+      stats: {
+        wordCount: 0,
+        sentenceCount: 0,
+        sourceCount: 0,
+        independentSourceCount: 0,
+        primaryIncluded: false,
+        packedCharacters: 0,
+      },
+    };
   }
-  const seen = new Set();
-  return sections
-    .map((section) => section.replace(/\s+/g, " ").trim())
-    .filter((section) => {
-      const key = normalizeForCompare(section);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
+
+  const pages = normalizeSourcePages(source.sourcePages || []);
+  const canonicalUrlKey = normalizeTopicMatchText(
+    source.wikiUrl || source.pageUrl,
+  );
+  const canonicalTitleKey = normalizeTopicMatchText(
+    source.pageTitle || source.sourcePageTitle,
+  );
+  const exactPrimary = pages.find((page) => {
+    const urlKey = normalizeTopicMatchText(page.pageUrl);
+    const titleKey = normalizeTopicMatchText(page.pageTitle);
+    return (
+      (canonicalUrlKey && urlKey === canonicalUrlKey) ||
+      (canonicalTitleKey && titleKey === canonicalTitleKey)
+    );
+  });
+  const selectedPrimary =
+    exactPrimary ||
+    selectPrimarySourcePage(source.text || source.sourceText, pages) ||
+    pages[0] ||
+    null;
+  const primaryExtractCandidates = [
+    source.sourceExtract,
+    selectedPrimary?.extract,
+  ]
+    .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+  const primaryPage = normalizeSourcePage({
+    ...(selectedPrimary || {}),
+    pageTitle:
+      source.pageTitle ||
+      source.sourcePageTitle ||
+      selectedPrimary?.pageTitle ||
+      "Primary event source",
+    pageUrl:
+      source.wikiUrl ||
+      source.pageUrl ||
+      selectedPrimary?.pageUrl ||
+      "",
+    extract: primaryExtractCandidates[0] || "",
+  });
+  const primaryIdentity = sourcePageIdentity(primaryPage);
+  const eventEvidence = [
+    source.eventTitle,
+    source.pageTitle,
+    source.sourcePageTitle,
+    source.text,
+    source.sourceText,
+    source.sourceExtract,
+  ].join(" ");
+  const eventTokens = new Set(sourcePageRelevanceTokens(eventEvidence));
+  const independentPages = pages
+    .filter(
+      (page) =>
+        page.verifiedIndependent === true &&
+        sourcePageIdentity(page) !== primaryIdentity,
+    )
+    .sort(
+      (left, right) =>
+        sourcePageEvidenceScore(right, eventTokens) -
+        sourcePageEvidenceScore(left, eventTokens),
+    );
+  const independentIdentities = new Set(
+    independentPages.map(sourcePageIdentity).filter(Boolean),
+  );
+  const supportingPages = pages
+    .filter((page) => {
+      const identity = sourcePageIdentity(page);
+      return (
+        identity &&
+        identity !== primaryIdentity &&
+        !independentIdentities.has(identity)
+      );
     })
-    .join("\n\n")
-    .slice(0, 16000);
+    .sort(
+      (left, right) =>
+        sourcePageEvidenceScore(right, eventTokens) -
+        sourcePageEvidenceScore(left, eventTokens),
+    );
+
+  const sections = [];
+  const seenSentences = new Set();
+  const contributingPages = new Set();
+  const contributingIndependentPages = new Set();
+  let primaryIncluded = false;
+
+  const packedLength = () =>
+    sections.reduce(
+      (total, section, index) =>
+        total + section.rendered.length + (index > 0 ? 2 : 0),
+      0,
+    );
+  const addSection = (
+    label,
+    rawText,
+    charCap,
+    { page = null, primary = false, independent = false } = {},
+  ) => {
+    const cleanLabel = String(label || "Source").replace(/\s+/g, " ").trim();
+    const prefix = `${cleanLabel}: `;
+    const remaining = boundedMaxChars - packedLength() - (sections.length ? 2 : 0);
+    const bodyBudget = Math.min(
+      Math.max(0, Number.parseInt(charCap, 10) || 0),
+      remaining - prefix.length,
+    );
+    if (bodyBudget < 80) return false;
+
+    const sourceSentences = splitSentences(rawText, 20);
+    const candidates = sourceSentences.length > 0
+      ? sourceSentences
+      : [String(rawText || "").replace(/\s+/g, " ").trim()].filter(Boolean);
+    const selected = [];
+    let selectedLength = 0;
+    for (const candidate of candidates) {
+      const sentence = String(candidate || "").replace(/\s+/g, " ").trim();
+      const key = normalizeForCompare(sentence);
+      if (!key || seenSentences.has(key)) continue;
+      const separatorLength = selected.length > 0 ? 1 : 0;
+      if (selectedLength + separatorLength + sentence.length > bodyBudget) {
+        if (selected.length === 0) {
+          const truncated = truncateSourceExtract(sentence, bodyBudget);
+          const truncatedKey = normalizeForCompare(truncated);
+          if (truncated.length >= 20 && truncatedKey) {
+            selected.push(truncated);
+            selectedLength = truncated.length;
+            seenSentences.add(truncatedKey);
+          }
+        }
+        continue;
+      }
+      selected.push(sentence);
+      selectedLength += separatorLength + sentence.length;
+      seenSentences.add(key);
+    }
+    const body = selected.join(" ").trim();
+    if (body.length < 20) return false;
+
+    sections.push({
+      rendered: `${prefix}${body}`,
+      body,
+    });
+    const identity = sourcePageIdentity(page);
+    if (identity) contributingPages.add(identity);
+    if (identity && independent) contributingIndependentPages.add(identity);
+    if (primary) primaryIncluded = true;
+    return true;
+  };
+
+  addSection(
+    "Event listing",
+    source.text || source.sourceText,
+    700,
+  );
+  if (primaryPage?.extract) {
+    addSection(
+      primaryPage.pageTitle || "Primary event source",
+      primaryPage.extract,
+      ARTICLE_SOURCE_PRIMARY_CHAR_CAP,
+      { page: primaryPage, primary: true },
+    );
+  }
+  for (const page of independentPages) {
+    const independentText = [
+      ...(page.supportedClaims || []),
+      page.extract,
+    ].filter(Boolean).join(" ");
+    addSection(
+      page.pageTitle || page.publisher || "Independent source",
+      independentText,
+      ARTICLE_SOURCE_INDEPENDENT_CHAR_CAP,
+      { page, independent: true },
+    );
+  }
+  for (const page of supportingPages) {
+    const relevantExtract = relevantSupportingSourceExtract(page, eventTokens);
+    if (!relevantExtract) continue;
+    addSection(
+      page.pageTitle || "Supporting source",
+      relevantExtract,
+      ARTICLE_SOURCE_SUPPORTING_CHAR_CAP,
+      { page },
+    );
+  }
+
+  const text = sections.map((section) => section.rendered).join("\n\n");
+  const bodyText = sections.map((section) => section.body).join(" ");
+  const distinctSentenceKeys = new Set(
+    splitSentences(bodyText, 30)
+      .map(normalizeForCompare)
+      .filter(Boolean),
+  );
+  return {
+    text,
+    stats: {
+      wordCount: wordCount(bodyText),
+      sentenceCount: distinctSentenceKeys.size,
+      sourceCount: contributingPages.size,
+      independentSourceCount: contributingIndependentPages.size,
+      primaryIncluded,
+      packedCharacters: text.length,
+    },
+  };
+}
+
+function articleEvidenceCapacity(source, options = {}) {
+  const minimumWords =
+    Number.parseInt(options.minimumWords, 10) || ARTICLE_SOURCE_PACK_MIN_WORDS;
+  const minimumSentences =
+    Number.parseInt(options.minimumSentences, 10) ||
+    ARTICLE_SOURCE_PACK_MIN_SENTENCES;
+  const minimumPages =
+    Number.parseInt(options.minimumPages, 10) || ARTICLE_SOURCE_PACK_MIN_PAGES;
+  const pack = buildArticleEvidencePack(source, {
+    maxChars: ARTICLE_SOURCE_PACK_MAX_CHARS,
+  });
+  const reasons = [];
+  if (pack.stats.wordCount < minimumWords) {
+    reasons.push(
+      `packed evidence has ${pack.stats.wordCount} words; needs ${minimumWords}`,
+    );
+  }
+  if (pack.stats.sentenceCount < minimumSentences) {
+    reasons.push(
+      `packed evidence has ${pack.stats.sentenceCount} distinct sentences; needs ${minimumSentences}`,
+    );
+  }
+  if (pack.stats.sourceCount < minimumPages) {
+    reasons.push(
+      `packed evidence uses ${pack.stats.sourceCount} source page(s); needs ${minimumPages}`,
+    );
+  }
+  if (pack.stats.independentSourceCount < 1) {
+    reasons.push("packed evidence omits a verified independent source");
+  }
+  if (!pack.stats.primaryIncluded) {
+    reasons.push("packed evidence omits the canonical event source");
+  }
+  const summary = {
+    ok: reasons.length === 0,
+    ...pack.stats,
+  };
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    summary,
+    text: pack.text,
+  };
+}
+
+function sourceMaterialForGrounding(source, options = {}) {
+  if (!source) return "";
+  return buildArticleEvidencePack(source, {
+    maxChars:
+      Number.isFinite(Number(options?.maxChars))
+        ? Number(options.maxChars)
+        : 16_000,
+  }).text;
 }
 
 function collectGroundingStrings(value, out = []) {
@@ -20744,6 +21680,22 @@ export const __contentGenerationTestHooks = {
   isShortArticleBodyFailure,
   articleBodyWordCount,
   validateChunkedArticleBodyChunk,
+  buildArticleEvidencePack,
+  articleEvidenceCapacity,
+  selectSourceReadyCandidate,
+  expandSelectedEventSourcePages,
+  preparedDraftSourceEvent,
+  auditChunkedArticleContinuity,
+  repairChunkedArticleContinuity,
+  articleGenerationJournalKey,
+  articleGenerationSourceFingerprint,
+  normalizeArticleGenerationJournal,
+  loadArticleGenerationJournal,
+  createArticleGenerationCheckpointer,
+  reusableArticleGenerationChunk,
+  shouldRetryChunkOutputFailure,
+  canDistributeIndependentArticleWork,
+  runIndependentArticleWork,
   MIN_REAL_ARTICLE_BODY_WORDS,
   CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
   generateEntityTimeline,

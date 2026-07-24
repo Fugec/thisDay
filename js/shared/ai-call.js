@@ -88,6 +88,15 @@ const NVIDIA_TEXT_MAX_TOKENS = 4096; // Documented max_tokens range for this NIM
 let _groqModelCache = { model: null, models: null, at: 0 };
 let _groqKeyRotationCursor = 0;
 const _MODEL_CACHE_TTL_MS = 3_600_000; // 1 hour
+const _providerKeysInFlight = new Set();
+const _providerPoolsInFlight = new Set();
+const _providerCapacitySnapshots = new Map();
+let _providerCircuitCache = new WeakMap();
+let _providerCircuitWriteQueues = new WeakMap();
+const AI_PROVIDER_CIRCUIT_VERSION = 1;
+const AI_PROVIDER_CIRCUIT_PREFIX = "ai-provider-circuit-v1:";
+const AI_PROVIDER_CIRCUIT_TTL = 2 * 86_400;
+const _DEFAULT_PROVIDER_TIMEOUT_COOLDOWN_MS = 5 * 60_000;
 
 /**
  * Test-only: clears the module-level Groq model cache so a test can query a
@@ -97,9 +106,259 @@ const _MODEL_CACHE_TTL_MS = 3_600_000; // 1 hour
 export function __resetGroqModelCacheForTests() {
   _groqModelCache = { model: null, models: null, at: 0 };
   _groqKeyRotationCursor = 0;
+  _providerKeysInFlight.clear();
+  _providerPoolsInFlight.clear();
+  _providerKeyCooldowns.clear();
+  _providerCapacitySnapshots.clear();
+  _providerCircuitCache = new WeakMap();
+  _providerCircuitWriteQueues = new WeakMap();
 }
 const _providerKeyCooldowns = new Map();
 const _DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+
+function utcDateKey(now = Date.now()) {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+function nextUtcResetMs(now = Date.now()) {
+  const date = new Date(now);
+  return Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate() + 1,
+  );
+}
+
+function parseProviderResetDurationMs(value) {
+  const source = String(value || "").trim().toLowerCase();
+  if (!source) return 0;
+  if (/^\d+(?:\.\d+)?$/.test(source)) {
+    return Math.ceil(Number(source) * 1000);
+  }
+  let totalMs = 0;
+  const units = {
+    d: 86_400_000,
+    h: 3_600_000,
+    m: 60_000,
+    s: 1_000,
+    ms: 1,
+  };
+  for (const match of source.matchAll(/(\d+(?:\.\d+)?)\s*(ms|d|h|m|s)/g)) {
+    totalMs += Number(match[1]) * units[match[2]];
+  }
+  return Math.ceil(totalMs);
+}
+
+function providerRetryAtFromResponse(response, body = "", now = Date.now()) {
+  const text = String(body || "");
+  if (
+    /free-models-per-day|daily free allocation|per day|requests? per day|rpd\b/i.test(
+      text,
+    )
+  ) {
+    return nextUtcResetMs(now);
+  }
+  const retryAfter = response?.headers?.get?.("retry-after");
+  const retryAfterDate = Date.parse(String(retryAfter || ""));
+  if (Number.isFinite(retryAfterDate) && retryAfterDate > now) {
+    return retryAfterDate;
+  }
+  const retryAfterMs = parseProviderResetDurationMs(retryAfter);
+  if (retryAfterMs > 0) return now + retryAfterMs;
+  const tokenResetMs = parseProviderResetDurationMs(
+    response?.headers?.get?.("x-ratelimit-reset-tokens"),
+  );
+  if (tokenResetMs > 0) return now + tokenResetMs;
+  const requestResetMs = parseProviderResetDurationMs(
+    response?.headers?.get?.("x-ratelimit-reset-requests"),
+  );
+  if (requestResetMs > 0) return now + requestResetMs;
+  return now + _DEFAULT_RATE_LIMIT_COOLDOWN_MS;
+}
+
+function providerRetryAtFromError(error, now = Date.now()) {
+  const message = String(error?.message || error || "");
+  if (/daily free allocation|10,?000 neurons|account limited|free-models-per-day/i.test(message)) {
+    return nextUtcResetMs(now);
+  }
+  if (/timeout|timed out|aborted/i.test(message)) {
+    return now + _DEFAULT_PROVIDER_TIMEOUT_COOLDOWN_MS;
+  }
+  return 0;
+}
+
+function providerCircuitKey(now = Date.now()) {
+  return `${AI_PROVIDER_CIRCUIT_PREFIX}${utcDateKey(now)}`;
+}
+
+function emptyProviderCircuit(now = Date.now()) {
+  return {
+    version: AI_PROVIDER_CIRCUIT_VERSION,
+    date: utcDateKey(now),
+    providers: {},
+  };
+}
+
+function normalizeProviderCircuit(value, now = Date.now()) {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (
+    !parsed ||
+    parsed.version !== AI_PROVIDER_CIRCUIT_VERSION ||
+    parsed.date !== utcDateKey(now) ||
+    !parsed.providers ||
+    typeof parsed.providers !== "object"
+  ) {
+    return emptyProviderCircuit(now);
+  }
+  return parsed;
+}
+
+async function loadProviderCircuit(
+  env,
+  now = Date.now(),
+  { refresh = false } = {},
+) {
+  const kv = env?.BLOG_AI_KV;
+  if (!kv?.get) return emptyProviderCircuit(now);
+  const date = utcDateKey(now);
+  const cached = _providerCircuitCache.get(kv);
+  if (!refresh && cached?.date === date) return cached.state;
+  const state = normalizeProviderCircuit(
+    await kv.get(providerCircuitKey(now), { type: "json" }).catch(() => null),
+    now,
+  );
+  _providerCircuitCache.set(kv, { date, state });
+  return state;
+}
+
+function providerCircuitUntil(state, provider, now = Date.now()) {
+  const until = Date.parse(String(state?.providers?.[provider]?.retryAt || ""));
+  return Number.isFinite(until) && until > now ? until : 0;
+}
+
+function providerCircuitReason(state, provider) {
+  return String(state?.providers?.[provider]?.reason || "");
+}
+
+async function markProviderCircuit(env, provider, retryAtMs, reason) {
+  if (!provider || !Number.isFinite(retryAtMs) || retryAtMs <= Date.now()) {
+    return false;
+  }
+  const kv = env?.BLOG_AI_KV;
+  if (!kv?.put) return false;
+  const previous = _providerCircuitWriteQueues.get(kv) || Promise.resolve();
+  const write = previous.then(async () => {
+    const now = Date.now();
+    const state = await loadProviderCircuit(env, now);
+    const currentUntil = providerCircuitUntil(state, provider, now);
+    if (currentUntil >= retryAtMs) return false;
+    state.providers[provider] = {
+      retryAt: new Date(retryAtMs).toISOString(),
+      reason: String(reason || "provider capacity unavailable").slice(0, 240),
+      observedAt: new Date(now).toISOString(),
+    };
+    await kv.put(providerCircuitKey(now), JSON.stringify(state), {
+      expirationTtl: AI_PROVIDER_CIRCUIT_TTL,
+    });
+    return true;
+  });
+  _providerCircuitWriteQueues.set(kv, write.catch(() => {}));
+  return write.catch((err) => {
+    console.warn(`AI capacity circuit write failed for ${provider}: ${err.message}`);
+    return false;
+  });
+}
+
+function providerCapacitySnapshotId(provider, model = "") {
+  return `${provider}:${String(model || "")}`;
+}
+
+function captureProviderCapacity(provider, model, response, now = Date.now()) {
+  const remainingTokensValue = response?.headers?.get?.(
+    "x-ratelimit-remaining-tokens",
+  );
+  const remainingRequestsValue = response?.headers?.get?.(
+    "x-ratelimit-remaining-requests",
+  );
+  const remainingTokens =
+    remainingTokensValue == null || remainingTokensValue === ""
+      ? null
+      : Number(remainingTokensValue);
+  const remainingRequests =
+    remainingRequestsValue == null || remainingRequestsValue === ""
+      ? null
+      : Number(remainingRequestsValue);
+  const tokenResetMs = parseProviderResetDurationMs(
+    response?.headers?.get?.("x-ratelimit-reset-tokens"),
+  );
+  const requestResetMs = parseProviderResetDurationMs(
+    response?.headers?.get?.("x-ratelimit-reset-requests"),
+  );
+  _providerCapacitySnapshots.set(providerCapacitySnapshotId(provider, model), {
+    remainingTokens: Number.isFinite(remainingTokens) ? remainingTokens : null,
+    remainingRequests: Number.isFinite(remainingRequests)
+      ? remainingRequests
+      : null,
+    tokenResetAt: tokenResetMs > 0 ? now + tokenResetMs : 0,
+    requestResetAt: requestResetMs > 0 ? now + requestResetMs : 0,
+  });
+}
+
+function providerCapacityDeferral(provider, model, requiredTokens, now = Date.now()) {
+  const snapshot = _providerCapacitySnapshots.get(
+    providerCapacitySnapshotId(provider, model),
+  );
+  if (!snapshot) return null;
+  if (
+    snapshot.remainingRequests != null &&
+    snapshot.remainingRequests < 1 &&
+    snapshot.requestResetAt > now
+  ) {
+    return {
+      retryAt: snapshot.requestResetAt,
+      reason: `${provider} has no requests remaining in the current window`,
+    };
+  }
+  if (
+    snapshot.remainingTokens != null &&
+    snapshot.remainingTokens < requiredTokens &&
+    snapshot.tokenResetAt > now
+  ) {
+    return {
+      retryAt: snapshot.tokenResetAt,
+      reason: `${provider} has ${snapshot.remainingTokens} tokens remaining but the next request needs approximately ${requiredTokens}`,
+    };
+  }
+  return null;
+}
+
+function capacityError(message, retryAtMs = 0) {
+  const error = new Error(message);
+  error.code = "AI_CAPACITY_UNAVAILABLE";
+  if (Number.isFinite(retryAtMs) && retryAtMs > Date.now()) {
+    error.retryAt = new Date(retryAtMs).toISOString();
+  }
+  return error;
+}
+
+export function isAIProviderCapacityError(error) {
+  return (
+    error?.code === "AI_CAPACITY_UNAVAILABLE" ||
+    /AI provider capacity unavailable/i.test(String(error?.message || error || ""))
+  );
+}
+
+export function aiProviderRetryAt(error) {
+  const parsed = Date.parse(String(error?.retryAt || ""));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : "";
+}
 
 function providerKeyCooldownId(provider, key) {
   return `${provider}:${key}`;
@@ -113,6 +372,25 @@ function isProviderKeyCoolingDown(provider, key) {
     return false;
   }
   return true;
+}
+
+function isProviderKeyInFlight(provider, key) {
+  return _providerKeysInFlight.has(providerKeyCooldownId(provider, key));
+}
+
+function isProviderPoolInFlight(provider, pool) {
+  return _providerPoolsInFlight.has(`${provider}:${pool}`);
+}
+
+function markProviderKeyInFlight(provider, key, pool = "shared") {
+  const id = providerKeyCooldownId(provider, key);
+  const poolId = `${provider}:${pool}`;
+  _providerKeysInFlight.add(id);
+  _providerPoolsInFlight.add(poolId);
+  return () => {
+    _providerKeysInFlight.delete(id);
+    _providerPoolsInFlight.delete(poolId);
+  };
 }
 
 function markProviderKeyRateLimited(provider, key, response) {
@@ -541,6 +819,13 @@ function getOpenRouterKeys(env) {
   ].filter(Boolean);
 }
 
+function groqQuotaPoolIds(env) {
+  return String(env?.GROQ_QUOTA_POOL_IDS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .map((value) => value.replace(/[^a-z0-9._-]+/g, "-").slice(0, 48));
+}
+
 export function hasAnyTextAIProvider(env) {
   return Boolean(
     env?.AI ||
@@ -628,16 +913,38 @@ async function callWorkersAIDirectUncached(
  * With AI_CASSETTE unset (production) this is a passthrough.
  */
 export async function callWorkersAIDirect(env, messages, options = {}) {
+  const now = Date.now();
+  // A warm isolate may have observed an empty circuit before another isolate
+  // recorded an account-wide limit, so refresh at every public entry point.
+  const circuit = await loadProviderCircuit(env, now, { refresh: true });
+  const blockedUntil = providerCircuitUntil(circuit, "workersAI", now);
+  if (blockedUntil) {
+    throw capacityError(
+      `AI provider capacity unavailable: Workers AI is paused until ${new Date(blockedUntil).toISOString()} (${providerCircuitReason(circuit, "workersAI") || "daily allocation exhausted"})`,
+      blockedUntil,
+    );
+  }
   const { maxTokens = 1024, temperature = 0.3, cfModel = null } = options;
   const resolvedCfModel = cfModel ?? (cassetteEnabled(env)
     ? await resolveAiModel(env.BLOG_AI_KV).catch(() => null)
     : null);
   const cassette = await cassetteLookup(env, ["workersAI", messages, maxTokens, temperature, resolvedCfModel]);
   if (cassette.text) return cassette.text;
-  const text = await callWorkersAIDirectUncached(env, messages, {
-    ...options,
-    ...(resolvedCfModel ? { cfModel: resolvedCfModel } : {}),
-  });
+  let text;
+  try {
+    text = await callWorkersAIDirectUncached(env, messages, {
+      ...options,
+      ...(resolvedCfModel ? { cfModel: resolvedCfModel } : {}),
+    });
+  } catch (err) {
+    const retryAt = providerRetryAtFromError(err);
+    if (retryAt) {
+      await markProviderCircuit(env, "workersAI", retryAt, err.message);
+      err.code = "AI_CAPACITY_UNAVAILABLE";
+      err.retryAt = new Date(retryAt).toISOString();
+    }
+    throw err;
+  }
   await cassetteStore(env, cassette.key, text);
   return text;
 }
@@ -706,6 +1013,24 @@ async function callAIProviders(
   } = {},
 ) {
   const failureReasons = [];
+  const invocationStartedAt = Date.now();
+  // Refresh once per AI call so a warm Worker cannot retain a pre-limit view
+  // after another invocation opens a durable provider circuit.
+  const providerCircuit = await loadProviderCircuit(
+    env,
+    invocationStartedAt,
+    { refresh: true },
+  );
+  const capacityRetryTimes = [];
+  const circuitBlockedUntil = (provider) => {
+    const until = providerCircuitUntil(
+      providerCircuit,
+      provider,
+      invocationStartedAt,
+    );
+    if (until) capacityRetryTimes.push(until);
+    return until;
+  };
   const parsedProviderAttemptLimit = Number(providerAttemptLimitOverride);
   const providerAttemptLimit =
     Number.isFinite(parsedProviderAttemptLimit) && parsedProviderAttemptLimit > 0
@@ -723,7 +1048,31 @@ async function callAIProviders(
   let providerAttempts = 0;
 
   // Resolve key arrays up front so model resolution can use the first available key.
-  const configuredGroqKeys = [env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3, env.GROQ_API_KEY_4, env.GROQ_API_KEY_5, env.GROQ_API_KEY_6, env.GROQ_API_KEY_7].filter(Boolean);
+  const configuredGroqPools = groqQuotaPoolIds(env);
+  const rawConfiguredGroqKeys = [
+    { key: env.GROQ_API_KEY, slot: 1 },
+    { key: env.GROQ_API_KEY_2, slot: 2 },
+    { key: env.GROQ_API_KEY_3, slot: 3 },
+    { key: env.GROQ_API_KEY_4, slot: 4 },
+    { key: env.GROQ_API_KEY_5, slot: 5 },
+    { key: env.GROQ_API_KEY_6, slot: 6 },
+    { key: env.GROQ_API_KEY_7, slot: 7 },
+  ].filter((entry) => Boolean(entry.key));
+  // Pool independence is fail-closed. If any configured key lacks an explicit
+  // label, treat every key as sharing one quota instead of guessing that a
+  // partially labelled key is independent.
+  const hasCompleteGroqPoolMap =
+    rawConfiguredGroqKeys.length > 0 &&
+    rawConfiguredGroqKeys.every(
+      ({ slot }) => Boolean(configuredGroqPools[slot - 1]),
+    );
+  const configuredGroqKeys = rawConfiguredGroqKeys
+    .map((entry) => ({
+      ...entry,
+      pool: hasCompleteGroqPoolMap
+        ? configuredGroqPools[entry.slot - 1]
+        : "shared",
+    }));
   // Chunked article generation makes several large calls in one Worker
   // invocation. Starting each call at key 1 repeatedly drains that key's TPM
   // allowance while later rotation keys remain idle. Rotate the starting key
@@ -745,8 +1094,16 @@ async function callAIProviders(
   // Dynamically resolve Groq text models (cached 1h).
   // On a warm Worker instance this is synchronous (cache hit, 0 subrequests).
   // On a cold start it adds at most one lightweight /v1/models fetch.
-  const resolvedGroqModels = groqKeys.length > 0
-    ? await resolveGroqModelCandidates(groqKeys[0]).catch(() => uniqueModelIds(_GROQ_FALLBACK_MODEL_CANDIDATES))
+  const groqModelResolutionKey = groqKeys.find(
+    ({ pool }) =>
+      !providerCircuitUntil(
+        providerCircuit,
+        `groq:${pool}`,
+        invocationStartedAt,
+      ),
+  );
+  const resolvedGroqModels = groqModelResolutionKey
+    ? await resolveGroqModelCandidates(groqModelResolutionKey.key).catch(() => uniqueModelIds(_GROQ_FALLBACK_MODEL_CANDIDATES))
     : uniqueModelIds(_GROQ_FALLBACK_MODEL_CANDIDATES);
   const groqModelsForRequest = orderGroqModelsForRequest(resolvedGroqModels, messages, maxTokens);
 
@@ -759,7 +1116,15 @@ async function callAIProviders(
   let stopGroqAfterAttemptShare = false;
   let groqSectionAttempts = 0;
   for (const groqModel of groqModelsForRequest) {
-    for (const key of groqKeys) {
+    for (const { key, slot, pool } of groqKeys) {
+      const groqProviderPool = `groq:${pool}`;
+      const groqPoolBlockedUntil = circuitBlockedUntil(groqProviderPool);
+      if (groqPoolBlockedUntil) {
+        failureReasons.push(
+          `Groq pool ${pool} capacity circuit open until ${new Date(groqPoolBlockedUntil).toISOString()} (${providerCircuitReason(providerCircuit, groqProviderPool) || "rate limited"})`,
+        );
+        continue;
+      }
       if (groqSectionAttempts >= groqSectionAttemptLimit) {
         failureReasons.push(
           `Groq section stopped after ${groqSectionAttemptLimit} attempts to preserve fallback budget`,
@@ -768,9 +1133,22 @@ async function callAIProviders(
         break;
       }
       if (isProviderKeyCoolingDown("groq", key)) {
-        failureReasons.push(`Groq key temporarily skipped after rate limit for ${groqModel}`);
+        failureReasons.push(`Groq key-${slot} temporarily skipped after rate limit for ${groqModel}`);
         continue;
       }
+      if (isProviderKeyInFlight("groq", key)) {
+        failureReasons.push(
+          `Groq key-${slot} is already serving another independent article chunk`,
+        );
+        continue;
+      }
+      if (isProviderPoolInFlight("groq", pool)) {
+        failureReasons.push(
+          `Groq pool ${pool} is already serving another independent article chunk`,
+        );
+        continue;
+      }
+      let releaseProviderKey = null;
       try {
         guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
         const groqMaxTokens = capGroqMaxTokens(
@@ -782,9 +1160,33 @@ async function callAIProviders(
           failureReasons.push(`Groq ${groqModel} skipped: prompt too large for configured token budget`);
           break;
         }
+        const estimatedRequestTokens =
+          estimatePromptTokensFromMessages(messages) + groqMaxTokens;
+        const capacityDeferral = providerCapacityDeferral(
+          groqProviderPool,
+          groqModel,
+          estimatedRequestTokens,
+        );
+        if (capacityDeferral) {
+          capacityRetryTimes.push(capacityDeferral.retryAt);
+          await markProviderCircuit(
+            env,
+            groqProviderPool,
+            capacityDeferral.retryAt,
+            capacityDeferral.reason,
+          );
+          providerCircuit.providers[groqProviderPool] = {
+            retryAt: new Date(capacityDeferral.retryAt).toISOString(),
+            reason: capacityDeferral.reason,
+            observedAt: new Date().toISOString(),
+          };
+          failureReasons.push(capacityDeferral.reason);
+          continue;
+        }
         providerAttempts += 1;
         groqSectionAttempts += 1;
         recordAiAttempt("groq", messages);
+        releaseProviderKey = markProviderKeyInFlight("groq", key, pool);
         const res = await fetch(GROQ_URL, {
           method: "POST",
           headers: {
@@ -801,24 +1203,37 @@ async function callAIProviders(
           signal: AbortSignal.timeout(timeoutMs),
         });
         if (res.ok) {
+          captureProviderCapacity(groqProviderPool, groqModel, res);
           const data = await res.json();
           const text = (data?.choices?.[0]?.message?.content ?? "").trim();
           if (text) return text;
-          console.warn(`Groq returned empty response for ${groqModel}`);
-          failureReasons.push(`Groq returned empty response for ${groqModel}`);
+          console.warn(`Groq key-${slot} returned empty response for ${groqModel}`);
+          failureReasons.push(`Groq key-${slot} returned empty response for ${groqModel}`);
         }
         const errBody = await res.text().catch(() => "");
-        if (res.status === 429) markProviderKeyRateLimited("groq", key, res);
-        console.warn(`Groq ${groqModel} error ${res.status}: ${errBody.slice(0, 120)}`);
-        failureReasons.push(`Groq ${groqModel} error ${res.status}: ${errBody.slice(0, 120)}`);
+        if (res.status === 429) {
+          markProviderKeyRateLimited("groq", key, res);
+          const retryAt = providerRetryAtFromResponse(res, errBody);
+          capacityRetryTimes.push(retryAt);
+          await markProviderCircuit(env, groqProviderPool, retryAt, errBody);
+          providerCircuit.providers[groqProviderPool] = {
+            retryAt: new Date(retryAt).toISOString(),
+            reason: String(errBody || "Groq rate limited").slice(0, 240),
+            observedAt: new Date().toISOString(),
+          };
+        }
+        console.warn(`Groq key-${slot} ${groqModel} error ${res.status}: ${errBody.slice(0, 120)}`);
+        failureReasons.push(`Groq key-${slot} ${groqModel} error ${res.status}: ${errBody.slice(0, 120)}`);
         if (isRequestTooLargeResponse(res.status, errBody)) break;
       } catch (err) {
-        console.warn(`Groq ${groqModel} request failed (${err.message})`);
-        failureReasons.push(`Groq ${groqModel} request failed: ${err.message}`);
+        console.warn(`Groq key-${slot} ${groqModel} request failed (${err.message})`);
+        failureReasons.push(`Groq key-${slot} ${groqModel} request failed: ${err.message}`);
         if (isSubrequestLimitError(err)) {
           stopGroqAfterSubrequestLimit = true;
           break;
         }
+      } finally {
+        releaseProviderKey?.();
       }
     }
     if (stopGroqAfterSubrequestLimit || stopGroqAfterAttemptShare) break;
@@ -839,8 +1254,13 @@ async function callAIProviders(
       (model) => reasoningCompletionBudget(model, maxTokens),
     ),
   );
-  const openRouterKeys = getOpenRouterKeys(env);
-  if (openRouterKeys.length > 0) {
+  const openRouterBlockedUntil = circuitBlockedUntil("openrouter");
+  const openRouterKeys = openRouterBlockedUntil ? [] : getOpenRouterKeys(env);
+  if (openRouterBlockedUntil) {
+    failureReasons.push(
+      `OpenRouter capacity circuit open until ${new Date(openRouterBlockedUntil).toISOString()} (${providerCircuitReason(providerCircuit, "openrouter") || "rate limited"})`,
+    );
+  } else if (openRouterKeys.length > 0) {
     for (const openRouterKey of openRouterKeys) {
     try {
       guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
@@ -874,6 +1294,12 @@ async function callAIProviders(
         const errBody = await res.text().catch(() => "");
         console.warn(`OpenRouter error ${res.status}: ${errBody.slice(0, 120)}`);
         failureReasons.push(`OpenRouter error ${res.status}: ${errBody.slice(0, 120)}`);
+        if (res.status === 429) {
+          const retryAt = providerRetryAtFromResponse(res, errBody);
+          capacityRetryTimes.push(retryAt);
+          await markProviderCircuit(env, "openrouter", retryAt, errBody);
+          break;
+        }
       }
     } catch (err) {
       console.warn(`OpenRouter request failed (${err.message})`);
@@ -891,7 +1317,12 @@ async function callAIProviders(
   // 3. NVIDIA NIM — meta/llama-3.3-70b-instruct via integrate.api.nvidia.com (OpenAI-compatible).
   // The endpoint documents max_tokens as 1..4096; do not inflate beyond that
   // or this fallback can fail with 422 exactly when Groq/OpenRouter are down.
-  if (env.NVIDIA_API_KEY) {
+  const nvidiaBlockedUntil = circuitBlockedUntil("nvidia");
+  if (nvidiaBlockedUntil) {
+    failureReasons.push(
+      `NVIDIA capacity circuit open until ${new Date(nvidiaBlockedUntil).toISOString()} (${providerCircuitReason(providerCircuit, "nvidia") || "temporarily unavailable"})`,
+    );
+  } else if (env.NVIDIA_API_KEY) {
     try {
       guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
       providerAttempts += 1;
@@ -920,10 +1351,20 @@ async function callAIProviders(
         const errBody = await res.text().catch(() => "");
         console.warn(`NVIDIA NIM error ${res.status}: ${errBody.slice(0, 120)}`);
         failureReasons.push(`NVIDIA NIM error ${res.status}: ${errBody.slice(0, 120)}`);
+        if (res.status === 429) {
+          const retryAt = providerRetryAtFromResponse(res, errBody);
+          capacityRetryTimes.push(retryAt);
+          await markProviderCircuit(env, "nvidia", retryAt, errBody);
+        }
       }
     } catch (err) {
       console.warn(`NVIDIA NIM request failed (${err.message})`);
       failureReasons.push(`NVIDIA NIM request failed: ${err.message}`);
+      const retryAt = providerRetryAtFromError(err);
+      if (retryAt) {
+        capacityRetryTimes.push(retryAt);
+        await markProviderCircuit(env, "nvidia", retryAt, err.message);
+      }
       if (isSubrequestLimitError(err)) {
         throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
       }
@@ -933,7 +1374,12 @@ async function callAIProviders(
   }
 
   // 4. Workers AI — built-in fallback when external providers are unavailable
-  if (env.AI && !skipWorkersAI) {
+  const workersAIBlockedUntil = circuitBlockedUntil("workersAI");
+  if (workersAIBlockedUntil && !skipWorkersAI) {
+    failureReasons.push(
+      `Workers AI capacity circuit open until ${new Date(workersAIBlockedUntil).toISOString()} (${providerCircuitReason(providerCircuit, "workersAI") || "daily allocation exhausted"})`,
+    );
+  } else if (env.AI && !skipWorkersAI) {
     try {
       guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
       providerAttempts += 1;
@@ -948,6 +1394,11 @@ async function callAIProviders(
     } catch (err) {
       console.warn(`Workers AI failed (${err.message})`);
       failureReasons.push(`Workers AI failed: ${err.message}`);
+      const retryAt = providerRetryAtFromError(err);
+      if (retryAt) {
+        capacityRetryTimes.push(retryAt);
+        await markProviderCircuit(env, "workersAI", retryAt, err.message);
+      }
       if (isSubrequestLimitError(err)) {
         throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
       }
@@ -958,7 +1409,16 @@ async function callAIProviders(
     failureReasons.push("Workers AI binding missing");
   }
 
-  throw new Error(
-    `callAI failed. ${failureReasons.join(" | ") || "No provider failure details captured."}`,
-  );
+  const retryAt = capacityRetryTimes
+    .filter((value) => Number.isFinite(value) && value > Date.now())
+    .sort((a, b) => a - b)[0] || 0;
+  const message =
+    `callAI failed. ${failureReasons.join(" | ") || "No provider failure details captured."}`;
+  if (retryAt) {
+    throw capacityError(
+      `AI provider capacity unavailable until ${new Date(retryAt).toISOString()}. ${message}`,
+      retryAt,
+    );
+  }
+  throw new Error(message);
 }

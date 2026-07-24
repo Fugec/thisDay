@@ -39,6 +39,11 @@
     "KV_OPTIONAL_WRITE_STOP": "850",
     "KV_CONTENT_START_STOP": "950",
     "KV_ENRICHMENT_STOP": "980",
+    // Comma-separated quota-pool labels aligned with GROQ_API_KEY(_2.._7).
+    // Leave empty unless keys are verified to belong to independent Groq
+    // organizations/projects. Empty means one shared pool and disables
+    // concurrent Groq article chunks, preventing parallel TPM exhaustion.
+    "GROQ_QUOTA_POOL_IDS": "",
     // Emergency manual override retained for incidents where analytics itself
     // is unavailable. Use an ISO UTC timestamp; leave empty normally.
     "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "",
@@ -51,15 +56,16 @@
   // The main SEO worker (seo-worker.js) keeps handling everything else.
   "routes": [{ "pattern": "thisday.info/blog/*", "zone_name": "thisday.info" }],
 
-  // Cron pipeline — primary publication runs at 00:05/00:10/00:12/00:15 UTC.
+  // Cron pipeline — primary publication runs at 00:05/00:10/00:15 UTC.
   // 00:05 vets and caches the source package after warmup-worker (00:01).
   // 00:10 generates the lightweight draft from that cache with a fresh
-  // external-subrequest budget; 00:12 retries only when the draft is missing.
+  // external-subrequest budget. There is no immediate generation retry:
+  // provider cooldowns persist across invocations and validated article chunks
+  // remain resumable for the single 00:35 GitHub failsafe attempt.
   // Blog post is the source of truth for the video narration + metadata.
   // 00:15 enrichment runs in a separate invocation with a fresh external
-  // subrequest budget. If final grounding rejects and deletes that draft,
-  // 00:18 prepares a different source, 00:20 regenerates, and 00:25 enriches
-  // once more before the GitHub failsafe check at 00:35.
+  // subrequest budget. A bounded rejection blocks that topic but does not
+  // regenerate another full article in the same capacity window.
   // 00:50 runs the dedicated entity-recovery pass (ENTITY_RECOVERY_CRON): a fresh
   // invocation with full subrequest budget re-links any people strips the budget-starved
   // 00:05 generation left unlinked. Must stay after the 00:35 failsafe.
@@ -74,7 +80,7 @@
   // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 13:00 UTC
   // (about 09:00 Eastern during daylight saving time).
   "triggers": {
-    "crons": ["5,10,12,15,18,20,25 0 * * *", "50,55 0 * * *", "25 1 * * *", "55 6,12,18 * * *"],
+    "crons": ["5,10,15 0 * * *", "50,55 0 * * *", "25 1 * * *", "55 6,12,18 * * *"],
   },
 
   // KV namespaces — blog posts/index and shared events/quiz cache.

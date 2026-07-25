@@ -14846,9 +14846,30 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
         const rejection = String(err.message || err).slice(0, 900);
         const needsConcreteDetail =
           /lacks a concrete (?:name|detail)|lacks a hard fact/i.test(rejection);
-        const correction = needsConcreteDetail
-          ? "For every flagged item, keep only source-supported claims and add an explicit proper name, calendar year, number, place, or institution copied from the canonical brief or its sourceFacts. Check each required item separately before returning."
-          : "Correct the exact structural or quality failure while keeping every claim source-grounded.";
+        // 2026-07-25: NVIDIA NIM (the only provider still reachable once
+        // Groq/OpenRouter/Workers AI were all circuit-blocked) systematically
+        // under-produced continuity-repair arrays — one paragraph where two
+        // were required, or the field omitted outright — and the generic
+        // "correct the exact structural or quality failure" instruction
+        // wasn't specific enough to fix it on retry. Name the exact gap.
+        const countMismatch = rejection.match(
+          /(\w+) must contain exactly (\d+) item\(s\), got (\d+)/,
+        );
+        const missingField = rejection.match(/missing (\w+) array/);
+        const correction = countMismatch
+          ? (() => {
+              const [, field, exact, got] = countMismatch;
+              const exactN = Number(exact);
+              const gotN = Number(got);
+              return gotN < exactN
+                ? `Your ${field} array had only ${gotN} of the required ${exactN} paragraph(s). Add ${exactN - gotN} more paragraph(s) to ${field} continuing the same section with genuinely new source-supported content — do not repeat, pad, or merge sentences to fake the count.`
+                : `Your ${field} array had ${gotN} paragraphs but must have exactly ${exactN}. Merge or trim it down to exactly ${exactN} paragraphs without losing the concrete source-supported details.`;
+            })()
+          : missingField
+            ? `Your response omitted the required "${missingField[1]}" field entirely. Every field listed in the requested JSON shape must appear in your response, even if you also believe the retained content already covers it.`
+            : needsConcreteDetail
+              ? "For every flagged item, keep only source-supported claims and add an explicit proper name, calendar year, number, place, or institution copied from the canonical brief or its sourceFacts. Check each required item separately before returning."
+              : "Correct the exact structural or quality failure while keeping every claim source-grounded.";
         retryFeedback =
           `\n\nPREVIOUS RESPONSE REJECTED: ${rejection}\n` +
           `${correction} Do not invent a replacement detail. Return only the complete JSON object requested above, with no planning or explanation.`;

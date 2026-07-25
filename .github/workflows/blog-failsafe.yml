@@ -71,6 +71,19 @@ jobs:
           SLUG="${DAY}-${MONTH}-${YEAR}"
           echo "Today's expected slug: post:${SLUG}"
 
+          # Absolute last resort (2026-07-25 user decision): only on the
+          # day's FINAL scheduled attempt does a continuity-repair failure
+          # get tolerated rather than blocking publication — every earlier
+          # attempt today still fails closed and self-heals/rotates
+          # normally. github.event.schedule is only set for `schedule`
+          # triggers, so a manual workflow_dispatch never qualifies even at
+          # this hour.
+          IS_LAST_RESORT="false"
+          if [ "${{ github.event.schedule }}" = "35 20 * * *" ]; then
+            IS_LAST_RESORT="true"
+            echo "This is the day's final scheduled attempt (20:35 UTC) — last-resort recovery is enabled for continuity-repair failures only."
+          fi
+
           KV_URL="https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/post:${SLUG}"
           DRAFT_URL="https://api.cloudflare.com/client/v4/accounts/${{ secrets.CF_ACCOUNT_ID }}/storage/kv/namespaces/${{ secrets.CF_KV_NAMESPACE_ID }}/values/draft:${SLUG}"
           # Direct Worker hostname bypasses thisday.info zone bot challenges.
@@ -145,8 +158,19 @@ jobs:
               DRAFT_CREATED=false
               for DRAFT_ATTEMPT in 1 2 3; do
                 DRAFT_ENDPOINT="$WORKER_URL/blog/generate-draft"
+                DRAFT_PARAMS=""
                 if [ "$DRAFT_ATTEMPT" != "1" ] || [ "$ROUND" != "1" ]; then
-                  DRAFT_ENDPOINT="$DRAFT_ENDPOINT?prefer-workers-ai=true"
+                  DRAFT_PARAMS="prefer-workers-ai=true"
+                fi
+                if [ "$IS_LAST_RESORT" = "true" ]; then
+                  if [ -n "$DRAFT_PARAMS" ]; then
+                    DRAFT_PARAMS="${DRAFT_PARAMS}&last-resort=true"
+                  else
+                    DRAFT_PARAMS="last-resort=true"
+                  fi
+                fi
+                if [ -n "$DRAFT_PARAMS" ]; then
+                  DRAFT_ENDPOINT="${DRAFT_ENDPOINT}?${DRAFT_PARAMS}"
                 fi
                 echo "Generating draft:${SLUG} from the retained source/checkpoint (attempt ${DRAFT_ATTEMPT}/3)..."
                 DRAFT_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \

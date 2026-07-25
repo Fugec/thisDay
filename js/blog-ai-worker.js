@@ -313,13 +313,19 @@ async function recordPipelineFailure(
   stepState.streak = streak;
   state.steps[step] = stepState;
 
-  if (streak >= 2) {
+  // 2026-07-25: a 2-consecutive-day threshold meant an isolated single-day
+  // failure (July 19, 21, 22 this week — each followed by a successful day
+  // that reset the streak before it reached 2) never alerted at all; every
+  // one of those was discovered by manually checking KV, not the pipeline
+  // reporting itself. A single failed day already means a lost publication
+  // and a delayed video pipeline, so it alerts immediately now.
+  if (streak >= 1) {
     stepState.lastAlertDate = today;
     state.steps[step] = stepState;
   }
   await savePipelineState(env, state);
 
-  if (streak >= 2) {
+  if (streak >= 1) {
     await notifyPipelineIssue(env, {
       step,
       slug,
@@ -3589,10 +3595,15 @@ export default {
       try {
         const preferWorkersAIForArticle =
           url.searchParams.get("prefer-workers-ai") === "true";
+        // Only the workflow's 20:35 UTC (day's final) scheduled run sets
+        // this — see the generateAndStore lastResortRecovery option above.
+        const lastResortRecovery =
+          url.searchParams.get("last-resort") === "true";
         await generateAndStore(budgetEnv, null, null, null, null, {
           lightweightPublish: true,
           enrichDraft: false,
           preferWorkersAIForArticle,
+          lastResortRecovery,
         });
         return jsonResponse({
           status: "ok",
@@ -7646,6 +7657,16 @@ async function generateAndStore(
     enrichDraft = true,
     prepareOnly = false,
     preferWorkersAIForArticle = false,
+    // Absolute last resort for the day's FINAL scheduled failsafe attempt
+    // (2026-07-25 user decision): if the chunked fallback's continuity
+    // repair still fails after its own retry, publish with the original
+    // pre-repair content (a real, complete article with a stylistic
+    // continuity nit) rather than losing the whole day. Never relaxes any
+    // other gate — grounding, required blocks, date validation, and the
+    // bounded enrichment gate are all unaffected. Only reachable via an
+    // explicit `last-resort=true` param the workflow sets on the 20:35 UTC
+    // cron specifically, never on an earlier attempt in the same day.
+    lastResortRecovery = false,
   } = {},
 ) {
   // Accept both ISO format ("2026-05-25") and slug format ("25-may-2026").
@@ -7917,6 +7938,7 @@ async function generateAndStore(
               stricterGrounding,
               groundingFeedback,
               groundingSource?.pageTitle || selectedEvent?.sourcePageTitle || "",
+              lastResortRecovery,
             );
           } catch (fallbackErr) {
             console.warn(
@@ -8062,6 +8084,7 @@ async function generateAndStore(
             Boolean(sourceMaterial) || currentGroundingFeedback.length > 0,
             currentGroundingFeedback,
             groundingSource?.pageTitle || selectedEvent?.sourcePageTitle || "",
+            lastResortRecovery,
           );
           // Re-run the same per-iteration gates on the chunked result so a
           // recovered body is still date-validated and structurally complete
@@ -14793,8 +14816,16 @@ function shouldRetryChunkOutputFailure(error) {
 // fires on the first attempt and never affects content-quality validation
 // failures (a "lacks a concrete detail" rejection already has usable JSON;
 // more tokens would not help and are harmless if given anyway).
+//
+// Also widened for the 2026-07-25 continuity-repair incident: once Groq/
+// OpenRouter/Workers AI were all circuit-blocked, NVIDIA NIM (the only
+// provider still reachable) systematically returned 1 paragraph where 2 were
+// required, or omitted a field outright — the same "ran out of room before
+// finishing" shape as a truncated JSON response, just caught by a different
+// validator (requireChunkArray) further down the pipeline instead of the
+// JSON parser itself. More budget is the same plausible fix either way.
 function isStructurallyIncompleteChunkFailure(error) {
-  return /no JSON object returned|JSON parse failed/i.test(
+  return /no JSON object returned|JSON parse failed|must contain exactly \d+ item\(s\)|missing \w+ array/i.test(
     String(error?.message || error || ""),
   );
 }
@@ -14946,6 +14977,7 @@ async function generateArticleContentChunkedFallback(
   stricterGrounding = false,
   groundingFeedback = [],
   canonicalSourcePageTitle = "",
+  lastResortRecovery = false,
 ) {
   const monthName = MONTH_NAMES[date.getMonth()];
   const day = date.getDate();
@@ -15367,14 +15399,29 @@ Requirements:
     console.warn(
       `Blog: repairing chunked continuity fields [${continuity.repairFields.join(", ")}] — ${continuity.issues.join("; ")}`,
     );
-    const repairedFields = await repairChunkedArticleContinuity(
-      env,
-      model,
-      merged,
-      sharedContext,
-      compactBrief,
-      continuity,
-    );
+    // repairChunkedArticleContinuity's own retry can throw (its internal
+    // validate callback re-audits and rejects after exhausting its 2
+    // attempts) — the 2026-07-25 live incident showed exactly this: NVIDIA
+    // was the only reachable provider and systematically under-produced the
+    // repaired arrays. lastResortRecovery is only ever true on the day's
+    // FINAL scheduled attempt (20:35 UTC); everywhere else this still throws
+    // and the normal self-heal/rotation handles it.
+    let repairedFields = null;
+    try {
+      repairedFields = await repairChunkedArticleContinuity(
+        env,
+        model,
+        merged,
+        sharedContext,
+        compactBrief,
+        continuity,
+      );
+    } catch (err) {
+      if (!lastResortRecovery) throw err;
+      console.warn(
+        `Blog: last-resort recovery — continuity repair failed (${err.message}); publishing with the original pre-repair content rather than losing the day.`,
+      );
+    }
     if (repairedFields) {
       Object.assign(merged, repairedFields);
       if (
@@ -15399,7 +15446,12 @@ Requirements:
     }
   }
   if (!continuity.ok) {
-    throw new Error(`chunked article fallback continuity failed: ${continuity.issues.join("; ")}`);
+    if (!lastResortRecovery) {
+      throw new Error(`chunked article fallback continuity failed: ${continuity.issues.join("; ")}`);
+    }
+    console.warn(
+      `Blog: last-resort recovery — publishing with unresolved continuity issues: ${continuity.issues.join("; ")}`,
+    );
   }
   delete merged.sourceFacts;
   validateChunkedArticleSupport(merged);

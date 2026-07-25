@@ -52,8 +52,14 @@ concurrency:
 jobs:
   ensure-post:
     runs-on: ubuntu-latest
-    # One prepare, one generation, and one synchronous enrichment invocation.
-    timeout-minutes: 90
+    # Up to two bounded prepare/generate/enrich rounds, each generation phase
+    # trying up to 3 fresh Worker invocations: a second round runs only after
+    # a hard failure where the Worker self-heal has already blocked the
+    # failing topic, so round 2 always tries a different one. Worst case is
+    # 2 rounds x 3 draft attempts x 60s per-provider timeout plus enrichment
+    # and the 10-minute final poll — bumped from 90 to 150 minutes so a slow
+    # recovery is not killed mid-run by the job timeout itself.
+    timeout-minutes: 150
 
     steps:
       - name: Check if today's post exists and trigger if missing
@@ -82,62 +88,143 @@ jobs:
             exit 0
           fi
 
-          # ── Phase 2: Ensure one lightweight draft exists ────────────────
-          DRAFT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
-            "$DRAFT_URL")
-          echo "KV status for draft:${SLUG} → HTTP $DRAFT_STATUS"
-
-          if [ "$DRAFT_STATUS" != "200" ]; then
-            echo "Draft for ${SLUG} is missing — preparing its source in a dedicated invocation..."
-            PREPARE_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-              -X POST "$WORKER_URL/blog/prepare-draft" \
-              -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
-            PREPARE_BODY=$(echo "$PREPARE_RESULT" | head -n -1)
-            PREPARE_HTTP_STATUS=$(echo "$PREPARE_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
-            echo "Source preparation response (HTTP $PREPARE_HTTP_STATUS): $PREPARE_BODY"
-            if [ "$PREPARE_HTTP_STATUS" != "200" ]; then
-              echo "::error::Source preparation stopped (HTTP $PREPARE_HTTP_STATUS); no automatic retry will consume more capacity."
-              exit 1
+          # ── Phases 2-3: draft + enrich, up to two bounded rounds ─────────
+          # A hard (non-capacity) draft failure or a bounded enrichment
+          # rejection means the Worker's self-heal has ALREADY blocked that
+          # event and deleted its cached source — so one same-run second
+          # round is guaranteed to try a DIFFERENT topic, not repeat the
+          # spend. Capacity responses (503/429) still stop the run
+          # immediately: no amount of same-run retrying restores quota.
+          ENRICH_OK=false
+          for ROUND in 1 2; do
+            if [ "$ROUND" = "2" ]; then
+              echo "Round 2: the rejected topic was blocked by the Worker self-heal; retrying once with a different topic."
             fi
 
-            echo "Generating draft:${SLUG} once from the retained source/checkpoint..."
-            DRAFT_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-              -X POST "$WORKER_URL/blog/generate-draft" \
-              -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
-            DRAFT_BODY=$(echo "$DRAFT_RESULT" | head -n -1)
-            DRAFT_HTTP_STATUS=$(echo "$DRAFT_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
-            echo "Draft response (HTTP $DRAFT_HTTP_STATUS): $DRAFT_BODY"
-            if [ "$DRAFT_HTTP_STATUS" != "200" ]; then
-              if [ "$DRAFT_HTTP_STATUS" = "503" ]; then
-                echo "::error::AI capacity deferred. Validated chunks remain checkpointed; retry only after the returned reset time."
-              elif [ "$DRAFT_HTTP_STATUS" = "429" ]; then
-                echo "::error::Cloudflare KV write budget blocked generation until the UTC reset."
-              else
-                echo "::error::Draft generation failed. The failsafe will not launch another full invocation."
+            DRAFT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+              "$DRAFT_URL")
+            echo "KV status for draft:${SLUG} → HTTP $DRAFT_STATUS"
+
+            if [ "$DRAFT_STATUS" != "200" ]; then
+              echo "Draft for ${SLUG} is missing — preparing its source in a dedicated invocation..."
+              PREPARE_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+                -X POST "$WORKER_URL/blog/prepare-draft" \
+                -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
+              PREPARE_BODY=$(echo "$PREPARE_RESULT" | head -n -1)
+              PREPARE_HTTP_STATUS=$(echo "$PREPARE_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
+              echo "Source preparation response (HTTP $PREPARE_HTTP_STATUS): $PREPARE_BODY"
+              if [ "$PREPARE_HTTP_STATUS" != "200" ]; then
+                echo "::error::Source preparation stopped (HTTP $PREPARE_HTTP_STATUS); no automatic retry will consume more capacity."
+                exit 1
               fi
-              exit 1
-            fi
-          fi
 
-          # ── Phase 3: Enrich/publish in one fresh invocation ──────────────
-          echo "Enriching draft:${SLUG} in a fresh Worker invocation..."
-          RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
-            -X POST "$WORKER_URL/blog/enrich?slug=${SLUG}&sync=true&bounded=true" \
-            -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
-          BODY=$(echo "$RESULT" | head -n -1)
-          HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
-          echo "Blog worker response (HTTP $HTTP_STATUS): $BODY"
-          if [ "$HTTP_STATUS" != "200" ]; then
+              # Up to 3 fresh Worker invocations per round (restores the
+              # 2026-07-19 design that a later commit dropped in favor of a
+              # single attempt — the week's data shows that trade made
+              # publication LESS reliable, not more: 1/2 days published under
+              # the 3-attempt design vs 1/5 under the 1-attempt design).
+              # Each invocation gets its own fresh subrequest/CPU budget from
+              # Cloudflare, and now also resumes from the same checkpointed
+              # chunks (2026-07-24 machinery), so a retry is cheaper than it
+              # was in July — not just a blind repeat.
+              #
+              # Groq's free tier is a single shared 100k-tokens/day budget, so
+              # every attempt that reaches it (not just ones that get rate-
+              # limited) spends real quota once content comes back and THEN
+              # fails validation — this is what actually emptied the account
+              # on 2026-07-24. prefer-workers-ai=true routes through Workers
+              # AI's separate 10k-neurons/day quota first, only touching Groq
+              # as a capped last resort (see callPublicationGateAI). Attempts
+              # 2-3 already used it; round 2 only runs after round 1 already
+              # spent one full-price Groq attempt on this slug today, so round
+              # 2 prefers Workers AI from attempt 1 too — at most ONE
+              # full-Groq-chain attempt happens per invocation, not one per
+              # round, while still keeping all 6 possible attempts for
+              # resilience.
+              DRAFT_CREATED=false
+              for DRAFT_ATTEMPT in 1 2 3; do
+                DRAFT_ENDPOINT="$WORKER_URL/blog/generate-draft"
+                if [ "$DRAFT_ATTEMPT" != "1" ] || [ "$ROUND" != "1" ]; then
+                  DRAFT_ENDPOINT="$DRAFT_ENDPOINT?prefer-workers-ai=true"
+                fi
+                echo "Generating draft:${SLUG} from the retained source/checkpoint (attempt ${DRAFT_ATTEMPT}/3)..."
+                DRAFT_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+                  -X POST "$DRAFT_ENDPOINT" \
+                  -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
+                DRAFT_BODY=$(echo "$DRAFT_RESULT" | head -n -1)
+                DRAFT_HTTP_STATUS=$(echo "$DRAFT_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
+                echo "Draft response (HTTP $DRAFT_HTTP_STATUS): $DRAFT_BODY"
+                if [ "$DRAFT_HTTP_STATUS" = "200" ]; then
+                  DRAFT_CREATED=true
+                  break
+                fi
+                if [ "$DRAFT_HTTP_STATUS" = "503" ]; then
+                  echo "::error::AI capacity deferred. Validated chunks remain checkpointed; retry only after the returned reset time."
+                  exit 1
+                elif [ "$DRAFT_HTTP_STATUS" = "429" ]; then
+                  echo "::error::Cloudflare KV write budget blocked generation until the UTC reset."
+                  exit 1
+                elif [ "$DRAFT_ATTEMPT" != "3" ]; then
+                  echo "::warning::Draft generation attempt ${DRAFT_ATTEMPT}/3 failed hard; retrying with a fresh invocation."
+                  sleep 5
+                fi
+              done
+              if [ "$DRAFT_CREATED" != "true" ]; then
+                if [ "$ROUND" = "1" ]; then
+                  echo "::warning::Draft generation failed hard in all 3 attempts; the Worker blocked the topic. Trying one more round with a different topic."
+                  # Cloudflare KV writes can take up to ~60s to propagate
+                  # across edge locations (2026-07-21 evidence: a round-2 KV
+                  # read 150ms after a same-invocation delete still returned
+                  # the just-blocked draft, so round 2 re-enriched and
+                  # re-rejected the IDENTICAL draft instead of trying a new
+                  # topic). Wait before round 2 re-reads draft:${SLUG}.
+                  sleep 30
+                  continue
+                else
+                  echo "::error::Draft generation failed in both rounds. The next scheduled run tries again with the blocked topics excluded."
+                  exit 1
+                fi
+              fi
+            fi
+
+            echo "Enriching draft:${SLUG} in a fresh Worker invocation..."
+            RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
+              -X POST "$WORKER_URL/blog/enrich?slug=${SLUG}&sync=true&bounded=true" \
+              -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}")
+            BODY=$(echo "$RESULT" | head -n -1)
+            HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
+            echo "Blog worker response (HTTP $HTTP_STATUS): $BODY"
+            if [ "$HTTP_STATUS" = "200" ]; then
+              ENRICH_OK=true
+              break
+            fi
             if [ "$HTTP_STATUS" = "503" ]; then
               echo "::error::AI capacity deferred during enrichment; the retained draft will be resumed after reset."
+              exit 1
             elif [ "$HTTP_STATUS" = "429" ]; then
               echo "::error::Cloudflare KV write budget blocked enrichment until the UTC reset."
+              exit 1
             elif echo "$BODY" | grep -q "Bounded recovery rejected"; then
-              echo "::error::The bounded publication gate rejected this topic. It was blocked for the next independent run; no same-run regeneration will drain another quota."
+              if [ "$ROUND" = "1" ]; then
+                echo "::warning::The bounded publication gate rejected this topic; it was blocked and its draft deleted. Trying one more round with a different topic."
+                # Same KV-propagation wait as the draft-generation branch
+                # above — confirmed live on 2026-07-21: round 2 re-read the
+                # deleted draft as still present (HTTP 200) 150ms later and
+                # re-rejected the byte-identical content.
+                sleep 30
+                continue
+              fi
+              echo "::error::The bounded publication gate rejected topics in both rounds. The next scheduled run tries again with the blocked topics excluded."
+              exit 1
             else
-              echo "::error::Enrichment failed. No automatic same-run retry will consume more capacity."
+              echo "::error::Enrichment failed with the draft still in place. The next scheduled run will re-enrich it; no same-run retry will consume more capacity."
+              exit 1
             fi
+          done
+
+          if [ "$ENRICH_OK" != "true" ]; then
+            echo "::error::No publication after the bounded rounds."
             exit 1
           fi
 

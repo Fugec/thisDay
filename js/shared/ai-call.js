@@ -1321,6 +1321,16 @@ async function callAIProviders(
     } catch (err) {
       console.warn(`OpenRouter request failed (${err.message})`);
       failureReasons.push(`OpenRouter request failed: ${err.message}`);
+      // 2026-07-19: unlike NVIDIA below, a timed-out OpenRouter request never
+      // recorded a circuit cooldown, so every later generation attempt in
+      // the same run re-waited through the identical timeout (observed 3x in
+      // one run). A short cooldown makes later attempts skip straight past
+      // it instead.
+      const retryAt = providerRetryAtFromError(err);
+      if (retryAt) {
+        capacityRetryTimes.push(retryAt);
+        await markProviderCircuit(env, "openrouter", retryAt, err.message);
+      }
       if (isSubrequestLimitError(err)) break;
     }
     }

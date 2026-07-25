@@ -1836,13 +1836,24 @@ function repairCuriosityTitleFromSource(content) {
       (word) => word.charAt(0).toUpperCase() + word.slice(1),
     );
     const article = /^(?:a|an|the)\b/i.test(subject) ? "" : "the ";
+    // A single fixed template can miss the 35-65 window on both ends: very
+    // short subjects (e.g. "D-Day") undershoot even with "Story" padding,
+    // very long subjects overshoot every variant (2026-07-19 incident: no
+    // candidate fit, so the invalid title reached the hard throw). More
+    // length-varied phrasings, ordered shortest first, raise the odds one
+    // fits without changing the neutral, source-identity-only meaning.
     const candidates = [
+      `Why Did ${article}${subject} Occur?`,
+      `How Did ${article}${subject} Occur?`,
       `How Did ${article}${subject} Unfold?`,
+      `How Did ${article}${subject} Come About?`,
       // Very short canonical subjects (for example "Landsat 1") leave the
       // neutral chronology repair below the 35-character public-title floor.
       // "Story" adds no factual claim and keeps the exact source identity.
       `How Did ${article}${subject} Story Unfold?`,
+      `What Led to ${article}${subject}?`,
       `How Did the Story of ${subject} Unfold?`,
+      `How Did the Events of ${subject} Unfold?`,
     ];
     for (const candidate of candidates) {
       if (
@@ -2240,6 +2251,59 @@ function sourcePageRelevanceTokens(value) {
 const DEDICATED_EVENT_SOURCE_PAGE_RE =
   /\b(?:ambush|assassination|attack|battle|bombing|case|collapse|convention|crash|disaster|fire|flight\s+\d+|incident|massacre|revolution|siege|treaty|uprising)\b/i;
 
+// Wikipedia "on this day" sentences often report event X but only reference a
+// different, causally-related event Y in a trailing subordinate clause, e.g.
+// "The United States Congress passes the Crittenden-Johnson Resolution ... in
+// the wake of the defeat at the First Battle of Bull Run." Y's own page is
+// frequently longer and more "dedicated" than X's, so the scoring below used
+// to pick Y as the primary source even though the article being written is
+// about X, leaving generation unable to ground the reported event (the
+// 2026-07-25 incident: 3 independent runs failed differently against the same
+// wrongly-sourced event before the day's AI quota ran out). A title found
+// only after one of these causal markers is the cause, not the event.
+const CAUSAL_CONTEXT_CLAUSE_PATTERN =
+  /\b(?:in the wake of|in the aftermath of|following the|in response to|as a result of|prompted by|sparked by|triggered by|stemming from|after the defeat at|after the fall of)\b/i;
+
+function mainClauseBeforeCausalContext(eventText) {
+  // The topic tag ("American Civil War: ...") is not part of the sentence;
+  // without stripping it first, a sentence-initial causal marker after the
+  // tag would leave the tag itself as the "main clause" and wrongly treat
+  // the sentence's real subject as causal-only context.
+  const text = stripLeadingTopicPrefix(String(eventText || "")).trim();
+  const match = CAUSAL_CONTEXT_CLAUSE_PATTERN.exec(text);
+  if (!match) return text;
+  if (match.index > 0) return text.slice(0, match.index);
+  // Sentence-initial (fronted) causal clause: "Following the assassination
+  // of X, Y declares war ..." — here the text BEFORE the marker is empty, so
+  // the main clause is what follows the fronted clause's closing comma.
+  // Without a comma the clause boundary is unknowable; return the whole
+  // sentence so detection fails open (no page is treated as causal-only).
+  const rest = text.slice(match[0].length);
+  const commaIndex = rest.indexOf(",");
+  return commaIndex >= 0 ? rest.slice(commaIndex + 1) : text;
+}
+
+// Caller-side (blog-only) signal computed once per candidate, before any AI
+// call: does this event's own winning source page only appear in a causal
+// clause rather than the sentence's main clause? If so, full-article
+// generation is very unlikely to be groundable in that source (2026-07-25
+// incident). Used both to deprioritize the candidate at selection time
+// (rankBlogEventCandidates) and, if it is still selected because nothing
+// better exists that day, to shorten the generation attempt budget spent on
+// it before the self-heal takes over (see generateAndStore).
+function isSourceTopicMismatch(eventText, pageTitle) {
+  const titleNormalized = normalizeForCompare(pageTitle);
+  if (!titleNormalized) return false;
+  const mainClauseNormalized = normalizeForCompare(
+    mainClauseBeforeCausalContext(eventText),
+  );
+  const fullNormalized = normalizeForCompare(eventText);
+  return (
+    !mainClauseNormalized.includes(titleNormalized) &&
+    fullNormalized.includes(titleNormalized)
+  );
+}
+
 function selectPrimarySourcePage(
   eventText,
   pages,
@@ -2249,6 +2313,9 @@ function selectPrimarySourcePage(
   if (normalizedPages.length <= 1) return normalizedPages[0] || null;
   const eventTokens = new Set(sourcePageRelevanceTokens(eventText));
   const eventNormalized = normalizeForCompare(eventText);
+  const mainClauseNormalized = normalizeForCompare(
+    mainClauseBeforeCausalContext(eventText),
+  );
   let best = normalizedPages[0];
   let bestScore = -1;
   for (const page of normalizedPages) {
@@ -2259,24 +2326,32 @@ function selectPrimarySourcePage(
     for (const word of eventTokens) if (extractTokens.has(word)) extractOverlap++;
     const extractCoverage = eventTokens.size > 0 ? extractOverlap / eventTokens.size : 0;
     const normalizedTitle = normalizeForCompare(page.pageTitle);
-    const exactTitleBonus = normalizedTitle && eventNormalized.includes(normalizedTitle) ? 12 : 0;
+    const titleInMainClause =
+      Boolean(normalizedTitle) && mainClauseNormalized.includes(normalizedTitle);
+    const titleOnlyInCausalContext =
+      Boolean(normalizedTitle) &&
+      !titleInMainClause &&
+      eventNormalized.includes(normalizedTitle);
+    const exactTitleBonus = titleInMainClause ? 12 : 0;
     const eventPageBonus = SOURCE_EVENT_PERSON_PAGE_RE.test(page.pageTitle) ? 8 : 0;
     const dedicatedEventBonus =
       preferDedicatedEventPage &&
-      normalizedTitle &&
-      eventNormalized.includes(normalizedTitle) &&
+      titleInMainClause &&
       DEDICATED_EVENT_SOURCE_PAGE_RE.test(page.pageTitle)
         ? 36
         : 0;
     const broadContextPenalty =
       preferDedicatedEventPage && isBroadEventContextPage(page) ? 35 : 0;
+    const causalContextPenalty =
+      preferDedicatedEventPage && titleOnlyInCausalContext ? 30 : 0;
     const score =
       titleOverlap * 18 +
       extractCoverage * 100 +
       exactTitleBonus +
       eventPageBonus +
       dedicatedEventBonus -
-      broadContextPenalty;
+      broadContextPenalty -
+      causalContextPenalty;
     if (score > bestScore) {
       best = page;
       bestScore = score;
@@ -2710,8 +2785,34 @@ function filterRecentEventFamilyRepeats(events, recentFamilies) {
   };
 }
 
+// Blog-only demotion (2026-07-25): a candidate whose only linked source
+// discusses a causally-related event, not the one actually reported, is very
+// unlikely to survive grounded generation (the shared ranking module
+// deliberately has no opinion on source-groundability — it is used by
+// calendar/date pages too, see js/shared/event-ranking.js). A flat point
+// penalty could still be outweighed by a large organic score (e.g. the
+// Crittenden-Johnson text itself scores +30 for civil-rights language), so
+// instead any clean candidate is placed strictly ahead of any mismatched one
+// regardless of raw score, preserving each group's own relative order. This
+// never eliminates a candidate outright: if every usable event for a date has
+// this shape, it is still selected and the generation-stage self-heal
+// recovers within one run instead of losing the whole day. Exported as its
+// own function (not folded only into rankBlogEventCandidates) because the
+// later pageview-notability re-rank sorts purely by combined editorial+
+// pageview score with no awareness of this flag and can otherwise re-promote
+// a mismatched candidate above a clean one; the caller re-applies this after
+// that stage too.
+function demoteSourceTopicMismatches(candidates) {
+  if (!Array.isArray(candidates) || !candidates.some((event) => event.sourceTopicMismatch)) {
+    return candidates;
+  }
+  const clean = candidates.filter((event) => !event.sourceTopicMismatch);
+  const mismatched = candidates.filter((event) => event.sourceTopicMismatch);
+  return [...clean, ...mismatched];
+}
+
 function rankBlogEventCandidates(events, options = {}) {
-  return rankHistoricalEventCandidates(events, options);
+  return demoteSourceTopicMismatches(rankHistoricalEventCandidates(events, options));
 }
 
 // ---------------------------------------------------------------------------
@@ -2929,6 +3030,7 @@ async function chooseEventForDate(
           extract: String(firstPage.extract || "").replace(/\s+/g, " ").trim(),
           extractLength: String(firstPage.extract || "").length,
           sourcePages,
+          sourceTopicMismatch: isSourceTopicMismatch(event?.text, firstPage.pageTitle),
         };
       })
       .filter((event) => event.year && event.text && event.pageTitle);
@@ -2953,6 +3055,10 @@ async function chooseEventForDate(
     });
     try {
       candidateEvents = await applyPageviewNotabilityRerank(candidateEvents);
+      // The pageview re-rank sorts purely by combined editorial+pageview
+      // score with no awareness of sourceTopicMismatch and can otherwise
+      // re-promote a mismatched candidate above a clean one (2026-07-25).
+      candidateEvents = demoteSourceTopicMismatches(candidateEvents);
       const preview = candidateEvents
         .slice(0, 3)
         .map(
@@ -7746,7 +7852,22 @@ async function generateAndStore(
   let pillars = [];
   let personImages = [];
   let eventImages = [];
-  const MAX_CONTENT_ATTEMPTS = 3;
+  // Reduced attempt budget for a source/topic-mismatched event (2026-07-25):
+  // when the selector had no clean alternative and picked a candidate whose
+  // source page only appears in a causal clause, grounded generation is
+  // unlikely to converge no matter how many times it regenerates — each extra
+  // attempt costs a full one-shot call plus potentially the whole chunked
+  // fallback (the most provider-token-expensive path in the worker). Two
+  // attempts give it one regeneration chance; after that the generation-stage
+  // self-heal blocks the event and the next independent run picks a
+  // different topic with the remaining daily budget intact.
+  const MAX_CONTENT_ATTEMPTS =
+    selectedEvent?.sourceTopicMismatch === true ? 2 : 3;
+  if (selectedEvent?.sourceTopicMismatch === true) {
+    console.warn(
+      `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" carries a source/topic mismatch — generation attempt budget reduced to ${MAX_CONTENT_ATTEMPTS} to conserve provider capacity.`,
+    );
+  }
   const MAX_MALFORMED_RESPONSE_ATTEMPTS = 2;
   const generateArticleContent = async (
     avoidTitles,
@@ -7816,6 +7937,28 @@ async function generateAndStore(
   const attemptFailures = [];
   let currentGroundingFeedback = [];
   let generationGroundingRepairUsed = false;
+  // Non-convergence guard (2026-07-25): live evidence from the Crittenden-
+  // Johnson Resolution incident showed attempt 3's grounding failure reasons
+  // were byte-identical to attempt 1's — the intervening "stricter grounding"
+  // regeneration spent a full AI call and made zero progress. Once a
+  // grounding-failure reason set repeats verbatim within this run, further
+  // attempts are pointless (the source cannot support the claim, no amount of
+  // rewriting will invent support for it), so generation stops immediately
+  // instead of spending the remaining attempt budget.
+  const seenGroundingReasonSignatures = new Set();
+  // Generation-stage self-heal (2026-07-25 Crittenden-Johnson Resolution
+  // incident): every terminal throw below used to escape straight to the
+  // /blog/generate-draft or /blog/publish caller with no record that this
+  // specific event cannot be written. Both the cached draft-source
+  // (loadPreparedDraftSource) and the deterministic selector then reproduced
+  // the identical failing event on every later, independent run for the rest
+  // of the day — 3 separate GitHub Actions runs, 3 different failure
+  // messages, same unwritable event, hours lost. markGroundingBlockedEvent
+  // already exists for exactly this purpose downstream (the final grounding
+  // gate); it was just never reached because generation itself died first.
+  // Transient provider-capacity defers must resume against the SAME event,
+  // not skip it, so those are excluded below.
+  try {
   for (let attempt = 1; attempt <= MAX_CONTENT_ATTEMPTS; attempt++) {
     content =
       attempt === 1
@@ -7826,6 +7969,10 @@ async function generateAndStore(
       attachSelectedEventSourcePages(content, selectedEvent);
       enforceSelectedEventDate(content, selectedEvent);
     }
+    ensurePersonKeyTermFromSource(
+      content,
+      sourceMaterial || selectedEvent?.sourceExtract || "",
+    );
 
     const dateValidation = validateContentDateForPublish(content, now);
     if (!dateValidation.ok) {
@@ -7923,6 +8070,10 @@ async function generateAndStore(
             attachSelectedEventSourcePages(chunked, selectedEvent);
             enforceSelectedEventDate(chunked, selectedEvent);
           }
+          ensurePersonKeyTermFromSource(
+            chunked,
+            sourceMaterial || selectedEvent?.sourceExtract || "",
+          );
           const chunkedDate = validateContentDateForPublish(chunked, now);
           if (!chunkedDate.ok) throw new Error(chunkedDate.reason);
           // Same combined polish gate as the one-shot path above: only a
@@ -8045,7 +8196,10 @@ async function generateAndStore(
       }
       if (!grounding.ok) {
         attemptFailures.push(`attempt ${attempt} grounding: ${grounding.reasons.join("; ")}`);
-        if (attempt < MAX_CONTENT_ATTEMPTS) {
+        const reasonSignature = grounding.reasons.slice().sort().join("|");
+        const isRepeatFailure = seenGroundingReasonSignatures.has(reasonSignature);
+        seenGroundingReasonSignatures.add(reasonSignature);
+        if (attempt < MAX_CONTENT_ATTEMPTS && !isRepeatFailure) {
           const avoid = [...takenAllTime, content?.title].filter(Boolean);
           currentGroundingFeedback = grounding.reasons;
           console.warn(
@@ -8055,7 +8209,11 @@ async function generateAndStore(
           continue;
         }
         throw new Error(
-          `Article failed source-grounding credibility check: ${grounding.reasons.join("; ")} [attempts: ${attemptFailures.join(" | ")}]`,
+          `Article failed source-grounding credibility check: ${grounding.reasons.join("; ")}` +
+          (isRepeatFailure
+            ? " (identical to an earlier attempt this run — the source cannot ground this event; stopping early instead of spending further capacity)"
+            : "") +
+          ` [attempts: ${attemptFailures.join(" | ")}]`,
         );
       }
     }
@@ -8121,6 +8279,15 @@ async function generateAndStore(
       enforceSelectedEventDate(content, selectedEvent);
     }
     break;
+  }
+  } catch (err) {
+    if (selectedEvent && !isAIProviderCapacityError(err)) {
+      await markGroundingBlockedEvent(env, buildSlug(now), selectedEvent, [err.message]);
+      console.warn(
+        `Blog AI: generation self-heal — blocked "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" for ${buildSlug(now)} after a hard content-generation failure so the next independent run selects a different event.`,
+      );
+    }
+    throw err;
   }
 
   if (selectedEvent) {
@@ -11333,6 +11500,98 @@ function stripPersonHonorifics(name) {
   return tokens.join(" ");
 }
 
+// Deterministic person-name extraction from source text (2026-07-25). The
+// "keyTerms must include one named person" contract killed two publication
+// runs on a day whose source extract literally named the key actors
+// ("Brigadier General Irvin McDowell", "P. G. T. Beauregard") — the model
+// simply failed to return them. Rather than fail the whole run, recover the
+// names from the source at zero AI cost. Precision over recall: only
+// honorific/rank-led names and initials-shaped names qualify, the result
+// must survive stripPersonHonorifics with at least two words (or an
+// initials-led shape), and any capitalized non-person word rejects the
+// candidate. A wrongly injected name degrades gracefully anyway: the entity
+// pipeline's Wikipedia profile validation already leaves unverifiable names
+// as unlinked context labels.
+const NON_PERSON_NAME_WORDS = new Set([
+  "the", "this", "that", "they", "army", "navy", "union", "confederate",
+  "congress", "senate", "parliament", "county", "city", "states", "united",
+  "battle", "fort", "river", "north", "south", "east", "west", "war",
+  "republic", "empire", "kingdom", "house", "court", "government", "assembly",
+]);
+const PERSON_EXTRACTION_EXTRA_RANKS = [
+  "brigadier", "lieutenant", "commander", "marshal", "commodore",
+];
+
+function derivePersonNamesFromSourceText(sourceText, limit = 2) {
+  const text = String(sourceText || "").replace(/\s+/g, " ");
+  if (!text) return [];
+  const names = [];
+  const seen = new Set();
+  const nameWord = "[A-Z][a-zA-Z'’-]+";
+  const initials = "(?:[A-Z]\\.\\s*)";
+  const nameShape = new RegExp(
+    `^(?:${initials}+${nameWord}|${nameWord}(?:\\s+${initials}*${nameWord})+)$`,
+  );
+  const push = (raw) => {
+    if (names.length >= limit) return;
+    const cleaned = stripPersonHonorifics(
+      String(raw || "").replace(/['’]s\b/g, "").replace(/\s+/g, " ").trim(),
+    );
+    if (!nameShape.test(cleaned)) return;
+    const words = cleaned.split(/\s+/).map((word) => word.replace(/\./g, "").toLowerCase());
+    if (words.some((word) => NON_PERSON_NAME_WORDS.has(word))) return;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(cleaned);
+  };
+  const honorificAlt = [
+    ...PERSON_NAME_HONORIFIC_TOKENS,
+    ...PERSON_EXTRACTION_EXTRA_RANKS,
+  ]
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join("|");
+  const honorificLed = new RegExp(
+    `\\b(?:${honorificAlt})(?:\\s+(?:${honorificAlt}))?\\s+(${initials}*${nameWord}(?:\\s+${initials}*${nameWord}){0,3})`,
+    "g",
+  );
+  for (const match of text.matchAll(honorificLed)) push(match[1]);
+  const initialsShaped = new RegExp(
+    `\\b(${initials}{1,3}${nameWord}|${nameWord}\\s+${initials}{1,3}${nameWord})\\b`,
+    "g",
+  );
+  for (const match of text.matchAll(initialsShaped)) push(match[1]);
+  return names;
+}
+
+// Injects source-derived person keyTerms when the model omitted a named
+// person, instead of failing the run. Prepends so the person always lands
+// inside downstream slice windows (the chunked brief forwards only the first
+// 8 keyTerms). `scanLimit` mirrors the caller's own window so a person the
+// caller cannot see does not suppress the rescue.
+function ensurePersonKeyTermFromSource(content, sourceText, { scanLimit = Infinity } = {}) {
+  if (!content || typeof content !== "object") return false;
+  const keyTerms = Array.isArray(content.keyTerms) ? content.keyTerms : [];
+  const scanned = Number.isFinite(scanLimit) ? keyTerms.slice(0, scanLimit) : keyTerms;
+  const hasPerson = scanned.some(
+    (term) =>
+      term &&
+      String(term.type || "").toLowerCase() === "person" &&
+      String(term.term || "").trim(),
+  );
+  if (hasPerson) return false;
+  const names = derivePersonNamesFromSourceText(sourceText);
+  if (names.length === 0) return false;
+  content.keyTerms = [
+    ...names.map((term) => ({ term, type: "person" })),
+    ...keyTerms,
+  ];
+  console.warn(
+    `Blog AI: injected ${names.length} source-derived person key term(s) (${names.join(", ")}) — the model omitted a named person.`,
+  );
+  return true;
+}
+
 function unlinkedArticlePerson(term) {
   const name = String(term?.term || term?.name || "").trim();
   const slug = entitySlug(name);
@@ -14525,6 +14784,21 @@ function shouldRetryChunkOutputFailure(error) {
   return true;
 }
 
+// A retry whose PREVIOUS failure never produced any JSON (parse failure or
+// "no JSON object returned") gets more completion headroom — the 2026-07-19
+// incident showed a raw response of reasoning prose ("We need to produce
+// JSON with many fields...") cut off mid-thought before any JSON began, i.e.
+// the model spent its whole budget reasoning and never reached the answer.
+// Retrying with the identical budget reproduces the same cutoff. This never
+// fires on the first attempt and never affects content-quality validation
+// failures (a "lacks a concrete detail" rejection already has usable JSON;
+// more tokens would not help and are harmless if given anyway).
+function isStructurallyIncompleteChunkFailure(error) {
+  return /no JSON object returned|JSON parse failed/i.test(
+    String(error?.message || error || ""),
+  );
+}
+
 async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, validate = null) {
   // Retry a failed sub-call once before letting it abort the whole chunked
   // fallback. A single transient parse error or short-count response (the
@@ -14532,6 +14806,7 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
   // undershooting one-shot; one retry makes the chunked path resilient to it.
   let lastError;
   let retryFeedback = "";
+  let retryMaxTokens = maxTokens;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const callArticleAI = env.ARTICLE_GENERATION_PREFER_WORKERS_AI
@@ -14548,7 +14823,7 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
           { role: "user", content: `${userPrompt}${retryFeedback}` },
         ],
         {
-          maxTokens,
+          maxTokens: attempt === 1 ? maxTokens : retryMaxTokens,
           timeoutMs: 60_000,
           cfModel: model,
           temperature: 0.15,
@@ -14562,6 +14837,12 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
       lastError = err;
       if (!shouldRetryChunkOutputFailure(err)) throw err;
       if (attempt < 2) {
+        if (isStructurallyIncompleteChunkFailure(err)) {
+          retryMaxTokens = Math.min(Math.round(maxTokens * 1.5), 4000);
+          console.warn(
+            `Blog: ${label} attempt ${attempt} never produced JSON (${err.message}) — retrying with maxTokens ${retryMaxTokens} (was ${maxTokens}).`,
+          );
+        }
         const rejection = String(err.message || err).slice(0, 900);
         const needsConcreteDetail =
           /lacks a concrete (?:name|detail)|lacks a hard fact/i.test(rejection);
@@ -14731,6 +15012,11 @@ ${retryFeedback}`;
       min: 1,
       label: "chunked article brief",
     });
+    // Rescue a person-less brief from the source text before failing the
+    // whole chunked run (the 2026-07-25 "keyTerms must include one named
+    // person" no-publish). scanLimit mirrors the slice(0, 8) forward window
+    // below; injection prepends so the person lands inside it.
+    ensurePersonKeyTermFromSource(parsed, sourceMaterial, { scanLimit: 8 });
     const forwardedTerms = parsed.keyTerms.slice(0, 8);
     if (
       !forwardedTerms.some(

@@ -14395,7 +14395,15 @@ function requireChunkArray(chunk, field, { min = 1, exact = null, label = "chunk
 
 function validateChunkedArticleBodyChunk(chunk, fields, label) {
   for (const field of fields) {
-    const paragraphs = requireChunkArray(chunk, field, { exact: 2, label });
+    // 2026-07-26: was `exact: 2` — a provider returning one substantive,
+    // properly-sourced paragraph instead of two (NVIDIA NIM's recurring
+    // failure shape under provider pressure) hard-failed here even though
+    // the content itself was fine, repeatedly blocking otherwise-good topics.
+    // The real substantive-length gate is the total-body-word floor
+    // (MIN_REAL_ARTICLE_BODY_WORDS, checked downstream across all four
+    // fields combined), so a short section here is not a silent quality
+    // loss — it still has to clear that floor to publish.
+    const paragraphs = requireChunkArray(chunk, field, { min: 1, label });
     if (!paragraphs.every((paragraph) => typeof paragraph === "string" && wordCount(paragraph) >= CHUNKED_BODY_PARAGRAPH_MIN_WORDS)) {
       throw new Error(`${label}: ${field} contains a thin paragraph`);
     }
@@ -14837,8 +14845,17 @@ function shouldRetryChunkOutputFailure(error) {
 // finishing" shape as a truncated JSON response, just caught by a different
 // validator (requireChunkArray) further down the pipeline instead of the
 // JSON parser itself. More budget is the same plausible fix either way.
+//
+// 2026-07-26: body-paragraph fields now validate with `min: 1` instead of
+// `exact: 2` (validateChunkedArticleBodyChunk), so a fully-empty field throws
+// "must contain at least N item(s)" rather than "exactly" — added here too,
+// scoped to just the four body fields, so a total omission still gets the
+// self-heal exemption a 1-of-2 shortfall already gets, instead of silently
+// blocking the topic through the one path this fix didn't cover. NOT
+// widened to analysisGood/analysisBad/didYouKnowFacts, which have used
+// `min` for unrelated, pre-existing reasons and are out of scope here.
 function isStructurallyIncompleteChunkFailure(error) {
-  return /no JSON object returned|JSON parse failed|must contain exactly \d+ item\(s\)|missing \w+ array/i.test(
+  return /no JSON object returned|JSON parse failed|must contain exactly \d+ item\(s\)|missing \w+ array|(?:overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs) must contain at least \d+ item\(s\)/i.test(
     String(error?.message || error || ""),
   );
 }
@@ -14896,9 +14913,21 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
         // were required, or the field omitted outright — and the generic
         // "correct the exact structural or quality failure" instruction
         // wasn't specific enough to fix it on retry. Name the exact gap.
-        const countMismatch = rejection.match(
-          /(\w+) must contain exactly (\d+) item\(s\), got (\d+)/,
-        );
+        // 2026-07-26: body-paragraph fields now validate with `min: 1`
+        // instead of `exact: 2` (see validateChunkedArticleBodyChunk), so an
+        // empty array throws "must contain at least N item(s)" rather than
+        // "exactly" — matched here too (scoped to just the four body fields,
+        // via a second alternative pattern) so a fully-empty field still
+        // gets the same specific "add N more paragraph(s)" correction
+        // instead of falling through to the generic message. NOT widened to
+        // analysisGood/analysisBad/didYouKnowFacts, which also use `min` but
+        // hold objects/strings, not paragraphs — the "paragraph(s)" wording
+        // below would be inaccurate for them.
+        const countMismatch =
+          rejection.match(/(\w+) must contain exactly (\d+) item\(s\), got (\d+)/) ||
+          rejection.match(
+            /((?:overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs)) must contain at least (\d+) item\(s\), got (\d+)/,
+          );
         const missingField = rejection.match(/missing (\w+) array/);
         const correction = countMismatch
           ? (() => {

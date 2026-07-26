@@ -472,7 +472,19 @@ const EVERGREEN_HISTORY_BACKLOG_CRON = "25 1 * * *";
 // Retry only the current day's still-pending companion after provider
 // cooldowns. These invocations are GET-only when the queue is empty and never
 // consume the older backlog handled by the isolated 01:25 pass.
-const EVERGREEN_HISTORY_RETRY_CRON = "55 6,12,18 * * *";
+// 2026-07-26: tightened from 3x/day (every ~6h) to hourly. This is the same
+// pass that also picks up inline person/event figures + the quiz for a
+// freshly published post (recoverPublishedPostEnrichment), so the 6h spacing
+// meant a newly published article could sit without figures/quiz for up to 6
+// hours. Safe to tighten because (a) recoverPublishedPostEnrichment's own
+// POST_PUBLISH_NOTIFICATION_DEADLINE_MS (30 min) already gates re-attempting
+// the expensive fetches for the same post, so hourly firing cannot cause
+// redundant spend within that window, and (b) each invocation still gets a
+// fresh subrequest budget exactly as before — only the WAIT between fresh
+// invocations shrank, not the isolation that made this pass safe in the
+// first place. KV write budget confirmed to have headroom (290/1000 used the
+// day this was tightened).
+const EVERGREEN_HISTORY_RETRY_CRON = "55 * * * *";
 const AMAZON_ASSOCIATE_TAG = "thisday0c-20";
 const MIN_RELEVANT_COMMERCIAL_BOOKS = 2;
 const MIN_RELATED_FILMS = 2;
@@ -3833,6 +3845,39 @@ export default {
       });
     }
 
+    // Admin: manually trigger the post-publish enrichment pass (inline person/
+    // event figures, book cover, quiz, evergreen entity writes) for one post,
+    // instead of waiting for the next EVERGREEN_HISTORY_RETRY_CRON
+    // (55 * * * *, hourly). enrichPublishedPost deliberately defers these —
+    // fetching them on the core publish path would spend that invocation's
+    // finite subrequest budget and could block the article behind a slow
+    // image fetch — so every freshly published post needs this pass before it
+    // shows inline figures or a quiz. Mirrors /blog/backfill-entities (a
+    // manual counterpart to a cron-only recovery pass); this one covers
+    // recoverPublishedPostEnrichment specifically. 2026-07-26.
+    // POST /blog/recover-post-figures?slug=26-july-2026
+    if (path === "/blog/recover-post-figures" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const recoverParams = new URL(request.url).searchParams;
+      const recoverSlug = recoverParams.get("slug") || "";
+      if (!recoverSlug) {
+        return jsonResponse({ status: "error", message: "Provide ?slug=X" }, 400);
+      }
+      const guarded = await prepareBlogKvBudget(env, "maintenance");
+      if (!guarded.budget.allowPhase) {
+        return kvBudgetBlockedResponse(guarded.budget);
+      }
+      try {
+        const result = await recoverPublishedPostEnrichment(guarded.env, recoverSlug);
+        return jsonResponse({ status: "ok", slug: recoverSlug, ...result });
+      } catch (err) {
+        return jsonResponse({ status: "error", slug: recoverSlug, message: err.message }, 500);
+      }
+    }
+
     // Admin: re-generate body sections for existing entity records using the improved prompt.
     // Does NOT re-fetch Wikipedia — uses already-stored intro/summary data.
     // POST /blog/reenrich-entity-sections?type=person&limit=10&offset=0
@@ -6929,17 +6974,70 @@ function semanticDuplicateScore(tokensA, tokensB) {
   return { shared, ratio: shared / Math.min(tokensA.size, tokensB.size) };
 }
 
-function scanIntraPageDuplication(content) {
+// Shared entry list for both the duplication scanner and the DYK pruner below.
+// Each entry keeps its array index (where applicable) so a caller can splice a
+// single offending item back out of content instead of only reporting on it.
+function articleContentEntries(content) {
   const entries = [];
   for (const f of ARTICLE_BODY_FIELDS) {
-    (Array.isArray(content[f]) ? content[f] : []).forEach((p) => entries.push([f, p]));
+    (Array.isArray(content[f]) ? content[f] : []).forEach((p, index) =>
+      entries.push({ field: f, index, text: p }),
+    );
   }
-  (Array.isArray(content.didYouKnowFacts) ? content.didYouKnowFacts : []).forEach((p) => entries.push(["didYouKnowFacts", p]));
+  (Array.isArray(content.didYouKnowFacts) ? content.didYouKnowFacts : []).forEach((p, index) =>
+    entries.push({ field: "didYouKnowFacts", index, text: p }),
+  );
   for (const f of ["analysisGood", "analysisBad"]) {
-    (Array.isArray(content[f]) ? content[f] : []).forEach((item) => entries.push([f, item?.detail || ""]));
+    (Array.isArray(content[f]) ? content[f] : []).forEach((item, index) =>
+      entries.push({ field: f, index, text: item?.detail || "" }),
+    );
   }
+  return entries;
+}
+
+// Pairwise semantic-overlap comparison shared by scanIntraPageDuplication
+// (reporting) and pruneDuplicateDidYouKnowFacts (mechanical fix). Kept as its
+// own function so a caller can inspect WHICH two entries collided, not just a
+// count, without re-deriving the scoring logic.
+function semanticDuplicateEntryPairs(content) {
+  const ignoredTokens = semanticDuplicateTokens(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.historicalDate,
+      content?.location,
+      content?.country,
+    ].filter(Boolean).join(" "),
+  );
+  const tokenized = articleContentEntries(content)
+    .map((entry) => ({
+      ...entry,
+      plain: plainText(entry.text),
+      tokens: semanticDuplicateTokens(entry.text, ignoredTokens),
+    }))
+    .filter((entry) => entry.plain.length >= 90 && entry.tokens.size >= 8);
+
+  const pairs = [];
+  for (let i = 0; i < tokenized.length; i += 1) {
+    for (let j = i + 1; j < tokenized.length; j += 1) {
+      const a = tokenized[i];
+      const b = tokenized[j];
+      const { shared, ratio } = semanticDuplicateScore(a.tokens, b.tokens);
+      if (shared >= 10 && ratio >= 0.62) pairs.push({ a, b, shared, ratio });
+    }
+  }
+  return pairs;
+}
+
+function quotedExcerpt(text, maxLength = 160) {
+  const clean = String(text || "").trim();
+  return clean.length > maxLength ? `${clean.slice(0, maxLength)}…` : clean;
+}
+
+function scanIntraPageDuplication(content) {
+  const entries = articleContentEntries(content);
   const map = new Map();
-  for (const [field, text] of entries) {
+  for (const { field, text } of entries) {
     for (const sentence of splitSentences(text, 45)) {
       const key = normalizeForCompare(sentence);
       if (!key) continue;
@@ -6955,37 +7053,63 @@ function scanIntraPageDuplication(content) {
     }
   }
 
-  const ignoredTokens = semanticDuplicateTokens(
-    [
-      content?.title,
-      content?.eventTitle,
-      content?.historicalDate,
-      content?.location,
-      content?.country,
-    ].filter(Boolean).join(" "),
-  );
-  const tokenized = entries
-    .map(([field, text], index) => ({
-      field,
-      text: plainText(text),
-      index,
-      tokens: semanticDuplicateTokens(text, ignoredTokens),
-    }))
-    .filter((entry) => entry.text.length >= 90 && entry.tokens.size >= 8);
-
-  for (let i = 0; i < tokenized.length; i += 1) {
-    for (let j = i + 1; j < tokenized.length; j += 1) {
-      const a = tokenized[i];
-      const b = tokenized[j];
-      const { shared, ratio } = semanticDuplicateScore(a.tokens, b.tokens);
-      if (shared >= 10 && ratio >= 0.62) {
-        issues.push(
-          `Semantic repetition across ${a.field} and ${b.field}: ${shared} shared detail terms; rewrite one to add new information.`,
-        );
-      }
-    }
+  // Quoting both colliding entries (not just a field-name pair and a count)
+  // gives a repair model something concrete to diff against, rather than
+  // needing it to re-scan the whole payload to find the overlap itself.
+  for (const { a, b, shared } of semanticDuplicateEntryPairs(content)) {
+    issues.push(
+      `Semantic repetition across ${a.field} and ${b.field}: ${shared} shared detail terms; rewrite one to add new information. ` +
+        `${a.field} currently says: "${quotedExcerpt(a.plain)}" ${b.field} currently says: "${quotedExcerpt(b.plain)}"`,
+    );
   }
   return issues;
+}
+
+// 2026-07-26: didYouKnowFacts is generated with headroom (the prompt asks for
+// up to 6 candidates for a 4-5 slot slider — see MIN/MAX_DID_YOU_KNOW_FACTS),
+// so a DYK entry that duplicates body or analysis content can simply be
+// dropped instead of spending an AI repair call to rewrite it. This is the
+// single most common scanIntraPageDuplication trigger in practice (a manual
+// publish this session hit it on the first attempt). Runs before any repair
+// call gates on the duplication scan, so the common case never reaches an AI
+// call at all. Never drops below MIN_DID_YOU_KNOW_FACTS.
+function pruneDuplicateDidYouKnowFacts(content) {
+  if (
+    !Array.isArray(content?.didYouKnowFacts) ||
+    content.didYouKnowFacts.length <= MIN_DID_YOU_KNOW_FACTS
+  ) {
+    return content;
+  }
+  let working = content;
+  let dropped = 0;
+  // Re-derive collisions after each removal: dropping one DYK fact changes
+  // array indices and can resolve or reveal further collisions. Bounded by
+  // the starting fact count so a pathological case cannot loop unbounded.
+  for (let guard = 0; guard < content.didYouKnowFacts.length; guard += 1) {
+    if (working.didYouKnowFacts.length <= MIN_DID_YOU_KNOW_FACTS) break;
+    const pairs = semanticDuplicateEntryPairs(working).filter(
+      ({ a, b }) => a.field === "didYouKnowFacts" || b.field === "didYouKnowFacts",
+    );
+    if (pairs.length === 0) break;
+    const worst = pairs.reduce((max, pair) => (pair.shared > max.shared ? pair : max), pairs[0]);
+    const dykSide =
+      worst.a.field === "didYouKnowFacts"
+        ? worst.b.field === "didYouKnowFacts"
+          ? (worst.a.index > worst.b.index ? worst.a : worst.b) // keep the earlier fact
+          : worst.a
+        : worst.b;
+    working = {
+      ...working,
+      didYouKnowFacts: working.didYouKnowFacts.filter((_, i) => i !== dykSide.index),
+    };
+    dropped += 1;
+  }
+  if (dropped > 0) {
+    console.log(
+      `pruneDuplicateDidYouKnowFacts: dropped ${dropped} redundant fact(s) without an AI call, ${working.didYouKnowFacts.length} remain`,
+    );
+  }
+  return working;
 }
 
 function extractFirstJsonObject(value) {
@@ -9309,7 +9433,7 @@ async function enrichPublishedPost(
   if (!draftRaw) throw new Error(`No draft found for ${slug}`);
 
   const draft = JSON.parse(draftRaw);
-  const content = draft?.content;
+  let content = draft?.content;
   const publishedAt = draft?.publishedAt;
   if (!content || !publishedAt) throw new Error(`Draft payload invalid for ${slug}`);
   const groundingSource = groundingSourceFromContent(content);
@@ -9331,6 +9455,11 @@ async function enrichPublishedPost(
   alignContentDateFields(content, { historicalDateISO: date.toISOString().slice(0, 10) });
   const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
   const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
+
+  // Mechanical, zero-token pass before either repair path below ever runs a
+  // duplication scan: drop a redundant didYouKnowFacts entry outright rather
+  // than spending an AI repair call asking a model to rewrite it.
+  content = pruneDuplicateDidYouKnowFacts(content);
 
   let enriched;
   let pillars;
@@ -15822,6 +15951,7 @@ Field requirements:
 - curiosityTitle must be fully answered by SOURCE MATERIAL and the article. Never use generic "What happened?", hype, a secret/mystery formula, or an invented premise.
 - title and eventTitle remain locked factual/date labels. They are not questions and must keep the selected event identity unchanged.
 - quickFacts must contain exactly 6 populated facts. didYouKnowFacts must contain 4 or 5 distinct facts. Prefer 5 when fully supported, but return 4 instead of adding vague, repetitive, or weakly sourced filler.
+- Before writing, silently pick 6-8 distinct concrete facts from SOURCE MATERIAL (each its own name, number, date, or institutional action) and assign each to exactly ONE field: 2 facts per body section (overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, conclusionParagraphs), the rest split across didYouKnowFacts and analysisGood/analysisBad. A fact used in a body paragraph must not reappear, even reworded, in didYouKnowFacts or analysis — pick a different fact instead.
 - Every Quick Fact must be directly supported. Do not use Significance, Legacy, Impact, or Lessons labels unless SOURCE MATERIAL explicitly states the claimed consequence. Prefer Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome.
 - Every Did You Know fact must come from SOURCE MATERIAL. Do not invent a surprising consequence, coincidence, motive, fate, or policy effect.
 - analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
@@ -17050,6 +17180,131 @@ const GROUNDING_REPAIRABLE_ARRAY_FIELDS = [
   "analysisBad",
 ];
 
+const MECHANICALLY_REPAIRABLE_GROUNDING_FIELDS = new Set([
+  ...GROUNDING_REPAIRABLE_STRING_FIELDS,
+  ...GROUNDING_REPAIRABLE_ARRAY_FIELDS,
+]);
+
+// "order attribution" fires on the bare noun "order" with no suffix required
+// (see GROUNDING_CLAIM_RISK_RULES), which makes it a near-guaranteed false
+// positive for any article about an executive order or decree: ordinary
+// references like "the order" trip the check even though they attribute
+// nothing. 2026-07-26 manual publish hit this three separate times in one
+// article. A source sentence about the event almost always names its
+// principal actor next to an order-family verb (e.g. "Truman ordered..."),
+// so splicing that same actor's name next to a bare reference is usually
+// enough to satisfy the check's own token+anchor overlap requirement — the
+// exact fix a human editor made by hand three times that session.
+const GENERIC_ORDER_REFERENCE_PATTERN =
+  /\b(?:the president'?s|the|this|an?)\s+(?:executive\s+)?order\b/i;
+
+function primaryContentSubjectName(content) {
+  const organizer = String(content?.organizerName || "").trim();
+  if (organizer && !/^(?:the|an?)\s/i.test(organizer)) return organizer;
+  const person = (Array.isArray(content?.keyTerms) ? content.keyTerms : []).find(
+    (term) =>
+      term &&
+      String(term.type || "").toLowerCase() === "person" &&
+      String(term.term || "").trim(),
+  );
+  return person ? String(person.term).trim() : "";
+}
+
+function possessiveName(name) {
+  const trimmed = String(name || "").trim();
+  return /s$/i.test(trimmed) ? `${trimmed}'` : `${trimmed}'s`;
+}
+
+function contentFieldPathSegments(path) {
+  return String(path || "").match(/[^.[\]]+/g) || [];
+}
+
+function getContentFieldByPath(content, path) {
+  let node = content;
+  for (const seg of contentFieldPathSegments(path)) {
+    if (node == null) return undefined;
+    node = /^\d+$/.test(seg) ? node[Number(seg)] : node[seg];
+  }
+  return node;
+}
+
+function setContentFieldByPath(content, path, value) {
+  const segments = contentFieldPathSegments(path);
+  if (segments.length === 0) return false;
+  let node = content;
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    const seg = segments[i];
+    node = /^\d+$/.test(seg) ? node[Number(seg)] : node[seg];
+    if (node == null) return false;
+  }
+  const last = segments[segments.length - 1];
+  node[/^\d+$/.test(last) ? Number(last) : last] = value;
+  return true;
+}
+
+// Zero-token, deterministic pre-repair. Tried before any AI repair call; a
+// no-op when it cannot help (no primary subject, no matching finding, or the
+// splice does not resolve the check), in which case the original content is
+// returned untouched and the finding is passed through to the existing AI
+// repair path exactly as before this function existed.
+function mechanicallyRepairBareOrderReferences(content, source) {
+  const subject = primaryContentSubjectName(content);
+  const sourceMaterial = sourceMaterialForGrounding(source);
+  if (!subject || !sourceMaterial) return { content, repairedFieldPaths: [] };
+
+  const surname = subject.split(/\s+/).pop();
+  const surnamePattern = surname
+    ? new RegExp(`\\b${surname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i")
+    : null;
+
+  let working = content;
+  const repairedFieldPaths = [];
+  // A field can hide a second finding once the first is fixed (e.g. two
+  // sentences in the same paragraph); cap iterations well above any realistic
+  // count so a pathological case cannot loop rather than terminate.
+  for (let guard = 0; guard < 8; guard += 1) {
+    const findings = unsupportedGroundingClaims(working, sourceMaterial).filter(
+      (finding) =>
+        finding.label === "order attribution" &&
+        MECHANICALLY_REPAIRABLE_GROUNDING_FIELDS.has(finding.field.split(/[.[\]]/)[0]),
+    );
+    if (findings.length === 0) break;
+    const finding = findings[0];
+    const fullText = getContentFieldByPath(working, finding.field);
+    if (typeof fullText !== "string") break;
+
+    const sentences = splitSentences(fullText);
+    const targetSentence = sentences.find((sentence) => sentence.slice(0, 240) === finding.sentence);
+    if (!targetSentence) break;
+    if (surnamePattern && surnamePattern.test(targetSentence)) break; // not the bare-reference case
+    if (!GENERIC_ORDER_REFERENCE_PATTERN.test(targetSentence)) break;
+
+    const fixedSentence = targetSentence.replace(GENERIC_ORDER_REFERENCE_PATTERN, (match) => {
+      const bareNoun = match.replace(/^(?:the president'?s|the|this|an?)\s+/i, "");
+      return `${possessiveName(subject)} ${bareNoun}`;
+    });
+    if (fixedSentence === targetSentence) break;
+    const fixedFullText = fullText.replace(targetSentence, fixedSentence);
+    if (fixedFullText === fullText) break;
+
+    // Deep clone (content is plain JSON data) so the candidate does not share
+    // nested array/object references with `working` — a shallow copy would
+    // mutate both when the field setter below writes into a nested array.
+    const candidate = JSON.parse(JSON.stringify(working));
+    setContentFieldByPath(candidate, finding.field, fixedFullText);
+
+    const stillFlagged = unsupportedGroundingClaims(candidate, sourceMaterial).some(
+      (f) => f.label === "order attribution" && f.field === finding.field && f.sentence === finding.sentence,
+    );
+    if (stillFlagged) break; // the splice did not help; stop rather than mangle text further.
+
+    working = candidate;
+    repairedFieldPaths.push(finding.field);
+  }
+
+  return { content: working, repairedFieldPaths };
+}
+
 async function repairGroundingContradictions(env, content, reasons, source, callAIImpl = callAI) {
   if (!Array.isArray(reasons) || reasons.length === 0) return content;
   const sourceMaterial = sourceBoundRepairContext(source);
@@ -17139,10 +17394,32 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
   const first = await verify(env, content, source);
   if (first.ok) return { ok: true, reasons: [], content };
 
-  const contradictions = (first.reasons || []).filter(
+  let contradictions = (first.reasons || []).filter(
     (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
   );
   if (contradictions.length === 0) return { ...first, content };
+
+  // Mechanical pass first: zero tokens, and resolves the single most common
+  // false-positive shape (a bare "order" reference) without ever reaching the
+  // AI repair call below. If it fixes everything, skip that call entirely.
+  const mechanical = mechanicallyRepairBareOrderReferences(content, source);
+  if (mechanical.repairedFieldPaths.length > 0) {
+    const afterMechanical = await verify(env, mechanical.content, source);
+    if (afterMechanical.ok) {
+      console.log(
+        `Final grounding: mechanical repair resolved ${slug} without an AI call (${mechanical.repairedFieldPaths.join(", ")}).`,
+      );
+      return { ok: true, reasons: [], content: mechanical.content };
+    }
+    content = mechanical.content;
+    contradictions = (afterMechanical.reasons || []).filter(
+      (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
+    );
+    if (contradictions.length === 0) return { ...afterMechanical, content };
+    console.warn(
+      `Final grounding: mechanical repair fixed part of ${slug} (${mechanical.repairedFieldPaths.join(", ")}); ${contradictions.length} issue(s) remain for AI repair.`,
+    );
+  }
 
   console.warn(
     `Final grounding failed for ${slug}; attempting one source-bound repair pass: ${contradictions.join("; ").slice(0, 400)}`,

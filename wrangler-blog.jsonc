@@ -75,12 +75,18 @@
   // not the optional-maintenance budget.
   // 01:25 retries at most one older pending companion in a separate invocation,
   // so backlog repair never displaces the current day's 00:55 edition.
-  // 06:55/12:55/18:55 retry only today's still-pending companion after provider
-  // cooldowns. They are GET-only when today's queue is empty.
+  // :55 hourly retries only today's still-pending companion after provider
+  // cooldowns, AND is the pass that fetches inline person/event figures + the
+  // quiz for a freshly published post (recoverPublishedPostEnrichment). They
+  // are GET-only when today's queue is empty. Tightened from 3x/day
+  // (06:55/12:55/18:55) to hourly on 2026-07-26 so a freshly published post
+  // doesn't sit without figures/quiz for up to 6 hours — safe because
+  // recoverPublishedPostEnrichment's own 30-minute re-attempt gate already
+  // prevents redundant spend on the same post within an hour.
   // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 13:00 UTC
   // (about 09:00 Eastern during daylight saving time).
   "triggers": {
-    "crons": ["5,10,15 0 * * *", "50,55 0 * * *", "25 1 * * *", "55 6,12,18 * * *"],
+    "crons": ["5,10,15 0 * * *", "50,55 0 * * *", "25 1 * * *", "55 * * * *"],
   },
 
   // KV namespaces — blog posts/index and shared events/quiz cache.

@@ -8304,7 +8304,20 @@ async function generateAndStore(
     break;
   }
   } catch (err) {
-    if (selectedEvent && !isAIProviderCapacityError(err)) {
+    if (selectedEvent && isStructurallyIncompleteChunkFailure(err)) {
+      // 2026-07-26: a structurally-incomplete provider response (missing/short
+      // continuity array, no JSON returned) is a known fallback-provider
+      // weakness (observed repeatedly from NVIDIA NIM once Groq/OpenRouter/
+      // Workers AI were all circuit-blocked), not evidence the topic itself is
+      // unusable. Blocking on this signature was burning through the day's
+      // whole candidate pool on a provider glitch. Treat it like a capacity
+      // defer: do not block, so the next attempt retries the SAME event fresh
+      // (ideally once a more reliable provider is available) instead of
+      // rotating away from a perfectly good topic.
+      console.warn(
+        `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" hit a structurally-incomplete provider response — not blocking; the next attempt retries the same event.`,
+      );
+    } else if (selectedEvent && !isAIProviderCapacityError(err)) {
       await markGroundingBlockedEvent(env, buildSlug(now), selectedEvent, [err.message]);
       console.warn(
         `Blog AI: generation self-heal — blocked "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" for ${buildSlug(now)} after a hard content-generation failure so the next independent run selects a different event.`,

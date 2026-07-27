@@ -1,16 +1,24 @@
 /**
- * Shared AI text generation helper — Groq → OpenRouter → NVIDIA NIM → Workers AI fallback chain.
+ * Shared AI text generation helper — Groq → OpenRouter → NVIDIA NIM → Workers AI → Anthropic fallback chain.
  *
  * Provider priority:
  *   1. Groq  (env.GROQ_API_KEY, env.GROQ_API_KEY_2, env.GROQ_API_KEY_3, env.GROQ_API_KEY_4)
  *        — preferred when available, keeps Free-plan Workers under subrequest limits
  *   2. OpenRouter (env.OPENROUTER_API_KEY... / env.OPENRUITER_API_KEY...) — free router support
  *   3. NVIDIA NIM (env.NVIDIA_API_KEY) — openai/gpt-oss-20b, additional fallback
- *   4. Workers AI (env.AI)       — @cf/meta/llama-3.3-70b-instruct-fp8-fast, last fallback
+ *   4. Workers AI (env.AI)       — @cf/meta/llama-3.3-70b-instruct-fp8-fast, penultimate fallback
+ *   5. Anthropic (env.ANTHROPIC_API_KEY) — claude-haiku-4-5-20251001, LAST RESORT ONLY
  *
- * Cerebras and Anthropic were removed from the chain on 2026-07-03 (user
- * decision). The Anthropic branch had been silently 404ing since
- * claude-3-5-haiku's 2026-02-19 retirement.
+ * Cerebras was removed from the chain on 2026-07-03 (user decision). Anthropic
+ * was removed the same day (its configured model had been silently 404ing
+ * since claude-3-5-haiku's 2026-02-19 retirement) and re-added on 2026-07-27
+ * as the final fallback tier, using an explicit dated model id this time
+ * (never a "-latest" alias — that is exactly what silently rotted before).
+ * Unlike every other tier here, Anthropic bills per token with no free
+ * allocation, so it is deliberately placed LAST: it is only ever reached once
+ * Groq, OpenRouter, NVIDIA, and Workers AI have all failed or exhausted their
+ * free-tier quota for the day (2026-07-27 incident: all four were down/dead
+ * simultaneously and the day's article had to be hand-published instead).
  *
  * Set GROQ_API_KEY as a Worker secret to enable Groq fallback:
  *   npx wrangler secret put GROQ_API_KEY --config wrangler.jsonc
@@ -98,6 +106,18 @@ const NVIDIA_MODEL = "openai/gpt-oss-20b";
 // Groq/OpenRouter's own gpt-oss tiers), so the base article-generation
 // maxTokens:4096 needs that room here too or large JSON output can truncate.
 const NVIDIA_TEXT_MAX_TOKENS = 6144;
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API_VERSION = "2023-06-01";
+// Explicit dated model id, never a "-latest" alias — the previous Anthropic
+// branch (claude-3-5-haiku-latest) silently 404'd for months after its
+// pinned model retired on 2026-02-19 because nothing forced a review of the
+// alias. Same model already proven live elsewhere in this codebase
+// (youtube-upload/lib/video-quality.js's AI visual check).
+const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
+// Last-resort tier only — real per-token cost, no free allocation. Keep the
+// completion budget close to what was actually requested rather than
+// inflating it the way the free-tier fallbacks do.
+const ANTHROPIC_MAX_TOKENS_CEILING = 4096;
 
 // ─── Dynamic model resolution ─────────────────────────────────────────────────
 // Module-level cache survives across requests within the same Worker instance.
@@ -854,8 +874,28 @@ export function hasAnyTextAIProvider(env) {
     env?.GROQ_API_KEY_6 ||
     env?.GROQ_API_KEY_7 ||
     getOpenRouterKeys(env).length > 0 ||
-    env?.NVIDIA_API_KEY,
+    env?.NVIDIA_API_KEY ||
+    env?.ANTHROPIC_API_KEY,
   );
+}
+
+// Anthropic's Messages API has no "system" role inside the messages array —
+// it takes one separate top-level `system` string instead, and every
+// remaining message must be user/assistant with plain string content (every
+// existing callAI call site here passes exactly that shape; multi-part
+// content like the image call in video-quality.js never goes through this
+// shared chain). Joins multiple system messages (rare) with blank lines.
+function anthropicMessagesFromChat(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  const system = list
+    .filter((m) => m?.role === "system")
+    .map((m) => String(m?.content ?? ""))
+    .filter(Boolean)
+    .join("\n\n");
+  const chat = list
+    .filter((m) => m?.role === "user" || m?.role === "assistant")
+    .map((m) => ({ role: m.role, content: String(m?.content ?? "") }));
+  return { system, messages: chat };
 }
 
 function isSubrequestLimitError(err) {
@@ -1439,6 +1479,68 @@ async function callAIProviders(
     failureReasons.push("Workers AI intentionally skipped");
   } else {
     failureReasons.push("Workers AI binding missing");
+  }
+
+  // 5. Anthropic Claude — LAST RESORT ONLY. Every tier above is free-tier;
+  // this one bills per token, so it only runs once all four have failed or
+  // exhausted their daily allocation for real. See the module header for why.
+  const anthropicBlockedUntil = circuitBlockedUntil("anthropic");
+  if (anthropicBlockedUntil) {
+    failureReasons.push(
+      `Anthropic capacity circuit open until ${new Date(anthropicBlockedUntil).toISOString()} (${providerCircuitReason(providerCircuit, "anthropic") || "temporarily unavailable"})`,
+    );
+  } else if (env.ANTHROPIC_API_KEY) {
+    try {
+      guardProviderAttempt(providerAttempts, providerAttemptLimit, failureReasons);
+      providerAttempts += 1;
+      recordAiAttempt("anthropic", messages);
+      const { system, messages: anthropicMessages } = anthropicMessagesFromChat(messages);
+      const res = await fetch(ANTHROPIC_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": env.ANTHROPIC_API_KEY,
+          "anthropic-version": ANTHROPIC_API_VERSION,
+        },
+        body: JSON.stringify({
+          model: ANTHROPIC_MODEL,
+          max_tokens: Math.min(Math.max(maxTokens, 1), ANTHROPIC_MAX_TOKENS_CEILING),
+          temperature,
+          ...(system ? { system } : {}),
+          messages: anthropicMessages,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const text = (data?.content?.[0]?.text ?? "").trim();
+        if (text) return text;
+        console.warn("Anthropic returned empty response");
+        failureReasons.push("Anthropic returned empty response");
+      } else {
+        const errBody = await res.text().catch(() => "");
+        console.warn(`Anthropic error ${res.status}: ${errBody.slice(0, 120)}`);
+        failureReasons.push(`Anthropic error ${res.status}: ${errBody.slice(0, 120)}`);
+        if (res.status === 429) {
+          const retryAt = providerRetryAtFromResponse(res, errBody);
+          capacityRetryTimes.push(retryAt);
+          await markProviderCircuit(env, "anthropic", retryAt, errBody);
+        }
+      }
+    } catch (err) {
+      console.warn(`Anthropic request failed (${err.message})`);
+      failureReasons.push(`Anthropic request failed: ${err.message}`);
+      const retryAt = providerRetryAtFromError(err);
+      if (retryAt) {
+        capacityRetryTimes.push(retryAt);
+        await markProviderCircuit(env, "anthropic", retryAt, err.message);
+      }
+      if (isSubrequestLimitError(err)) {
+        throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
+      }
+    }
+  } else {
+    failureReasons.push("Anthropic API key missing");
   }
 
   const retryAt = capacityRetryTimes

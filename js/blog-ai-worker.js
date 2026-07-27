@@ -3545,6 +3545,7 @@ export default {
         hasOpenRouter2: Boolean(env.OPENROUTER_API_KEY_2 || env.OPENRUITER_API_KEY_2 || env.OPENNRUITER_API_KEY_2),
         hasOpenRouter3: Boolean(env.OPENROUTER_API_KEY_3 || env.OPENRUITER_API_KEY_3 || env.OPENNRUITER_API_KEY_3),
         hasNvidia: Boolean(env.NVIDIA_API_KEY),
+        hasAnthropic: Boolean(env.ANTHROPIC_API_KEY),
       });
     }
 
@@ -6425,7 +6426,15 @@ async function fetchWikipediaImage(
     const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
 
     // 1. REST summary — Wikipedia's explicit lead/featured image for the page.
-    //    Trusted unconditionally: if Wikipedia chose it as the lead, we use it.
+    //    Trusted immediately UNLESS it's a low-value asset (seal/flag/logo/
+    //    coat of arms) that the caller's isLowValueFeaturedImage would reject
+    //    anyway. Falling through then lets step 2's full image list (which
+    //    already excludes those same low-value patterns) find a real photo
+    //    instead of returning nothing. (2026-07-27 fix: institution/agency
+    //    pages like "United States Department of State" have their infobox
+    //    seal as the REST-summary lead image, which used to short-circuit
+    //    here and starve every fallback, even though the page's own image
+    //    list has usable photos — verified live for the July 27 stuck draft.)
     const summaryRes = await fetch(
       `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
       { headers: ua },
@@ -6433,7 +6442,7 @@ async function fetchWikipediaImage(
     if (summaryRes.ok) {
       const d = await summaryRes.json();
       const img = d.originalimage?.source ?? d.thumbnail?.source ?? null;
-      if (img) return img;
+      if (img && !isLowValueFeaturedImage(img)) return img;
     }
 
     // 2. MediaWiki images list + imageinfo — catches infobox images not exposed
@@ -10388,7 +10397,26 @@ function isHistoryEntityDiscoveryLinkEligible(entity) {
     ) {
       return true;
     }
-    return evergreenHistoryEditionQuality(entity).ok;
+    if (evergreenHistoryEditionQuality(entity).ok) return true;
+    // The full AI-generated edition (generateEvergreenHistoryEdition) is a
+    // best-effort async pass that can fail on a bad AI response, and the
+    // daily backlog queue can starve a candidate indefinitely if it does
+    // (2026-07-27: selectPendingEvergreenHistoryCandidates sorts oldest-
+    // updatedAt-first with limit=1, and a failed attempt never advances
+    // updatedAt, so a single stuck entry blocks every other one forever).
+    // The destination /history/ page already renders a real, non-empty page
+    // from just the deterministic bodySections built at entity-creation time
+    // (seo-worker.js's hydrateSparseEntity only re-hydrates below its own
+    // MIN_EVENT_ENTITY_BODY_WORDS=150 floor), so gate the CARD on that same
+    // floor rather than on a lucky AI call landing. This makes the card show
+    // right after core post-publish entity creation instead of only after
+    // (if ever) a separate background promotion succeeds — and once
+    // eligible this way, it can only become MORE eligible later (a
+    // successful edition still upgrades the page), never less, so it never
+    // has to disappear again. A live 2026-07-27 entity (218 words) verified
+    // this floor: 300 (matching the legacy fallback below) was too strict
+    // for the deterministic 2-section content this path actually produces.
+    return entityContentWordCount(entity) >= 150;
   }
   if (entity.historyLinkEligible === true) return true;
   if (entity.historyLinkEligible === false) return false;

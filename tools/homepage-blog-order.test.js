@@ -16,6 +16,10 @@ const blogWorker = readFileSync(join(root, "js/blog-ai-worker.js"), "utf8");
 const seoWorker = readFileSync(join(root, "js/seo-worker.js"), "utf8");
 const rssWorker = readFileSync(join(root, "js/rss-worker.js"), "utf8");
 const serviceWorker = readFileSync(join(root, "sw.js"), "utf8");
+const deployWorkflow = readFileSync(
+  join(root, ".github/workflows/deploy-workers.yml"),
+  "utf8",
+);
 
 test("daily blog index ordering uses the canonical slug date newest first", () => {
   const posts = [
@@ -120,4 +124,14 @@ test("the service worker refreshes the daily blog index before cache fallback", 
     /element\.append\(homepageBlogIndexFreshnessScript, \{ html: true \}\)/,
   );
   assert.match(indexHtml, /register\("\/sw\.js", \{ updateViaCache: "none" \}\)/);
+});
+
+test("the deployment workflow validates and deploys the RSS worker", () => {
+  assert.match(deployWorkflow, /node --check js\/rss-worker\.js/);
+  assert.match(deployWorkflow, /tools\/homepage-blog-order\.test\.js/);
+  assert.match(
+    deployWorkflow,
+    /deploy --dry-run --config wrangler-rss\.jsonc/,
+  );
+  assert.match(deployWorkflow, /deploy --config wrangler-rss\.jsonc/);
 });

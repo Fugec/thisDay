@@ -27,6 +27,7 @@ jobs:
         run: |
           node --check js/blog-ai-worker.js
           node --check js/shared/ai-call.js
+          node --check js/rss-worker.js
 
       # `tests/` is gitignored (see .gitignore) and never reaches this
       # checkout, so it cannot appear here — `node --test` silently ignores
@@ -45,6 +46,7 @@ jobs:
             tools/article-source-capacity.test.js \
             tools/automatic-article-enrichment.test.js \
             tools/evergreen-history-pipeline.test.js \
+            tools/homepage-blog-order.test.js \
             tools/person-human-identity.test.js \
             tools/blog-article-presentation.test.js \
             tools/related-films.test.js"
@@ -63,6 +65,9 @@ jobs:
       - name: Dry-run blog worker bundle
         run: npx wrangler@latest deploy --dry-run --config wrangler-blog.jsonc
 
+      - name: Dry-run RSS worker bundle
+        run: npx wrangler@latest deploy --dry-run --config wrangler-rss.jsonc
+
       - name: Deploy SEO worker
         run: npx wrangler@latest deploy --config wrangler.jsonc
         env:
@@ -71,6 +76,12 @@ jobs:
 
       - name: Deploy blog worker
         run: npx wrangler@latest deploy --config wrangler-blog.jsonc
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Deploy RSS worker
+        run: npx wrangler@latest deploy --config wrangler-rss.jsonc
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}

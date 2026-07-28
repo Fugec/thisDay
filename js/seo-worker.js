@@ -427,7 +427,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
 const HISTORY_EDGE_CACHE_VERSION = 2;
 const PERSON_MEDIA_EDGE_CACHE_VERSION = 1;
-const DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 5;
+const DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 6;
 // Routes eligible for CF Cache API storage. Quiz pages are excluded because
 // the blog worker busts their KV key (quiz-page-v31) on publish; the CF Cache
 // has no hook into that invalidation path.
@@ -5516,6 +5516,38 @@ function ensureEraChipPressedStateHtml(html) {
   );
 }
 
+function normalizeCachedDatePagePerformanceHtml(html) {
+  let source = String(html || "").replace(
+    /<style\b([^>]*)>([\s\S]*?)<\/style>/gi,
+    (block, attributes, css) => {
+      let cleanedCss = css;
+      let previousCss;
+      do {
+        previousCss = cleanedCss;
+        cleanedCss = cleanedCss.replace(
+          /(^|[{}])\s*([^{}]*\.date-story-float[^{}]*)\{[^{}]*\}/gim,
+          (_rule, boundary) => boundary,
+        );
+      } while (cleanedCss !== previousCss);
+      return cleanedCss === css
+        ? block
+        : `<style${attributes}>${cleanedCss}</style>`;
+    },
+  );
+
+  if (!/content-visibility\s*:\s*auto/i.test(source)) {
+    const performanceStyle = '<style id="date-page-performance-v1">.tl-item{content-visibility:auto;contain-intrinsic-size:auto 420px}</style>';
+    source = /<\/head>/i.test(source)
+      ? source.replace(/<\/head>/i, `${performanceStyle}</head>`)
+      : `${performanceStyle}${source}`;
+  }
+
+  return source.replace(
+    /(<img\b(?=[^>]*\bclass="[^"]*\b(?:tl-card-img|tl-thumb)\b[^"]*")[^>]*\bloading="lazy")(?!\s+decoding="async")/gi,
+    '$1 decoding="async"',
+  );
+}
+
 function normalizeDatePageCleanLayoutHtml(
   html,
   { type = "events", monthName = "", day = 0 } = {},
@@ -5541,6 +5573,7 @@ function normalizeDatePageCleanLayoutHtml(
     /\s*<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi,
     (block, json) => /"@type"\s*:\s*"Quiz"/i.test(json) ? "" : block,
   );
+  source = normalizeCachedDatePagePerformanceHtml(source);
   if (!source.includes("pagead2.googlesyndication.com/pagead/js/adsbygoogle.js")) {
     source = source.replace(
       "</head>",

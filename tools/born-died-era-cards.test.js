@@ -167,7 +167,7 @@ describe("Born and died major-person era cards", () => {
     assert.match(html, /class="era-chip era-chip-active" aria-pressed="true"/);
     assert.match(seoSource, /born-v33-/);
     assert.match(seoSource, /died-v32-/);
-    assert.match(seoSource, /DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 5/);
+    assert.match(seoSource, /DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 6/);
     assert.doesNotMatch(seoSource, /born-v34-/);
     assert.doesNotMatch(seoSource, /died-v33-/);
   });
@@ -175,13 +175,14 @@ describe("Born and died major-person era cards", () => {
   it("expands and cleans a cached date page without changing its KV key", () => {
     const oldHtml = `<!doctype html><html><head>
       <style id="date-person-filmography-style">.person-filmography{display:block}</style>
+      <style>.date-story-float{display:grid}@media(max-width:700px){.date-story-float{display:block}}.tl-item{display:flex}</style>
       <style>/*ai-card-patch-v2*/.ai-answer-card{display:none}</style>
       <script type="application/ld+json">{"@context":"https://schema.org","@type":"Quiz"}</script>
       <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
       </head><body><main>
       <div class="card-box"><section><h2 id="major-births-heading">People</h2>
-      <div class="tl-wrap"><div class="tl-card-body"><a class="site-btn site-btn-primary tl-btn">One</a></div></div>
-      <div id="births-more" style="display:none"><div class="tl-wrap"><div class="tl-card-body"><a class="site-btn site-btn-primary tl-btn">Two</a></div></div></div>
+      <div class="tl-wrap"><div class="tl-card-body"><img class="tl-card-img" loading="lazy" src="one.jpg"><a class="site-btn site-btn-primary tl-btn">One</a></div></div>
+      <div id="births-more" style="display:none"><div class="tl-wrap"><div class="tl-card-body"><img class="tl-card-img" loading="lazy" src="two.jpg"><a class="site-btn site-btn-primary tl-btn">Two</a></div></div></div>
       <button id="births-more-btn">Show all</button></section></div>
       <section class="amazon-related person-filmography">IMDb</section>
       <div class="ad-unit">Advertisement</div>
@@ -195,16 +196,24 @@ describe("Born and died major-person era cards", () => {
       monthName: "july",
       day: 28,
     });
+    const cleanedTwice = hooks.normalizeDatePageCleanLayoutHtml(cleaned, {
+      type: "born",
+      monthName: "july",
+      day: 28,
+    });
 
+    assert.equal(cleanedTwice, cleaned);
     assert.match(cleaned, />One</);
     assert.match(cleaned, />Two</);
     assert.equal((cleaned.match(/class="tl-wrap"/g) || []).length, 1);
     assert.equal((cleaned.match(/class="tl-card-actions"/g) || []).length, 2);
+    assert.equal((cleaned.match(/decoding="async"/g) || []).length, 2);
+    assert.match(cleaned, /content-visibility:auto;contain-intrinsic-size:auto 420px/);
     assert.equal((cleaned.match(/data-date-timeline-ad/g) || []).length, 1);
     assert.doesNotMatch(cleaned, /<div class="ad-unit">Advertisement<\/div>/);
     assert.doesNotMatch(cleaned, /bootstrap\.bundle\.min\.js|"@type":"Quiz"|ai-card-patch-v2/);
     assert.match(cleaned, /class="date-bottom-navigation/);
     assert.match(cleaned, /data-cached-major-persons="births"/);
-    assert.doesNotMatch(cleaned, /births-more|Show all|IMDb|Major events|Featured article|Open the Calendar/);
+    assert.doesNotMatch(cleaned, /births-more|Show all|IMDb|Major events|Featured article|Open the Calendar|date-story-float/);
   });
 });

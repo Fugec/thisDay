@@ -663,7 +663,7 @@ test("person and born/died cache keys advance without invalidating unrelated rou
     historyHooks.edgeCacheKey(
       new URL("https://thisday.info/born/july/23/"),
     ),
-    /__date_person_media_v=5$/,
+    /__date_person_media_v=6$/,
   );
   assert.equal(
     historyHooks.edgeCacheKey(

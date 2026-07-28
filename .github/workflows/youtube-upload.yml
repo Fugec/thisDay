@@ -32,30 +32,28 @@ jobs:
         with:
           node-version: "22"
 
-      # Static ffmpeg binary — avoids apt mirror issues with libssh deps.
-      # The binary download occasionally fails with a transient "fetch failed"
-      # on the runner network, so retry up to two more times before giving up.
-      - uses: FedericoCarboni/setup-ffmpeg@v3
-        id: setup-ffmpeg-1
-        continue-on-error: true
-        with:
-          ffmpeg-version: release
-      - name: Retry ffmpeg setup (attempt 2)
-        if: steps.setup-ffmpeg-1.outcome == 'failure'
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        id: setup-ffmpeg-2
-        continue-on-error: true
-        with:
-          ffmpeg-version: release
-      - name: Retry ffmpeg setup (attempt 3)
-        if: steps.setup-ffmpeg-1.outcome == 'failure' && steps.setup-ffmpeg-2.outcome == 'failure'
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          ffmpeg-version: release
-
-      # DejaVu fonts for SVG text rendering
+      # Use Ubuntu's signed packages instead of a third-party action that must
+      # discover and download the latest johnvansickle release through GitHub.
+      # Retry only the package operation, then verify both binaries before any
+      # AI, rendering, or upload work can begin.
       - name: Install system dependencies
-        run: sudo apt-get install -y fonts-dejavu-core
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "FFmpeg installation failed after ${attempt} attempts." >&2
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version
+          ffprobe -version
 
       - name: Install npm dependencies
         run: npm ci

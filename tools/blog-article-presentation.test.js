@@ -130,6 +130,15 @@ test("history discovery is separated from the people row", () => {
     html,
     /class="story-topic-card-image"><img[^>]+w=720&h=405&fit=cover&q=82/,
   );
+  assert.match(
+    html,
+    /\.story-topic-card\{[^}]*background:#fff[^}]*box-shadow:none/,
+  );
+  assert.doesNotMatch(html, /\.story-topic-card:hover\{/);
+  assert.doesNotMatch(
+    html,
+    /\.story-topic-card\{[^}]*transition:/,
+  );
   assert.match(html, /Read the full history/);
   assert.equal(
     blogHooks.articleEntityStripNeedsProfileValidation(
@@ -402,6 +411,23 @@ test("analysis is event-labelled and collapsed behind a native disclosure", () =
       eventTitle: "Spanish Civil War Begins",
       sourcePageTitle: "Spanish Civil War",
       wikiUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+      sourcePages: [
+        {
+          pageTitle: "Spanish Civil War",
+          pageUrl: "https://en.wikipedia.org/wiki/Spanish_Civil_War",
+          supportedClaims: [
+            "A military uprising in July 1936 began the Spanish Civil War.",
+          ],
+        },
+        {
+          pageTitle: "The Spanish Civil War",
+          pageUrl: "https://www.iwm.org.uk/history/what-you-need-to-know-about-the-spanish-civil-war",
+          supportedClaims: [
+            "A military uprising in July 1936 began the Spanish Civil War.",
+          ],
+          verifiedIndependent: true,
+        },
+      ],
       historicalDate: "July 17, 1936",
       historicalDateISO: "1936-07-17",
       historicalYear: 1936,
@@ -409,6 +435,9 @@ test("analysis is event-labelled and collapsed behind a native disclosure", () =
         "A military uprising against Spain's Popular Front government begins the Spanish Civil War on July 17, 1936, and divides the country.",
       overviewParagraphs: [
         "The July 1936 uprising divided Spain between Republican and Nationalist forces.",
+      ],
+      eyewitnessOrChronicle: [
+        "Contemporary records documented how the July 1936 uprising unfolded.",
       ],
       analysisGood: analysisItems("Evidence"),
       analysisBad: analysisItems("Limit"),
@@ -439,9 +468,17 @@ test("analysis is event-labelled and collapsed behind a native disclosure", () =
     /<summary class="analysis-disclosure-summary">What the evidence supports and leaves unresolved<\/summary>/,
   );
   assert.doesNotMatch(html, /<h2 class="h3">Our Take:/);
+  assert.ok(
+    html.indexOf("The July 1936 uprising") < html.indexOf("article-body-ad-v1"),
+  );
+  assert.ok(
+    html.indexOf("article-body-ad-v1") < html.indexOf("Contemporary records documented"),
+  );
+  assert.ok(html.indexOf("Test Your Knowledge") < html.indexOf("article-evidence-map"));
+  assert.ok(html.indexOf("article-evidence-map") < html.indexOf("Related questions"));
 });
 
-test("future articles show the verified evidence comparison near the overview", () => {
+test("future articles render the verified evidence comparison without inline spacing", () => {
   const sourcePages = [
     {
       pageTitle: "Spanish Civil War",
@@ -471,8 +508,9 @@ test("future articles show the verified evidence comparison near the overview", 
   assert.equal(validation.ok, true, JSON.stringify(validation.reasons));
   assert.match(
     html,
-    /<section class="article-evidence-map article-analysis mt-5" style="margin-top:2rem!important"/,
+    /<section class="article-evidence-map article-analysis mt-5" data-original-value-module="source-comparison"/,
   );
+  assert.doesNotMatch(html, /<section class="article-evidence-map[^>]*\bstyle=/);
   assert.match(html, /<details class="analysis-disclosure mt-2">/);
   assert.match(html, /<summary class="analysis-disclosure-summary">/);
   assert.match(
@@ -570,7 +608,7 @@ test("commercial blocks render only with verified topic-matched books", () => {
   );
 });
 
-test("irrelevant commercial recommendations omit both the affiliate slider and paired ad", () => {
+test("irrelevant commercial recommendations omit the affiliate slider but retain the article ad", () => {
   const html = blogHooks.buildPostHTML(
     {
       title: "Spanish Civil War Begins — July 17, 1936",
@@ -604,7 +642,7 @@ test("irrelevant commercial recommendations omit both the affiliate slider and p
   );
 
   assert.doesNotMatch(html, /class="amazon-related/);
-  assert.doesNotMatch(html, /article-body-ad-v1/);
+  assert.match(html, /article-body-ad-v1/);
 });
 
 test("article disclosure accurately distinguishes automated safeguards from human review", () => {
@@ -624,6 +662,18 @@ test("article disclosure accurately distinguishes automated safeguards from huma
     html,
     /reviewed for factual accuracy by the|reviewed by the editorial team/i,
   );
+});
+
+test("read progress bar is prominent for new and previously stored articles", () => {
+  const legacyHtml = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg)}</style><div id="read-progress"></div>`;
+  const normalized = blogHooks.normalizeReadProgressBarHtml(legacyHtml);
+
+  assert.match(normalized, /#read-progress\{[^}]*height:6px/);
+  assert.match(
+    normalized,
+    /box-shadow:0 1px 4px rgba\(27,58,45,\.35\)/,
+  );
+  assert.doesNotMatch(normalized, /height:3px/);
 });
 
 test("legacy article disclosures drop the guaranteed editorial-review claim", () => {

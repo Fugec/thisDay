@@ -650,6 +650,94 @@ test("invalid checkpoint chunks are discarded before reuse", () => {
   assert.equal(journal.chunks.facts, undefined);
 });
 
+test("article generation request budget is durable, capped, and resets on a new UTC day", async () => {
+  const kv = makeKvMock();
+  const env = {
+    BLOG_AI_KV: kv,
+    ARTICLE_GENERATION_REQUEST_BUDGET: "2",
+  };
+  const date = new Date();
+  const fingerprint = hooks.articleGenerationSourceFingerprint(
+    "Budget test event",
+    "grounded source material",
+  );
+  const journal = await hooks.loadArticleGenerationJournal(
+    env,
+    date,
+    fingerprint,
+  );
+  const checkpoint = hooks.createArticleGenerationCheckpointer(
+    env,
+    date,
+    journal,
+  );
+  await checkpoint.consumeRequest("brief");
+  await checkpoint.consumeRequest("body A");
+  await assert.rejects(
+    checkpoint.consumeRequest("body B"),
+    (error) => error?.code === "AI_CAPACITY_UNAVAILABLE" && /2\/2 exhausted/.test(error.message),
+  );
+  assert.equal(kv.puts.length, 2, "each actual model request reserves one durable budget unit");
+
+  const resumed = await hooks.loadArticleGenerationJournal(
+    env,
+    date,
+    fingerprint,
+  );
+  assert.equal(resumed.requestBudget.used, 2);
+  await assert.rejects(
+    hooks.createArticleGenerationCheckpointer(env, date, resumed)
+      .consumeRequest("facts"),
+    (error) => error?.code === "AI_CAPACITY_UNAVAILABLE",
+  );
+  assert.equal(kv.puts.length, 2, "a fresh invocation must not reopen the same day's allowance");
+
+  const rotatedTopic = await hooks.loadArticleGenerationJournal(
+    env,
+    date,
+    hooks.articleGenerationSourceFingerprint(
+      "Different topic on the same date",
+      "different grounded source material",
+    ),
+  );
+  assert.deepEqual(rotatedTopic.chunks, {}, "chunks belong only to their source fingerprint");
+  assert.equal(rotatedTopic.requestBudget.used, 2, "topic rotation must retain the date-wide allowance");
+  await assert.rejects(
+    hooks.createArticleGenerationCheckpointer(env, date, rotatedTopic)
+      .consumeRequest("rotated brief"),
+    (error) => error?.code === "AI_CAPACITY_UNAVAILABLE",
+  );
+  assert.equal(kv.puts.length, 2);
+
+  resumed.requestBudget.date = "2000-01-01";
+  await hooks.createArticleGenerationCheckpointer(env, date, resumed)
+    .consumeRequest("next-day repair");
+  assert.equal(resumed.requestBudget.used, 1);
+  assert.equal(resumed.requestBudget.date, new Date().toISOString().slice(0, 10));
+  assert.equal(kv.puts.length, 3);
+
+  assert.equal(hooks.articleGenerationRequestBudgetLimit({}), 8);
+  assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "4" }), 4);
+  assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "100" }), 8);
+});
+
+test("undersized chunked body selects only the shortest field for targeted repair", () => {
+  const words = (count) => `${"grounded ".repeat(count - 1)}fact.`;
+  const body = {
+    overviewParagraphs: [words(200)],
+    eyewitnessOrChronicle: [words(180)],
+    aftermathParagraphs: [words(170)],
+    conclusionParagraphs: [words(150)],
+  };
+  assert.equal(hooks.articleBodyWordCount(body), 700);
+  assert.deepEqual(
+    hooks.chunkedArticleBodyCapacityRepairFields(body),
+    ["conclusionParagraphs"],
+  );
+  body.conclusionParagraphs = [words(200)];
+  assert.equal(hooks.chunkedArticleBodyCapacityRepairFields(body).length, 0);
+});
+
 test("failsafe permits one recovery attempt and has a non-overlapping concurrency lock", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/blog-failsafe.yml", import.meta.url),
@@ -660,8 +748,28 @@ test("failsafe permits one recovery attempt and has a non-overlapping concurrenc
   assert.doesNotMatch(workflow, /MAX_COOLDOWN_RETRIES|COOLDOWN_SECONDS/);
   assert.doesNotMatch(workflow, /for DRAFT_ATTEMPT|prefer-workers-ai=true/);
   assert.equal(
-    (workflow.match(/-X POST "\$WORKER_URL\/blog\/generate-draft"/g) || [])
+    (workflow.match(/-X POST "\$DRAFT_ENDPOINT"/g) || [])
       .length,
     1,
   );
+});
+
+test("Evergreen maintenance has one 00:55 trigger instead of a duplicate midnight race", () => {
+  const worker = readFileSync(
+    new URL("../js/blog-ai-worker.js", import.meta.url),
+    "utf8",
+  );
+  const wrangler = readFileSync(
+    new URL("../wrangler-blog.jsonc", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(worker, /const RECOVERY_CRON = "50 0 \* \* \*"/);
+  assert.match(worker, /const EVERGREEN_HISTORY_RETRY_CRON = "55 \* \* \* \*"/);
+  assert.doesNotMatch(worker, /const RECOVERY_CRON = "50,55 0 \* \* \*"/);
+  assert.match(
+    wrangler,
+    /"crons": \["5,10,15 0 \* \* \*", "50 0 \* \* \*", "25 1 \* \* \*", "55 \* \* \* \*"\]/,
+  );
+  assert.doesNotMatch(wrangler, /50,55 0 \* \* \*/);
 });

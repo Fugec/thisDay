@@ -176,6 +176,11 @@ test("only a primary event with independent evidence becomes an evergreen candid
   assert.equal(eligible.slug, "apollo-11-1969");
   assert.equal(eligible.sourceLinks.length, 2);
   assert.equal(eligible.canonicalIdentity, "enwiki:apollo 11");
+  assert.equal(
+    Object.hasOwn(eligible.evidence, "articleRationale"),
+    false,
+    "editorial article-value copy must not become historical evidence",
+  );
 
   const withoutIndependent = sourceRichContent();
   withoutIndependent.sourcePages =
@@ -263,6 +268,28 @@ test("the edition gate requires deep, distinct, source-backed content", () => {
   assert.equal(rejected.ok, false);
   assert.ok(rejected.reasons.some((reason) => /four substantive/i.test(reason)));
   assert.ok(rejected.reasons.some((reason) => /five grounded timeline/i.test(reason)));
+
+  const editorialMeta = {
+    ...ready,
+    bodySections: ready.bodySections.map((section, index) =>
+      index === 0
+        ? {
+            ...section,
+            paragraphs: [
+              "Wikipedia provides the broad event record, while this article organizes the evidence so readers can see which source supports the chronology. " + section.paragraphs[0],
+              section.paragraphs[1],
+            ],
+          }
+        : section,
+    ),
+  };
+  const editorialMetaRejected =
+    hooks.evergreenHistoryEditionQuality(editorialMeta);
+  assert.equal(editorialMetaRejected.ok, false);
+  assert.match(
+    editorialMetaRejected.reasons.join("; "),
+    /article or page-production commentary/i,
+  );
 });
 
 test("a qualified edition upgrades the related article metadata and visible card", async () => {

@@ -193,6 +193,54 @@ function mockDynamicEvergreenKv() {
   };
 }
 
+test("stored event pages suppress generic article-meta prose at render time", () => {
+  const genericRationale =
+    "Wikipedia provides the broad event record, while this article organizes the evidence around the aircraft's move beyond the approach radius.";
+  const genericDateBridge =
+    "Why Was Airblue Flight 202 Outside Its Approach Radius? connects Airblue Flight 202 to a specific historical date.";
+  const factualParagraph =
+    "Airblue Flight 202 was a scheduled domestic passenger flight from Karachi to Islamabad. On July 28, 2010, the Airbus A321 crashed in the Margalla Hills, killing all 152 people aboard.";
+  const stored = {
+    type: "event",
+    name: "Airblue Flight 202",
+    summary: factualParagraph,
+    overviewCards: [
+      { label: "What happened", value: factualParagraph },
+      { label: "Why it matters", value: genericRationale },
+    ],
+    bodySections: [
+      { heading: "What was Airblue Flight 202?", paragraphs: [factualParagraph] },
+      {
+        heading: "Why Airblue Flight 202 still matters",
+        paragraphs: [genericRationale, genericDateBridge],
+      },
+    ],
+  };
+
+  const filteredSections = hooks.stripGenericEntityContextSections(
+    stored.bodySections,
+  );
+  assert.equal(filteredSections.length, 1);
+  const bodyHtml = hooks.buildEntityBodySections({
+    ...stored,
+    bodySections: filteredSections,
+  });
+  const overviewHtml = hooks.buildEntityOverviewSlider(stored);
+  assert.match(bodyHtml, /scheduled domestic passenger flight/);
+  assert.doesNotMatch(bodyHtml, /organizes the evidence|specific historical date/i);
+  assert.doesNotMatch(overviewHtml, /organizes the evidence/i);
+  assert.match(overviewHtml, /scheduled domestic passenger flight/);
+
+  assert.deepEqual(
+    hooks.ensureEntityContextSections(
+      { type: "event", name: "Sparse Event", bodySections: [] },
+      "event",
+    ),
+    [],
+    "a sparse event stays sparse instead of receiving invented context",
+  );
+});
+
 test("evergreen edition covers the requested reader questions with original depth", () => {
   const page = hooks.getHistoryEvergreenPage(canonicalSlug);
 

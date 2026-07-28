@@ -42,6 +42,56 @@ function queuedCompanion() {
   };
 }
 
+test("event fallbacks omit unsupported significance prose instead of filling space", () => {
+  const entity = {
+    type: "event",
+    name: "Airblue Flight 202",
+    summary:
+      "Airblue Flight 202 was a scheduled domestic passenger flight from Karachi to Islamabad. On July 28, 2010, the Airbus A321 crashed in the Margalla Hills, killing all 152 people aboard. The crash remains Pakistan's deadliest aviation accident.",
+    intro:
+      "Airblue Flight 202 was a scheduled domestic passenger flight from Karachi to Islamabad. On July 28, 2010, the Airbus A321 crashed in the Margalla Hills, killing all 152 people aboard. The crash remains Pakistan's deadliest aviation accident.",
+    sourcePostTitle:
+      "Why Was Airblue Flight 202 Outside Its Approach Radius?",
+  };
+  const content = {
+    title: "Why Was Airblue Flight 202 Outside Its Approach Radius?",
+    historicalDate: "July 28, 2010",
+    location: "Islamabad, Pakistan",
+    description:
+      "Airblue Flight 202 crashed in the Margalla Hills during its approach to Islamabad, killing all 152 people aboard.",
+    contentRationale:
+      "Wikipedia provides the broad event record, while this article organizes the evidence so readers can see which source supports the chronology.",
+    keyTerms: [],
+  };
+
+  const sections = hooks.buildFallbackEntityBodySections(entity, content);
+  const sectionText = JSON.stringify(sections);
+  assert.match(sectionText, /scheduled domestic passenger flight/);
+  assert.doesNotMatch(sectionText, /still matters/i);
+  assert.doesNotMatch(sectionText, /organizes the evidence/i);
+  assert.doesNotMatch(sectionText, /specific historical date/i);
+
+  const cards = hooks.buildEventOverviewCards(entity, content);
+  const significance = cards.find((card) => card.label === "Why it matters");
+  assert.match(significance?.value || "", /deadliest aviation accident/i);
+  assert.doesNotMatch(JSON.stringify(cards), /organizes the evidence/i);
+
+  assert.deepEqual(
+    hooks.buildFallbackEntityBodySections(
+      { type: "event", name: "Sparse Event" },
+      { contentRationale: "This page helps readers understand the event." },
+    ),
+    [],
+  );
+  assert.deepEqual(
+    hooks.buildEventOverviewCards(
+      { type: "event", name: "Sparse Event" },
+      { keyTerms: [] },
+    ),
+    [],
+  );
+});
+
 test("secondary article images exclude the hero and duplicate Wikimedia files", () => {
   const images = hooks.uniqueSecondaryArticleImages(
     hero,
@@ -253,4 +303,105 @@ test("outbox completion waits for every asynchronous target", async () => {
   );
   assert.equal(pending.complete, false);
   assert.equal(pending.quizReady, false);
+});
+
+test("an attempted timestamp cannot suppress recovery before the primary event entity is persisted", async () => {
+  const paragraph = Array.from(
+    { length: 710 },
+    (_, index) => `grounded${index}`,
+  ).join(" ");
+  const content = {
+    title: "Example Event Begins — July 20, 1969",
+    eventTitle: "Example Event Begins",
+    historicalDate: "July 20, 1969",
+    historicalYear: 1969,
+    wikiUrl: "https://en.wikipedia.org/wiki/Example",
+    sourcePageTitle: "Example",
+    overviewParagraphs: [paragraph],
+    timeline: timeline(5),
+    sourcePages: [
+      {
+        pageTitle: "Example",
+        pageUrl: "https://en.wikipedia.org/wiki/Example",
+        supportedClaims: ["The example event occurred in 1969."],
+      },
+      {
+        pageTitle: "Independent example record",
+        pageUrl: "https://example.org/history/example-event",
+        supportedClaims: ["An independent record confirms the 1969 event."],
+        verifiedIndependent: true,
+      },
+    ],
+  };
+  const quiz = {
+    questions: Array.from({ length: 5 }, (_, index) => ({
+      q: `Which sourced development belongs to step ${index + 1}?`,
+      options: ["First", "Second", "Third", "Fourth"],
+      answer: index % 4,
+      explanation: "The supplied evidence identifies this development.",
+    })),
+  };
+  const post =
+    '<article><figure style="float:right;margin:0"></figure>' +
+    '<figure style="float:left;margin:0"></figure></article>';
+  const store = new Map([
+    ["post:20-july-2026", post],
+    ["quiz-v3:blog:20-july-2026", JSON.stringify(quiz)],
+    [
+      "post-entities:20-july-2026",
+      JSON.stringify([
+        {
+          type: "person",
+          slug: "fallback-person",
+          name: "Fallback Person",
+          profileLinkEligible: false,
+        },
+      ]),
+    ],
+  ]);
+  const env = {
+    BLOG_AI_KV: {
+      async get(key) {
+        return store.get(key) ?? null;
+      },
+    },
+  };
+  const draft = {
+    content,
+    postPublishEnrichment: {
+      entitiesAttemptedAt: "2026-07-20T00:50:00.000Z",
+    },
+  };
+
+  const falseAttempt = await hooks.postPublishEnrichmentStatus(
+    env,
+    "20-july-2026",
+    draft,
+  );
+  assert.equal(falseAttempt.entitiesAttempted, false);
+  assert.equal(falseAttempt.complete, false);
+
+  const candidate = hooks.validatePrimaryEvergreenCandidateForContent(content);
+  assert.equal(candidate.ok, true, candidate.reasons.join("; "));
+  store.set(
+    "post-entities:20-july-2026",
+    JSON.stringify([
+      {
+        type: "event",
+        slug: candidate.slug,
+        name: content.eventTitle,
+        wikiUrl: content.wikiUrl,
+        canonicalIdentity: candidate.canonicalIdentity,
+        historyQualityGateVersion: 2,
+        historyLinkEligible: false,
+      },
+    ]),
+  );
+
+  const durableAttempt = await hooks.postPublishEnrichmentStatus(
+    env,
+    "20-july-2026",
+    draft,
+  );
+  assert.equal(durableAttempt.entitiesAttempted, true);
 });

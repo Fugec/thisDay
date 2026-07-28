@@ -65,6 +65,7 @@ import {
   fetchCachedWikidataPersonFilmography,
   fetchCachedWikidataRelatedFilms,
 } from "./shared/related-media.js";
+import { sortBlogIndexNewestFirst } from "./shared/blog-index-order.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -74,6 +75,13 @@ const DRAFT_SOURCE_VERSION = 1;
 const DRAFT_SOURCE_TTL = 3 * 86_400;
 const ARTICLE_GENERATION_VERSION = 1;
 const ARTICLE_GENERATION_TTL = 7 * 86_400;
+// A source-grounded daily article normally needs five logical chunk calls
+// (brief, two body chunks, facts, analysis). Eight leaves room for a split or
+// targeted body repair while reserving roughly half of Groq's shared
+// 100k-token/day free allowance for the final grounding/repair gates. The
+// counter is stored in the existing article journal, so later GitHub failsafe
+// invocations cannot unknowingly start a fresh budget.
+const DEFAULT_ARTICLE_GENERATION_REQUEST_BUDGET = 8;
 const FEATURED_IMAGE_CHECK_MARKER = "<!-- featured-image-check-v1 -->";
 const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
 const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
@@ -90,6 +98,11 @@ const REPAIR_ATTEMPT_LIMIT = 2; // per slug, per repair type, per TTL window
 const WIKIDATA_HUMAN_ENTITY_ID = "Q5";
 
 async function callPublicationGateAI(env, messages, options = {}) {
+  const {
+    providerAttemptLimit = 8,
+    groqSectionAttemptLimit = 2,
+    ...callOptions
+  } = options;
   // Local-test guard: the Workers AI 10k-neurons/day pool is ACCOUNT-wide,
   // shared with production. AI_GATE_PREFER_EXTERNAL=1 (dev var only, never a
   // deployed secret) routes gates through the external chain first so local
@@ -97,22 +110,22 @@ async function callPublicationGateAI(env, messages, options = {}) {
   // the chain's own last resort.
   if (env.AI_GATE_PREFER_EXTERNAL) {
     return callAI(env, messages, {
-      ...options,
-      providerAttemptLimit: 8,
-      groqSectionAttemptLimit: 2,
+      ...callOptions,
+      providerAttemptLimit,
+      groqSectionAttemptLimit,
     });
   }
   try {
-    return await callWorkersAIDirect(env, messages, options);
+    return await callWorkersAIDirect(env, messages, callOptions);
   } catch (workersError) {
     console.warn(
       `Publication gate: Workers AI unavailable (${workersError.message}); trying bounded external fallback.`,
     );
     return callAI(env, messages, {
-      ...options,
+      ...callOptions,
       skipWorkersAI: true,
-      providerAttemptLimit: 8,
-      groqSectionAttemptLimit: 2,
+      providerAttemptLimit,
+      groqSectionAttemptLimit,
     });
   }
 }
@@ -458,13 +471,12 @@ const DRAFT_PREPARATION_MINUTES = new Set([5]);
 const DRAFT_GENERATION_MINUTES = new Set([10]);
 const DRAFT_ENRICHMENT_MINUTES = new Set([15]);
 const WORKERS_AI_GENERATION_MINUTES = new Set();
-// Cloudflare reports event.cron as the exact configured expression, including
-// comma lists. Dispatch the shared 00:50/00:55 trigger by scheduled minute;
-// comparing it with separate "50 ..." / "55 ..." strings makes neither branch
-// match and previously sent both invocations into article generation.
-const RECOVERY_CRON = "50,55 0 * * *";
+// Entity recovery has one isolated midnight invocation. Evergreen recovery is
+// handled by the hourly :55 trigger below, including 00:55; keeping 00:55 in
+// both expressions would race two maintenance invocations against the same
+// article and provider/KV budget.
+const RECOVERY_CRON = "50 0 * * *";
 const ENTITY_RECOVERY_MINUTE = 50;
-const EVERGREEN_HISTORY_RECOVERY_MINUTE = 55;
 // A second isolated invocation repairs at most one older pending companion.
 // Keeping backlog work separate prevents an old failure from displacing the
 // current day's required edition at 00:55.
@@ -549,9 +561,6 @@ function scheduledBlogPhase(cron, scheduledMinute) {
   }
   if (cron === RECOVERY_CRON) {
     if (scheduledMinute === ENTITY_RECOVERY_MINUTE) return "entity-recovery";
-    if (scheduledMinute === EVERGREEN_HISTORY_RECOVERY_MINUTE) {
-      return "history-recovery";
-    }
     return "ignore";
   }
   if (cron === EVERGREEN_HISTORY_BACKLOG_CRON) return "history-backlog";
@@ -566,7 +575,7 @@ const MIN_EVERGREEN_HISTORY_EVIDENCE_WORDS = 700;
 const ARTICLE_HERO_CSS =
   `.article-hero-wrap{position:relative;isolation:isolate;margin:-1.5rem -1.5rem 1.5rem;border-radius:.375rem .375rem 0 0;overflow:hidden;height:460px;display:flex;flex-direction:column;justify-content:flex-end}.article-hero-wrap.article-hero-standalone{margin:0 0 1.5rem}.article-hero-fig{position:absolute!important;inset:0;margin:0!important;z-index:0;pointer-events:none}.article-hero-fig img{width:100%;height:100%;max-height:none!important;object-fit:cover;object-position:center;border-radius:0!important}.article-hero-fig figcaption{display:none}.article-hero-overlay{position:absolute;inset:0;background:linear-gradient(to top,rgba(27,58,45,.95) 0%,rgba(27,58,45,.6) 50%,rgba(27,58,45,.15) 100%);z-index:1;pointer-events:none}.article-hero-header{position:relative;z-index:3;width:100%;padding:2rem 1.5rem 2.5rem;margin-bottom:0!important;text-align:center!important}.article-body-layer{position:relative;z-index:1;clear:both}.article-hero-header h1{color:#fff!important}.article-hero-header a[rel="author"]{color:rgba(255,255,255,.7)!important}.article-hero-header .article-meta{color:rgba(255,255,255,.75)!important}.article-hero-header .pillar-pill-row{justify-content:center}.article-hero-header .pillar-pill{background:rgba(255,255,255,.12)!important;border-color:rgba(255,255,255,.3)!important;color:#fff!important}.article-hero-header .pillar-pill-featured{background:rgba(27,58,45,.85)!important;border-color:rgba(255,255,255,.35)!important;color:#fff!important}@media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:-1.5rem 0 1.5rem;justify-content:center}}`;
 const ARTICLE_ENTITY_STRIP_STYLE =
-  `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3,.entity-strip .h4{margin:0 0 1rem}.story-topic-section{margin-top:1.5rem;padding-top:1.35rem;border-top:1px solid var(--border,#cfe0cf)}.story-topic-section .story-topic-heading{font-size:clamp(1.3rem,2vw,1.65rem);margin:0 0 1rem}.story-topic-card{display:grid;grid-template-columns:minmax(210px,34%) minmax(0,1fr);overflow:hidden;border:1px solid var(--border,#cfe0cf);border-radius:14px;background:var(--bg-alt,#f2f7f2);color:var(--text,#1a2e20)!important;text-decoration:none!important;box-shadow:0 12px 30px rgba(27,58,45,.08);transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}.story-topic-card-no-image{grid-template-columns:1fr}.story-topic-card:hover{transform:translateY(-2px);border-color:var(--btn-bg,#1b3a2d);box-shadow:0 16px 34px rgba(27,58,45,.14);color:var(--text,#1a2e20)!important}.story-topic-card:focus-visible{outline:3px solid var(--accent,#9dc43a);outline-offset:3px}.story-topic-card-image{position:relative;min-height:220px;background:var(--btn-bg,#1b3a2d);overflow:hidden}.story-topic-card-image img{display:block;width:100%;height:100%;position:absolute;inset:0;object-fit:cover;object-position:center}.story-topic-card-copy{display:flex;min-width:0;flex-direction:column;align-items:flex-start;justify-content:center;padding:1.5rem}.story-topic-kicker{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted,#5c7a65);margin-bottom:.55rem}.story-topic-title{font-size:clamp(1.15rem,2vw,1.45rem);line-height:1.3;margin:0 0 .7rem;color:var(--text,#1a2e20)}.story-topic-description{font-size:14px;line-height:1.65;margin:0 0 1rem;color:var(--text-muted,#5c7a65)}.story-topic-cta{display:inline-flex;align-items:center;gap:.45rem;margin-top:auto;font-size:14px;font-weight:700;color:var(--btn-bg,#1b3a2d)}@media(max-width:680px){.story-topic-card{grid-template-columns:1fr}.story-topic-card-image{min-height:210px}.story-topic-card-copy{padding:1.2rem}}</style>`;
+  `<style>.entity-strip{margin:0 0 2rem}.entity-strip .h3,.entity-strip .h4{margin:0 0 1rem}.story-topic-section{margin-top:1.5rem;padding-top:1.35rem;border-top:1px solid var(--border,#cfe0cf)}.story-topic-section .story-topic-heading{font-size:clamp(1.3rem,2vw,1.65rem);margin:0 0 1rem}.story-topic-card{display:grid;grid-template-columns:minmax(210px,34%) minmax(0,1fr);overflow:hidden;border:1px solid var(--border,#cfe0cf);border-radius:14px;background:#fff;color:var(--text,#1a2e20)!important;text-decoration:none!important;box-shadow:none}.story-topic-card-no-image{grid-template-columns:1fr}.story-topic-card:focus-visible{outline:3px solid var(--accent,#9dc43a);outline-offset:3px}.story-topic-card-image{position:relative;min-height:220px;background:var(--btn-bg,#1b3a2d);overflow:hidden}.story-topic-card-image img{display:block;width:100%;height:100%;position:absolute;inset:0;object-fit:cover;object-position:center}.story-topic-card-copy{display:flex;min-width:0;flex-direction:column;align-items:flex-start;justify-content:center;padding:1.5rem}.story-topic-kicker{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted,#5c7a65);margin-bottom:.55rem}.story-topic-title{font-size:clamp(1.15rem,2vw,1.45rem);line-height:1.3;margin:0 0 .7rem;color:var(--text,#1a2e20)}.story-topic-description{font-size:14px;line-height:1.65;margin:0 0 1rem;color:var(--text-muted,#5c7a65)}.story-topic-cta{display:inline-flex;align-items:center;gap:.45rem;margin-top:auto;font-size:14px;font-weight:700;color:var(--btn-bg,#1b3a2d)}@media(max-width:680px){.story-topic-card{grid-template-columns:1fr}.story-topic-card-image{min-height:210px}.story-topic-card-copy{padding:1.2rem}}</style>`;
 const VIDEO_THUMBNAIL_OVERRIDES = {
   "13-may-2026":
     "https://thisday.info/image-proxy?src=https%3A%2F%2Fupload.wikimedia.org%2Fwikipedia%2Fcommons%2Ff%2Ffb%2FGIRO8076_Pogacar_%252853750349243%2529.jpg",
@@ -1464,7 +1473,7 @@ function buildEvidenceMapBlock(content) {
     })
     .join("\n");
 
-  return `<section class="article-evidence-map article-analysis mt-5" style="margin-top:2rem!important" data-original-value-module="source-comparison" aria-labelledby="evidence-map-heading">
+  return `<section class="article-evidence-map article-analysis mt-5" data-original-value-module="source-comparison" aria-labelledby="evidence-map-heading">
             <h2 class="h3" id="evidence-map-heading">Evidence Map: How We Checked the Central Claim</h2>
             <details class="analysis-disclosure mt-2">
               <summary class="analysis-disclosure-summary">What the sources verify and how they were used</summary>
@@ -1493,6 +1502,10 @@ ${rows}
 
 function normalizeArticleEvidenceMapDisclosureHtml(body) {
   const html = String(body || "")
+    .replace(
+      /(<section class="article-evidence-map article-analysis mt-5")\s+style="margin-top:2rem!important"/gi,
+      "$1",
+    )
     .replace(/<style>\/\*evidence-map-disclosure-v1\*\/[\s\S]*?<\/style>/gi, "")
     .replace(/\.article-evidence-map\{[^}]*\}/gi, "")
     .replace(/\.evidence-map-summary(?::[^{]+|\[[^\]]+\]\s+\.evidence-map-summary)?\{[^}]*\}/gi, "")
@@ -1505,7 +1518,7 @@ function normalizeArticleEvidenceMapDisclosureHtml(body) {
     const cleanAttributes = String(attributes || "")
       .replace(/\sstyle="[^"]*"/gi, "")
       .replace(/\saria-labelledby="[^"]*"/gi, "");
-    return `<section class="article-evidence-map article-analysis mt-5" style="margin-top:2rem!important"${cleanAttributes} aria-labelledby="${headingId}">
+    return `<section class="article-evidence-map article-analysis mt-5"${cleanAttributes} aria-labelledby="${headingId}">
             <h2 class="h3" id="${headingId}">${heading}</h2>
             <details class="analysis-disclosure mt-2">
               <summary class="analysis-disclosure-summary">What the sources verify and how they were used</summary>
@@ -1542,32 +1555,12 @@ function normalizeArticleEvidenceMapDisclosureHtml(body) {
 }
 
 function buildAuthorityLinksBlock(content, _pillars = []) {
-  const links = directCitationPagesFromContent(content);
-  if (links.length === 0) return "";
-
-  const chips = links
-    .map((source) => {
-      const publisher = source.publisher || sourcePublisherName(source.pageUrl);
-      const title = source.pageTitle || publisher;
-      const label = title === publisher ? title : `${title} · ${publisher}`;
-      return `<a href="${esc(source.pageUrl)}" target="_blank" rel="noopener noreferrer" class="authority-link">${esc(label)}</a>`;
-    })
-    .join("");
-  const wikipediaLicense = links.some((source) => {
-    try {
-      return new URL(source.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
-    } catch {
-      return false;
-    }
-  })
-    ? `<small class="article-meta" style="display:block;margin-top:10px">Wikipedia text is available under <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>.</small>`
-    : "";
-
-  return `<div class="authority-links mt-3 mb-4">
-    <span class="authority-links-label">Sources used for this article</span>
-    <div class="authority-links-row">${chips}</div>
-    ${wikipediaLicense}
-  </div>`;
+  // Direct sources already appear in the evidence map. Keep this legacy
+  // helper as a no-op so old callers cannot reintroduce a duplicate source
+  // block while stored posts are normalized at response time below.
+  void content;
+  void _pillars;
+  return "";
 }
 
 // Content pillars — mirrors the 10 event filter categories in script.js,
@@ -3657,6 +3650,30 @@ export default {
       }
     }
 
+    // Manual cache finalization for source-reviewed recovery publications that
+    // were promoted directly through the shared savePublishedPost contract.
+    // It has the same authority as /blog/publish, performs no KV mutations,
+    // and avoids spending another AI request merely to clear derived feeds.
+    if (
+      path === "/blog/invalidate-publication-caches" &&
+      request.method === "POST"
+    ) {
+      const auth = request.headers.get("Authorization") ?? "";
+      const validPublish =
+        env.PUBLISH_SECRET && auth === `Bearer ${env.PUBLISH_SECRET}`;
+      const validYtRegen =
+        env.YOUTUBE_REGEN_SECRET &&
+        auth === `Bearer ${env.YOUTUBE_REGEN_SECRET}`;
+      if (!validPublish && !validYtRegen) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      await invalidateCorePublicationCaches();
+      return jsonResponse({
+        status: "ok",
+        message: "Publication caches invalidated.",
+      });
+    }
+
     // Manual trigger (POST /blog/publish)
     // Requires:  Authorization: Bearer <PUBLISH_SECRET>  (blog failsafe)
     //        or  Authorization: Bearer <YOUTUBE_REGEN_SECRET>  (YouTube regen)
@@ -3873,7 +3890,35 @@ export default {
       }
       try {
         const result = await recoverPublishedPostEnrichment(guarded.env, recoverSlug);
-        return jsonResponse({ status: "ok", slug: recoverSlug, ...result });
+        const evergreen = result.found
+          ? await recoverPendingEvergreenHistory(guarded.env, {
+              preferPostSlug: recoverSlug,
+              requirePostSlug: true,
+            })
+          : { selected: 0, promoted: 0, deferred: 0 };
+        const finalized = result.found
+          ? await maybeFinalizePostPublishEnrichment(guarded.env, recoverSlug)
+          : { found: false, complete: false };
+        return jsonResponse({
+          status: "ok",
+          slug: recoverSlug,
+          recovery: {
+            found: result.found === true,
+            complete: result.complete === true,
+            timelineReady: result.timelineReady === true,
+            figureCount: result.figureCount || 0,
+            quizReady: result.quizReady === true,
+            evergreenReady: result.evergreenReady === true,
+            entitiesAttempted: result.entitiesAttempted === true,
+          },
+          evergreen,
+          finalized: {
+            found: finalized.found === true,
+            complete: finalized.complete === true,
+            evergreenReady: finalized.evergreenReady === true,
+            notified: finalized.notified === true,
+          },
+        });
       } catch (err) {
         return jsonResponse({ status: "error", slug: recoverSlug, message: err.message }, 500);
       }
@@ -4271,7 +4316,7 @@ export default {
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "public, max-age=300",
+          "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
         },
       });
     }
@@ -4289,11 +4334,11 @@ export default {
           index = JSON.parse(jsonStart > 0 ? trimmed.slice(jsonStart) : trimmed);
         } catch { index = []; }
       }
-      return new Response(JSON.stringify(index), {
+      return new Response(JSON.stringify(sortBlogIndexNewestFirst(index)), {
         headers: {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
-          "Cache-Control": "public, max-age=300",
+          "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
         },
       });
     }
@@ -5133,7 +5178,7 @@ export default {
         }
         // Inject scroll progress bar into older posts that were stored without it
         if (!patchedHtml.includes("read-progress")) {
-          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg,#1b3a2d);z-index:9999;transition:width .1s linear;pointer-events:none}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text,#1a2e20);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:var(--btn-bg,#1b3a2d);background:var(--bg-alt,#f2f7f2)}.site-btn-primary{border-color:var(--btn-bg,#1b3a2d);color:var(--btn-bg,#1b3a2d)}.site-btn-primary:hover{background:var(--bg-alt,#f2f7f2);border-color:var(--btn-hover,#2a4d3a);color:var(--btn-hover,#2a4d3a)}.tdq-cta-sub{color:var(--text-muted,#5c7a65)}</style>`;
+          const progressCss = `<style>#read-progress{position:fixed;top:0;left:0;height:6px;width:0%;background:var(--btn-bg,#1b3a2d);box-shadow:0 1px 4px rgba(27,58,45,.35);z-index:9999;transition:width .1s linear;pointer-events:none}.site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border,#cfe0cf);border-radius:8px;font-size:.875rem;font-weight:500;text-decoration:none;color:var(--text,#1a2e20);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}.site-btn:hover{border-color:var(--btn-bg,#1b3a2d);background:var(--bg-alt,#f2f7f2)}.site-btn-primary{border-color:var(--btn-bg,#1b3a2d);color:var(--btn-bg,#1b3a2d)}.site-btn-primary:hover{background:var(--bg-alt,#f2f7f2);border-color:var(--btn-hover,#2a4d3a);color:var(--btn-hover,#2a4d3a)}.tdq-cta-sub{color:var(--text-muted,#5c7a65)}</style>`;
           const progressHtml = `<div id="read-progress" role="progressbar" aria-label="Reading progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>`;
           const progressJs = `<script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();<\/script>`;
           patchedHtml = patchedHtml
@@ -7289,7 +7334,13 @@ function parseJsonObjectFromAI(value, label) {
  * Called once after scanBannedPhrases finds violations.
  * Returns updated content — falls back to original on any error.
  */
-async function fixBannedPhrases(env, content, violations, source = null) {
+async function fixBannedPhrases(
+  env,
+  content,
+  violations,
+  source = null,
+  { boundedProviderBudget = false } = {},
+) {
   const sourceMaterial = sourceBoundRepairContext(source);
   const allSections = {
     overviewParagraphs: content.overviewParagraphs || [],
@@ -7325,13 +7376,22 @@ async function fixBannedPhrases(env, content, violations, source = null) {
 
   let raw;
   try {
-    raw = await callAI(
+    const callRepairAI = boundedProviderBudget
+      ? callPublicationGateAI
+      : callAI;
+    raw = await callRepairAI(
       env,
       [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      { maxTokens: 3000, timeoutMs: 40_000 },
+      {
+        maxTokens: 3000,
+        timeoutMs: 40_000,
+        ...(boundedProviderBudget
+          ? { providerAttemptLimit: 5, groqSectionAttemptLimit: 1 }
+          : {}),
+      },
     );
   } catch (err) {
     console.warn(`fixBannedPhrases: AI call failed (${err.message}) — keeping original`);
@@ -7366,7 +7426,13 @@ async function fixBannedPhrases(env, content, violations, source = null) {
   return updated;
 }
 
-async function improveArticleQuality(env, content, issues, source = null) {
+async function improveArticleQuality(
+  env,
+  content,
+  issues,
+  source = null,
+  { boundedProviderBudget = false } = {},
+) {
   if (!issues.length) return content;
   const sourceMaterial = sourceBoundRepairContext(source);
 
@@ -7411,13 +7477,22 @@ async function improveArticleQuality(env, content, issues, source = null) {
 
   let raw;
   try {
-    raw = await callAI(
+    const callRepairAI = boundedProviderBudget
+      ? callPublicationGateAI
+      : callAI;
+    raw = await callRepairAI(
       env,
       [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      { maxTokens: 3000, timeoutMs: 50_000 },
+      {
+        maxTokens: 3000,
+        timeoutMs: 50_000,
+        ...(boundedProviderBudget
+          ? { providerAttemptLimit: 5, groqSectionAttemptLimit: 1 }
+          : {}),
+      },
     );
   } catch (err) {
     console.warn(`improveArticleQuality: AI call failed (${err.message}) — keeping original`);
@@ -8001,6 +8076,14 @@ async function generateAndStore(
   const articleGenerationEnv = preferWorkersAIForArticle
     ? { ...env, ARTICLE_GENERATION_PREFER_WORKERS_AI: "1" }
     : env;
+  // Daily publication always has a vetted, source-grounded evidence pack.
+  // The monolithic 4,096-token path repeatedly returned only 546-841 body
+  // words and then launched the chunked fallback anyway. Starting with the
+  // checkpointed chunks removes that duplicated full-article spend and lets
+  // later invocations resume only the missing component.
+  const useCheckpointedChunkedGeneration = Boolean(
+    selectedEvent && sourceMaterial,
+  );
 
   let content = null;
   let pillars = [];
@@ -8015,8 +8098,11 @@ async function generateAndStore(
   // attempts give it one regeneration chance; after that the generation-stage
   // self-heal blocks the event and the next independent run picks a
   // different topic with the remaining daily budget intact.
-  const MAX_CONTENT_ATTEMPTS =
-    selectedEvent?.sourceTopicMismatch === true ? 2 : 3;
+  const MAX_CONTENT_ATTEMPTS = useCheckpointedChunkedGeneration
+    ? 1
+    : selectedEvent?.sourceTopicMismatch === true
+      ? 2
+      : 3;
   if (selectedEvent?.sourceTopicMismatch === true) {
     console.warn(
       `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" carries a source/topic mismatch — generation attempt budget reduced to ${MAX_CONTENT_ATTEMPTS} to conserve provider capacity.`,
@@ -8028,6 +8114,23 @@ async function generateAndStore(
     stricterGrounding = false,
     groundingFeedback = [],
   ) => {
+    if (useCheckpointedChunkedGeneration) {
+      return generateArticleContentChunkedFallback(
+        articleGenerationEnv,
+        now,
+        avoidTitles,
+        activeModel,
+        selectedForcedEvent,
+        preferredPillars,
+        contextHook,
+        recentPillars,
+        sourceMaterial,
+        stricterGrounding,
+        groundingFeedback,
+        groundingSource?.pageTitle || selectedEvent?.sourcePageTitle || "",
+        lastResortRecovery,
+      );
+    }
     let lastError;
     for (let responseAttempt = 1; responseAttempt <= MAX_MALFORMED_RESPONSE_ATTEMPTS; responseAttempt++) {
       try {
@@ -9068,9 +9171,30 @@ async function postPublishEnrichmentStatus(env, slug, draft = null) {
   const evergreenReady = Boolean(
     html?.includes('data-history-entity-link="1"'),
   );
-  const entitiesAttempted = Boolean(
-    payload?.postPublishEnrichment?.entitiesAttemptedAt,
-  );
+  const attemptedAt = payload?.postPublishEnrichment?.entitiesAttemptedAt;
+  const primaryEvergreenCandidate =
+    validatePrimaryEvergreenCandidateForContent(content);
+  const primaryEventEntityPersisted =
+    !primaryEvergreenCandidate.ok ||
+    entityMeta.some((entity) => {
+      if (
+        entity?.type !== "event" ||
+        entity.historyQualityGateVersion !== BLOG_HISTORY_QUALITY_GATE_VERSION
+      ) {
+        return false;
+      }
+      const identity =
+        entity.canonicalIdentity ||
+        normalizedWikipediaEntityIdentity(entity.wikiUrl);
+      return (
+        identity &&
+        identity === primaryEvergreenCandidate.canonicalIdentity
+      );
+    });
+  // A timestamp is only a throttle after the entity phase produced the
+  // durable primary-event record. Manual/recovery callers must not suppress
+  // retries by stamping an attempted time alongside fallback person labels.
+  const entitiesAttempted = Boolean(attemptedAt && primaryEventEntityPersisted);
   const complete =
     timeline.ok &&
     figureCount >= MIN_AUTOMATIC_INLINE_FIGURES &&
@@ -9394,12 +9518,12 @@ async function savePublishedPost(
     originalValueGateVersion: content.originalValueGateVersion,
     originalValueModules: content.originalValueModules,
   };
-  deduped.unshift(entry);
-  if (deduped.length > 200) deduped.splice(200);
+  const orderedIndex = sortBlogIndexNewestFirst([entry, ...deduped])
+    .slice(0, 200);
   await blogKvPutIfChanged(
     env,
     KV_INDEX_KEY,
-    JSON.stringify(deduped),
+    JSON.stringify(orderedIndex),
   );
   if (recordPipeline) {
     await recordPipelineSuccess(env, {
@@ -9487,14 +9611,26 @@ async function enrichPublishedPost(
     let repaired = content;
     const bannedViolations = scanBannedPhrases(repaired);
     if (bannedViolations.length > 0) {
-      repaired = await fixBannedPhrases(env, repaired, bannedViolations, groundingSource);
+      repaired = await fixBannedPhrases(
+        env,
+        repaired,
+        bannedViolations,
+        groundingSource,
+        { boundedProviderBudget: true },
+      );
     }
     const preRepairIssues = [
       ...scanArticleQuality(repaired),
       ...scanIntraPageDuplication(repaired),
     ];
     if (preRepairIssues.length > 0) {
-      repaired = await improveArticleQuality(env, repaired, preRepairIssues, groundingSource);
+      repaired = await improveArticleQuality(
+        env,
+        repaired,
+        preRepairIssues,
+        groundingSource,
+        { boundedProviderBudget: true },
+      );
     }
     let boundedIssues = [
       ...scanBannedPhrases(repaired),
@@ -9509,14 +9645,26 @@ async function enrichPublishedPost(
       // pass on a fixable residual banned-phrase + source-anchor set).
       const secondBannedViolations = scanBannedPhrases(repaired);
       if (secondBannedViolations.length > 0) {
-        repaired = await fixBannedPhrases(env, repaired, secondBannedViolations, groundingSource);
+        repaired = await fixBannedPhrases(
+          env,
+          repaired,
+          secondBannedViolations,
+          groundingSource,
+          { boundedProviderBudget: true },
+        );
       }
       const secondQualityIssues = [
         ...scanArticleQuality(repaired),
         ...scanIntraPageDuplication(repaired),
       ];
       if (secondQualityIssues.length > 0) {
-        repaired = await improveArticleQuality(env, repaired, secondQualityIssues, groundingSource);
+        repaired = await improveArticleQuality(
+          env,
+          repaired,
+          secondQualityIssues,
+          groundingSource,
+          { boundedProviderBudget: true },
+        );
       }
       boundedIssues = [
         ...scanBannedPhrases(repaired),
@@ -9752,9 +9900,15 @@ async function recoverPublishedPostEnrichment(env, slug) {
   const lastAttemptAt = Date.parse(
     draft.postPublishEnrichment?.entitiesAttemptedAt || "",
   );
+  const preRecoveryStatus = await postPublishEnrichmentStatus(
+    env,
+    slug,
+    draft,
+  );
   if (
     Number.isFinite(lastAttemptAt) &&
-    Date.now() - lastAttemptAt < POST_PUBLISH_NOTIFICATION_DEADLINE_MS
+    Date.now() - lastAttemptAt < POST_PUBLISH_NOTIFICATION_DEADLINE_MS &&
+    preRecoveryStatus.entitiesAttempted
   ) {
     return {
       found: true,
@@ -9819,20 +9973,26 @@ async function recoverPublishedPostEnrichment(env, slug) {
     }
   }
 
-  const entitiesAttemptedAt =
-    draft.postPublishEnrichment?.entitiesAttemptedAt ||
-    new Date().toISOString();
+  let entityPersistenceSucceeded = false;
   const entityMeta = await upsertEntitiesForContent(
-    env,
-    content,
-    slug,
-    date,
-    pillars,
-    { skipAiGeneration: true },
-  ).catch((err) => {
+      env,
+      content,
+      slug,
+      date,
+      pillars,
+      { skipAiGeneration: true },
+    )
+    .then((entities) => {
+      entityPersistenceSucceeded = true;
+      return entities;
+    })
+    .catch((err) => {
     console.warn(`Blog: entity enrichment remains pending for ${slug} — ${err.message}`);
     return unlinkedArticlePeople(content);
   });
+  const entitiesAttemptedAt = entityPersistenceSucceeded
+    ? new Date().toISOString()
+    : "";
 
   if (!blogKvBackgroundWritesPaused(env)) {
     await hydrateRelatedFilmsForContent(content, entityMeta).catch((err) => {
@@ -10072,7 +10232,6 @@ function buildEvergreenHistoryEvidence(entity, content) {
     historicalYear: deriveHistoricalYear(content),
     location: content.location || "",
     articleDescription: content.description || "",
-    articleRationale: content.contentRationale || "",
     articleParagraphs,
     sourcePages,
   };
@@ -10308,6 +10467,11 @@ function evergreenHistoryEditionQuality(entity) {
   });
   const bodyWords = entityContentWordCount(entity);
   const copiedPhrase = hasCopiedEvergreenHistoryPhrase(entity);
+  const hasEditorialMeta = evergreenHistoryVisibleValues(entity).some((value) =>
+    /\b(?:this|the related) article\b|\bthis (?:entity )?page\b|\bwikipedia provides\b|\borganizes? the evidence\b|\bwhich source supports\b|\bto a specific historical date\b/i.test(
+      value,
+    ),
+  );
 
   if (entity?.evergreenHistoryVersion !== EVERGREEN_HISTORY_EDITION_VERSION) {
     reasons.push("missing the current evergreen edition marker");
@@ -10352,6 +10516,9 @@ function evergreenHistoryEditionQuality(entity) {
   if (independentSources.length < 1) reasons.push("missing an independent source");
   if (copiedPhrase) {
     reasons.push("copies a long phrase from the daily article");
+  }
+  if (hasEditorialMeta) {
+    reasons.push("contains article or page-production commentary in historical prose");
   }
   if (evergreenHistoryVisibleValues(entity).some((value) => rawUrlsInVisibleText(value).length > 0)) {
     reasons.push("contains a raw URL in visible prose");
@@ -11964,7 +12131,11 @@ function expandedEntityCardValue(label, currentValue, entity, content, fallbackV
       return description || fallback || current || summary;
     }
     if (label === "Context") {
-      return content.contentRationale || findEntityFact(facts, [/legacy/i, /impact/i, /influenced/i, /remembered/i, /shaped/i], fallback || current || summary);
+      return findEntityFact(
+        facts,
+        [/legacy/i, /impact/i, /influenced/i, /remembered/i, /shaped/i],
+        fallback || current || summary,
+      );
     }
     if (label === "Known for") {
       return findEntityFact(facts, [/primary author/i, /founded/i, /invented/i, /discovered/i, /pioneered/i, /proponent/i, /known for/i, /best known/i], description || summary || current || fallback);
@@ -11978,22 +12149,37 @@ function expandedEntityCardValue(label, currentValue, entity, content, fallbackV
   }
 
   if (label === "What happened") {
-    return summary || content.description || `${entity.name} is treated as the central event for this entity page, with the related article providing the narrative and source-backed context.`;
+    return summary || content.description || fallback || current;
   }
   if (label === "Date") {
-    return content.historicalDate || fallback || current || "Date details are sourced from the related thisDay article.";
+    return content.historicalDate || fallback || current;
   }
   if (label === "Location") {
-    return content.location || fallback || current || "Location details are sourced from the related thisDay article when available.";
+    return content.location || fallback || current;
   }
   if (label === "Key people") {
-    return people || fallback || current || "Key people are drawn from the related article and linked entity records when available.";
+    return people || fallback || current;
   }
   if (label === "Outcome") {
-    return `${content.description || summary || `${entity.name} changed the public story around the people and institutions involved.`} The outcome card keeps the immediate result separate from the broader legacy.`;
+    return content.description || summary || fallback || current;
   }
   if (label === "Why it matters") {
-    return content.contentRationale || `This event matters because it links a specific date to people, institutions, media attention, and later memory. The entity page gives readers a place to move beyond one article.`;
+    return findEntityFact(
+      facts,
+      [
+        /\bdeadliest\b/i,
+        /\bfirst (?:fatal|major|successful|recorded)\b/i,
+        /\bled to\b/i,
+        /\bresulted in\b/i,
+        /\bprompted\b/i,
+        /\breform(?:ed|s)?\b/i,
+        /\blegacy\b/i,
+        /\bimpact\b/i,
+        /\bconsequence/i,
+        /\bremembered\b/i,
+      ],
+      fallback || current,
+    );
   }
   return current || fallback;
 }
@@ -12032,7 +12218,7 @@ function ensureFilledEntityCards(cards, fallbackCards, entity, content) {
       label: card.label,
       value,
     };
-  });
+  }).filter((card) => card?.label && String(card.value || "").trim());
 }
 
 async function generateEntityOverviewCards(env, entity, content, fallbackCards) {
@@ -12063,8 +12249,6 @@ Life and death must be factual and first. If the person is alive, say "No death 
         birthDate: entity.birthDate,
         deathDate: entity.deathDate,
         wikiUrl: entity.wikiUrl,
-        sourcePostTitle: entity.sourcePostTitle,
-        sourcePublishedAt: entity.sourcePublishedAt,
       },
       null,
       2,
@@ -12076,7 +12260,6 @@ Life and death must be factual and first. If the person is alive, say "No death 
         historicalDate: content.historicalDate,
         location: content.location,
         description: content.description,
-        contentRationale: content.contentRationale,
         keyPeople: (content.keyTerms || []).filter((term) => term.type === "person").map((term) => term.term).slice(0, 6),
       },
       null,
@@ -12160,19 +12343,12 @@ function splitIntroParagraphs(text, targetWords = 100) {
 }
 
 function buildFallbackEntityBodySections(entity, content) {
-  const sourceTitle = entity.sourcePostTitle || content.title || "the related thisDay article";
   const factSentences = entityFactSentences(entity.intro, entity.summary);
   const summary = String(entity.summary || entity.intro || "").replace(/\s+/g, " ").trim();
   const description = String(entity.description || "").replace(/\s+/g, " ").trim();
   const articleDescription = /\.\.\.$|…$/.test(String(content.description || "").trim())
     ? ""
     : String(content.description || "").trim();
-  const people = (content.keyTerms || [])
-    .filter((term) => term.type === "person")
-    .map((term) => term.term)
-    .slice(0, 5)
-    .join(", ");
-
   if (entity.type === "person") {
     const introParagraphs = splitIntroParagraphs(entity.intro || entity.summary, 110);
     const sections = [];
@@ -12218,22 +12394,38 @@ function buildFallbackEntityBodySections(entity, content) {
     return sections.filter((s) => s.paragraphs.filter(Boolean).length > 0);
   }
 
-  return [
-    {
-      heading: `What was ${entity.name}?`,
-      paragraphs: [
-        `${summary || content.description || `${entity.name} is the event connected to this thisDay article.`}`,
-        `${content.historicalDate ? `${entity.name} is tied to ${content.historicalDate}.` : `The related article supplies the date context for ${entity.name}.`} ${people ? `Key people connected to the event include ${people}.` : `Key people are drawn from the related article when available.`}`,
-      ],
-    },
-    {
-      heading: `Why ${entity.name} still matters`,
-      paragraphs: [
-        `${content.contentRationale || `${entity.name} matters because it connects a specific date to people, institutions, public memory, and later interpretation.`}`,
-        `${sourceTitle} connects ${entity.name} to a specific historical date. ${articleDescription || "The related article explains the event, the people involved, and why the moment is still remembered."}`,
-      ],
-    },
-  ];
+  const sourceParagraphs = splitIntroParagraphs(
+    entity.intro || entity.summary,
+    110,
+  );
+  const factualParagraphs = sourceParagraphs.length
+    ? sourceParagraphs.slice(0, 3)
+    : [summary || articleDescription].filter(Boolean);
+  if (!factualParagraphs.length) return [];
+
+  const sections = [{
+    heading: `What was ${entity.name}?`,
+    paragraphs: factualParagraphs,
+  }];
+  const usedText = normalizeTopicMatchText(factualParagraphs.join(" "));
+  const consequenceSentences = factSentences
+    .filter((sentence) =>
+      /\b(deadliest|first fatal|led to|resulted in|prompted|reform|legacy|impact|consequence|investigation|memorial|remembered)\b/i.test(sentence),
+    )
+    .filter((sentence) =>
+      !usedText.includes(normalizeTopicMatchText(sentence)),
+    );
+  const consequenceParagraphs = splitIntroParagraphs(
+    consequenceSentences.join(" "),
+    110,
+  );
+  if (consequenceParagraphs.length) {
+    sections.push({
+      heading: "Documented consequences and significance",
+      paragraphs: consequenceParagraphs,
+    });
+  }
+  return sections;
 }
 
 function normalizeEntityBodySections(sections, fallbackSections) {
@@ -12280,7 +12472,6 @@ async function generateEntityBodySections(env, entity, content, fallbackSections
         birthDate: entity.birthDate,
         deathDate: entity.deathDate,
         wikiUrl: entity.wikiUrl,
-        sourcePostTitle: entity.sourcePostTitle,
       },
       null,
       2,
@@ -12292,7 +12483,6 @@ async function generateEntityBodySections(env, entity, content, fallbackSections
         historicalDate: content.historicalDate,
         location: content.location,
         description: content.description,
-        contentRationale: content.contentRationale,
         pillars: entity.relatedTopics,
         keyPeople: (content.keyTerms || []).filter((term) => term.type === "person").map((term) => term.term).slice(0, 6),
       },
@@ -12341,7 +12531,6 @@ function evergreenHistoryEvidenceCorpus(entity) {
     evidence.historicalDate,
     evidence.location,
     evidence.articleDescription,
-    evidence.articleRationale,
     ...(Array.isArray(evidence.articleParagraphs)
       ? evidence.articleParagraphs
       : []),
@@ -12570,15 +12759,36 @@ async function generateEvergreenHistoryEdition(env, entity) {
 function buildEventOverviewCards(entity, content) {
   const summary = compactEntityText(entity.summary, 185);
   const description = compactEntityText(content.description, 185);
-  const rationale = compactEntityText(content.contentRationale, 185);
+  const sourceFacts = entityFactSentences(entity.intro, entity.summary);
+  const significance = findEntityFact(
+    sourceFacts,
+    [
+      /\bdeadliest\b/i,
+      /\bfirst (?:fatal|major|successful|recorded)\b/i,
+      /\bled to\b/i,
+      /\bresulted in\b/i,
+      /\bprompted\b/i,
+      /\breform(?:ed|s)?\b/i,
+      /\blegacy\b/i,
+      /\bimpact\b/i,
+      /\bconsequence/i,
+      /\bremembered\b/i,
+    ],
+    "",
+  );
+  const people = (content.keyTerms || [])
+    .filter((term) => term.type === "person")
+    .map((term) => term.term)
+    .slice(0, 4)
+    .join(", ");
   return [
-    { label: "What happened", value: summary || description || `${entity.name} is the event covered by this thisDay article.` },
-    { label: "Date", value: content.historicalDate || "Date details are sourced from the related article." },
-    { label: "Location", value: content.location || "Location details are sourced from the related article." },
-    { label: "Key people", value: (content.keyTerms || []).filter((t) => t.type === "person").map((t) => t.term).slice(0, 4).join(", ") || "Key people are listed in the related article." },
-    { label: "Outcome", value: description || summary || "The related article explains the outcome and immediate consequences." },
-    { label: "Why it matters", value: rationale || summary || "This page collects thisDay coverage and source links for the event." },
-  ];
+    { label: "What happened", value: summary || description },
+    { label: "Date", value: content.historicalDate || "" },
+    { label: "Location", value: content.location || "" },
+    { label: "Key people", value: people },
+    { label: "Outcome", value: description || "" },
+    { label: "Why it matters", value: significance },
+  ].filter((card) => card.value);
 }
 
 async function upsertEntityRecord(env, draftEntity) {
@@ -14589,13 +14799,14 @@ async function generateChunkedArticleBodyField(
   sharedContext,
   compactBrief,
   alreadyWritten = null,
+  invokeChunkedArticleAI = callChunkedArticleAI,
 ) {
   const label = `chunked article ${field}`;
   const existingSection = alreadyWritten
     ? `Already written body fields, for continuity and non-repetition:\n${JSON.stringify(alreadyWritten, null, 2)}\n\n`
     : "";
 
-  return callChunkedArticleAI(
+  return invokeChunkedArticleAI(
     env,
     model,
     label,
@@ -14635,6 +14846,102 @@ function validateChunkedArticleSupport(merged) {
   requireChunkArray(merged, "analysisGood", { min: 3, label: "chunked article fallback" });
   requireChunkArray(merged, "analysisBad", { min: 3, label: "chunked article fallback" });
   assertRequiredContentBlocks(merged);
+}
+
+function chunkedArticleBodyCapacityRepairFields(content) {
+  const currentWords = articleBodyWordCount(content);
+  if (currentWords >= MIN_REAL_ARTICLE_BODY_WORDS) return [];
+  const deficit = MIN_REAL_ARTICLE_BODY_WORDS - currentWords;
+  const targetWordsPerField = 2 * (CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 25);
+  const candidates = ARTICLE_BODY_FIELDS
+    .map((field) => {
+      const paragraphs = Array.isArray(content?.[field]) ? content[field] : [];
+      const words = paragraphs.reduce(
+        (sum, paragraph) => sum + wordCount(paragraph),
+        0,
+      );
+      return {
+        field,
+        paragraphCount: paragraphs.length,
+        words,
+        projectedGain: Math.max(0, targetWordsPerField - words),
+      };
+    })
+    .sort((left, right) =>
+      left.paragraphCount - right.paragraphCount || left.words - right.words
+    );
+  const selected = [];
+  let projectedGain = 0;
+  for (const candidate of candidates) {
+    selected.push(candidate.field);
+    projectedGain += candidate.projectedGain;
+    // Keep a small safety margin so punctuation/tokenization differences do
+    // not land the targeted rewrite just below the hard publication floor.
+    if (projectedGain >= deficit + 40) break;
+  }
+  return selected;
+}
+
+async function repairChunkedArticleBodyCapacity(
+  env,
+  model,
+  content,
+  sharedContext,
+  compactBrief,
+  invokeChunkedArticleAI = callChunkedArticleAI,
+) {
+  const fields = chunkedArticleBodyCapacityRepairFields(content);
+  if (fields.length === 0) return null;
+  const requestedShape = Object.fromEntries(
+    fields.map((field) => [field, ["paragraph 1", "paragraph 2"]]),
+  );
+  const retainedBody = Object.fromEntries(
+    ARTICLE_BODY_FIELDS
+      .filter((field) => !fields.includes(field))
+      .map((field) => [field, content[field]]),
+  );
+  const currentWords = articleBodyWordCount(content);
+  return invokeChunkedArticleAI(
+    env,
+    model,
+    "chunked article body capacity repair",
+    `CHUNKED ARTICLE FALLBACK - BODY CAPACITY REPAIR
+${sharedContext}
+
+Canonical brief:
+${JSON.stringify(compactBrief, null, 2)}
+
+The retained article body has ${currentWords} words, below the hard ${MIN_REAL_ARTICLE_BODY_WORDS}-word publication floor.
+Retained body fields:
+${JSON.stringify(retainedBody, null, 2)}
+
+Rewrite only these shortest fields as JSON:
+${JSON.stringify(requestedShape, null, 2)}
+
+Requirements:
+- Return exactly these top-level fields: ${fields.join(", ")}.
+- Each field must contain exactly 2 paragraphs of 145-175 words each.
+- The complete body, including retained fields, must total at least ${MIN_REAL_ARTICLE_BODY_WORDS + 50} words.
+- Add only distinct facts explicitly present in the authoritative source.
+- Do not repeat retained paragraphs, infer causality, add policy lessons, or place raw URLs, hyphens, or em dashes in prose.`,
+    Math.min(3_600, 1_000 + fields.length * 850),
+    (parsed) => {
+      validateChunkedArticleBodyChunk(
+        parsed,
+        fields,
+        "chunked article body capacity repair",
+      );
+      const repairedWords = articleBodyWordCount({
+        ...content,
+        ...parsed,
+      });
+      if (repairedWords < MIN_REAL_ARTICLE_BODY_WORDS) {
+        throw new Error(
+          `chunked article body capacity repair: still below ${MIN_REAL_ARTICLE_BODY_WORDS} words (got ${repairedWords})`,
+        );
+      }
+    },
+  );
 }
 
 function continuityTokenList(value, ignoredTokens = new Set()) {
@@ -14872,10 +15179,25 @@ function normalizeArticleGenerationJournal(
   date,
   sourceFingerprint,
 ) {
+  const sameDailyArticle =
+    payload &&
+    payload.version === ARTICLE_GENERATION_VERSION &&
+    payload.slug === buildSlug(date);
+  const retainedRequestBudget =
+    sameDailyArticle &&
+    payload.requestBudget &&
+    typeof payload.requestBudget === "object"
+      ? {
+          ...payload.requestBudget,
+          calls:
+            payload.requestBudget.calls &&
+            typeof payload.requestBudget.calls === "object"
+              ? { ...payload.requestBudget.calls }
+              : {},
+        }
+      : null;
   if (
-    !payload ||
-    payload.version !== ARTICLE_GENERATION_VERSION ||
-    payload.slug !== buildSlug(date) ||
+    !sameDailyArticle ||
     payload.sourceFingerprint !== sourceFingerprint ||
     !payload.chunks ||
     typeof payload.chunks !== "object"
@@ -14886,11 +15208,17 @@ function normalizeArticleGenerationJournal(
       sourceFingerprint,
       createdAt: new Date().toISOString(),
       chunks: {},
+      ...(retainedRequestBudget
+        ? { requestBudget: retainedRequestBudget }
+        : {}),
     };
   }
   return {
     ...payload,
     chunks: { ...payload.chunks },
+    ...(retainedRequestBudget
+      ? { requestBudget: retainedRequestBudget }
+      : {}),
   };
 }
 
@@ -14920,27 +15248,88 @@ async function loadArticleGenerationJournal(
   );
 }
 
+function articleGenerationRequestBudgetLimit(env) {
+  const configured = Number.parseInt(
+    String(env?.ARTICLE_GENERATION_REQUEST_BUDGET || ""),
+    10,
+  );
+  return Number.isFinite(configured) && configured > 0
+    ? Math.min(configured, DEFAULT_ARTICLE_GENERATION_REQUEST_BUDGET)
+    : DEFAULT_ARTICLE_GENERATION_REQUEST_BUDGET;
+}
+
+function articleGenerationBudgetRetryAt(now = new Date()) {
+  return new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+  ));
+}
+
+function articleGenerationBudgetError(date, used, limit) {
+  const retryAt = articleGenerationBudgetRetryAt();
+  const error = new Error(
+    `AI provider capacity unavailable: article-generation request budget ` +
+    `${used}/${limit} exhausted for ${buildSlug(date)}; retained chunks resume after ` +
+    `${retryAt.toISOString()}`,
+  );
+  error.code = "AI_CAPACITY_UNAVAILABLE";
+  error.retryAt = retryAt.toISOString();
+  return error;
+}
+
 function createArticleGenerationCheckpointer(
   env,
   date,
   journal,
 ) {
   let writeQueue = Promise.resolve();
+  const persist = async () => {
+    journal.updatedAt = new Date().toISOString();
+    const snapshot = JSON.stringify(journal);
+    writeQueue = writeQueue.then(() =>
+      blogKvPutIfChanged(
+        env,
+        articleGenerationJournalKey(date),
+        snapshot,
+        { expirationTtl: ARTICLE_GENERATION_TTL },
+      ),
+    );
+    await writeQueue;
+  };
   return {
     journal,
+    async consumeRequest(label) {
+      const limit = articleGenerationRequestBudgetLimit(env);
+      const existing = journal.requestBudget;
+      const budgetDate = new Date().toISOString().slice(0, 10);
+      const budget =
+        existing &&
+        existing.date === budgetDate &&
+        Number.isInteger(existing.used) &&
+        existing.used >= 0 &&
+        existing.calls &&
+        typeof existing.calls === "object"
+          ? existing
+          : { date: budgetDate, used: 0, calls: {} };
+      if (budget.used >= limit) {
+        throw articleGenerationBudgetError(date, budget.used, limit);
+      }
+      const normalizedLabel = String(label || "article chunk").slice(0, 80);
+      budget.used += 1;
+      budget.limit = limit;
+      budget.calls[normalizedLabel] =
+        (Number(budget.calls[normalizedLabel]) || 0) + 1;
+      journal.requestBudget = budget;
+      // Persist before the provider call. A timeout or malformed response must
+      // still count, otherwise a fresh Worker invocation could spend the same
+      // free-tier allowance again without seeing the earlier failed attempt.
+      await persist();
+      return { used: budget.used, limit };
+    },
     async save(name, value) {
       journal.chunks[name] = value;
-      journal.updatedAt = new Date().toISOString();
-      const snapshot = JSON.stringify(journal);
-      writeQueue = writeQueue.then(() =>
-        blogKvPutIfChanged(
-          env,
-          articleGenerationJournalKey(date),
-          snapshot,
-          { expirationTtl: ARTICLE_GENERATION_TTL },
-        ),
-      );
-      await writeQueue;
+      await persist();
       return value;
     },
     async flush() {
@@ -15017,7 +15406,19 @@ function isStructurallyIncompleteChunkFailure(error) {
   );
 }
 
-async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, validate = null) {
+async function callChunkedArticleAI(
+  env,
+  model,
+  label,
+  userPrompt,
+  maxTokens,
+  validate = null,
+  {
+    maxAttempts = 2,
+    onAttempt = null,
+    groqSectionAttemptLimit = null,
+  } = {},
+) {
   // Retry a failed sub-call once before letting it abort the whole chunked
   // fallback. A single transient parse error or short-count response (the
   // 2026-07-05 "facts" sub-call) previously dropped the pipeline back to the
@@ -15025,8 +15426,12 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
   let lastError;
   let retryFeedback = "";
   let retryMaxTokens = maxTokens;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  const boundedAttempts = Math.max(1, Math.min(2, Number(maxAttempts) || 1));
+  for (let attempt = 1; attempt <= boundedAttempts; attempt++) {
     try {
+      if (typeof onAttempt === "function") {
+        await onAttempt({ attempt, label, maxTokens: retryMaxTokens });
+      }
       const callArticleAI = env.ARTICLE_GENERATION_PREFER_WORKERS_AI
         ? callPublicationGateAI
         : callAI;
@@ -15046,6 +15451,9 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
           cfModel: model,
           temperature: 0.15,
           providerAttemptLimit: 8,
+          ...(groqSectionAttemptLimit == null
+            ? {}
+            : { groqSectionAttemptLimit }),
         },
       );
       const parsed = parseJsonObjectFromAI(raw, label);
@@ -15054,7 +15462,7 @@ async function callChunkedArticleAI(env, model, label, userPrompt, maxTokens, va
     } catch (err) {
       lastError = err;
       if (!shouldRetryChunkOutputFailure(err)) throw err;
-      if (attempt < 2) {
+      if (attempt < boundedAttempts) {
         if (isStructurallyIncompleteChunkFailure(err)) {
           retryMaxTokens = Math.min(Math.round(maxTokens * 1.5), 4000);
           console.warn(
@@ -15233,6 +15641,31 @@ ${retryFeedback}`;
     date,
     generationJournal,
   );
+  const invokeBudgetedChunkedArticleAI = (
+    callEnv,
+    callModel,
+    label,
+    prompt,
+    maxTokens,
+    validate = null,
+  ) => callChunkedArticleAI(
+    callEnv,
+    callModel,
+    label,
+    prompt,
+    maxTokens,
+    validate,
+    {
+      // A later scheduled invocation can retry only the missing checkpoint.
+      // Retrying inside the same invocation was the July 28 quota drain.
+      maxAttempts: 1,
+      onAttempt: () => generationCheckpoint.consumeRequest(label),
+      // All configured Groq keys share one organization unless an explicit
+      // quota-pool map proves otherwise. One attempt per logical chunk keeps
+      // an empty/malformed response from probing every key in the same pool.
+      groqSectionAttemptLimit: 1,
+    },
+  );
   const savedChunks = generationJournal.chunks;
   const validateBriefChunk = (parsed) => {
     parsed.curiosityTitle = normalizeCuriosityTitleText(parsed.curiosityTitle);
@@ -15289,7 +15722,7 @@ ${retryFeedback}`;
     validateBriefChunk,
   ) || await generationCheckpoint.save(
     "brief",
-    await callChunkedArticleAI(
+    await invokeBudgetedChunkedArticleAI(
       env,
       model,
       "chunked article brief",
@@ -15343,7 +15776,11 @@ Requirements:
 
   const compactBrief = compactChunkedArticleBrief(brief);
 
-  const generateSplitBodyFields = async (fields, alreadyWritten = null) => {
+  const generateSplitBodyFields = async (
+    fields,
+    alreadyWritten = null,
+    invokeChunkedArticleAI = callChunkedArticleAI,
+  ) => {
     const merged = {};
     for (const field of fields) {
       const continuityContext =
@@ -15357,6 +15794,7 @@ Requirements:
         sharedContext,
         compactBrief,
         continuityContext,
+        invokeChunkedArticleAI,
       );
       Object.assign(merged, chunk);
     }
@@ -15381,7 +15819,7 @@ Requirements:
     );
     if (!bodyA) {
       try {
-        bodyA = await callChunkedArticleAI(
+        bodyA = await invokeBudgetedChunkedArticleAI(
           env,
           model,
           "chunked article body A",
@@ -15412,7 +15850,11 @@ Requirements:
         console.warn(
           `Blog: combined chunked article body A failed (${err.message}); splitting into single-section calls.`,
         );
-        bodyA = await generateSplitBodyFields(["overviewParagraphs", "eyewitnessOrChronicle"]);
+        bodyA = await generateSplitBodyFields(
+          ["overviewParagraphs", "eyewitnessOrChronicle"],
+          null,
+          invokeBudgetedChunkedArticleAI,
+        );
       }
       await generationCheckpoint.save("bodyA", bodyA);
     }
@@ -15429,7 +15871,7 @@ Requirements:
     );
     if (!bodyB) {
       try {
-        bodyB = await callChunkedArticleAI(
+        bodyB = await invokeBudgetedChunkedArticleAI(
           env,
           model,
           "chunked article body B",
@@ -15463,9 +15905,50 @@ Requirements:
         console.warn(
           `Blog: combined chunked article body B failed (${err.message}); splitting into single-section calls.`,
         );
-        bodyB = await generateSplitBodyFields(["aftermathParagraphs", "conclusionParagraphs"], bodyA);
+        bodyB = await generateSplitBodyFields(
+          ["aftermathParagraphs", "conclusionParagraphs"],
+          bodyA,
+          invokeBudgetedChunkedArticleAI,
+        );
       }
       await generationCheckpoint.save("bodyB", bodyB);
+    }
+
+    const capacityRepair = await repairChunkedArticleBodyCapacity(
+      env,
+      model,
+      { ...compactBrief, ...bodyA, ...bodyB },
+      sharedContext,
+      compactBrief,
+      invokeBudgetedChunkedArticleAI,
+    );
+    if (capacityRepair) {
+      const repairedBodyA = {
+        ...bodyA,
+        ...Object.fromEntries(
+          ["overviewParagraphs", "eyewitnessOrChronicle"]
+            .filter((field) => capacityRepair[field])
+            .map((field) => [field, capacityRepair[field]]),
+        ),
+      };
+      const repairedBodyB = {
+        ...bodyB,
+        ...Object.fromEntries(
+          ["aftermathParagraphs", "conclusionParagraphs"]
+            .filter((field) => capacityRepair[field])
+            .map((field) => [field, capacityRepair[field]]),
+        ),
+      };
+      if (JSON.stringify(repairedBodyA) !== JSON.stringify(bodyA)) {
+        bodyA = await generationCheckpoint.save("bodyA", repairedBodyA);
+      }
+      if (JSON.stringify(repairedBodyB) !== JSON.stringify(bodyB)) {
+        bodyB = await generationCheckpoint.save("bodyB", repairedBodyB);
+      }
+      console.log(
+        `Blog: targeted body-capacity repair raised ${buildSlug(date)} to ` +
+        `${articleBodyWordCount({ ...bodyA, ...bodyB })} words.`,
+      );
     }
     return { bodyA, bodyB };
   })();
@@ -15497,7 +15980,7 @@ Requirements:
       validateFactsChunk,
     );
     if (checkpointedFacts) return checkpointedFacts;
-    const facts = await callChunkedArticleAI(
+    const facts = await invokeBudgetedChunkedArticleAI(
         env,
         model,
         "chunked article facts",
@@ -15552,7 +16035,7 @@ Requirements:
     validateAnalysisChunk,
   ) || await generationCheckpoint.save(
     "analysis",
-    await callChunkedArticleAI(
+    await invokeBudgetedChunkedArticleAI(
       env,
       model,
       "chunked article analysis",
@@ -15614,6 +16097,7 @@ Requirements:
         sharedContext,
         compactBrief,
         continuity,
+        invokeBudgetedChunkedArticleAI,
       );
     } catch (err) {
       if (!lastResortRecovery) throw err;
@@ -20314,7 +20798,7 @@ function buildPostHTML(
   const evidenceMapBlock = buildEvidenceMapBlock(c);
   const amazonRelatedBlock = buildAmazonRelatedBlock(c, currentPillars);
   const relatedFilmsBlock = buildRelatedFilmsBlock(c);
-  const articleBodyAdBlock = amazonRelatedBlock ? buildArticleBodyAdBlock() : "";
+  const articleBodyAdBlock = buildArticleBodyAdBlock();
 
   const overviewParas = (c.overviewParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
@@ -20618,7 +21102,7 @@ ${breadcrumbJsonLd}
       .shadow-sm{box-shadow:none!important}
       .btn-outline-primary{color:var(--text-muted);border-color:var(--border);background:var(--bg)}
       .btn-outline-primary:hover{border-color:var(--btn-bg);color:var(--text);background:var(--bg-alt)}
-      #read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg);z-index:9999;transition:width .1s linear;pointer-events:none}
+      #read-progress{position:fixed;top:0;left:0;height:6px;width:0%;background:var(--btn-bg);box-shadow:0 1px 4px rgba(27,58,45,.35);z-index:9999;transition:width .1s linear;pointer-events:none}
       button#chatbotToggle,#chatbotWindow{display:none!important}
       .site-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:15px;font-weight:400;text-decoration:none;color:var(--text);background:transparent;cursor:pointer;transition:background .15s,border-color .15s,color .15s;user-select:none}
       .site-btn:hover{border-color:var(--btn-bg);background:var(--bg-alt)}
@@ -20706,10 +21190,8 @@ ${overviewParas}
               : ""
           }
 
-          ${evidenceMapBlock}
-
-          ${amazonRelatedBlock}
           ${articleBodyAdBlock}
+          ${amazonRelatedBlock}
           ${relatedFilmsBlock}
 
           <!-- Eyewitness / Chronicle Accounts -->
@@ -20779,7 +21261,6 @@ ${conclusionParas}
             <details class="analysis-disclosure mt-2">
               <summary class="analysis-disclosure-summary">What the evidence supports and leaves unresolved</summary>
               <div class="analysis-disclosure-body">
-                <p class="article-meta mb-3">The overview above gives the factual narrative. This optional section separates interpretation from the documented record.</p>
                 <div class="row g-3 mt-1">
               <div class="col-md-6">
                 <div class="analysis-good p-3 rounded h-100">
@@ -20850,6 +21331,7 @@ ${analysisBadItems}
             </div>
           </div>` : `<!-- quiz-deferred -->`;
             return `${quizCta}
+          ${evidenceMapBlock}
           ${buildAuthorityLinksBlock(c, currentPillars)}
           ${relatedSection}`;
           })()}
@@ -21210,8 +21692,9 @@ ${supportPopupSnippet()}
  * Builds the canonical /blog/ listing page.
  */
 async function buildListingHTML(index) {
-  const postItems = index.length
-    ? index
+  const orderedIndex = sortBlogIndexNewestFirst(index);
+  const postItems = orderedIndex.length
+    ? orderedIndex
         .map((entry) => renderBlogPostListItem(entry))
         .join("\n")
     : '<p class="text-muted">No AI-generated posts yet. Check back soon!</p>';
@@ -21256,7 +21739,7 @@ ${JSON.stringify(
         url: "https://thisday.info/images/logo.png",
       },
     },
-    hasPart: index.slice(0, 20).map((p) => ({
+    hasPart: orderedIndex.slice(0, 20).map((p) => ({
       "@type": "BlogPosting",
       name: p.title,
       url: `https://thisday.info/blog/${p.slug}/`,
@@ -21329,7 +21812,7 @@ ${JSON.stringify(
                data-full-width-responsive="true"></ins>
         </div>
         <div class="month-section">
-          <h2 class="month-header"><i class="bi bi-book me-2"></i>All Articles (${index.length})</h2>
+          <h2 class="month-header"><i class="bi bi-book me-2"></i>All Articles (${orderedIndex.length})</h2>
           ${postItems}
         </div>
 
@@ -22115,6 +22598,13 @@ function moveHeroOutsideArticleHtml(body) {
 function normalizeArticleLayoutHtml(body) {
   let html = moveHeroOutsideArticleHtml(body);
 
+  // The analysis disclosure already labels itself clearly; this explanatory
+  // sentence repeats that distinction without adding information.
+  html = html.replace(
+    /\s*<p\b[^>]*\bclass="[^"]*\barticle-meta\b[^"]*\bmb-3\b[^"]*"[^>]*>\s*The overview above gives the factual narrative\.\s*This optional section separates interpretation from the documented record\.\s*<\/p>/gi,
+    "",
+  );
+
   if (html.includes('<section class="dyn-slider-shell') && !html.includes("<h2 class=\"h3\">Did You Know?</h2>")) {
     html = html.replace(
       '<section class="dyn-slider-shell',
@@ -22145,38 +22635,49 @@ function normalizeArticleLayoutHtml(body) {
     html = moveHtmlRangeBefore(html, exploreRange, exploreAnchor);
   }
 
-  const amazonRelatedRange = findSectionRangeContaining(
+  // The in-article ad occupies the Evidence Map's former position: directly
+  // after Overview and before any related-media modules and Eyewitness. Stored
+  // posts are repaired at response time without rewriting KV.
+  const articleBodyAdRange = findDivBlockRangeContaining(
     html,
-    "Related books",
-    /\bclass="[^"]*\bamazon-related\b/i,
+    "Advertisement",
+    /\bclass="[^"]*\barticle-body-ad-v1\b/i,
   );
-  if (amazonRelatedRange && !html.includes("article-body-ad-v1")) {
-    html = `${html.slice(0, amazonRelatedRange.end)}
-          ${buildArticleBodyAdBlock()}
-          ${html.slice(amazonRelatedRange.end)}`;
+  const relatedMediaAnchor = html.indexOf('<section class="amazon-related');
+  const eyewitnessCommentAnchor = html.indexOf(
+    "<!-- Eyewitness / Chronicle Accounts -->",
+  );
+  const bodyAdAnchor = [relatedMediaAnchor, eyewitnessCommentAnchor]
+    .filter((index) => index !== -1)
+    .sort((a, b) => a - b)[0] ?? -1;
+  if (bodyAdAnchor !== -1) {
+    if (articleBodyAdRange) {
+      html = moveHtmlRangeBefore(html, articleBodyAdRange, bodyAdAnchor);
+    } else {
+      html = `${html.slice(0, bodyAdAnchor)}${buildArticleBodyAdBlock()}
+          ${html.slice(bodyAdAnchor)}`;
+    }
   }
 
-  // Keep direct-source links at the bottom of the article, immediately after
-  // the Test Your Knowledge CTA. This also repairs older stored posts whose
-  // authority block was rendered near the overview.
-  const trustedSourcesRange =
-    findDivBlockRangeContaining(
-      html,
-      "Sources used for this article",
-      /\bclass="[^"]*\bauthority-links\b/i,
-    ) ||
-    findDivBlockRangeContaining(
-      html,
-      "Learn more at trusted sources",
-      /\bclass="[^"]*\bauthority-links\b/i,
-    );
+  // The evidence map replaces the former direct-source links block at the
+  // bottom of the article, immediately after Test Your Knowledge.
   const quizCtaRange = findDivBlockRangeContaining(
     html,
     "Test Your Knowledge",
     /\bclass="[^"]*\bauthority-links\b[^"]*\bmt-4\b/i,
   );
-  if (trustedSourcesRange && quizCtaRange) {
-    html = moveHtmlRangeBefore(html, trustedSourcesRange, quizCtaRange.end);
+  const evidenceMapRange = findSectionRangeContaining(
+    html,
+    "Evidence Map: How We Checked the Central Claim",
+    /\bclass="[^"]*\barticle-evidence-map\b/i,
+  );
+  if (evidenceMapRange && quizCtaRange) {
+    const alreadyAfterQuiz =
+      evidenceMapRange.start >= quizCtaRange.end &&
+      html.slice(quizCtaRange.end, evidenceMapRange.start).trim() === "";
+    if (!alreadyAfterQuiz) {
+      html = moveHtmlRangeBefore(html, evidenceMapRange, quizCtaRange.end);
+    }
   }
 
   const relatedQuestionsRange =
@@ -22198,6 +22699,25 @@ function normalizeArticleLayoutHtml(body) {
       : disclosureRange?.start ?? -1;
   if (relatedQuestionsRange && disclosureAnchor !== -1) {
     html = moveHtmlRangeBefore(html, relatedQuestionsRange, disclosureAnchor);
+  }
+
+  // The evidence map contains the same direct source links and their verified
+  // claim coverage, so remove the older duplicate authority-links block. The
+  // quiz and Explore cards also reuse authority-links styling and are retained.
+  let duplicateSourceStart = html.search(
+    /<div\b[^>]*\bclass="(?=[^"]*\bauthority-links\b)(?=[^"]*\bmt-3\b)(?=[^"]*\bmb-4\b)[^"]*"[^>]*>/i,
+  );
+  while (duplicateSourceStart !== -1) {
+    const duplicateSourceEnd = findElementBlockEnd(
+      html,
+      duplicateSourceStart,
+      "div",
+    );
+    if (duplicateSourceEnd === -1) break;
+    html = `${html.slice(0, duplicateSourceStart)}${html.slice(duplicateSourceEnd)}`;
+    duplicateSourceStart = html.search(
+      /<div\b[^>]*\bclass="(?=[^"]*\bauthority-links\b)(?=[^"]*\bmt-3\b)(?=[^"]*\bmb-4\b)[^"]*"[^>]*>/i,
+    );
   }
 
   return html;
@@ -22238,6 +22758,13 @@ function normalizeArticleAssetVersionsHtml(body) {
   return String(body || "").replace(
     /\/css\/custom\.css\?v=\d+/g,
     "/css/custom.css?v=37",
+  );
+}
+
+function normalizeReadProgressBarHtml(body) {
+  return String(body || "").replace(
+    /(#read-progress\s*\{[^{}]*?)height:\s*[1-5](?:\.\d+)?px\s*;/gi,
+    "$1height:6px;box-shadow:0 1px 4px rgba(27,58,45,.35);",
   );
 }
 
@@ -22295,17 +22822,19 @@ function prepareHtmlResponse(body) {
   return normalizeHistoryEntityCanonicalLinksHtml(
     normalizeTdqFloatBarHtml(
       normalizeArticleAssetVersionsHtml(
-        normalizeArticleEvidenceMapDisclosureHtml(
-          normalizeArticleEntityStripPresentationHtml(
-            normalizeStackedTitleHtml(
-              normalizeImageAltHtml(
-                normalizeCrawlableLinksHtml(
-                  normalizeSearchPreviewHtml(
-                    normalizeHeadingAuditHtml(
-                      normalizeAiAnswerCardHtml(
-                        normalizeArticleLayoutHtml(
-                          stripDynSliderFiguresHtml(
-                            stripGoogleFundingChoices(body),
+        normalizeReadProgressBarHtml(
+          normalizeArticleEvidenceMapDisclosureHtml(
+            normalizeArticleEntityStripPresentationHtml(
+              normalizeStackedTitleHtml(
+                normalizeImageAltHtml(
+                  normalizeCrawlableLinksHtml(
+                    normalizeSearchPreviewHtml(
+                      normalizeHeadingAuditHtml(
+                        normalizeAiAnswerCardHtml(
+                          normalizeArticleLayoutHtml(
+                            stripDynSliderFiguresHtml(
+                              stripGoogleFundingChoices(body),
+                            ),
                           ),
                         ),
                       ),
@@ -22398,6 +22927,9 @@ export const __contentGenerationTestHooks = {
   normalizeArticleGenerationJournal,
   loadArticleGenerationJournal,
   createArticleGenerationCheckpointer,
+  articleGenerationRequestBudgetLimit,
+  chunkedArticleBodyCapacityRepairFields,
+  repairChunkedArticleBodyCapacity,
   reusableArticleGenerationChunk,
   shouldRetryChunkOutputFailure,
   canDistributeIndependentArticleWork,
@@ -22428,6 +22960,8 @@ export const __contentGenerationTestHooks = {
   blogEntityQualityEligible,
   validateEvergreenCompanionQueueForPublish,
   validatePrimaryEvergreenCandidateForContent,
+  buildFallbackEntityBodySections,
+  buildEventOverviewCards,
   normalizedWikipediaEntityIdentity,
   buildEvergreenHistorySlug,
   evergreenHistoryEvidenceWordCount,
@@ -22473,6 +23007,7 @@ export const __contentGenerationTestHooks = {
   validateQuizQuestions,
   buildEvidenceMapBlock,
   normalizeArticleEvidenceMapDisclosureHtml,
+  normalizeReadProgressBarHtml,
   normalizeTdqFloatBarHtml,
   TDQ_FLOAT_TRIGGER_JS,
   relevantOpenLibraryBooks,

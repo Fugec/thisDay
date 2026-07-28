@@ -44,6 +44,10 @@
     // organizations/projects. Empty means one shared pool and disables
     // concurrent Groq article chunks, preventing parallel TPM exhaustion.
     "GROQ_QUOTA_POOL_IDS": "",
+    // Durable per-source logical AI-call ceiling. Five calls create the normal
+    // checkpointed article; eight leaves targeted repair headroom and reserves
+    // free-tier capacity for final grounding/publication gates.
+    "ARTICLE_GENERATION_REQUEST_BUDGET": "8",
     // Emergency manual override retained for incidents where analytics itself
     // is unavailable. Use an ISO UTC timestamp; leave empty normally.
     "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "",
@@ -69,10 +73,9 @@
   // 00:50 runs the dedicated entity-recovery pass (ENTITY_RECOVERY_CRON): a fresh
   // invocation with full subrequest budget re-links any people strips the budget-starved
   // 00:05 generation left unlinked. Must stay after the 00:35 failsafe.
-  // 00:55 promotes the daily article's required evergreen history companion in
-  // a separate invocation so long-form generation cannot delay the date-based
-  // article or person recovery. It uses the protected enrichment KV reserve,
-  // not the optional-maintenance budget.
+  // The hourly :55 trigger promotes the daily article's Evergreen companion,
+  // including at 00:55. It is intentionally not duplicated in the 00:50
+  // entity-recovery expression.
   // 01:25 retries at most one older pending companion in a separate invocation,
   // so backlog repair never displaces the current day's 00:55 edition.
   // :55 hourly retries only today's still-pending companion after provider
@@ -86,7 +89,7 @@
   // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 13:00 UTC
   // (about 09:00 Eastern during daylight saving time).
   "triggers": {
-    "crons": ["5,10,15 0 * * *", "50,55 0 * * *", "25 1 * * *", "55 * * * *"],
+    "crons": ["5,10,15 0 * * *", "50 0 * * *", "25 1 * * *", "55 * * * *"],
   },
 
   // KV namespaces — blog posts/index and shared events/quiz cache.

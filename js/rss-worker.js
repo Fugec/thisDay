@@ -15,6 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import { SITE_DESCRIPTION } from "./shared/layout.js";
+import { sortBlogIndexNewestFirst } from "./shared/blog-index-order.js";
 
 const DOMAIN = "https://thisday.info";
 const FEED_URL = `${DOMAIN}/rss.xml`;
@@ -22,6 +23,7 @@ const SITE_TITLE = "thisDay. — On This Day in History";
 const SITE_LOGO_URL = `${DOMAIN}/images/logo.png`;
 
 const CACHE_MAX_AGE = 3600; // 1 hour
+const RSS_EDGE_CACHE_VERSION = 2;
 const KV_INDEX_KEY = "index";
 const MAX_FEED_ITEMS = 20;
 
@@ -45,7 +47,7 @@ export default {
 
     // Serve from edge cache if available
     const cache = caches.default;
-    const cacheKey = new Request(FEED_URL);
+    const cacheKey = new Request(`${FEED_URL}?edge-v=${RSS_EDGE_CACHE_VERSION}`);
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
 
@@ -59,7 +61,9 @@ export default {
       console.error("RSS: failed to read KV index:", err);
     }
 
-    const xml = buildFeed(posts.slice(0, MAX_FEED_ITEMS));
+    const xml = buildFeed(
+      sortBlogIndexNewestFirst(posts).slice(0, MAX_FEED_ITEMS),
+    );
 
     const response = new Response(xml, {
       headers: {

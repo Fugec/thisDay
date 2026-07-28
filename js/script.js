@@ -54,6 +54,65 @@ const monthNames = [
   "December",
 ];
 
+function getBlogPostSlugDateTime(slug) {
+  const match = String(slug || "")
+    .trim()
+    .toLowerCase()
+    .match(/^(\d{1,2})-([a-z]+)-(\d{4})$/);
+  if (!match) return null;
+  const day = Number.parseInt(match[1], 10);
+  const monthIndex = monthNames.findIndex(
+    (month) => month.toLowerCase() === match[2],
+  );
+  const year = Number.parseInt(match[3], 10);
+  if (!Number.isInteger(day) || monthIndex < 0 || !Number.isInteger(year)) {
+    return null;
+  }
+  const time = Date.UTC(year, monthIndex, day);
+  const parsed = new Date(time);
+  return parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === monthIndex &&
+    parsed.getUTCDate() === day
+    ? time
+    : null;
+}
+
+function getBlogPostPublicationTime(post) {
+  const slugTime = getBlogPostSlugDateTime(post?.slug);
+  if (slugTime != null) return slugTime;
+  for (const value of [post?.publishedAt, post?.date]) {
+    const time = value ? new Date(value).getTime() : NaN;
+    if (Number.isFinite(time)) return time;
+  }
+  return 0;
+}
+
+function sortBlogPostsNewestFirst(posts) {
+  if (!Array.isArray(posts)) return [];
+  return posts
+    .map((post, index) => ({
+      post,
+      index,
+      publicationTime: getBlogPostPublicationTime(post),
+      preciseTime: post?.publishedAt
+        ? new Date(post.publishedAt).getTime() || 0
+        : 0,
+    }))
+    .sort(
+      (left, right) =>
+        right.publicationTime - left.publicationTime ||
+        right.preciseTime - left.preciseTime ||
+        left.index - right.index,
+    )
+    .map((entry) => entry.post);
+}
+
+function homepageBlogIndexUrl(now = Date.now()) {
+  // The minute bucket bypasses an already-installed legacy cache-first service
+  // worker while still allowing all homepage consumers to share one response.
+  return `/blog/index.json?homepage=${Math.floor(now / 60_000)}`;
+}
+
 function injectAdBlockRecoveryScript() {
   const existing = document.querySelector(
     'script[src^="https://fundingchoicesmessages.google.com/i/pub-8565025017387209"]',
@@ -3310,7 +3369,7 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
 
   // Priority 1: latest AI index posts (across months), but only with working images.
   try {
-    const indexResponse = await fetch("/blog/index.json", {
+    const indexResponse = await fetch(homepageBlogIndexUrl(), {
       cache: "no-cache",
       headers: { Accept: "application/json" },
     });
@@ -3318,7 +3377,7 @@ async function fetchBlogPostsForCarousel(monthName, monthIndex) {
     if (indexResponse.ok) {
       const index = await indexResponse.json();
       if (Array.isArray(index) && index.length > 0) {
-        const latest = index.slice(0, 20);
+        const latest = sortBlogPostsNewestFirst(index).slice(0, 20);
         const fromIndex = [];
 
         for (const entry of latest) {

@@ -1,7 +1,7 @@
 // thisDay. Service Worker
 // Caches static assets for instant repeat visits and basic offline support.
 
-const CACHE_NAME = "thisday-v20";
+const CACHE_NAME = "thisday-v21";
 const CACHE_VERSION_KEY = "thisday-sw-version";
 
 // Static assets to cache on install (shell of the app)
@@ -87,6 +87,26 @@ self.addEventListener("fetch", (event) => {
 
   // Wikipedia API — always network, never cache in SW (app has its own cache)
   if (url.hostname === "api.wikimedia.org") return;
+
+  // The blog index changes after each daily publication. Cache-first left
+  // returning yesterday's first slide indefinitely, so refresh it from the
+  // network and retain the cached copy only as an offline fallback.
+  if (
+    url.origin === self.location.origin &&
+    (url.pathname === "/blog/index.json" ||
+      url.pathname === "/blog/archive.json")
+  ) {
+    event.respondWith(
+      fetch(request)
+        .then(cacheSuccessfulResponse)
+        .catch(() =>
+          caches
+            .match(request)
+            .then((cached) => cached || unavailableResponse()),
+        ),
+    );
+    return;
+  }
 
   // HTML navigation requests — network-first for freshness
   if (request.mode === "navigate") {

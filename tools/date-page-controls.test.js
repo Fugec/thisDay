@@ -42,7 +42,7 @@ test("date navigation uses the existing month-nav with arrows and a plain center
   );
   assert.doesNotMatch(
     currentDatePageRenderSource,
-    /\.date-top-navigation\{/,
+    /\.date-top-navigation\{[^}]*display:grid/,
   );
   assert.doesNotMatch(
     seoWorker.slice(
@@ -60,11 +60,11 @@ test("cached date pages receive the same control classes without a KV rewrite", 
   );
   assert.match(
     seoWorker,
-    /const normalizedControls = ensureFloatingDateStoryHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /const normalizedControls = normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
   );
   assert.match(
     seoWorker,
-    /const kvKey = `gen-post-v48-[\s\S]*?const normalizedControls = ensureFloatingDateStoryHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /const kvKey = `gen-post-v50-[\s\S]*?const normalizedControls = normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
   );
   assert.match(seoWorker, /navigationBlock\.match\(\/<a\\b/);
   assert.match(seoWorker, /link\.includes\(className\)/);
@@ -255,7 +255,7 @@ test("event fragments reveal hidden chronology cards before scrolling", () => {
   );
   assert.match(
     seoWorker,
-    /ensureFloatingDateStoryHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
   );
   assert.match(
     seoWorker,

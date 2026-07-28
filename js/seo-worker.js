@@ -58,6 +58,7 @@ import {
   fetchCachedWikidataPersonFilmography as fetchSharedWikidataPersonFilmography,
   fetchCachedWikidataRelatedFilms,
 } from "./shared/related-media.js";
+import { sortBlogIndexNewestFirst } from "./shared/blog-index-order.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -420,13 +421,13 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v50/born-v33) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v50/born-v33/died-v32) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
 const HISTORY_EDGE_CACHE_VERSION = 2;
 const PERSON_MEDIA_EDGE_CACHE_VERSION = 1;
-const DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 1;
+const DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 5;
 // Routes eligible for CF Cache API storage. Quiz pages are excluded because
 // the blog worker busts their KV key (quiz-page-v31) on publish; the CF Cache
 // has no hook into that invalidation path.
@@ -879,11 +880,31 @@ const ENTITY_PLACEHOLDER_FRAGMENTS = [
   "date details are sourced from the related",
   "location details are sourced from the related",
   "key people are drawn from the related article",
+  "provides the broad event record",
+  "organizes the evidence",
+  "so readers can see which source supports",
+  "the related article explains",
+  "this page collects thisday coverage",
+  "is treated as the central event for this entity page",
+  "is included here as a connected history page",
+  "the page gathers the article link",
+  "move from one date-based story",
+  "why the event remains useful beyond its date",
+  "public memory, and later interpretation",
+];
+
+const ENTITY_PLACEHOLDER_PATTERNS = [
+  /\bconnects?\b[^.!?]{0,180}\bto a specific historical date\b/i,
+  /\bthe (?:related )?(?:thisday )?article (?:supplies|provides|explains|organizes)\b/i,
+  /\bthis (?:entity )?page (?:gives|helps|lets|allows) readers\b/i,
 ];
 
 function isEntityPlaceholder(value) {
   const v = String(value || "").toLowerCase();
-  return ENTITY_PLACEHOLDER_FRAGMENTS.some((f) => v.includes(f));
+  return (
+    ENTITY_PLACEHOLDER_FRAGMENTS.some((fragment) => v.includes(fragment)) ||
+    ENTITY_PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(value))
+  );
 }
 
 const PERSON_CARD_SKIP = [
@@ -1266,48 +1287,10 @@ function datePageScreenPersonCandidate(html) {
     )[0] || null;
 }
 
-async function injectDatePagePersonFilmographyHtml(
-  html,
-  {
-    fetchImpl = fetch,
-    cache = globalThis.caches?.default,
-  } = {},
-) {
-  const source = String(html || "");
-  if (!source || source.includes('class="amazon-related person-filmography')) {
-    return source;
-  }
-  const candidate = datePageScreenPersonCandidate(source);
-  if (!candidate) return source;
-  const wikidataEntityId = await fetchCachedWikipediaWikidataId(
-    candidate.wikiUrl || candidate.name,
-    { fetchImpl, cache },
-  ).catch(() => "");
-  if (!wikidataEntityId) return source;
-  const filmography = await fetchCachedWikidataPersonFilmography(
-    wikidataEntityId,
-    { fetchImpl, cache },
-  ).catch(() => ({ films: [] }));
-  const block = buildPersonFilmographyBlock({
-    name: candidate.name,
-    filmography,
-  });
-  if (!block) return source;
-  const anchor = '<div class="ad-unit">';
-  let enriched = source.includes(anchor)
-    ? source.replace(anchor, `${block}\n  ${anchor}`)
-    : source;
-  if (
-    enriched !== source &&
-    !enriched.includes('id="date-person-filmography-style"') &&
-    enriched.includes("</head>")
-  ) {
-    enriched = enriched.replace(
-      "</head>",
-      `${DATE_PERSON_FILMOGRAPHY_CSS}</head>`,
-    );
-  }
-  return enriched;
+async function injectDatePagePersonFilmographyHtml(html) {
+  // Calendar pages end after their primary timeline and date navigation.
+  // Keep filmography enrichment on dedicated person/article pages only.
+  return String(html || "");
 }
 
 function renderEntityInlineFigure(img, altFallback = "") {
@@ -2159,6 +2142,7 @@ function stripGenericEntityContextSections(sections) {
       .toLowerCase();
     return !(
       heading.includes("biographical notes") ||
+      isEntityPlaceholder(text) ||
       text.includes("is included here because") ||
       text.includes("the page is designed to give readers") ||
       text.includes("for thisday readers, the point is navigation") ||
@@ -2369,10 +2353,6 @@ function ensureEntityContextSections(entity, type) {
 
   const name = entity.name || (type === "person" ? "This person" : "This event");
   const sourcePost = entity.sourcePostTitle || "the related thisDay article";
-  const relatedTopics = Array.isArray(entity.relatedTopics) && entity.relatedTopics.length
-    ? entity.relatedTopics.join(", ")
-    : "the wider historical setting";
-
   if (type === "person") {
     if (hasIncompleteEntityParagraphs({ bodySections })) {
       const rebuilt = rebuildPersonBodySections({ ...entity, bodySections });
@@ -2389,13 +2369,10 @@ function ensureEntityContextSections(entity, type) {
           ].filter(Boolean),
     });
   } else {
-    bodySections.push({
-      heading: `${name} in context`,
-      paragraphs: [
-        `${name} is included here as a connected history page for ${sourcePost}. The page gathers the article link, source material, and topic context so readers can move from one date-based story into the wider background.`,
-        `The surrounding themes include ${relatedTopics}. Those links help explain why the event remains useful beyond its date: it connects people, institutions, consequences, and later memory in one navigable place.`,
-      ],
-    });
+    // An event page may be short when the stored source provides little usable
+    // context. Preserve only factual sections; do not manufacture navigation,
+    // memory, or significance prose to satisfy a word-count target.
+    return bodySections;
   }
 
   return bodySections;
@@ -3964,6 +3941,72 @@ function buildDidYouKnowSlider(facts, extraClass = "") {
   </section>`;
 }
 
+function personDidYouKnowCandidates(person) {
+  const name = String(person?.text || "").split(",")[0].trim();
+  const extract = String(person?.pages?.[0]?.extract || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!name || !extract) return [];
+
+  const score = (fact) =>
+    (/\d/.test(fact) ? 2 : 0) +
+    (/\b(first|only|never|most|oldest|youngest|record|won|invented|discovered|became)\b/i.test(fact) ? 3 : 0) +
+    (/[A-Z][a-z]/.test(fact.slice(5)) ? 1 : 0);
+
+  return (extract.match(/[^.!?]+(?:[.!?]+|$)/g) || [])
+    .map((sentence, sourceIndex) => {
+      let fact = sentence.replace(/\s+/g, " ").trim();
+      if (fact.length < 50 || fact.length > 240 || !/[.!?]["')\]]?$/.test(fact)) {
+        return null;
+      }
+      if (/^(This|It|The [a-z])\b/.test(fact)) return null;
+      fact = fact
+        .replace(/^(He|She|They)\b/, name)
+        .replace(/^(His|Her|Their)\b/, `${name}'s`);
+      return { fact, score: score(fact), sourceIndex };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score || a.sourceIndex - b.sourceIndex);
+}
+
+function personDidYouKnowFacts(featured, people = [], limit = 5) {
+  const maximum = Math.max(0, Math.min(5, Number(limit) || 0));
+  if (!maximum) return [];
+
+  const orderedPeople = [featured, ...(Array.isArray(people) ? people : [])]
+    .filter(Boolean)
+    .filter((person, index, list) => {
+      const key = String(person?.text || "").split(",")[0].trim().toLowerCase();
+      return key && list.findIndex((candidate) =>
+        String(candidate?.text || "").split(",")[0].trim().toLowerCase() === key
+      ) === index;
+    });
+  const candidatesByPerson = orderedPeople.map((person) =>
+    personDidYouKnowCandidates(person),
+  );
+  const facts = [];
+  const seen = new Set();
+  const addFact = (candidate) => {
+    if (!candidate || facts.length >= maximum) return;
+    const key = candidate.fact.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    facts.push(candidate.fact);
+  };
+
+  // Give each ranked person one sourced card before filling remaining slots.
+  candidatesByPerson.forEach((candidates) => addFact(candidates[0]));
+  for (let rank = 1; facts.length < maximum; rank += 1) {
+    let found = false;
+    candidatesByPerson.forEach((candidates) => {
+      if (candidates[rank]) found = true;
+      addFact(candidates[rank]);
+    });
+    if (!found) break;
+  }
+  return facts;
+}
+
 // Tropical zodiac sign for a calendar date. Deterministic, no data source.
 function zodiacSignFor(monthNum, day) {
   const md = monthNum * 100 + day;
@@ -4870,19 +4913,6 @@ function buildDynamicOverview(featured, events, mDisplay, day) {
   };
 }
 
-const DATE_STORY_FLOAT_CSS = `.date-story-float{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));z-index:1040;width:min(720px,calc(100% - 24px));display:grid;grid-template-columns:88px minmax(0,1fr) auto;gap:.8rem;align-items:center;margin:0;padding:.8rem .9rem;border:1px solid var(--cbr);border-radius:9px;background:var(--bg-alt);box-shadow:0 18px 42px rgba(27,58,45,.22);opacity:0;pointer-events:none;transform:translate(-50%,calc(100% + 32px));transition:opacity .22s ease,transform .22s ease}
-.date-story-float-visible{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
-.date-story-float-image{width:88px;height:68px;object-fit:cover;border-radius:7px;display:block;background:rgba(0,0,0,.06)}
-.date-story-float-image-placeholder{display:flex;align-items:center;justify-content:center;color:var(--btn-bg);font-size:1.25rem}
-.date-story-float-copy{display:flex;flex-direction:column;gap:2px}
-.date-story-float-kicker{font-size:12px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.05em}
-.date-story-float-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.35;color:var(--tc)}
-.date-story-float-description{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;color:var(--mu);font-size:13px;line-height:1.4}
-.date-story-float-link{display:inline-flex;align-items:center;gap:.35rem;color:var(--btn-bg);font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap}
-.date-story-float-link:hover,.date-story-float-link:focus-visible{color:var(--btn-bg);text-decoration:none}
-@media(max-width:575px){.date-story-float{grid-template-columns:64px minmax(0,1fr);gap:.65rem;padding:.65rem .7rem}.date-story-float-image{width:64px;height:64px}.date-story-float-link{grid-column:2;justify-self:start}}
-@media(prefers-reduced-motion:reduce){.date-story-float{transition:none}}`;
-
 function getSharedPageStyles() {
   return (
     `:root{--bg:#ffffff;--bg-alt:#f2f7f2;--text:#1a2e20;--text-muted:#5c7a65;--border:#cfe0cf;--btn-bg:#1b3a2d;--btn-text:#fff;--btn-hover:#2a4d3a;--accent:#9dc43a;--radius:4px;--shadow:0 16px 32px -8px rgba(27,58,45,.08);--cb:var(--bg);--cbr:var(--border);--tc:var(--text);--mu:var(--text-muted);--lc:var(--btn-bg);--ftc:#fff;--fb:var(--bg-alt)}
@@ -4957,6 +4987,8 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .auto-tag{display:inline-block;background:rgba(0,0,0,.12);color:#1a1a1a;font-size:13px;font-weight:400;padding:2px 7px;border-radius:20px;margin-left:6px;vertical-align:middle}
 
 .ad-unit{margin:22px 0;text-align:center}.ad-unit-label{font-size:13px;font-weight:400;letter-spacing:.06em;color:var(--mu);text-transform:uppercase;margin-bottom:6px;opacity:.7}
+.date-timeline-ad{max-width:728px;margin:20px auto;padding:14px 0;border-top:1px solid var(--cbr);border-bottom:1px solid var(--cbr);background:transparent}
+.date-timeline-ad ins.adsbygoogle{width:100%}
 .tdq-question{margin-bottom:18px}.tdq-q-text{font-weight:600;margin-bottom:10px;font-size:.95rem;color:var(--tc)}.tdq-options{display:flex;flex-direction:column;gap:8px}
 .era-chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
 .era-chip{padding:5px 14px;border:1.5px solid var(--cbr);border-radius:20px;background:var(--cb);color:var(--tc);font-size:13px;font-family:inherit;cursor:pointer;transition:all .15s}
@@ -4983,7 +5015,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .site-btn-primary{background:#1a3a2d!important;color:#fff!important;border-color:#1a3a2d!important}
 .site-btn-primary:hover{background:#2a4d3a!important;border-color:#2a4d3a!important;color:#fff!important}
 
-#read-progress{position:fixed;top:0;left:0;height:3px;width:0%;background:var(--btn-bg);z-index:9999;transition:width .1s linear;pointer-events:none}
+#read-progress{position:fixed;top:0;left:0;height:6px;width:0%;background:var(--btn-bg);box-shadow:0 1px 4px rgba(27,58,45,.35);z-index:9999;transition:width .1s linear;pointer-events:none}
 
 .explore-actions{display:flex;flex-direction:column;gap:.5rem}
 @media(min-width:576px){.explore-actions{flex-direction:row;flex-wrap:wrap;gap:.5rem}}
@@ -5023,12 +5055,11 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .tl-card-actions .tl-btn{margin-top:0}
 @media(min-width:900px){.major-events-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:575px){.major-events-summary-head{display:block}.major-events-summary-head p{margin-top:.35rem}.major-event-item{grid-template-columns:auto minmax(0,1fr)}.major-event-actions{grid-column:2;justify-content:flex-start}}
-${DATE_STORY_FLOAT_CSS}
 
 /* ── Events Timeline ─────────────────────────────────────────── */
 .tl-wrap{position:relative;padding:4px 0 8px}
 .tl-wrap::before{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;background:var(--border);transform:translateX(-50%);z-index:0;pointer-events:none}
-.tl-item{display:flex;align-items:flex-start;position:relative;margin-bottom:28px}
+.tl-item{display:flex;align-items:flex-start;position:relative;margin-bottom:28px;content-visibility:auto;contain-intrinsic-size:auto 420px}
 .tl-body{flex:1;min-width:0}
 .tl-media{flex:1;min-width:0}
 .tl-item-odd .tl-body{order:1;padding-right:44px}
@@ -5105,6 +5136,14 @@ ${DATE_STORY_FLOAT_CSS}
 }
 
 function getSharedPageScripts({ pageType = "page", pageSlug = "" } = {}) {
+  const includeBootstrapJs = ![
+    "events-date",
+    "born-date",
+    "died-date",
+  ].includes(pageType);
+  const bootstrapScript = includeBootstrapJs
+    ? '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>'
+    : "";
   return `<script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
 <script>
 window.dataLayer = window.dataLayer || [];
@@ -5147,7 +5186,7 @@ gtag("config", "AW-17262488503");
   });
 })();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+${bootstrapScript}
 <script>
 (function(){var t=document.getElementById('navToggle'),m=document.getElementById('navMobile');if(t&&m)t.addEventListener('click',function(){m.classList.toggle('active');});})();
 const yrEl=document.getElementById('yr');
@@ -5168,6 +5207,435 @@ setTimeout(initAds,1200);
 ${marqueeScript()}`;
 }
 
+const DATE_PAGE_ERA_FILTERS = [
+  { label: "Before 1500", min: -9999, max: 1499 },
+  { label: "1500 to 1799", min: 1500, max: 1799 },
+  { label: "1800 to 1899", min: 1800, max: 1899 },
+  { label: "1900 to 1999", min: 1900, max: 1999 },
+  { label: "2000 to today", min: 2000, max: 9999 },
+];
+
+const DATE_TIMELINE_AD_HTML = `<aside class="ad-unit date-timeline-ad" data-date-timeline-ad aria-label="Advertisement">
+  <span class="ad-unit-label" aria-hidden="true">Advertisement</span>
+  <ins class="adsbygoogle" style="display:block"
+       data-ad-client="ca-pub-8565025017387209"
+       data-ad-slot="9477779891"
+       data-ad-format="horizontal"
+       data-full-width-responsive="true"></ins>
+</aside>`;
+
+function buildDateEraFilterScript(filterKey, itemSelector) {
+  return `<script>(function(){
+var row=document.querySelector('[data-era-filter="${filterKey}"]');
+if(!row)return;
+var chips=row.querySelectorAll('.era-chip');
+chips.forEach(function(chip){chip.addEventListener('click',function(){
+chips.forEach(function(c){c.classList.remove('era-chip-active');c.setAttribute('aria-pressed','false');});
+this.classList.add('era-chip-active');
+this.setAttribute('aria-pressed','true');
+var min=parseInt(this.dataset.min,10),max=parseInt(this.dataset.max,10);
+var all=isNaN(min);
+document.querySelectorAll('${itemSelector}').forEach(function(item){
+var y=parseInt(item.dataset.year,10);
+item.style.display=(all||(y>=min&&y<=max))?'':'none';
+});
+});});
+})();</script>`;
+}
+
+function buildDateEraFilter({
+  items,
+  ariaLabel,
+  filterKey,
+  itemSelector,
+}) {
+  const list = Array.isArray(items) ? items : [];
+  const years = list.map((item) => parseInt(item?.year, 10) || 0);
+  const usableEras = DATE_PAGE_ERA_FILTERS.filter((era) =>
+    years.some((year) => year >= era.min && year <= era.max),
+  );
+  if (list.length < 12 || usableEras.length < 2) {
+    return { chipsHtml: "", scriptHtml: "" };
+  }
+
+  const chipsHtml = `<div class="era-chip-row" role="group" aria-label="${escapeHtml(ariaLabel)}" data-era-filter="${escapeHtml(filterKey)}">
+    <button type="button" class="era-chip era-chip-active" aria-pressed="true">All</button>
+    ${usableEras
+      .map(
+        (era) =>
+          `<button type="button" class="era-chip" data-min="${era.min}" data-max="${era.max}" aria-pressed="false">${era.label}</button>`,
+      )
+      .join("")}
+  </div>`;
+  const scriptHtml = buildDateEraFilterScript(filterKey, itemSelector);
+  return { chipsHtml, scriptHtml };
+}
+
+function buildExpandedCachedMajorPersonsScript(type) {
+  return `<script data-cached-major-persons="${type}">(function(){
+var timeline=document.querySelector('[data-major-persons-timeline="${type}"]');
+if(!timeline)return;
+var items=Array.prototype.slice.call(timeline.querySelectorAll('.tl-item'));
+if(!items.length)return;
+items.forEach(function(item){var badge=item.querySelector('.tl-node-badge');var year=parseInt(badge&&badge.textContent,10);item.dataset.year=isNaN(year)?0:year;item.dataset.eraItem='${type}';});
+var min=null,max=null;
+function render(){var filtering=Number.isFinite(min)&&Number.isFinite(max);items.forEach(function(item){var year=parseInt(item.dataset.year,10);var matches=!filtering||(year>=min&&year<=max);item.style.display=matches?'':'none';});}
+var row=document.querySelector('[data-era-filter="${type}"]');
+if(row){row.querySelectorAll('.era-chip').forEach(function(chip){chip.addEventListener('click',function(){row.querySelectorAll('.era-chip').forEach(function(candidate){candidate.classList.remove('era-chip-active');candidate.setAttribute('aria-pressed','false');});chip.classList.add('era-chip-active');chip.setAttribute('aria-pressed','true');var nextMin=parseInt(chip.dataset.min,10),nextMax=parseInt(chip.dataset.max,10);min=isNaN(nextMin)?null:nextMin;max=isNaN(nextMax)?null:nextMax;render();});});}
+render();
+})();</script>`;
+}
+
+function normalizeCachedPersonDateMajorCardHtml(
+  html,
+  { type, mDisplay, day } = {},
+) {
+  const source = String(html || "");
+  const isBirths = type === "births";
+  const isDeaths = type === "deaths";
+  if (!source || (!isBirths && !isDeaths)) return source;
+
+  const headingId = isBirths ? "major-births-heading" : "major-deaths-heading";
+  if (source.includes(`id="${headingId}"`)) return source;
+
+  const timelineNeedle = '<div class="tl-wrap">';
+  const timelineIndex = source.indexOf(timelineNeedle);
+  if (timelineIndex < 0) return source;
+  const timelineEnd = source.indexOf("</main>", timelineIndex);
+  const timelineSource = source.slice(
+    timelineIndex,
+    timelineEnd >= 0 ? timelineEnd : undefined,
+  );
+  const years = [...timelineSource.matchAll(
+    /<span class="tl-node-badge event-years-ago"[^>]*>\s*(-?\d+)\s*<\/span>/g,
+  )].map((match) => Number(match[1]));
+  if (!years.length) return source;
+
+  const filterLabel = isBirths
+    ? "Filter people born on this day by era"
+    : "Filter people who died on this day by era";
+  const { chipsHtml } = buildDateEraFilter({
+    items: years.map((year) => ({ year })),
+    ariaLabel: filterLabel,
+    filterKey: type,
+    itemSelector: `.tl-item[data-era-item="${type}"]`,
+  });
+  const heading = isBirths
+    ? `More major people born on ${escapeHtml(mDisplay)} ${day}`
+    : `More major people who died on ${escapeHtml(mDisplay)} ${day}`;
+  const intro = `<h2 class="h5 mb-1" id="${headingId}">${heading}</h2>
+    <p class="text-muted mb-3" style="font-size:14px">Notable people are ranked by substantive profile depth and public notability.</p>
+    ${chipsHtml}`;
+  let normalized = source.replace(
+    timelineNeedle,
+    `${intro}<div class="tl-wrap" data-major-persons-timeline="${type}">`,
+  );
+  const script = buildExpandedCachedMajorPersonsScript(type);
+  normalized = normalized.replace("</body>", `${script}</body>`);
+  return normalized;
+}
+
+function decodeCachedHtmlText(value) {
+  return String(value || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&mdash;|&#8212;|&#x2014;/gi, "—")
+    .replace(/&ndash;|&#8211;|&#x2013;/gi, "–")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function ensureCachedPersonDateDidYouKnowHtml(
+  html,
+  { type, people = [] } = {},
+) {
+  const source = String(html || "");
+  const isBirths = type === "births";
+  const isDeaths = type === "deaths";
+  if (
+    !source ||
+    source.includes('class="dyn-slider-shell"') ||
+    (!isBirths && !isDeaths) ||
+    !Array.isArray(people) ||
+    !people.length
+  ) {
+    return source;
+  }
+
+  const heroMatch = source.match(
+    /<h2\b[^>]*class="[^"]*article-hero-title[^"]*"[^>]*>([\s\S]*?)<\/h2>/i,
+  ) || source.match(
+    /<h2\b[^>]*style="[^"]*margin-top\s*:\s*0[^"]*"[^>]*>([\s\S]*?)<\/h2>/i,
+  );
+  const heroText = decodeCachedHtmlText(heroMatch?.[1]);
+  const featuredName = heroText.split(/\s+[—–]\s+/).pop()?.trim().toLowerCase();
+  const featured = people.find((person) =>
+    String(person?.text || "").split(",")[0].trim().toLowerCase() === featuredName
+  ) || null;
+  const displayedPeople = selectDatePersonProfiles(people, featured);
+  const facts = personDidYouKnowFacts(featured, displayedPeople, 5);
+  const slider = buildDidYouKnowSlider(facts);
+  if (!slider) return source;
+
+  const headingId = isBirths ? "major-births-heading" : "major-deaths-heading";
+  const headingIndex = source.indexOf(`id="${headingId}"`);
+  if (headingIndex < 0) return source;
+  const headingStart = source.lastIndexOf("<h2", headingIndex);
+  if (headingStart < 0) return source;
+
+  const prefix = source.slice(0, headingStart);
+  const hrStart = prefix.lastIndexOf("<hr");
+  if (hrStart >= 0 && headingStart - hrStart < 500) {
+    return `${source.slice(0, hrStart)}${slider}\n    ${source.slice(hrStart)}`;
+  }
+  const divider = '<hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>';
+  return `${source.slice(0, headingStart)}${slider}\n    ${divider}\n    ${source.slice(headingStart)}`;
+}
+
+function findMatchingHtmlElementEnd(html, startIndex, tagName = "div") {
+  const source = String(html || "");
+  if (startIndex < 0 || startIndex >= source.length) return -1;
+  const tag = String(tagName || "div").replace(/[^a-z0-9-]/gi, "");
+  const tokenPattern = new RegExp(`<${tag}\\b[^>]*>|<\\/${tag}>`, "gi");
+  tokenPattern.lastIndex = startIndex;
+  let depth = 0;
+  let token;
+  while ((token = tokenPattern.exec(source))) {
+    if (token.index < startIndex) continue;
+    if (token.index === startIndex || depth > 0) {
+      if (token[0].startsWith("</")) depth -= 1;
+      else depth += 1;
+      if (depth === 0) return tokenPattern.lastIndex;
+    } else {
+      return -1;
+    }
+  }
+  return -1;
+}
+
+function expandDateTimelineHtml(html, type) {
+  const source = String(html || "");
+  const key = type === "born" ? "births" : type === "died" ? "deaths" : "events";
+  const hiddenMatch = source.match(
+    new RegExp(`<div\\b[^>]*id="${key}-more"[^>]*>`, "i"),
+  );
+  if (!hiddenMatch || hiddenMatch.index == null) {
+    return source.replace(
+      new RegExp(`\\s*<button\\b[^>]*id="${key}-more-btn"[\\s\\S]*?<\\/button>`, "i"),
+      "",
+    );
+  }
+
+  const hiddenStart = hiddenMatch.index;
+  const visibleMatches = [...source.slice(0, hiddenStart).matchAll(
+    /<div\b[^>]*class="[^"]*\btl-wrap\b[^"]*"[^>]*>/gi,
+  )];
+  const visibleMatch = visibleMatches.at(-1);
+  if (!visibleMatch || visibleMatch.index == null) return source;
+  const visibleStart = visibleMatch.index;
+  const visibleEnd = findMatchingHtmlElementEnd(source, visibleStart);
+  const hiddenEnd = findMatchingHtmlElementEnd(source, hiddenStart);
+  const hiddenTimelineMatch = source.slice(hiddenStart, hiddenEnd).match(
+    /<div\b[^>]*class="[^"]*\btl-wrap\b[^"]*"[^>]*>/i,
+  );
+  if (
+    visibleEnd < 0 ||
+    hiddenEnd < 0 ||
+    !hiddenTimelineMatch ||
+    hiddenTimelineMatch.index == null
+  ) {
+    return source;
+  }
+  const hiddenTimelineStart = hiddenStart + hiddenTimelineMatch.index;
+  const hiddenTimelineEnd = findMatchingHtmlElementEnd(
+    source,
+    hiddenTimelineStart,
+  );
+  if (hiddenTimelineEnd < 0) return source;
+
+  const openingEnd = (start) => source.indexOf(">", start) + 1;
+  const closingStart = (end) => source.lastIndexOf("</div>", end);
+  const visibleContent = source.slice(
+    openingEnd(visibleStart),
+    closingStart(visibleEnd),
+  );
+  const hiddenContent = source.slice(
+    openingEnd(hiddenTimelineStart),
+    closingStart(hiddenTimelineEnd),
+  );
+  const buttonMatch = source.slice(hiddenEnd).match(
+    new RegExp(`\\s*<button\\b[^>]*id="${key}-more-btn"[\\s\\S]*?<\\/button>`, "i"),
+  );
+  const replaceEnd = buttonMatch?.index === 0
+    ? hiddenEnd + buttonMatch[0].length
+    : hiddenEnd;
+  const merged = `<div class="tl-wrap">${visibleContent}${hiddenContent}</div>`;
+  return `${source.slice(0, visibleStart)}${merged}${source.slice(replaceEnd)}`;
+}
+
+function ensureTimelineCardActionWrappersHtml(html) {
+  let source = String(html || "");
+  const cardBodies = [...source.matchAll(
+    /<div\b[^>]*class="[^"]*\btl-card-body\b[^"]*"[^>]*>/gi,
+  )];
+  const replacements = [];
+  for (const match of cardBodies) {
+    if (match.index == null) continue;
+    const end = findMatchingHtmlElementEnd(source, match.index);
+    if (end < 0) continue;
+    const block = source.slice(match.index, end);
+    if (!/\btl-btn\b/.test(block) || /\btl-card-actions\b/.test(block)) {
+      continue;
+    }
+    const withActions = block.replace(
+      /(<a\b(?=[^>]*class="[^"]*\btl-btn\b[^"]*")[^>]*>[\s\S]*?<\/a>)/gi,
+      '<div class="tl-card-actions">$1</div>',
+    );
+    if (withActions !== block) replacements.push({ start: match.index, end, withActions });
+  }
+  replacements.reverse().forEach((replacement) => {
+    source = `${source.slice(0, replacement.start)}${replacement.withActions}${source.slice(replacement.end)}`;
+  });
+  return source;
+}
+
+function ensureEraChipPressedStateHtml(html) {
+  return String(html || "").replace(
+    /<button\b[^>]*class="[^"]*\bera-chip\b[^"]*"[^>]*>/gi,
+    (tag) => {
+      const pressed = /\bera-chip-active\b/.test(tag) ? "true" : "false";
+      if (/\baria-pressed="[^"]*"/i.test(tag)) {
+        return tag.replace(/\baria-pressed="[^"]*"/i, `aria-pressed="${pressed}"`);
+      }
+      return tag.replace(/>$/, ` aria-pressed="${pressed}">`);
+    },
+  );
+}
+
+function normalizeDatePageCleanLayoutHtml(
+  html,
+  { type = "events", monthName = "", day = 0 } = {},
+) {
+  const routeType = type === "born" || type === "died" ? type : "events";
+  const personEraKey = routeType === "born" ? "births" : routeType === "died" ? "deaths" : "";
+  let source = String(html || "")
+    .replace(
+      /\s*<section\b[^>]*class="[^"]*\bperson-filmography\b[^"]*"[^>]*>[\s\S]*?<\/section>/gi,
+      "",
+    )
+    .replace(/\s*<style\b[^>]*id="date-person-filmography-style"[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/\s*<style\b[^>]*id="date-story-float-style"[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/\s*<style>\/\*ai-card-patch-v[12]\*\/[\s\S]*?<\/style>/gi, "")
+    .replace(/\s*<script\b[^>]*src="https:\/\/cdn\.jsdelivr\.net\/npm\/bootstrap@5\.3\.0\/dist\/js\/bootstrap\.bundle\.min\.js"[^>]*><\/script>/gi, "")
+    .replace(/\s*<aside\b[^>]*id="date-story-float"[^>]*>[\s\S]*?<\/aside>/gi, "")
+    .replace(/\s*<script\b[^>]*id="date-story-float-script"[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(
+      /\s*<script\b[^>]*data-cached-major-persons="(?:births|deaths)"[^>]*>[\s\S]*?<\/script>/gi,
+      () => personEraKey ? buildExpandedCachedMajorPersonsScript(personEraKey) : "",
+    );
+  source = source.replace(
+    /\s*<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi,
+    (block, json) => /"@type"\s*:\s*"Quiz"/i.test(json) ? "" : block,
+  );
+  if (!source.includes("pagead2.googlesyndication.com/pagead/js/adsbygoogle.js")) {
+    source = source.replace(
+      "</head>",
+      '<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script></head>',
+    );
+  }
+  source = ensureTimelineCardActionWrappersHtml(
+    expandDateTimelineHtml(source, routeType),
+  );
+  source = ensureEraChipPressedStateHtml(source);
+
+  const markerPatterns = routeType === "born"
+    ? [
+        /id="major-births-heading"/,
+        /data-era-item="births"/,
+        /class="dyn-slider-shell"/,
+        /class="article-hero-wrap"/,
+      ]
+    : routeType === "died"
+      ? [
+          /id="major-deaths-heading"/,
+          /data-era-item="deaths"/,
+          /class="dyn-slider-shell"/,
+          /class="article-hero-wrap"/,
+        ]
+      : [/data-era-item="events"/, /class="dyn-slider-shell"/, /class="major-events-summary"/];
+  let markerIndex = -1;
+  for (const pattern of markerPatterns) {
+    const match = pattern.exec(source);
+    if (match?.index >= 0) {
+      markerIndex = match.index;
+      break;
+    }
+  }
+  if (markerIndex < 0) return source;
+
+  const cardMatches = [...source.slice(0, markerIndex).matchAll(
+    /<div\b[^>]*class="[^"]*\bcard-box\b[^"]*"[^>]*>/gi,
+  )];
+  const cardMatch = cardMatches.at(-1);
+  if (!cardMatch || cardMatch.index == null) return source;
+  const cardStart = cardMatch.index;
+  let cardEnd = findMatchingHtmlElementEnd(source, cardStart);
+  if (cardEnd < 0) return source;
+
+  if (!source.slice(cardStart, cardEnd).includes("data-date-timeline-ad")) {
+    const cardBeforeMarker = source.slice(cardStart, markerIndex);
+    const dividers = [...cardBeforeMarker.matchAll(/<hr\b[^>]*>/gi)];
+    let insertAt = dividers.at(-1)?.index;
+    insertAt = insertAt == null ? markerIndex : cardStart + insertAt;
+    if (insertAt === markerIndex && /class="dyn-slider-shell"/.test(source.slice(markerIndex, markerIndex + 120))) {
+      const sliderStart = source.lastIndexOf("<section", markerIndex);
+      const sliderEnd = findMatchingHtmlElementEnd(source, sliderStart, "section");
+      if (sliderStart >= cardStart && sliderEnd > sliderStart) insertAt = sliderEnd;
+    }
+    source = `${source.slice(0, insertAt)}\n    ${DATE_TIMELINE_AD_HTML}\n    ${source.slice(insertAt)}`;
+    if (insertAt <= markerIndex) markerIndex += DATE_TIMELINE_AD_HTML.length + 10;
+    cardEnd = findMatchingHtmlElementEnd(source, cardStart);
+    if (cardEnd < 0) return source;
+  }
+
+  const oldBottomMatch = source.slice(cardEnd).match(
+    /<div\b[^>]*class="[^"]*\bmy-5\b[^"]*\bpt-3\b[^"]*\bborder-top\b[^"]*"[^>]*>/i,
+  );
+  const mainEnd = source.indexOf("</main>", cardEnd);
+  if (mainEnd < 0) return source;
+  const oldBottomStart = oldBottomMatch?.index == null
+    ? mainEnd
+    : cardEnd + oldBottomMatch.index;
+  const oldBottomEnd = oldBottomStart === mainEnd
+    ? mainEnd
+    : findMatchingHtmlElementEnd(source, oldBottomStart);
+  if (oldBottomEnd < 0) return source;
+
+  const removedRegion = source.slice(cardEnd, oldBottomStart);
+  const eraKey = routeType === "born" ? "births" : routeType === "died" ? "deaths" : "events";
+  const legacyEraScript = ([...removedRegion.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/gi)]
+    .map((match) => match[0])
+    .find((script) => script.includes(`[data-era-filter="${eraKey}"]`))) || "";
+  const eraScript = legacyEraScript
+    ? buildDateEraFilterScript(
+        eraKey,
+        `.tl-item[data-era-item="${eraKey}"]`,
+      )
+    : "";
+  const bottomNavigation = buildDateBottomNavigationForRoute(
+    monthName,
+    day,
+    routeType,
+  );
+  if (!bottomNavigation) return source;
+
+  return `${source.slice(0, cardEnd)}\n  ${eraScript}\n  ${bottomNavigation}\n${source.slice(oldBottomEnd)}`;
+}
+
 function generateEventsDateHTML(
   monthName,
   day,
@@ -5184,8 +5652,6 @@ function generateEventsDateHTML(
   const mDisplay = MONTH_DISPLAY_NAMES[mNum];
   const canonical = `${siteUrl}/events/${monthName}/${day}/`;
   const events = (eventsData?.events || []).slice().sort((a, b) => a.year - b.year);
-  const births = eventsData?.births || [];
-  const deaths = eventsData?.deaths || [];
 
   const rankedEvents = rankDateEventsBySignificance(events);
   const featured = rankedEvents[0] || null;
@@ -5205,21 +5671,6 @@ function generateEventsDateHTML(
     eventStoryLinks,
   );
   const others = events.filter((e) => e !== featured);
-  // Preview strips: strongest 20 profiles (not the oldest 20), year-sorted so
-  // the timeline still reads chronologically. No pageview fetches here — the
-  // dedicated born/died pages carry the fame-precise ranking.
-  const topPersons = (list) =>
-    list
-      .slice()
-      .sort(
-        (a, b) =>
-          datePersonRankScore(b) + wikiRichScore(b) -
-          (datePersonRankScore(a) + wikiRichScore(a)),
-      )
-      .slice(0, 20)
-      .sort((a, b) => a.year - b.year);
-  const topBirths = topPersons(births);
-  const topDeaths = topPersons(deaths);
 
   const pageTitle = buildEventsDateTitle({ mDisplay, day, featured });
   const rawDesc = featured
@@ -5232,13 +5683,9 @@ function generateEventsDateHTML(
     featured?.pages?.[0]?.originalimage?.source ||
     featured?.pages?.[0]?.thumbnail?.source ||
     null;
-  const featWiki = featured?.pages?.[0]?.content_urls?.desktop?.page || "";
-  const commentaryParas = featured
-    ? workerCommentary(featured.year, featured.text)
-    : [
-        "Every date in history is someone's entire world.",
-        "What we record as a footnote was, for those living it, the defining moment of their lives. The past was always someone's present.",
-      ];
+  const featuredStoryUrl = featured && typeof safeBlogStoryUrl === "function"
+    ? safeBlogStoryUrl(eventStoryLinks.get(featured))
+    : "";
   const featTitle = featured
     ? `${escapeHtml(String(featured.year))} — ${escapeHtml(featured.text.split(".")[0])}`
     : escapeHtml(`Events on ${mDisplay} ${day}`);
@@ -5284,9 +5731,6 @@ function generateEventsDateHTML(
         })
       : "";
   const dateEngagementScript = buildDateEngagementScript(monthName, day);
-  const _todayDate = new Date();
-  const todayMonthSlug = MONTHS_ALL[_todayDate.getUTCMonth()];
-  const todayDayNum = _todayDate.getUTCDate();
 
   // Prev / next day navigation
   const mIdx = mNum - 1;
@@ -5347,111 +5791,11 @@ function generateEventsDateHTML(
         }).replace(/<\//g, "<\\/")
       : null;
 
-  const quizSchema = quizData?.questions?.length
-    ? JSON.stringify({
-        "@context": "https://schema.org",
-        "@type": "Quiz",
-        name: `${mDisplay} ${day} History Quiz`,
-        description: quizData.topic
-          ? `Think you know what happened on ${mDisplay} ${day}? Take our free 5-question history quiz on ${quizData.topic} and test your knowledge.`
-          : `Test your knowledge of historical events on ${mDisplay} ${day}.`,
-        url: `${siteUrl}/quiz/${monthName}/${day}/`,
-        educationalLevel: "beginner",
-        learningResourceType: "quiz",
-        ...(quizData.topic
-          ? {
-              about: {
-                "@type": "Event",
-                name: quizData.topic,
-                description: quizData.sourceEvent || "",
-              },
-            }
-          : {}),
-        isPartOf: {
-          "@type": "WebPage",
-          url: `${siteUrl}/events/${monthName}/${day}/`,
-        },
-        publisher: {
-          "@type": "Organization",
-          name: "thisday.info",
-          url: siteUrl,
-        },
-        hasPart: quizData.questions.map((q) => ({
-          "@type": "Question",
-          name: q.q,
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: q.options?.[q.answer] ?? "",
-          },
-        })),
-      }).replace(/<\//g, "<\\/")
-    : null;
-
   const breadcrumbSchema = buildBreadcrumbSchema([
     { name: "Home", item: `${siteUrl}/` },
     { name: "On This Day", item: `${siteUrl}/events/` },
     { name: `${mDisplay} ${day} in History`, item: canonical },
   ]);
-
-  // Births era range
-  const birthYears = topBirths
-    .map((b) => parseInt(b.year) || null)
-    .filter((y) => y !== null);
-  const bMin = birthYears.length ? Math.min(...birthYears) : null;
-  const bMax = birthYears.length ? Math.max(...birthYears) : null;
-  const birthEraRange =
-    bMin !== null && bMax !== null && bMin !== bMax
-      ? `${fmtY(bMin)} – ${fmtY(bMax)}`
-      : bMin !== null
-        ? fmtY(bMin)
-        : "";
-
-  // Deaths era range
-  const deathYears = topDeaths
-    .map((d) => parseInt(d.year) || null)
-    .filter((y) => y !== null);
-  const dMin = deathYears.length ? Math.min(...deathYears) : null;
-  const dMax = deathYears.length ? Math.max(...deathYears) : null;
-  const deathEraRange =
-    dMin !== null && dMax !== null && dMin !== dMax
-      ? `${fmtY(dMin)} – ${fmtY(dMax)}`
-      : dMin !== null
-        ? fmtY(dMin)
-        : "";
-
-  // Featured event as first timeline item (hero)
-  const renderFeaturedTimelineItem = () => {
-    if (!featured) return "";
-    const yearStr = escapeHtml(String(featured.year));
-    const mobileImg = featImg
-      ? `<img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=600&q=80" alt="${escapeHtml(featured.text.substring(0, 80))}" class="tl-feat-img d-md-none" loading="eager"/>`
-      : "";
-    const didYouKnowHtml = didYouKnowFacts.length > 0
-      ? buildDidYouKnowSlider(didYouKnowFacts, "dyn-slide-inline")
-      : `<div class="commentary" style="margin:10px 0"><i class="bi bi-chat-quote me-1" style="color:#1a1a1a"></i>${commentaryParas.map((p, i, a) => `<p class="${i === a.length - 1 ? "mb-0" : "mb-2"}">${p}</p>`).join("")}</div>`;
-    const card = `<div class="tl-card tl-card-feat">
-  ${mobileImg}
-  <div class="tl-feat-title">${featTitle}</div>
-  <p class="tl-feat-body">${escapeHtml(featured.text)}</p>
-  ${didYouKnowHtml}
-  <table class="site-table" style="margin-top:10px">
-    <tbody>
-      <tr><th>Date</th><td>${escapeHtml(mDisplay)} ${day}</td></tr>
-      <tr><th>Year</th><td>${escapeHtml(String(featured.year))}</td></tr>
-      <tr><th>Events recorded</th><td>${events.length}</td></tr>
-      <tr><th>Data source</th><td><a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></td></tr>
-    </tbody>
-  </table>
-  ${featWiki ? `<a href="${escapeHtml(featWiki)}" class="site-btn w-100 mt-3" style="justify-content:center" target="_blank" rel="noopener noreferrer"><i class="bi bi-box-arrow-up-right"></i>Full Article on Wikipedia</a>` : ""}
-</div>`;
-    const media = featImg
-      ? `<div class="tl-media"><img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=400&q=85" alt="${escapeHtml(featured.text.substring(0, 80))}" class="tl-thumb" style="max-height:220px" loading="eager" onerror="this.closest('.tl-media').innerHTML='<div class=\\'tl-thumb-blank\\'><i class=\\'bi bi-calendar-event\\'></i></div>'"/></div>`
-      : `<div class="tl-media"><div class="tl-thumb-blank"><i class="bi bi-calendar-event"></i></div></div>`;
-    const node = `<div class="tl-node"><span class="tl-node-badge tl-node-badge-feat event-years-ago">${yearStr}</span></div>`;
-    return `<div class="tl-item tl-item-odd">
-  <div class="tl-body">${card}</div>${node}${media}
-</div>`;
-  };
 
   // Events timeline — alternating left/right layout with center line
   const renderTimelineItem = (e, idx) => {
@@ -5475,8 +5819,8 @@ function generateEventsDateHTML(
     const isEven = idx % 2 === 1;
     const imgHtml = th
       ? w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
-        : `<img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-image-alt"></i></div>`;
     const card = `<div class="tl-card">
   ${imgHtml}
@@ -5495,124 +5839,25 @@ function generateEventsDateHTML(
   </div>
 </div>`;
     const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago">${yearStr}</span></div>`;
-    return `<div id="${escapeHtml(eventAnchorId)}" class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}" data-year="${parseInt(e.year, 10) || 0}">
+    return `<div id="${escapeHtml(eventAnchorId)}" class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}" data-year="${parseInt(e.year, 10) || 0}" data-era-item="events">
   <div class="tl-body">${card}</div>
   ${node}
   <div class="tl-media"></div>
 </div>`;
   };
-  const othersVisibleHtml = others.slice(0, 10).map((e, i) => renderTimelineItem(e, i)).join("");
-  const othersHiddenHtml = others.slice(10).map((e, i) => renderTimelineItem(e, i + 10)).join("");
+  const othersHtml = others.map((event, index) =>
+    renderTimelineItem(event, index),
+  ).join("");
 
-  // Era filter chips — only for long timelines, only eras that have events.
   // Filtering is display-only; every event stays in the HTML for SEO.
-  const ERA_FILTERS = [
-    { label: "Before 1500", min: -9999, max: 1499 },
-    { label: "1500 to 1799", min: 1500, max: 1799 },
-    { label: "1800 to 1899", min: 1800, max: 1899 },
-    { label: "1900 to 1999", min: 1900, max: 1999 },
-    { label: "2000 to today", min: 2000, max: 9999 },
-  ];
-  const otherYears = others.map((e) => parseInt(e.year, 10) || 0);
-  const usableEras = ERA_FILTERS.filter((era) =>
-    otherYears.some((y) => y >= era.min && y <= era.max),
-  );
-  const eraChipsHtml =
-    others.length >= 12 && usableEras.length >= 2
-      ? `<div class="era-chip-row" role="group" aria-label="Filter events by era">
-    <button type="button" class="era-chip era-chip-active">All</button>
-    ${usableEras
-      .map(
-        (era) =>
-          `<button type="button" class="era-chip" data-min="${era.min}" data-max="${era.max}">${era.label}</button>`,
-      )
-      .join("")}
-  </div>`
-      : "";
-  const eraChipScript = eraChipsHtml
-    ? `<script>(function(){
-var chips=document.querySelectorAll('.era-chip');
-if(!chips.length)return;
-var moreWrap=document.getElementById('events-more');
-var moreBtn=document.getElementById('events-more-btn');
-chips.forEach(function(chip){chip.addEventListener('click',function(){
-chips.forEach(function(c){c.classList.remove('era-chip-active');});
-this.classList.add('era-chip-active');
-var min=parseInt(this.dataset.min,10),max=parseInt(this.dataset.max,10);
-var all=isNaN(min);
-document.querySelectorAll('.tl-item[data-year]').forEach(function(item){
-var y=parseInt(item.dataset.year,10);
-item.style.display=(all||(y>=min&&y<=max))?'':'none';
-});
-if(moreWrap){if(!all){moreWrap.style.display='block';if(moreBtn)moreBtn.style.display='none';}
-else{moreWrap.style.display='none';if(moreBtn){moreBtn.style.display='';moreBtn.innerHTML='<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events';}}}
-});});
-})();</script>`
-    : "";
-
-  // Person timeline item renderer (replaces card + grid row)
-  const renderPersonTimelineItem = (p, idx, isDeaths = false) => {
-    const th = p.pages?.[0]?.thumbnail?.source || "";
-    const w = p.pages?.[0]?.content_urls?.desktop?.page || "";
-    const rawName = p.text.split(",")[0];
-    const profileUrl = internalPersonUrl(personLinks, rawName);
-    const name = escapeHtml(rawName);
-    const desc = p.text.includes(",")
-      ? escapeHtml(p.text.slice(p.text.indexOf(",") + 1).trim())
-      : "";
-    const rawExtract = p.pages?.[0]?.extract || "";
-    const extract = rawExtract
-      ? escapeHtml(rawExtract.length > 220 ? rawExtract.slice(0, 220).replace(/\s\S*$/, "") + "…" : rawExtract)
-      : "";
-    const year = escapeHtml(String(p.year));
-    const badgeStyle = isDeaths ? ' style="background:#6c757d"' : "";
-    const isEven = idx % 2 === 1;
-    const imgLink = profileUrl || w;
-    const imgHtml = th
-      ? imgLink
-        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
-        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
-      : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
-    const actionBtn = profileUrl
-      ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
-      : w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>`
-        : "";
-    const card = `<div class="tl-card">
-  ${imgHtml}
-  <div class="tl-card-body">
-    <div class="tl-card-title">${name}</div>
-    ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
-    ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-    ${actionBtn}
-  </div>
-</div>`;
-    const media = `<div class="tl-media"></div>`;
-    const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago"${badgeStyle}>${year}</span></div>`;
-    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}">
-  <div class="tl-body">${card}</div>${node}${media}
-</div>`;
-  };
-
-  const birthTimelineHtml = topBirths
-    .map((b, i) => renderPersonTimelineItem(b, i, false))
-    .join("");
-  const deathTimelineHtml = topDeaths
-    .map((d, i) => renderPersonTimelineItem(d, i, true))
-    .join("");
-  const floatingDateStoryHtml = buildFloatingDateStory(
-    relatedBlogEntry,
-    mDisplay,
-    day,
-  );
-  const relatedQuestionsHtml = buildEventRelatedQuestionsBlock({
-    mDisplay,
-    day,
-    featured,
-    events,
-    births,
-    deaths,
-    relatedBlogEntry,
+  const {
+    chipsHtml: eraChipsHtml,
+    scriptHtml: eraChipScript,
+  } = buildDateEraFilter({
+    items: others,
+    ariaLabel: "Filter events by era",
+    filterKey: "events",
+    itemSelector: '.tl-item[data-era-item="events"]',
   });
 
   return `<!DOCTYPE html><html lang="en">
@@ -5632,7 +5877,6 @@ else{moreWrap.style.display='none';if(moreBtn){moreBtn.style.display='';moreBtn.
 <script type="application/ld+json">${collectionPageSchema}</script>
 ${eventsSchema ? `<script type="application/ld+json">${eventsSchema}</script>` : ""}
 <script type="application/ld+json">${breadcrumbSchema}</script>
-${quizSchema ? `<script type="application/ld+json">${quizSchema}</script>` : ""}
 <link rel="icon" href="/images/favicon.ico" type="image/x-icon"/>
 <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -5705,86 +5949,19 @@ ${siteNav()}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
     ${majorEventsSummary}
     ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
+    ${featuredStoryUrl ? `<div class="tl-card-actions"><a href="${escapeHtml(featuredStoryUrl)}" class="site-btn site-btn-primary tl-btn">Read our story</a></div>` : ""}
+    ${DATE_TIMELINE_AD_HTML}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${others.length > 0 ? `
     ${eraChipsHtml}
-    <div class="tl-wrap">${othersVisibleHtml}</div>
-    ${othersHiddenHtml ? `<div id="events-more" style="display:none"><div class="tl-wrap">${othersHiddenHtml}</div></div>
-    <button id="events-more-btn" onclick="var m=document.getElementById('events-more');m.style.display=m.style.display==='none'?'block':'none';this.innerHTML=m.style.display==='none'?'<i class=\\'bi bi-chevron-down me-1\\'></i>Show all ${others.length} events':'<i class=\\'bi bi-chevron-up me-1\\'></i>Show less';" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-chevron-down me-1"></i>Show all ${others.length} events</button>` : ""}` : ""}
+    <div class="tl-wrap">${othersHtml}</div>` : ""}
     </div>
   </div>
   ${eraChipScript}`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
-  ${buildQuizHookCard(quizData, monthName, day, mDisplay)}
-  <div class="ad-unit">
-    <div class="ad-unit-label">Advertisement</div>
-    <ins class="adsbygoogle"
-         style="display:block;border-radius:8px;overflow:hidden"
-         data-ad-client="ca-pub-8565025017387209"
-         data-ad-slot="9477779891"
-         data-ad-format="auto"
-         data-full-width-responsive="true"></ins>
-  </div>
-  ${
-    topBirths.length > 0
-      ? `
-  <div class="card-box">
-    <h2 class="h4 mb-2"><i class="bi bi-person-heart me-2" style="color:#1a1a1a"></i>Born on ${escapeHtml(mDisplay)} ${day}</h2>
-    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-      <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${topBirths.length} people</span>
-      ${birthEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(birthEraRange)}</span>` : ""}
-    </div>
-    <div class="tl-wrap">${birthTimelineHtml}</div>
-    <a href="/born/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-person-heart"></i>See all birthdays on ${escapeHtml(mDisplay)} ${day}</a>
-  </div>`
-      : ""
-  }
-  ${
-    topDeaths.length > 0
-      ? `
-  <div class="card-box">
-    <h2 class="h4 mb-2"><i class="bi bi-flower1 me-2" style="color:#6c757d"></i>Died on ${escapeHtml(mDisplay)} ${day}</h2>
-    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-      <span class="auto-tag event-years-ago ms-2"><i class="bi bi-people me-1"></i>${topDeaths.length} people</span>
-      ${deathEraRange ? `<span class="auto-tag event-years-ago ms-2"><i class="bi bi-clock-history me-1"></i>${escapeHtml(deathEraRange)}</span>` : ""}
-    </div>
-    <div class="tl-wrap">${deathTimelineHtml}</div>
-    <a href="/died/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-flower1"></i>See all deaths on ${escapeHtml(mDisplay)} ${day}</a>
-  </div>`
-      : ""
-  }
-  ${relatedQuestionsHtml}
-  ${buildEventAnswerBlock({ mDisplay, day, featured, events, evEraRange })}
-  <div class="card-box">
-    <h3 class="h5 mb-3"><i class="bi bi-compass me-2" style="color:#1a1a1a"></i>Explore ${escapeHtml(mDisplay)} ${day}</h3>
-    <div class="explore-actions">
-      <a href="/quiz/${monthName}/${day}/" class="explore-action-btn explore-action-quiz"><i class="bi bi-patch-question me-2"></i>Test Your Knowledge</a>
-      <a href="/born/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-person-heart me-2"></i>Famous Birthdays</a>
-      <a href="/died/${monthName}/${day}/" class="explore-action-btn"><i class="bi bi-flower1 me-2"></i>Notable Deaths</a>
-    </div>
-  </div>
-  <div class="ad-unit-container my-4">
-    <span class="ad-unit-label">Advertisement</span>
-    <ins class="adsbygoogle"
-         style="display:block"
-         data-ad-format="autorelaxed"
-         data-ad-client="ca-pub-8565025017387209"
-         data-ad-slot="9183511632"></ins>
-  </div>
-  <div class="my-5 pt-3 border-top">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <a href="/events/${prevMonthName}/${prevDayNum}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMonthDisplay)} ${prevDayNum}</a>
-      <a href="/events/${nextMonthName}/${nextDayNum}/" class="site-btn">${escapeHtml(nextMonthDisplay)} ${nextDayNum}<i class="bi bi-arrow-right"></i></a>
-    </div>
-    <div class="text-center">
-      <p class="text-muted mb-3">Explore history for any date on the interactive calendar.</p>
-      <a href="/" class="site-btn site-btn-primary w-100 mt-3"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn w-100 mt-3"><i class="bi bi-journal-text"></i>All Blog Posts</a>
-    </div>
-  </div>
+  ${buildDateBottomNavigationForRoute(monthName, day, "events")}
 </main>
-${floatingDateStoryHtml}
 ${dateEngagementScript}
 ${buildEventAnchorNavigationScript()}
 ${siteFooter("yr")}
@@ -5976,6 +6153,49 @@ function buildDateTopNavigationForRoute(
     nextDay: dayNum < DAYS_IN_MONTH[monthIndex] ? dayNum + 1 : 1,
     currentType,
   });
+}
+
+function buildDateBottomNavigationForRoute(
+  monthName,
+  day,
+  currentType = "events",
+) {
+  const normalizedMonthName = String(monthName || "").toLowerCase();
+  const monthNum = MONTH_NUM_MAP[normalizedMonthName];
+  const dayNum = Number(day);
+  const monthIndex = monthNum - 1;
+  if (
+    !monthNum ||
+    !Number.isInteger(dayNum) ||
+    dayNum < 1 ||
+    dayNum > DAYS_IN_MONTH[monthIndex]
+  ) {
+    return "";
+  }
+  const routeType = currentType === "born" || currentType === "died"
+    ? currentType
+    : "events";
+  const prevMonthIndex = dayNum > 1
+    ? monthIndex
+    : (monthIndex - 1 + 12) % 12;
+  const nextMonthIndex = dayNum < DAYS_IN_MONTH[monthIndex]
+    ? monthIndex
+    : (monthIndex + 1) % 12;
+  const prevDay = dayNum > 1
+    ? dayNum - 1
+    : DAYS_IN_MONTH[(monthIndex - 1 + 12) % 12];
+  const nextDay = dayNum < DAYS_IN_MONTH[monthIndex] ? dayNum + 1 : 1;
+  const prevMonthName = MONTHS_ALL[prevMonthIndex];
+  const nextMonthName = MONTHS_ALL[nextMonthIndex];
+  const prevLabel = `${MONTH_DISPLAY_NAMES[prevMonthIndex + 1]} ${prevDay}`;
+  const nextLabel = `${MONTH_DISPLAY_NAMES[nextMonthIndex + 1]} ${nextDay}`;
+
+  return `<nav class="date-bottom-navigation my-5 pt-3 border-top" aria-label="More dates">
+    <div class="d-flex justify-content-between align-items-center">
+      <a href="/${routeType}/${prevMonthName}/${prevDay}/" class="site-btn" rel="prev"><i class="bi bi-arrow-left"></i>${escapeHtml(prevLabel)}</a>
+      <a href="/${routeType}/${nextMonthName}/${nextDay}/" class="site-btn" rel="next">${escapeHtml(nextLabel)}<i class="bi bi-arrow-right"></i></a>
+    </div>
+  </nav>`;
 }
 
 function buildEventAnchorNavigationScript() {
@@ -6246,103 +6466,6 @@ function buildRelatedBlogCard(entry, heading = "Related Story") {
   </div>`;
 }
 
-function buildFloatingDateStory(entry, mDisplay = "", day = 0) {
-  const storyUrl =
-    typeof safeBlogStoryUrl === "function" ? safeBlogStoryUrl(entry) : "";
-  if (!storyUrl) return "";
-
-  const title = escapeHtml(
-    entry.title || "Read the related historical story",
-  );
-  const description = escapeHtml(
-    entry.description || "Explore the complete story and its historical context.",
-  );
-  const image = entry.imageUrl
-    ? `<img src="/image-proxy?src=${encodeURIComponent(entry.imageUrl)}&w=240&q=80" alt="" width="88" height="68" class="date-story-float-image" loading="lazy">`
-    : `<span class="date-story-float-image date-story-float-image-placeholder" aria-hidden="true"><i class="bi bi-journal-richtext"></i></span>`;
-  const dateLabel =
-    mDisplay && Number(day) > 0 ? ` for ${mDisplay} ${Number(day)}` : "";
-
-  return `<aside id="date-story-float" class="major-event-item date-story-float" aria-label="Featured article${escapeHtml(dateLabel)}" aria-hidden="true" inert>
-    ${image}
-    <span class="major-event-copy date-story-float-copy">
-      <span class="date-story-float-kicker">From the blog</span>
-      <strong class="date-story-float-title">${title}</strong>
-      <span class="date-story-float-description">${description}</span>
-    </span>
-    <a href="${escapeHtml(storyUrl)}" class="major-event-source date-story-float-link">Read More<i class="bi bi-arrow-right" aria-hidden="true"></i></a>
-  </aside>
-  <script id="date-story-float-script">(function(){
-var card=document.getElementById('date-story-float');
-var trigger=document.querySelector('.dyn-slider-shell');
-if(!card||!trigger){if(card)card.remove();return;}
-var ticking=false;
-function syncDateStoryFloat(){
-var visible=trigger.getBoundingClientRect().top<=window.innerHeight*.72;
-card.classList.toggle('date-story-float-visible',visible);
-card.setAttribute('aria-hidden',visible?'false':'true');
-if(visible)card.removeAttribute('inert');else card.setAttribute('inert','');
-ticking=false;
-}
-function requestDateStoryFloatSync(){
-if(ticking)return;
-ticking=true;
-window.requestAnimationFrame(syncDateStoryFloat);
-}
-window.addEventListener('scroll',requestDateStoryFloatSync,{passive:true});
-window.addEventListener('resize',requestDateStoryFloatSync,{passive:true});
-syncDateStoryFloat();
-})();</script>`;
-}
-
-function ensureFloatingDateStoryHtml(
-  html,
-  entry,
-  mDisplay = "",
-  day = 0,
-) {
-  const source = String(html || "");
-  const existingFloatingStory =
-    /<aside id="date-story-float"[\s\S]*?<\/aside>\s*<script id="date-story-float-script">[\s\S]*?<\/script>/;
-  const removeFloatingStory = (value) =>
-    String(value || "")
-      .replace(
-        /<style id="date-story-float-style">[\s\S]*?<\/style>/g,
-        "",
-      )
-      .replace(existingFloatingStory, "")
-      .replace(
-        /<aside id="date-story-float"[\s\S]*?<\/aside>/g,
-        "",
-      )
-      .replace(
-        /<script id="date-story-float-script">[\s\S]*?<\/script>/g,
-        "",
-      );
-  const floatingStory = buildFloatingDateStory(entry, mDisplay, day);
-  if (!source || !floatingStory) return removeFloatingStory(source);
-  const needsStylePatch = !/\.date-story-float\{position:fixed/.test(source);
-  const stylePatch = needsStylePatch
-    ? `<style id="date-story-float-style">${DATE_STORY_FLOAT_CSS}</style>`
-    : "";
-  const withStylePatch =
-    stylePatch && source.includes("</head>")
-      ? source.replace("</head>", `${stylePatch}</head>`)
-      : source;
-  const floatingStoryPayload = `${withStylePatch === source ? stylePatch : ""}${floatingStory}`;
-
-  if (existingFloatingStory.test(withStylePatch)) {
-    return withStylePatch.replace(
-      existingFloatingStory,
-      floatingStoryPayload,
-    );
-  }
-  return withStylePatch.replace(
-    "</body>",
-    `${floatingStoryPayload}</body>`,
-  );
-}
-
 function dateRouteKey(monthName, day) {
   const normalizedMonth = String(monthName || "").toLowerCase();
   const normalizedDay = parseInt(day, 10);
@@ -6515,15 +6638,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const births = (eventsData?.births || []).slice().sort((a, b) => a.year - b.year);
   // Count qualifying DYK sentences for a person — prefer someone who produces DYK cards,
   // using wikiRichScore as a tiebreaker so we still get images when DYK counts are equal.
-  const countDyk = (b) => {
-    const extract = b?.pages?.[0]?.extract || "";
-    return extract.split(/\.\s+/).filter((s) => {
-      s = s.replace(/\s+/g, " ").trim();
-      if (s.length < 50 || s.length > 220) return false;
-      if (/^(He|She|It|This|They|The [a-z])/.test(s) && !/\d/.test(s)) return false;
-      return true;
-    }).length;
-  };
+  const countDyk = (b) => personDidYouKnowFacts(b, [b], 5).length;
   const hasImage = (p) => !!(p?.pages?.[0]?.thumbnail?.source || p?.pages?.[0]?.originalimage?.source);
   // Fame first (pageview bonus, when the handler annotated it), DYK richness
   // as the tiebreaker so the featured card still fills its slider.
@@ -6543,23 +6658,11 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featRemainder = featured ? featured.text.substring(featured.text.indexOf(",") + 1).trim() : "";
-  const commentaryParas = featured ? workerCommentary(featured.year, featured.text) : [];
-  const didYouKnowFacts = (() => {
-    const scoreS = (s) =>
-      (/\d/.test(s) ? 2 : 0) +
-      (/\b(first|only|never|most|oldest|youngest|record|won|invented|discovered|became)\b/i.test(s) ? 3 : 0) +
-      (/[A-Z][a-z]/.test(s.slice(5)) ? 1 : 0);
-    return (featured?.pages?.[0]?.extract || "")
-      .split(/\.\s+/)
-      .map((s) => s.replace(/\s+/g, " ").trim())
-      .filter((s) => {
-        if (s.length < 50 || s.length > 220) return false;
-        if (/^(He|She|It|This|They|The [a-z])/.test(s) && !/\d/.test(s)) return false;
-        return true;
-      })
-      .sort((a, b) => scoreS(b) - scoreS(a))
-      .slice(0, 5);
-  })();
+  const didYouKnowFacts = personDidYouKnowFacts(
+    featured,
+    displayedBirths,
+    5,
+  );
   const ogImg = featImg || `${siteUrl}/images/logo.png`;
   const pageTitle = featured
     ? `${featName} & Other Famous Birthdays on ${mDisplay} ${day}`
@@ -6621,26 +6724,6 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       : "";
   const dateEngagementScript = buildDateEngagementScript(monthName, day);
 
-  const rankedDateEvents = rankDateEventsBySignificance(eventsData?.events || []);
-  const dateEventStoryLinks =
-    typeof matchHistoricalEventsToBlogStories === "function"
-      ? matchHistoricalEventsToBlogStories(
-          rankedDateEvents,
-          relatedBlogEntry ? [relatedBlogEntry] : [],
-        )
-      : new Map();
-  const majorEventsSummary = buildMajorEventsSummary(
-    rankedDateEvents.slice(0, 3),
-    mDisplay,
-    day,
-    dateEventStoryLinks,
-    {
-      heading: `Major events on ${mDisplay} ${day}`,
-      description:
-        "The most significant recorded events of this date, ranked. The complete chronology lives on the events page.",
-    },
-  );
-
   // Schema — ItemList with jobTitle
   const personListSchema =
     displayedBirths.length > 0
@@ -6687,12 +6770,6 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     { name: "On This Day", item: `${siteUrl}/events/` },
     { name: `Born on ${mDisplay} ${day}`, item: canonical },
   ]);
-  const floatingDateStoryHtml = buildFloatingDateStory(
-    relatedBlogEntry,
-    mDisplay,
-    day,
-  );
-
   // Timeline item renderer for born page
   const renderBornTlItem = (b, idx) => {
     const th = b.pages?.[0]?.thumbnail?.source || "";
@@ -6712,8 +6789,8 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     const imgLink = profileUrl || w;
     const imgHtml = th
       ? imgLink
-        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
-        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
+        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
     const actionBtn = profileUrl
       ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
@@ -6726,19 +6803,27 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     <div class="tl-card-title">${name}</div>
     ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
     ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-    ${actionBtn}
+    ${actionBtn ? `<div class="tl-card-actions">${actionBtn}</div>` : ""}
   </div>
 </div>`;
     const media = `<div class="tl-media"></div>`;
     const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago">${year}</span></div>`;
-    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}">
+    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}" data-year="${parseInt(b.year, 10) || 0}" data-era-item="births">
   <div class="tl-body">${card}</div>${node}${media}
 </div>`;
   };
 
-  let visibleTlHtml = "";
-  othersB.forEach((b, i) => {
-    visibleTlHtml += renderBornTlItem(b, i);
+  const birthsHtml = othersB
+    .map((birth, index) => renderBornTlItem(birth, index))
+    .join("");
+  const {
+    chipsHtml: birthEraChipsHtml,
+    scriptHtml: birthEraChipScript,
+  } = buildDateEraFilter({
+    items: othersB,
+    ariaLabel: "Filter people born on this day by era",
+    filterKey: "births",
+    itemSelector: '.tl-item[data-era-item="births"]',
   });
 
   return `<!DOCTYPE html><html lang="en">
@@ -6821,43 +6906,21 @@ ${siteNav()}
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
-    ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
+    ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
+    ${DATE_TIMELINE_AD_HTML}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${othersB.length > 0 ? `
-    <div class="tl-wrap">${visibleTlHtml}</div>` : ""}
-    </div>
-  </div>` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
-  <div class="ad-unit">
-    <div class="ad-unit-label">Advertisement</div>
-    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
-         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
-         data-ad-format="auto" data-full-width-responsive="true"></ins>
-  </div>
-  ${buildBornAnswerBlock({ mDisplay, day, featured, births, eraRange, personLinks })}
-  ${buildDateClusterCard(monthName, day, mDisplay, "born")}
-  ${majorEventsSummary ? `
-  <div class="card-box">
-    ${majorEventsSummary}
-    <a href="/events/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
-  </div>` : ""}
-  <div class="ad-unit-container my-4">
-    <span class="ad-unit-label">Advertisement</span>
-    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
-         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
-  </div>
-  <div class="my-5 pt-3 border-top">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <a href="/born/${prevMonth}/${prevDay}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMDisplay)} ${prevDay}</a>
-      <a href="/born/${nextMonth}/${nextDay}/" class="site-btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
-    </div>
-    <div class="text-center">
-      <p class="text-muted mb-3">Explore famous birthdays on the interactive calendar.</p>
-      <a href="/" class="site-btn site-btn-primary w-100 mt-3"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn w-100 mt-3"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+    <section aria-labelledby="major-births-heading">
+      <h2 class="h5 mb-1" id="major-births-heading">More major people born on ${escapeHtml(mDisplay)} ${day}</h2>
+      <p class="text-muted mb-3" style="font-size:14px">Notable people are ranked by substantive profile depth and public notability.</p>
+      ${birthEraChipsHtml}
+      <div class="tl-wrap">${birthsHtml}</div>
+    </section>` : ""}
     </div>
   </div>
+  ${birthEraChipScript}` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  ${buildDateBottomNavigationForRoute(monthName, day, "born")}
 </main>
-${floatingDateStoryHtml}
 ${dateEngagementScript}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "born-date", pageSlug: `${monthName}-${day}` })}
@@ -6873,15 +6936,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
 
   const deaths = (eventsData?.deaths || []).slice().sort((a, b) => a.year - b.year);
   // Prefer a featured person whose extract produces DYK cards; use wikiRichScore as tiebreaker.
-  const countDykD = (d) => {
-    const extract = d?.pages?.[0]?.extract || "";
-    return extract.split(/\.\s+/).filter((s) => {
-      s = s.replace(/\s+/g, " ").trim();
-      if (s.length < 50 || s.length > 220) return false;
-      if (/^(He|She|It|This|They|The [a-z])/.test(s) && !/\d/.test(s)) return false;
-      return true;
-    }).length;
-  };
+  const countDykD = (d) => personDidYouKnowFacts(d, [d], 5).length;
   const hasImgD = (p) => !!(p?.pages?.[0]?.thumbnail?.source || p?.pages?.[0]?.originalimage?.source);
   // Fame first (pageview bonus, when the handler annotated it), DYK richness
   // as the tiebreaker so the featured card still fills its slider.
@@ -6901,23 +6956,11 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featRemainder = featured ? featured.text.substring(featured.text.indexOf(",") + 1).trim() : "";
-  const commentaryParas = featured ? workerCommentary(featured.year, featured.text) : [];
-  const didYouKnowFacts = (() => {
-    const scoreS = (s) =>
-      (/\d/.test(s) ? 2 : 0) +
-      (/\b(first|only|never|most|oldest|youngest|record|won|invented|discovered|became)\b/i.test(s) ? 3 : 0) +
-      (/[A-Z][a-z]/.test(s.slice(5)) ? 1 : 0);
-    return (featured?.pages?.[0]?.extract || "")
-      .split(/\.\s+/)
-      .map((s) => s.replace(/\s+/g, " ").trim())
-      .filter((s) => {
-        if (s.length < 50 || s.length > 220) return false;
-        if (/^(He|She|It|This|They|The [a-z])/.test(s) && !/\d/.test(s)) return false;
-        return true;
-      })
-      .sort((a, b) => scoreS(b) - scoreS(a))
-      .slice(0, 5);
-  })();
+  const didYouKnowFacts = personDidYouKnowFacts(
+    featured,
+    displayedDeaths,
+    5,
+  );
   const ogImg = featImg || `${siteUrl}/images/logo.png`;
   const pageTitle = featured
     ? `${featName} & Others Who Died on ${mDisplay} ${day}`
@@ -6976,26 +7019,6 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       : "";
   const dateEngagementScript = buildDateEngagementScript(monthName, day);
 
-  const rankedDateEvents = rankDateEventsBySignificance(eventsData?.events || []);
-  const dateEventStoryLinks =
-    typeof matchHistoricalEventsToBlogStories === "function"
-      ? matchHistoricalEventsToBlogStories(
-          rankedDateEvents,
-          relatedBlogEntry ? [relatedBlogEntry] : [],
-        )
-      : new Map();
-  const majorEventsSummary = buildMajorEventsSummary(
-    rankedDateEvents.slice(0, 3),
-    mDisplay,
-    day,
-    dateEventStoryLinks,
-    {
-      heading: `Major events on ${mDisplay} ${day}`,
-      description:
-        "The most significant recorded events of this date, ranked. The complete chronology lives on the events page.",
-    },
-  );
-
   // Schema — ItemList with jobTitle
   const personListSchema =
     displayedDeaths.length > 0
@@ -7042,12 +7065,6 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     { name: "On This Day", item: `${siteUrl}/events/` },
     { name: `Died on ${mDisplay} ${day}`, item: canonical },
   ]);
-  const floatingDateStoryHtml = buildFloatingDateStory(
-    relatedBlogEntry,
-    mDisplay,
-    day,
-  );
-
   // Timeline item renderer for died page
   const renderDiedTlItem = (d, idx) => {
     const th = d.pages?.[0]?.thumbnail?.source || "";
@@ -7067,8 +7084,8 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     const imgLink = profileUrl || w;
     const imgHtml = th
       ? imgLink
-        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
-        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
+        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : `<div class="tl-card-img-blank"><i class="bi bi-person"></i></div>`;
     const actionBtn = profileUrl
       ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
@@ -7081,19 +7098,27 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     <div class="tl-card-title">${name}</div>
     ${desc ? `<div class="tl-card-desc">${desc}</div>` : ""}
     ${extract ? `<div class="tl-card-extract">${extract}</div>` : ""}
-    ${actionBtn}
+    ${actionBtn ? `<div class="tl-card-actions">${actionBtn}</div>` : ""}
   </div>
 </div>`;
     const media = `<div class="tl-media"></div>`;
     const node = `<div class="tl-node"><span class="tl-node-badge event-years-ago" style="background:#6c757d">${year}</span></div>`;
-    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}">
+    return `<div class="tl-item ${isEven ? "tl-item-even" : "tl-item-odd"}" data-year="${parseInt(d.year, 10) || 0}" data-era-item="deaths">
   <div class="tl-body">${card}</div>${node}${media}
 </div>`;
   };
 
-  let visibleDiedTlHtml = "";
-  othersD.forEach((d, i) => {
-    visibleDiedTlHtml += renderDiedTlItem(d, i);
+  const deathsHtml = othersD
+    .map((death, index) => renderDiedTlItem(death, index))
+    .join("");
+  const {
+    chipsHtml: deathEraChipsHtml,
+    scriptHtml: deathEraChipScript,
+  } = buildDateEraFilter({
+    items: othersD,
+    ariaLabel: "Filter people who died on this day by era",
+    filterKey: "deaths",
+    itemSelector: '.tl-item[data-era-item="deaths"]',
   });
 
   return `<!DOCTYPE html><html lang="en">
@@ -7174,43 +7199,21 @@ ${siteNav()}
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
-    ${didYouKnowFacts.length >= 3 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
+    ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
+    ${DATE_TIMELINE_AD_HTML}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${othersD.length > 0 ? `
-    <div class="tl-wrap">${visibleDiedTlHtml}</div>` : ""}
-    </div>
-  </div>` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
-  <div class="ad-unit">
-    <div class="ad-unit-label">Advertisement</div>
-    <ins class="adsbygoogle" style="display:block;border-radius:8px;overflow:hidden"
-         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9477779891"
-         data-ad-format="auto" data-full-width-responsive="true"></ins>
-  </div>
-  ${buildDiedAnswerBlock({ mDisplay, day, featured, deaths, eraRange, personLinks })}
-  ${buildDateClusterCard(monthName, day, mDisplay, "died")}
-  ${majorEventsSummary ? `
-  <div class="card-box">
-    ${majorEventsSummary}
-    <a href="/events/${monthName}/${day}/" class="site-btn w-100 mt-3" style="justify-content:center"><i class="bi bi-arrow-right"></i>See all events on ${escapeHtml(mDisplay)} ${day}</a>
-  </div>` : ""}
-  <div class="ad-unit-container my-4">
-    <span class="ad-unit-label">Advertisement</span>
-    <ins class="adsbygoogle" style="display:block" data-ad-format="autorelaxed"
-         data-ad-client="ca-pub-8565025017387209" data-ad-slot="9183511632"></ins>
-  </div>
-  <div class="my-5 pt-3 border-top">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <a href="/died/${prevMonth}/${prevDay}/" class="site-btn"><i class="bi bi-arrow-left"></i>${escapeHtml(prevMDisplay)} ${prevDay}</a>
-      <a href="/died/${nextMonth}/${nextDay}/" class="site-btn">${escapeHtml(nextMDisplay)} ${nextDay}<i class="bi bi-arrow-right"></i></a>
-    </div>
-    <div class="text-center">
-      <p class="text-muted mb-3">Explore notable deaths on the interactive calendar.</p>
-      <a href="/" class="site-btn site-btn-primary w-100 mt-3"><i class="bi bi-calendar3"></i>Open the Calendar</a>
-      <a href="/blog/" class="site-btn w-100 mt-3"><i class="bi bi-journal-text"></i>All Blog Posts</a>
+    <section aria-labelledby="major-deaths-heading">
+      <h2 class="h5 mb-1" id="major-deaths-heading">More major people who died on ${escapeHtml(mDisplay)} ${day}</h2>
+      <p class="text-muted mb-3" style="font-size:14px">Notable people are ranked by substantive profile depth and public notability.</p>
+      ${deathEraChipsHtml}
+      <div class="tl-wrap">${deathsHtml}</div>
+    </section>` : ""}
     </div>
   </div>
+  ${deathEraChipScript}` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  ${buildDateBottomNavigationForRoute(monthName, day, "died")}
 </main>
-${floatingDateStoryHtml}
 ${dateEngagementScript}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "died-date", pageSlug: `${monthName}-${day}` })}
@@ -7221,7 +7224,7 @@ async function handleBlogIndex(env, url) {
   const index = env.BLOG_AI_KV
     ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
     : null;
-  const posts = Array.isArray(index) ? index.slice(0, 3) : [];
+  const posts = sortBlogIndexNewestFirst(index).slice(0, 3);
   const latestPost = posts[0] || null;
   const latestPostIso =
     latestPost?.publishedAt &&
@@ -7392,6 +7395,19 @@ ${getSharedPageScripts({ pageType: "blog-index", pageSlug: "blog" })}
   });
 }
 
+function authorizedDatePageCacheBypass(request, env, url) {
+  const requested =
+    url.searchParams.get("fresh") === "1" ||
+    url.searchParams.get("nocache") === "1";
+  if (!requested) return false;
+  if (["localhost", "127.0.0.1", "::1"].includes(url.hostname)) return true;
+  const expected = String(env.DATE_PAGE_CACHE_BYPASS_SECRET || "").trim();
+  const supplied = String(
+    request.headers.get("x-thisday-cache-bypass") || "",
+  ).trim();
+  return Boolean(expected && supplied && supplied === expected);
+}
+
 async function handleBornPage(request, env, ctx, url) {
   const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
   if (parts.length !== 3) return new Response("Not Found", { status: 404 });
@@ -7401,32 +7417,36 @@ async function handleBornPage(request, env, ctx, url) {
   const maxDay = monthNum ? DAYS_IN_MONTH[monthNum - 1] : 0;
   if (!monthNum || isNaN(day) || day < 1 || day > maxDay)
     return new Response("Not Found", { status: 404 });
+  const mPad = String(monthNum).padStart(2, "0");
+  const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
   const kvKey = `born-v33-${hostKey}-${monthName}-${day}`;
-  const bypassCache =
-    url.searchParams.get("fresh") === "1" ||
-    url.searchParams.get("nocache") === "1";
+  const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const relatedBlogEntry = await findMatchingDateBlogEntry(
-          env,
-          monthName,
+        const needsDidYouKnow = !cached.includes('class="dyn-slider-shell"');
+        const cachedEventsData = needsDidYouKnow
+          ? await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, { type: "json" })
+              .catch(() => null)
+          : null;
+        const withMajorPeople = normalizeCachedPersonDateMajorCardHtml(cached, {
+          type: "births",
+          mDisplay: MONTH_DISPLAY_NAMES[monthNum],
           day,
+        });
+        const withDidYouKnow = ensureCachedPersonDateDidYouKnowHtml(
+          withMajorPeople,
+          { type: "births", people: cachedEventsData?.births || [] },
         );
-        const withFloatingStory = ensureFloatingDateStoryHtml(
-          cached,
-          relatedBlogEntry,
-          MONTH_DISPLAY_NAMES[monthNum],
-          day,
+        const cleanLayout = normalizeDatePageCleanLayoutHtml(
+          withDidYouKnow,
+          { type: "born", monthName, day },
         );
-        const patched = withFloatingStory.includes('ai-card-patch-v2') ? withFloatingStory : withFloatingStory.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
-        const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
-        const withFilmography =
-          await injectDatePagePersonFilmographyHtml(withSpec);
-        return new Response(withFilmography, {
+        const withSpec = cleanLayout.includes('speculationrules') ? cleanLayout : cleanLayout.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
+        return new Response(withSpec, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
@@ -7440,8 +7460,6 @@ async function handleBornPage(request, env, ctx, url) {
     console.error("KV read born:", e);
   }
 
-  const mPad = String(monthNum).padStart(2, "0");
-  const dPad = String(day).padStart(2, "0");
   let eventsData = { events: [], births: [], deaths: [] };
   if (env.EVENTS_KV) {
     try {
@@ -7459,7 +7477,7 @@ async function handleBornPage(request, env, ctx, url) {
       );
       if (r.ok) {
         eventsData = await r.json();
-        if (env.EVENTS_KV && eventsData?.events?.length)
+        if (!bypassCache && env.EVENTS_KV && eventsData?.events?.length)
           ctx.waitUntil(
             env.EVENTS_KV.put(
               `events-data:${mPad}-${dPad}`,
@@ -7473,8 +7491,7 @@ async function handleBornPage(request, env, ctx, url) {
     }
   }
 
-  const [relatedBlogEntry, personLinks] = await Promise.all([
-    findMatchingDateBlogEntry(env, monthName, day),
+  const [personLinks] = await Promise.all([
     loadPersonEntityLinkMap(env),
     annotatePersonNotability(eventsData?.births),
   ]);
@@ -7483,11 +7500,15 @@ async function handleBornPage(request, env, ctx, url) {
     monthName,
     day,
     eventsData,
-    relatedBlogEntry,
+    null,
     personLinks,
   );
-  const html = await injectDatePagePersonFilmographyHtml(generatedHtml);
-  if (env.EVENTS_KV && eventsData?.births?.length)
+  const html = normalizeDatePageCleanLayoutHtml(generatedHtml, {
+    type: "born",
+    monthName,
+    day,
+  });
+  if (!bypassCache && env.EVENTS_KV && eventsData?.births?.length)
     ctx.waitUntil(
       env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 }).catch(
         () => {},
@@ -7514,32 +7535,36 @@ async function handleDiedPage(request, env, ctx, url) {
   const maxDay = monthNum ? DAYS_IN_MONTH[monthNum - 1] : 0;
   if (!monthNum || isNaN(day) || day < 1 || day > maxDay)
     return new Response("Not Found", { status: 404 });
+  const mPad = String(monthNum).padStart(2, "0");
+  const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
   const kvKey = `died-v32-${hostKey}-${monthName}-${day}`;
-  const bypassCache =
-    url.searchParams.get("fresh") === "1" ||
-    url.searchParams.get("nocache") === "1";
+  const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const relatedBlogEntry = await findMatchingDateBlogEntry(
-          env,
-          monthName,
+        const needsDidYouKnow = !cached.includes('class="dyn-slider-shell"');
+        const cachedEventsData = needsDidYouKnow
+          ? await env.EVENTS_KV.get(`events-data:${mPad}-${dPad}`, { type: "json" })
+              .catch(() => null)
+          : null;
+        const withMajorPeople = normalizeCachedPersonDateMajorCardHtml(cached, {
+          type: "deaths",
+          mDisplay: MONTH_DISPLAY_NAMES[monthNum],
           day,
+        });
+        const withDidYouKnow = ensureCachedPersonDateDidYouKnowHtml(
+          withMajorPeople,
+          { type: "deaths", people: cachedEventsData?.deaths || [] },
         );
-        const withFloatingStory = ensureFloatingDateStoryHtml(
-          cached,
-          relatedBlogEntry,
-          MONTH_DISPLAY_NAMES[monthNum],
-          day,
+        const cleanLayout = normalizeDatePageCleanLayoutHtml(
+          withDidYouKnow,
+          { type: "died", monthName, day },
         );
-        const patched = withFloatingStory.includes('ai-card-patch-v2') ? withFloatingStory : withFloatingStory.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
-        const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
-        const withFilmography =
-          await injectDatePagePersonFilmographyHtml(withSpec);
-        return new Response(withFilmography, {
+        const withSpec = cleanLayout.includes('speculationrules') ? cleanLayout : cleanLayout.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
+        return new Response(withSpec, {
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "public, max-age=3600, s-maxage=604800",
@@ -7553,8 +7578,6 @@ async function handleDiedPage(request, env, ctx, url) {
     console.error("KV read died:", e);
   }
 
-  const mPad = String(monthNum).padStart(2, "0");
-  const dPad = String(day).padStart(2, "0");
   let eventsData = { events: [], births: [], deaths: [] };
   if (env.EVENTS_KV) {
     try {
@@ -7572,7 +7595,7 @@ async function handleDiedPage(request, env, ctx, url) {
       );
       if (r.ok) {
         eventsData = await r.json();
-        if (env.EVENTS_KV && eventsData?.events?.length)
+        if (!bypassCache && env.EVENTS_KV && eventsData?.events?.length)
           ctx.waitUntil(
             env.EVENTS_KV.put(
               `events-data:${mPad}-${dPad}`,
@@ -7586,8 +7609,7 @@ async function handleDiedPage(request, env, ctx, url) {
     }
   }
 
-  const [relatedBlogEntry, personLinks] = await Promise.all([
-    findMatchingDateBlogEntry(env, monthName, day),
+  const [personLinks] = await Promise.all([
     loadPersonEntityLinkMap(env),
     annotatePersonNotability(eventsData?.deaths),
   ]);
@@ -7596,11 +7618,15 @@ async function handleDiedPage(request, env, ctx, url) {
     monthName,
     day,
     eventsData,
-    relatedBlogEntry,
+    null,
     personLinks,
   );
-  const html = await injectDatePagePersonFilmographyHtml(generatedHtml);
-  if (env.EVENTS_KV && eventsData?.deaths?.length)
+  const html = normalizeDatePageCleanLayoutHtml(generatedHtml, {
+    type: "died",
+    monthName,
+    day,
+  });
+  if (!bypassCache && env.EVENTS_KV && eventsData?.deaths?.length)
     ctx.waitUntil(
       env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 }).catch(
         () => {},
@@ -7904,7 +7930,7 @@ async function handleEventsMarkdown(env, monthName, dayNum) {
   });
 }
 
-async function handleEventsDatePage(_request, env, ctx, url) {
+async function handleEventsDatePage(request, env, ctx, url) {
   const parts = url.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
   // Expect: ['events', 'july', '20']
   if (parts.length !== 3) return new Response("Not Found", { status: 404 });
@@ -7919,28 +7945,18 @@ async function handleEventsDatePage(_request, env, ctx, url) {
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
   const kvKey = `gen-post-v50-${hostKey}-${monthName}-${day}`;
-  const bypassCache =
-    url.searchParams.get("fresh") === "1" ||
-    url.searchParams.get("nocache") === "1";
+  const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
-        const relatedBlogEntry = await findMatchingDateBlogEntry(
-          env,
-          monthName,
-          day,
-        );
-        const normalizedControls = ensureFloatingDateStoryHtml(
+        const normalizedControls = normalizeDatePageCleanLayoutHtml(
           ensureEventAnchorNavigationHtml(
             normalizeCachedDatePageControlsHtml(cached, { monthName, day }),
           ),
-          relatedBlogEntry,
-          MONTH_DISPLAY_NAMES[monthNum],
-          day,
+          { type: "events", monthName, day },
         );
-        const patched = normalizedControls.includes('ai-card-patch-v2') ? normalizedControls : normalizedControls.replace(/<style>\/\*ai-card-patch-v1\*\/[\s\S]*?<\/style>/, '').replace('</head>', '<style>/*ai-card-patch-v2*/.ai-answer-card{background:#f5f5f5!important;background-image:none!important}.ai-answer-kicker{display:none!important}.ai-answer-card h2{display:none!important}.ai-answer-card>figure{display:none!important}.ai-answer-card>p{display:none!important}.site-btn.w-100{justify-content:center!important}</style></head>');
-        const withSpec = patched.includes('speculationrules') ? patched : patched.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
+        const withSpec = normalizedControls.includes('speculationrules') ? normalizedControls : normalizedControls.replace('</head>', `<script type="speculationrules">${SPECULATION_RULES_JSON}</script></head>`);
         const mdHref = `/events/${monthName}/${day}.md`;
         const withMd = withSpec.includes('text/markdown') ? withSpec : withSpec.replace('</head>', `<link rel="alternate" type="text/markdown" href="${mdHref}"/></head>`);
         return new Response(withMd, {
@@ -7983,7 +7999,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
       });
       if (r.ok) {
         eventsData = await r.json();
-        if (env.EVENTS_KV && eventsData?.events?.length) {
+        if (!bypassCache && env.EVENTS_KV && eventsData?.events?.length) {
           ctx.waitUntil(
             env.EVENTS_KV.put(
               `events-data:${mPad}-${dPad}`,
@@ -8008,11 +8024,10 @@ async function handleEventsDatePage(_request, env, ctx, url) {
     ? await fetchWikipediaSummaryByTitle(wikiTitle)
     : "";
 
-  // Run DYK and quiz generation in parallel to avoid double latency
-  const [dykResult, quizResult] = await Promise.allSettled([
-    // --- DYK async IIFE ---
-    (async () => {
-      if ((!env.AI && !env.GROQ_API_KEY) || !featuredEvent) return [];
+  // The Events page needs only its visible DYK facts. Quiz generation belongs
+  // to the dedicated quiz route and scheduled pre-generation path.
+  if ((env.AI || env.GROQ_API_KEY) && featuredEvent) {
+    try {
       const eventDesc = `${featuredEvent.year} — ${featuredEvent.text}`;
       const contextChunks = [
         `Featured event: ${eventDesc}`,
@@ -8043,7 +8058,7 @@ async function handleEventsDatePage(_request, env, ctx, url) {
         try {
           const parsed = JSON.parse(arrMatch[0]);
           if (Array.isArray(parsed) && parsed.length >= 3) {
-            return parsed
+            didYouKnowFacts = parsed
               .filter((f) => typeof f === "string")
               .map(normalizeDidYouKnowFact)
               .filter(Boolean)
@@ -8053,22 +8068,10 @@ async function handleEventsDatePage(_request, env, ctx, url) {
           console.error("DYK JSON.parse failed:", parseErr);
         }
       }
-      return [];
-    })(),
-    // --- Quiz async call ---
-    generateQuizForDate(
-      env,
-      monthName,
-      day,
-      eventsData,
-      featuredEvent,
-      wikiSummary,
-    ),
-  ]);
-
-  didYouKnowFacts = dykResult.status === "fulfilled" ? dykResult.value : [];
-  if (dykResult.status === "rejected")
-    console.error("AI did-you-know generation failed:", dykResult.reason);
+    } catch (error) {
+      console.error("AI did-you-know generation failed:", error);
+    }
+  }
 
   if (featuredEvent && didYouKnowFacts.length < 5) {
     const fallbackFacts = buildTopicFallbackFacts(
@@ -8082,41 +8085,38 @@ async function handleEventsDatePage(_request, env, ctx, url) {
       .slice(0, 5);
   }
 
-  const quizData = quizResult.status === "fulfilled" ? quizResult.value : null;
-  if (quizResult.status === "rejected")
-    console.error("Quiz generation failed:", quizResult.reason);
-
   const siteUrl = "https://thisday.info";
-  const mDisplayForQuiz = MONTH_DISPLAY_NAMES[monthNum];
-  const quizHtml = quizData
-    ? buildQuizHTML(quizData, mDisplayForQuiz, day)
-    : "";
-
-  const [blogIndex, personLinks] = await Promise.all([
-    getBlogIndexEntries(env),
-    loadPersonEntityLinkMap(env),
-  ]);
+  const blogIndex = await getBlogIndexEntries(env);
   const indexedBlogEntry =
     buildPublishedDateRouteMap(blogIndex).get(dateRouteKey(monthName, day)) ||
     null;
   const relatedBlogEntry = indexedBlogEntry
     ? await verifyPublishedDateBlogEntry(env, indexedBlogEntry)
     : null;
-  const html = generateEventsDateHTML(
+  const generatedHtml = generateEventsDateHTML(
     monthName,
     day,
     eventsData,
     siteUrl,
     didYouKnowFacts,
-    quizHtml,
-    quizData,
+    "",
+    null,
     relatedBlogEntry,
-    personLinks,
+    null,
     relatedBlogEntry ? [relatedBlogEntry] : [],
   );
+  const html = normalizeDatePageCleanLayoutHtml(generatedHtml, {
+    type: "events",
+    monthName,
+    day,
+  });
 
   // Only cache to KV when we have actual events (avoids caching API failure responses)
-  if (env.EVENTS_KV && (eventsData?.events?.length || 0) > 0) {
+  if (
+    !bypassCache &&
+    env.EVENTS_KV &&
+    (eventsData?.events?.length || 0) > 0
+  ) {
     ctx.waitUntil(
       env.EVENTS_KV.put(kvKey, html, { expirationTtl: 7 * 24 * 60 * 60 }).catch(
         (e) => console.error("KV write:", e),
@@ -8626,12 +8626,12 @@ async function handleFetchRequest(request, env, ctx) {
     const index = env.BLOG_AI_KV
       ? await env.BLOG_AI_KV.get("index", { type: "json" }).catch(() => null)
       : null;
-    const data = Array.isArray(index) ? index : [];
+    const data = sortBlogIndexNewestFirst(index);
     return new Response(JSON.stringify(data), {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=300, s-maxage=3600",
+        "Cache-Control": "public, max-age=0, s-maxage=60, must-revalidate",
       },
     });
   }
@@ -8923,6 +8923,7 @@ async function handleFetchRequest(request, env, ctx) {
         `</a>`,
     )
     .join("");
+  const homepageBlogIndexFreshnessScript = `<script>(function(){var nativeFetch=window.fetch;if(typeof nativeFetch!=="function")return;window.fetch=function(input,init){try{var raw=typeof input==="string"?input:input&&input.url;var target=new URL(raw,window.location.href);if(target.origin===window.location.origin&&(target.pathname==="/blog/index.json"||target.pathname==="/blog/archive.json")){target.searchParams.set("homepage",String(Math.floor(Date.now()/60000)));input=typeof input==="string"?target.pathname+target.search+target.hash:new Request(target.toString(),input)}}catch(e){}return nativeFetch.call(this,input,init)}})();</script>`;
 
   // Fetch the original index.html from the origin server
   const originalResponse = await fetch(url.origin, request);
@@ -8934,6 +8935,13 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   const rewriter = new HTMLRewriter()
+    .on("head", {
+      element(element) {
+        // This ships with the Worker, so repeat visitors escape the legacy
+        // cache-first service worker before the static v21 assets are committed.
+        element.append(homepageBlogIndexFreshnessScript, { html: true });
+      },
+    })
     // --- Meta Tags and Title ---
     .on("title", {
       element(element) {
@@ -10636,12 +10644,6 @@ export default {
           const pageType = cachedDateRoute[1];
           const monthName = cachedDateRoute[2];
           const day = Number(cachedDateRoute[3]);
-          const monthNum = MONTH_NUM_MAP[monthName];
-          const relatedBlogEntry = await findMatchingDateBlogEntry(
-            env,
-            monthName,
-            day,
-          );
           let datePageHtml = await cached.text();
           if (pageType === "events") {
             datePageHtml = ensureEventAnchorNavigationHtml(
@@ -10651,11 +10653,9 @@ export default {
               }),
             );
           }
-          cachedBody = ensureFloatingDateStoryHtml(
+          cachedBody = normalizeDatePageCleanLayoutHtml(
             datePageHtml,
-            relatedBlogEntry,
-            MONTH_DISPLAY_NAMES[monthNum] || "",
-            day,
+            { type: pageType, monthName, day },
           );
         }
         const r = new Response(cachedBody, {
@@ -10708,8 +10708,15 @@ export const __datePageEngagementTestHooks = {
   buildEventAnchorNavigationScript,
   ensureEventAnchorNavigationHtml,
   normalizeCachedDatePageControlsHtml,
-  buildFloatingDateStory,
-  ensureFloatingDateStoryHtml,
+  normalizeCachedPersonDateMajorCardHtml,
+  personDidYouKnowFacts,
+  ensureCachedPersonDateDidYouKnowHtml,
+  expandDateTimelineHtml,
+  ensureTimelineCardActionWrappersHtml,
+  normalizeDatePageCleanLayoutHtml,
+  buildDateBottomNavigationForRoute,
+  authorizedDatePageCacheBypass,
+  ensureEraChipPressedStateHtml,
   buildPublishedDateRouteMap,
   findMatchingDateBlogEntry,
 };
@@ -10733,6 +10740,9 @@ export const __historyEvergreenTestHooks = {
   buildEntityBookOrAdSlot,
   buildEntityRelatedFilmsBlock,
   buildPersonFilmographyBlock,
+  buildEntityOverviewSlider,
+  stripGenericEntityContextSections,
+  ensureEntityContextSections,
   datePageScreenPersonCandidate,
   injectDatePagePersonFilmographyHtml,
   buildEntityBodySections,

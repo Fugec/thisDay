@@ -525,7 +525,7 @@ test("person profiles place selected movies after the career section", () => {
   );
 });
 
-test("born and died pages add one actor filmography without a KV write", async () => {
+test("born and died pages skip filmography enrichment and its network calls", async () => {
   const dateHtml = `<html><body>
     <div class="tl-card">
       <a href="https://en.wikipedia.org/wiki/Arthur_Treacher">Source</a>
@@ -576,13 +576,9 @@ test("born and died pages add one actor filmography without a KV write", async (
     },
   );
 
-  assert.equal(calls.length, 2);
-  assert.match(patched, /Selected movies: Arthur Treacher/);
-  assert.match(patched, /tt1234567/);
-  assert.ok(
-    patched.indexOf("Selected movies: Arthur Treacher") <
-      patched.indexOf('<div class="ad-unit">'),
-  );
+  assert.equal(calls.length, 0);
+  assert.equal(patched, dateHtml);
+  assert.doesNotMatch(patched, /Selected movies|imdb\.com/);
   assert.equal(historyHooks.datePageScreenPersonCandidate(dateHtml)?.name, "Arthur Treacher");
 });
 
@@ -667,7 +663,7 @@ test("person and born/died cache keys advance without invalidating unrelated rou
     historyHooks.edgeCacheKey(
       new URL("https://thisday.info/born/july/23/"),
     ),
-    /__date_person_media_v=1$/,
+    /__date_person_media_v=5$/,
   );
   assert.equal(
     historyHooks.edgeCacheKey(

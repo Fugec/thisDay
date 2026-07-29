@@ -44,10 +44,10 @@ test("carousel eagerly loads only its first responsive image", () => {
 
 test("homepage static asset versions are current", () => {
   assert.match(indexHtml, /js\/script\.js\?v=22/);
-  assert.match(indexHtml, /custom\.css\?v=40/);
-  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v24"/);
+  assert.match(indexHtml, /custom\.css\?v=41/);
+  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v25"/);
   assert.match(serviceWorker, /"\/js\/script\.js\?v=22"/);
-  assert.match(serviceWorker, /"\/css\/custom\.css\?v=40"/);
-  assert.match(seoWorker, /custom\.css\?v=40/);
+  assert.match(serviceWorker, /"\/css\/custom\.css\?v=41"/);
+  assert.match(seoWorker, /custom\.css\?v=41/);
   assert.match(seoWorker, /width="480" height="360" loading="lazy" decoding="async"/);
 });

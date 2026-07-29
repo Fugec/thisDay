@@ -56,21 +56,33 @@ test("server discovery links cover the daily cluster, adjacent dates, and topic 
   ]) {
     assert.match(html, new RegExp(`href="${href.replaceAll("/", "\\/")}"`));
   }
+  assert.equal((html.match(/class="date-view-tab"/g) || []).length, 12);
+  assert.match(html, /class="bi bi-calendar-event" aria-hidden="true"/);
 });
 
-test("mobile discovery links form a 1.5-card snap slider", () => {
+test("homepage discovery reuses date-view tabs as a 1.5-card slider", () => {
+  assert.match(indexHtml, /class="date-view-tabs homepage-discovery-links"/);
   assert.match(
     customCss,
-    /\.homepage-discovery-links\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;[^}]*scroll-snap-type:\s*x mandatory;/s,
+    /\.date-view-tabs\s*\{[^}]*display:\s*flex;[^}]*overflow-x:\s*auto;/s,
   );
   assert.match(
     customCss,
-    /\.homepage-discovery-links a\s*\{[^}]*flex:\s*0 0 calc\(\(100% - 0\.65rem\) \/ 1\.5\);[^}]*scroll-snap-align:\s*start;/s,
+    /\.date-view-tab\s*\{[^}]*display:\s*inline-flex;[^}]*border-radius:\s*999px;/s,
+  );
+  assert.match(
+    customCss,
+    /\.homepage-discovery-links\s*\{[^}]*scroll-snap-type:\s*x mandatory;/s,
+  );
+  assert.match(
+    customCss,
+    /\.homepage-discovery-links \.date-view-tab\s*\{[^}]*flex:\s*0 0 calc\(\(100% - 0\.5rem\) \/ 1\.5\);[^}]*scroll-snap-align:\s*start;/s,
   );
   assert.match(
     customCss,
     /@media \(min-width: 768px\)[\s\S]*?\.homepage-discovery-links\s*\{[^}]*flex-wrap:\s*wrap;[^}]*overflow-x:\s*visible;/,
   );
+  assert.doesNotMatch(workerSource, /\.date-view-tabs\{display:flex/);
 });
 
 test("homepage blog cards are real internal links before JavaScript runs", () => {
@@ -138,7 +150,7 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=40/);
+  assert.match(indexHtml, /custom\.css\?v=41/);
   assert.match(indexHtml, /script\.js\?v=22/);
   assert.match(
     workerSource,
@@ -155,7 +167,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=40"),
+      new Request("https://thisday.info/css/custom.css?v=41"),
       {},
       { waitUntil() {} },
     );

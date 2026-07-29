@@ -1727,23 +1727,23 @@ function buildHomepageDiscoveryLinks(today) {
   const previous = homepageDateLink(previousDate);
   const next = homepageDateLink(nextDate);
   const links = [
-    [`/events/${current.month}/${current.day}/`, `Events on ${current.label}`],
-    [`/born/${current.month}/${current.day}/`, `Born on ${current.label}`],
-    [`/died/${current.month}/${current.day}/`, `Died on ${current.label}`],
-    [`/quiz/${current.month}/${current.day}/`, `Quiz for ${current.label}`],
-    [`/events/${previous.month}/${previous.day}/`, `Previous date: ${previous.label}`],
-    [`/events/${next.month}/${next.day}/`, `Next date: ${next.label}`],
-    ["/people/", "People in history"],
-    ["/topics/", "All history topics"],
-    ["/topics/world-war-ii/", "World War II"],
-    ["/topics/space-exploration/", "Space exploration"],
-    ["/topics/civil-rights/", "Civil rights"],
-    ["/topics/medical-breakthroughs/", "Medical breakthroughs"],
+    [`/events/${current.month}/${current.day}/`, `Events on ${current.label}`, "bi-calendar-event"],
+    [`/born/${current.month}/${current.day}/`, `Born on ${current.label}`, "bi-balloon"],
+    [`/died/${current.month}/${current.day}/`, `Died on ${current.label}`, "bi-flower1"],
+    [`/quiz/${current.month}/${current.day}/`, `Quiz for ${current.label}`, "bi-patch-question"],
+    [`/events/${previous.month}/${previous.day}/`, `Previous date: ${previous.label}`, "bi-chevron-left"],
+    [`/events/${next.month}/${next.day}/`, `Next date: ${next.label}`, "bi-chevron-right"],
+    ["/people/", "People in history", "bi-people"],
+    ["/topics/", "All history topics", "bi-collection"],
+    ["/topics/world-war-ii/", "World War II", "bi-shield"],
+    ["/topics/space-exploration/", "Space exploration", "bi-rocket-takeoff"],
+    ["/topics/civil-rights/", "Civil rights", "bi-megaphone"],
+    ["/topics/medical-breakthroughs/", "Medical breakthroughs", "bi-heart-pulse"],
   ];
   return links
     .map(
-      ([href, label]) =>
-        `<a href="${href}">${escapeHtml(label)}</a>`,
+      ([href, label, icon]) =>
+        `<a href="${href}" class="date-view-tab"><i class="bi ${icon}" aria-hidden="true"></i>${escapeHtml(label)}</a>`,
     )
     .join("");
 }
@@ -5298,12 +5298,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .date-cluster-link i{font-size:1rem;flex-shrink:0}
 .date-cluster-link-active{background:var(--bg-alt);border-color:var(--btn-bg)}
 
-.date-view-tabs{display:flex;gap:.5rem;overflow-x:auto;margin:0 0 1.25rem;padding:0 0 .2rem;scrollbar-width:none;-ms-overflow-style:none}
-.date-view-tabs::-webkit-scrollbar{display:none}
 .date-top-navigation{padding:40px 0}
-.date-view-tab{display:inline-flex;align-items:center;gap:.45rem;flex:0 0 auto;padding:.55rem .8rem;border:1px solid var(--cbr);border-radius:999px;background:var(--cb);color:var(--tc);text-decoration:none;font-size:14px;white-space:nowrap}
-.date-view-tab:hover{background:var(--bg-alt);color:var(--tc);text-decoration:none}
-.date-view-tab-active{background:var(--btn-bg);border-color:var(--btn-bg);color:#fff!important}
 .major-events-summary{margin:0 0 1.25rem}
 .major-events-summary-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:.8rem}
 .major-events-summary-head p{max-width:620px;margin:0;color:var(--mu);font-size:14px}
@@ -9848,7 +9843,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=40>; rel=preload; as=style",
+      "</css/custom.css?v=41>; rel=preload; as=style",
     ].join(", "),
   );
 

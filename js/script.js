@@ -37,6 +37,8 @@ var lastActiveCard = null;
 
 const CACHE_EXPIRY_TIME = 24 * 60 * 60 * 1000;
 const LOCAL_STORAGE_CACHE_KEY = "wikipediaEventCacheV2";
+const HOMEPAGE_DOCUMENT_TITLE =
+  "On This Day in History: Events, Births & Deaths";
 
 // Months
 const monthNames = [
@@ -442,32 +444,60 @@ function processRawWikipediaData(data) {
     events: processedEvents,
     births: processedBirths,
     deaths: processedDeaths,
+    partial: data?.partial === true,
+    counts:
+      data?.counts && typeof data.counts === "object"
+        ? {
+            events: Number(data.counts.events) || processedEvents.length,
+            births: Number(data.counts.births) || processedBirths.length,
+            deaths: Number(data.counts.deaths) || processedDeaths.length,
+          }
+        : {
+            events: processedEvents.length,
+            births: processedBirths.length,
+            deaths: processedDeaths.length,
+          },
   };
 }
 
-async function fetchWikipediaEvents(month, day) {
+async function fetchWikipediaEvents(month, day, options = {}) {
+  const requireFull = options.requireFull === true;
   const cacheKey = `${month}-${day}-en`;
   if (eventCache.has(cacheKey)) {
     const cached = eventCache.get(cacheKey);
-    if (Date.now() - cached.timestamp < CACHE_EXPIRY_TIME) {
+    const cachedIsComplete =
+      cached.complete !== false && cached.data?.partial !== true;
+    if (
+      Date.now() - cached.timestamp < CACHE_EXPIRY_TIME &&
+      (!requireFull || cachedIsComplete)
+    ) {
       return cached.data;
-    } else {
+    } else if (Date.now() - cached.timestamp >= CACHE_EXPIRY_TIME) {
       eventCache.delete(cacheKey);
       saveCacheToLocalStorage(eventCache);
     }
   }
 
-  // For today's date, use data the Cloudflare Worker already injected — no API call needed
+  // The Worker injects a deliberately small preview for today's initial paint.
+  // Complete modal data is fetched only when the visitor asks to open the day.
   const now = new Date();
-  if (month === now.getMonth() + 1 && day === now.getDate()) {
+  if (
+    !requireFull &&
+    month === now.getMonth() + 1 &&
+    day === now.getDate()
+  ) {
     const preloadedScript = document.getElementById("preloaded-today-events");
     if (preloadedScript) {
       try {
         const raw = JSON.parse(preloadedScript.textContent);
         if (raw && raw.events && raw.events.length > 0) {
           const resultData = processRawWikipediaData(raw);
-          eventCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
-          saveCacheToLocalStorage(eventCache);
+          eventCache.set(cacheKey, {
+            data: resultData,
+            timestamp: Date.now(),
+            complete: raw.partial !== true,
+          });
+          if (raw.partial !== true) saveCacheToLocalStorage(eventCache);
           return resultData;
         }
       } catch (e) {
@@ -496,14 +526,22 @@ async function fetchWikipediaEvents(month, day) {
         `No data for English Wikipedia for ${month}/${day} (Status: ${response.status})`,
       );
       const emptyData = { events: [], births: [], deaths: [] };
-      eventCache.set(cacheKey, { data: emptyData, timestamp: Date.now() });
+      eventCache.set(cacheKey, {
+        data: emptyData,
+        timestamp: Date.now(),
+        complete: true,
+      });
       saveCacheToLocalStorage(eventCache);
       return emptyData;
     }
 
     const data = await response.json();
     const resultData = processRawWikipediaData(data);
-    eventCache.set(cacheKey, { data: resultData, timestamp: Date.now() });
+    eventCache.set(cacheKey, {
+      data: resultData,
+      timestamp: Date.now(),
+      complete: true,
+    });
     saveCacheToLocalStorage(eventCache);
     return resultData;
   } catch (error) {
@@ -960,12 +998,17 @@ async function loadDayEvents(dayCard, month, forceLoad = false) {
   eventSummary.innerHTML =
     '<div class="spinner-border spinner-border-sm" role="status"></div>';
   try {
-    const eventsData = await fetchWikipediaEvents(month + 1, day);
+    const eventsData = await fetchWikipediaEvents(month + 1, day, {
+      requireFull: forceLoad,
+    });
     dayCard.eventsData = eventsData;
-    const totalEvents =
-      (eventsData.events?.length || 0) +
-      (eventsData.births?.length || 0) +
-      (eventsData.deaths?.length || 0);
+    const totalEvents = eventsData.counts
+      ? (eventsData.counts.events || 0) +
+        (eventsData.counts.births || 0) +
+        (eventsData.counts.deaths || 0)
+      : (eventsData.events?.length || 0) +
+        (eventsData.births?.length || 0) +
+        (eventsData.deaths?.length || 0);
     dayCard.classList.remove("loading");
     dayCard.classList.add("loaded");
     if (totalEvents > 0) {
@@ -1009,7 +1052,7 @@ async function renderCalendar() {
     year === today.getFullYear() && month === today.getMonth();
   const todayDate = today.getDate();
   currentMonthYearDisplay.textContent = `${monthNames[month]}`;
-  document.title = `What Happened on This Day | ${monthNames[month]} Historical Events`;
+  document.title = HOMEPAGE_DOCUMENT_TITLE;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const dayCards = [];
   for (let i = 1; i <= daysInMonth; i++) {
@@ -2638,11 +2681,14 @@ async function showEventDetails(
   try {
     if (
       !structuredEvents ||
+      structuredEvents.partial === true ||
       (structuredEvents.events?.length === 0 &&
         structuredEvents.births?.length === 0 &&
         structuredEvents.deaths?.length === 0)
     ) {
-      structuredEvents = await fetchWikipediaEvents(month, day);
+      structuredEvents = await fetchWikipediaEvents(month, day, {
+        requireFull: true,
+      });
     }
     currentDayEventsData = structuredEvents;
     currentDayAllItems = [
@@ -3052,8 +3098,11 @@ async function fetchWikipediaEventsForCarousel() {
               sourceImageUrl: wikiPage.thumbnail.source,
               imageUrl: optimized,
               backgroundUrl: optimized,
-              url: wikiPage.content_urls.desktop.page,
-              isExternal: true,
+              url:
+                wikiPage.content_urls?.desktop?.page ||
+                window.__todayEventsUrl ||
+                "/events/today/",
+              isExternal: Boolean(wikiPage.content_urls?.desktop?.page),
             };
           });
         }

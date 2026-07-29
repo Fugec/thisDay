@@ -7,9 +7,7 @@
 
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>
-      This Day in History | Historical Events & Milestones | thisDay.
-    </title>
+    <title>On This Day in History: Events, Births &amp; Deaths</title>
     <link rel="canonical" href="https://thisday.info/" />
     <meta name="robots" content="index, follow" />
     <meta name="color-scheme" content="light dark" />
@@ -19,12 +17,15 @@
     />
     <meta
       name="description"
-      content="Explore this day in history — discover wars declared, inventions patented, and notable births on any calendar date, spanning thousands of years of recorded history."
+      content="Explore historical events, famous birthdays and notable deaths for every day of the year, with sourced timelines, quizzes and daily articles."
     />
-    <meta property="og:title" content="This Day in History | thisDay." />
+    <meta
+      property="og:title"
+      content="On This Day in History: Events, Births &amp; Deaths"
+    />
     <meta
       property="og:description"
-      content="Discover this day in history — from ancient battles to modern milestones. Explore historical events and notable figures on any calendar date."
+      content="Explore historical events, famous birthdays and notable deaths for every day of the year, with sourced timelines, quizzes and daily articles."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://thisday.info/" />
@@ -34,11 +35,11 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta
       name="twitter:title"
-      content="This Day in History | Historical Events | thisDay."
+      content="On This Day in History: Events, Births &amp; Deaths"
     />
     <meta
       name="twitter:description"
-      content="Explore this day in history — wars, inventions, births, and deaths on any calendar date."
+      content="Explore historical events, famous birthdays and notable deaths for every day of the year, with sourced timelines, quizzes and daily articles."
     />
     <meta name="twitter:image" content="https://thisday.info/images/logo.png" />
     <meta name="twitter:creator" content="@thisday_info" />
@@ -51,7 +52,7 @@
           "@type": "WebSite",
           "name": "thisDay.",
           "url": "https://thisday.info/",
-          "description": "Explore this day in history — discover what happened on any calendar date, from famous birthdays and historical anniversaries to wars, inventions, and world-changing events.",
+          "description": "Explore historical events, famous birthdays and notable deaths for every day of the year, with sourced timelines, quizzes and daily articles.",
           "potentialAction": {
             "@type": "SearchAction",
             "target": "https://thisday.info/?date={date}",
@@ -114,7 +115,7 @@
       sizes="16x16"
       href="icons/favicon-16x16.png"
     />
-    <link rel="stylesheet" href="css/custom.css?v=38" />
+    <link rel="stylesheet" href="css/custom.css?v=39" />
 
     <link rel="manifest" href="/manifest.json" />
     <link
@@ -184,7 +185,6 @@
             <i class="bi bi-arrow-right" aria-hidden="true"></i>
           </a>
         </div>
-
       </div>
       <script>
         (function () {
@@ -306,7 +306,7 @@
           <img
             id="latest-article-img"
             src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-            alt="Loading..."
+            alt="Latest history article illustration"
             class="quiz-card-img"
             width="800"
             height="400"
@@ -316,7 +316,7 @@
           />
           <div class="quiz-card-body">
             <h2 class="homepage-section-title-box" id="latest-article-title">
-              Loading...
+              Latest history article
             </h2>
             <p id="latest-article-desc">Read it. Quiz yourself at the end.</p>
             <a id="blog-quiz-btn" href="/blog/" class="btn"
@@ -351,6 +351,27 @@
       </div>
     </section>
 
+    <section
+      class="homepage-discovery"
+      aria-labelledby="homepageDiscoveryTitle"
+    >
+      <h2 class="homepage-section-title" id="homepageDiscoveryTitle">
+        Explore Today in History
+      </h2>
+      <nav
+        class="homepage-discovery-links"
+        id="homepageDiscoveryLinks"
+        aria-label="Explore today's history and related topics"
+      >
+        <a href="/events/today/">Today's events</a>
+        <a href="/born/today/">Born today</a>
+        <a href="/died/today/">Died today</a>
+        <a href="/quiz/">Today's quiz</a>
+        <a href="/topics/">History topics</a>
+        <a href="/people/">People in history</a>
+      </nav>
+    </section>
+
     <script>
       (function () {
         var btn = document.getElementById("blog-quiz-btn");
@@ -360,6 +381,7 @@
         var descEl = document.getElementById("latest-article-desc");
 
         function loadLatestArticle() {
+          if (btn && btn.dataset.ssrReady === "true") return;
           fetch(homepageBlogIndexUrl())
             .then(function (r) {
               return r.ok ? r.json() : null;
@@ -451,6 +473,8 @@
 
     <script>
       (function () {
+        var serverGrid = document.getElementById("videoGrid");
+        if (serverGrid && serverGrid.dataset.ssrReady === "true") return;
         fetch("/blog/videos.json")
           .then(function (r) {
             return r.ok ? r.json() : [];
@@ -522,7 +546,9 @@
           <i class="bi bi-chevron-left"></i>
           <span class="d-none d-sm-inline">Prev</span>
         </button>
-        <h2 class="homepage-section-title" id="currentMonthYear"></h2>
+        <h2 class="homepage-section-title" id="currentMonthYear">
+          Current month
+        </h2>
         <button class="btn" id="nextMonthBtn" aria-label="Next month">
           <span class="d-none d-sm-inline">Next</span>
           <i class="bi bi-chevron-right"></i>
@@ -778,8 +804,12 @@
         <div class="modal-content">
           <div class="modal-header">
             <div class="modal-heading">
-              <h5 class="modal-title" id="modalDate"></h5>
-              <p class="modal-subtitle" id="modalDateSummary"></p>
+              <h2 class="modal-title h5" id="modalDate">
+                Historical events for selected date
+              </h2>
+              <p class="modal-subtitle" id="modalDateSummary">
+                Events, births and deaths today.
+              </p>
             </div>
             <button
               type="button"
@@ -820,12 +850,14 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="js/script.js?v=21"></script>
+    <script src="js/script.js?v=22"></script>
     <script src="/js/chatbot.js?v=5"></script>
 
     <script>
       // Populate latest 10 blog posts
       (function () {
+        var serverGrid = document.getElementById("blogGrid");
+        if (serverGrid && serverGrid.dataset.ssrReady === "true") return;
         fetch(homepageBlogIndexUrl())
           .then(function (r) {
             return r.ok ? r.json() : [];

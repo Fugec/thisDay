@@ -1,23 +1,68 @@
 // thisDay. Service Worker
 // Caches static assets for instant repeat visits and basic offline support.
 
-const CACHE_NAME = "thisday-v21";
+const CACHE_NAME = "thisday-v23";
 const CACHE_VERSION_KEY = "thisday-sw-version";
 
 // Static assets to cache on install (shell of the app)
 const STATIC_ASSETS = [
-  "/",
-  "/index.html",
   "/manifest.json",
-  "/js/script.js",
-  "/js/chatbot.js",
-  "/css/style.css",
+  "/js/script.js?v=22",
+  "/js/chatbot.js?v=5",
+  "/js/shared/static-layout.js",
+  "/js/shared/layout.js",
+  "/css/custom.css?v=39",
+  "/css/style.css?v=9",
   "/images/favicon.ico",
   "/images/favicon-32x32.png",
   "/images/favicon-16x16.png",
   "/images/apple-touch-icon.png",
   "/images/logo.png",
 ];
+
+function responseHeadersBlockCaching(request, response) {
+  if (!response.ok || response.redirected) return true;
+
+  const cacheControl = response.headers.get("cache-control") || "";
+  if (/\b(?:no-store|private)\b/i.test(cacheControl)) return true;
+
+  const robotsHeader = response.headers.get("x-robots-tag") || "";
+  if (/\bnoindex\b/i.test(robotsHeader)) return true;
+
+  if (response.url) {
+    try {
+      const requestUrl = new URL(
+        typeof request === "string" ? request : request.url,
+        self.location.origin,
+      );
+      const responseUrl = new URL(response.url);
+      if (requestUrl.href !== responseUrl.href) return true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function responseHtmlBlocksIndexing(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!/\btext\/html\b/i.test(contentType)) return false;
+
+  const html = await response.text();
+  return (html.match(/<meta\b[^>]*>/gi) || []).some(
+    (tag) =>
+      /\bname\s*=\s*["']?robots["']?/i.test(tag) &&
+      /\bcontent\s*=\s*["'][^"']*\bnoindex\b/i.test(tag),
+  );
+}
+
+async function putInCacheIfIndexSafe(cache, request, response) {
+  if (responseHeadersBlockCaching(request, response)) return false;
+  if (await responseHtmlBlocksIndexing(response.clone())) return false;
+  await cache.put(request, response);
+  return true;
+}
 
 // Install: pre-cache the app shell — each asset cached independently so one
 // failure (e.g. a CDN miss) doesn't abort the entire service worker install.
@@ -27,7 +72,7 @@ self.addEventListener("install", (event) => {
       Promise.allSettled(
         STATIC_ASSETS.map((url) =>
           fetch(url)
-            .then((res) => { if (res.ok) cache.put(url, res); })
+            .then((res) => putInCacheIfIndexSafe(cache, url, res))
             .catch(() => {}),
         ),
       ),
@@ -63,11 +108,14 @@ self.addEventListener("fetch", (event) => {
       statusText: "Service Unavailable",
     });
   const cacheSuccessfulResponse = (response) => {
-    if (response.ok) {
+    if (!responseHeadersBlockCaching(request, response)) {
+      const cacheCandidate = response.clone();
       event.waitUntil(
         caches
           .open(CACHE_NAME)
-          .then((cache) => cache.put(request, response.clone()))
+          .then((cache) =>
+            putInCacheIfIndexSafe(cache, request, cacheCandidate),
+          )
           .catch(() => {}),
       );
     }

@@ -2171,6 +2171,41 @@ article.p-4.rounded.border.shadow-sm {
   box-shadow: none !important;
 }
 
+.homepage-discovery {
+  padding: 1.5rem var(--gutter-x) 2.5rem;
+}
+
+.homepage-discovery .homepage-section-title {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.homepage-discovery-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.homepage-discovery-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.homepage-discovery-links a:hover,
+.homepage-discovery-links a:focus-visible {
+  border-color: var(--accent);
+  background: var(--bg-alt);
+  color: var(--text);
+}
+
 @media (min-width: 768px) {
   .modal-timeline .modal-tl-actions.event-actions {
     display: flex;

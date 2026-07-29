@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "js/**"
+      - "sw.js"
       - "wrangler*.jsonc"
       - ".github/workflows/deploy-workers.yml"
   workflow_dispatch:
@@ -15,6 +16,10 @@ concurrency:
 
 jobs:
   deploy:
+    # Static-origin releases use a [pages-only] commit and deploy the SEO Worker
+    # explicitly after Pages is live, avoiding an unnecessary redeploy of every
+    # other Worker from the same push.
+    if: ${{ !contains(github.event.head_commit.message, '[pages-only]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

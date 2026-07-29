@@ -172,6 +172,11 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
       ? options.recentEventFamilies
       : [],
   );
+  const previousDayFamilies = new Set(
+    Array.isArray(options?.previousDayEventFamilies)
+      ? options.previousDayEventFamilies
+      : [],
+  );
   const repeatedFamilies = [
     ...new Set(
       (Array.isArray(event?.eventFamilies) ? event.eventFamilies : []).filter(
@@ -179,7 +184,19 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
       ),
     ),
   ];
-  const varietyPenalty = repeatedFamilies.length > 0 ? 6 : 0;
+  const repeatedPreviousDayFamilies = repeatedFamilies.filter((family) =>
+    previousDayFamilies.has(family),
+  );
+  // A same-family story on the immediately preceding UTC date is much more
+  // visible to readers than a repeat several days later. Keep every candidate
+  // eligible, but make the adjacent-day tie-breaker strong enough to prefer a
+  // comparably significant fresh subject. Older seven-day repeats retain the
+  // existing light touch.
+  const varietyPenalty = repeatedPreviousDayFamilies.length > 0
+    ? 18
+    : repeatedFamilies.length > 0
+      ? 6
+      : 0;
   const selectionScore = editorialScore - varietyPenalty;
 
   return {
@@ -187,6 +204,7 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
     varietyPenalty,
     selectionScore,
     repeatedFamilies,
+    repeatedPreviousDayFamilies,
     signals,
   };
 }

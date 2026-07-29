@@ -650,11 +650,12 @@ test("invalid checkpoint chunks are discarded before reuse", () => {
   assert.equal(journal.chunks.facts, undefined);
 });
 
-test("article generation request budget is durable, capped, and resets on a new UTC day", async () => {
+test("article generation request budget reserves one bounded replacement topic and resets on a new UTC day", async () => {
   const kv = makeKvMock();
   const env = {
     BLOG_AI_KV: kv,
     ARTICLE_GENERATION_REQUEST_BUDGET: "2",
+    ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET: "3",
   };
   const date = new Date();
   const fingerprint = hooks.articleGenerationSourceFingerprint(
@@ -692,6 +693,25 @@ test("article generation request budget is durable, capped, and resets on a new 
   );
   assert.equal(kv.puts.length, 2, "a fresh invocation must not reopen the same day's allowance");
 
+  const stricterVariant = await hooks.loadArticleGenerationJournal(
+    env,
+    date,
+    hooks.articleGenerationSourceFingerprint(
+      "Budget test event",
+      "grounded source material",
+      "stricter retry",
+    ),
+    fingerprint,
+  );
+  assert.deepEqual(stricterVariant.chunks, {}, "a prompt variant cannot reuse incompatible chunks");
+  assert.equal(stricterVariant.requestBudget.used, 2, "a prompt variant of the same source gets no rotation reserve");
+  await assert.rejects(
+    hooks.createArticleGenerationCheckpointer(env, date, stricterVariant)
+      .consumeRequest("stricter brief"),
+    (error) => error?.code === "AI_CAPACITY_UNAVAILABLE",
+  );
+  assert.equal(kv.puts.length, 2);
+
   const rotatedTopic = await hooks.loadArticleGenerationJournal(
     env,
     date,
@@ -701,24 +721,154 @@ test("article generation request budget is durable, capped, and resets on a new 
     ),
   );
   assert.deepEqual(rotatedTopic.chunks, {}, "chunks belong only to their source fingerprint");
-  assert.equal(rotatedTopic.requestBudget.used, 2, "topic rotation must retain the date-wide allowance");
+  assert.equal(rotatedTopic.requestBudget.used, 0, "a replacement source gets a fresh active-source counter");
+  assert.equal(rotatedTopic.requestBudget.dailyUsed, 2, "topic rotation must retain the date-wide spend");
+  await hooks.createArticleGenerationCheckpointer(env, date, rotatedTopic)
+    .consumeRequest("rotated brief");
+  await hooks.createArticleGenerationCheckpointer(env, date, rotatedTopic)
+    .consumeRequest("rotated body");
+  await hooks.createArticleGenerationCheckpointer(env, date, rotatedTopic)
+    .consumeRequest("rotated facts");
   await assert.rejects(
     hooks.createArticleGenerationCheckpointer(env, date, rotatedTopic)
-      .consumeRequest("rotated brief"),
-    (error) => error?.code === "AI_CAPACITY_UNAVAILABLE",
+      .consumeRequest("rotated analysis"),
+    (error) =>
+      error?.code === "AI_CAPACITY_UNAVAILABLE" &&
+      /5\/5 daily exhausted/.test(error.message),
   );
-  assert.equal(kv.puts.length, 2);
+  assert.equal(kv.puts.length, 5);
+
+  const thirdTopic = await hooks.loadArticleGenerationJournal(
+    env,
+    date,
+    hooks.articleGenerationSourceFingerprint(
+      "Third topic on the same date",
+      "third grounded source material",
+    ),
+  );
+  assert.equal(thirdTopic.requestBudget.used, 0);
+  assert.equal(thirdTopic.requestBudget.dailyUsed, 5);
+  await assert.rejects(
+    hooks.createArticleGenerationCheckpointer(env, date, thirdTopic)
+      .consumeRequest("third brief"),
+    (error) =>
+      error?.code === "AI_CAPACITY_UNAVAILABLE" &&
+      /replacement-topic allowance is already used/.test(error.message),
+  );
+  assert.equal(kv.puts.length, 5, "a third topic cannot reopen the date-wide allowance");
 
   resumed.requestBudget.date = "2000-01-01";
   await hooks.createArticleGenerationCheckpointer(env, date, resumed)
     .consumeRequest("next-day repair");
   assert.equal(resumed.requestBudget.used, 1);
   assert.equal(resumed.requestBudget.date, new Date().toISOString().slice(0, 10));
-  assert.equal(kv.puts.length, 3);
+  assert.equal(kv.puts.length, 6);
 
   assert.equal(hooks.articleGenerationRequestBudgetLimit({}), 8);
+  assert.equal(hooks.articleGenerationReplacementRequestBudgetLimit({}), 14);
+  assert.equal(hooks.articleGenerationDailyRequestBudgetLimit({}), 22);
   assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "4" }), 4);
+  assert.equal(
+    hooks.articleGenerationReplacementRequestBudgetLimit({
+      ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET: "6",
+    }),
+    6,
+  );
+  assert.equal(
+    hooks.articleGenerationDailyRequestBudgetLimit({
+      ARTICLE_GENERATION_REQUEST_BUDGET: "4",
+      ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET: "6",
+    }),
+    10,
+  );
   assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "100" }), 8);
+});
+
+test("optional unsupported claims are removed locally without weakening grounding gates", () => {
+  const source = {
+    pageTitle: "1948 Summer Olympics",
+    text: "The 1948 Summer Olympics opened in London on July 29, 1948.",
+    sourceExtract:
+      "The games were known as the Austerity Games during a difficult economic climate after World War II. " +
+      "Organizers used existing venues and accommodation instead of building new ones. " +
+      "Fanny Blankers-Koen won four gold medals in athletics.",
+  };
+  const content = {
+    title: "1948 Summer Olympics — July 29, 1948",
+    eventTitle: "1948 Summer Olympics Open",
+    didYouKnowFacts: [
+      "The games opened in London on July 29, 1948.",
+      "Fanny Blankers-Koen, a 30-year-old mother of two, won four gold medals in athletics.",
+      "The games were known as the Austerity Games.",
+      "Organizers used existing venues instead of building new ones.",
+      "Fanny Blankers-Koen won four gold medals in athletics.",
+    ],
+    analysisBad: [
+      {
+        title: "Economic challenges",
+        detail:
+          "The 1948 Summer Olympics were held during a difficult economic climate and were known as the Austerity Games, which forced the organizers to use existing venues and accommodation instead of building new ones.",
+      },
+      { title: "Limited participation", detail: "Germany and Japan did not participate in the London games." },
+      { title: "Existing venues", detail: "Organizers used existing venues and accommodation in London." },
+    ],
+  };
+
+  const before = hooks.verifyArticleGrounding(content, source);
+  assert.equal(before.ok, false);
+  assert.match(before.reasons.join(" "), /unsupported parent relationship/);
+  assert.match(before.reasons.join(" "), /unsupported coercive outcome/);
+
+  const repaired = hooks.mechanicallyRemoveOptionalUnsupportedClaims(
+    content,
+    source,
+  );
+  assert.deepEqual(repaired.repairedFieldPaths, [
+    "didYouKnowFacts[1]",
+    "analysisBad[0].detail",
+  ]);
+  assert.equal(repaired.content.didYouKnowFacts.length, 4);
+  assert.doesNotMatch(JSON.stringify(repaired.content), /mother of two|forced the organizers/i);
+  assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
+
+  const requiredFourthFact = {
+    ...content,
+    didYouKnowFacts: content.didYouKnowFacts.slice(0, 4),
+    analysisBad: content.analysisBad.slice(1),
+  };
+  const preserved = hooks.mechanicallyRemoveOptionalUnsupportedClaims(
+    requiredFourthFact,
+    source,
+  );
+  assert.equal(preserved.content.didYouKnowFacts.length, 4);
+  assert.match(preserved.content.didYouKnowFacts[1], /mother of two/);
+
+  const mh370Source = {
+    pageTitle: "Malaysia Airlines Flight 370",
+    text: "Debris from Malaysia Airlines Flight 370 was found on Reunion Island on July 29, 2015.",
+    sourceExtract:
+      "Malaysia Airlines Flight 370 disappeared on March 8, 2014. The Australian Transport Safety Bureau led a search in the southern Indian Ocean. The cause of the disappearance remains unknown.",
+  };
+  const mh370Content = {
+    title: "Debris from MH370 discovered on Reunion Island",
+    eventTitle: "Debris from MH370 discovered on Reunion Island",
+    conclusionParagraphs: [
+      "The cause of the disappearance remains unknown, with the Malaysian government and ICAO working to determine the cause and to improve aviation safety.",
+    ],
+  };
+  const mh370Before = hooks.verifyArticleGrounding(mh370Content, mh370Source);
+  assert.equal(mh370Before.ok, false);
+  assert.match(mh370Before.reasons.join(" "), /unsupported causal claim/);
+  const mh370Repaired = hooks.mechanicallyRemoveOptionalUnsupportedClaims(
+    mh370Content,
+    mh370Source,
+  );
+  assert.deepEqual(mh370Repaired.repairedFieldPaths, ["conclusionParagraphs[0]"]);
+  assert.equal(
+    mh370Repaired.content.conclusionParagraphs[0],
+    "The cause of the disappearance remains unknown.",
+  );
+  assert.equal(hooks.verifyArticleGrounding(mh370Repaired.content, mh370Source).ok, true);
 });
 
 test("undersized chunked body selects only the shortest field for targeted repair", () => {

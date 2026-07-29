@@ -82,6 +82,16 @@ const ARTICLE_GENERATION_TTL = 7 * 86_400;
 // counter is stored in the existing article journal, so later GitHub failsafe
 // invocations cannot unknowingly start a fresh budget.
 const DEFAULT_ARTICLE_GENERATION_REQUEST_BUDGET = 8;
+// If a completed topic is rejected by a hard grounding gate, the selector
+// deliberately rotates to a different source fingerprint. Carrying an
+// exhausted 8/8 counter into that new topic made the self-heal illusory: the
+// replacement was rejected before its brief could be generated (2026-07-29).
+// A replacement normally needs five core calls, but live July 29 recovery
+// proved that malformed combined/split body responses can spend several calls
+// before the rest of the article is saved. Split fields are now checkpointed
+// individually below; fourteen leaves bounded headroom for the already-spent
+// replacement while the first topic stays at eight and a third is forbidden.
+const DEFAULT_ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET = 14;
 const FEATURED_IMAGE_CHECK_MARKER = "<!-- featured-image-check-v1 -->";
 const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
 const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
@@ -422,7 +432,7 @@ const EVENT_FAMILY_RULES = [
   {
     name: "aviation crash",
     pattern:
-      /\b(aircraft|airliner|airplane|aeroplane|helicopter|flight|plane)\b.{0,48}\b(crash|crashes|crashed|breaks apart)\b|\b(crash|crashes|crashed|breaks apart)\b.{0,48}\b(aircraft|airliner|airplane|aeroplane|helicopter|flight|plane)\b/,
+      /\b(aircraft|airliner|airplane|aeroplane|helicopter|flight|plane)\b.{0,120}\b(crash|crashes|crashed|breaks apart|disappear(?:s|ed|ance)?|vanish(?:es|ed)?|missing|debris|wreckage|shot down|hijack(?:ed|ing)?)\b|\b(crash|crashes|crashed|breaks apart|disappear(?:s|ed|ance)?|vanish(?:es|ed)?|missing|debris|wreckage|shot down|hijack(?:ed|ing)?)\b.{0,120}\b(aircraft|airliner|airplane|aeroplane|helicopter|flight|plane)\b/,
   },
   {
     name: "earthquake or tsunami",
@@ -2758,6 +2768,33 @@ function collectRecentEventFamilies(index, targetDate, days = EVENT_FAMILY_REPEA
   ];
 }
 
+function collectPreviousDayEventFamilies(index, targetDate) {
+  const target = targetDate instanceof Date
+    ? targetDate
+    : new Date(targetDate);
+  if (!Array.isArray(index) || !Number.isFinite(target.getTime())) return [];
+  const targetDayStart = Date.UTC(
+    target.getUTCFullYear(),
+    target.getUTCMonth(),
+    target.getUTCDate(),
+  );
+  const previousDayStart = targetDayStart - 24 * 60 * 60 * 1000;
+  return [
+    ...new Set(
+      index
+        .filter((entry) => {
+          const publishedMs = Date.parse(entry?.publishedAt || "");
+          return (
+            Number.isFinite(publishedMs) &&
+            publishedMs >= previousDayStart &&
+            publishedMs < targetDayStart
+          );
+        })
+        .flatMap((entry) => eventFamiliesFromText(entry.eventTitle, entry.title)),
+    ),
+  ];
+}
+
 function filterRecentEventFamilyRepeats(events, recentFamilies) {
   if (!Array.isArray(events) || events.length === 0) {
     return {
@@ -2962,6 +2999,7 @@ async function chooseEventForDate(
   preferredPillars = [],
   recentPillars = [],
   recentEventFamilies = [],
+  previousDayEventFamilies = [],
 ) {
   const monthName = MONTH_NAMES[date.getUTCMonth()];
   const day = date.getUTCDate();
@@ -3063,6 +3101,7 @@ async function chooseEventForDate(
     candidateEvents = familyGuard.candidates;
     candidateEvents = rankBlogEventCandidates(candidateEvents, {
       recentEventFamilies,
+      previousDayEventFamilies,
     });
     try {
       candidateEvents = await applyPageviewNotabilityRerank(candidateEvents);
@@ -5563,36 +5602,11 @@ export default {
             bodyCloseInline,
             `<script>window.__tdqQuiz=${JSON.stringify(inlineQuiz)};<\/script>\n${bodyCloseInline}`,
           );
-        } else if (inlineQuizRaw && allowArticleKvBackgroundWrites) {
-          ctx.waitUntil(env.BLOG_AI_KV.delete(`quiz-v3:blog:${slug}`).catch(() => {}));
         }
-        // Pre-warm quiz in background so it's ready before the user clicks "Take the Quiz"
-        if (allowArticleKvBackgroundWrites) ctx.waitUntil(
-          (async () => {
-            const cachedRaw =
-              inlineQuizRaw ||
-              (await env.BLOG_AI_KV.get(`quiz-v3:blog:${slug}`));
-            if (!parseValidBlogQuiz(cachedRaw) && hasAnyTextAIProvider(env)) {
-              try {
-                const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
-                const index = indexRaw ? JSON.parse(indexRaw) : [];
-                const entry = index.find((p) => p.slug === slug);
-                if (entry) {
-                  const richContent = await buildRichContent(entry, slug);
-                  const quiz = await generateBlogQuiz(env, richContent, slug);
-                  if (quiz)
-                    await env.BLOG_AI_KV.put(
-                      `quiz-v3:blog:${slug}`,
-                      JSON.stringify(quiz),
-                      { expirationTtl: 90 * 86_400 },
-                    );
-                }
-              } catch (e) {
-                console.error("Quiz pre-warm failed:", e);
-              }
-            }
-          })(),
-        );
+        // Missing/invalid quizzes are an optional post-publish outbox target.
+        // Article GETs must stay read-only and must not launch provider calls or
+        // KV writes: the July 29 first public request raced outbox recovery and
+        // hit Cloudflare 1102 while two quiz generations ran concurrently.
         const entityStripFixedHtml = moveEntityStripOutOfArticleHero(patchedHtml);
         if (
           entityStripFixedHtml !== patchedHtml &&
@@ -7110,7 +7124,21 @@ function scanIntraPageDuplication(content) {
   // Quoting both colliding entries (not just a field-name pair and a count)
   // gives a repair model something concrete to diff against, rather than
   // needing it to re-scan the whole payload to find the overlap itself.
+  const bodyFields = new Set(ARTICLE_BODY_FIELDS);
+  const analysisFields = new Set(["analysisGood", "analysisBad"]);
   for (const { a, b, shared } of semanticDuplicateEntryPairs(content)) {
+    // Semantic overlap is meaningful only when the two entries serve the same
+    // editorial job. An analysis item necessarily discusses evidence already
+    // introduced by the body, and a short Did You Know card can legitimately
+    // restate one body fact in a different module. Treating those expected
+    // cross-module relationships as duplicate prose produced dozens of false
+    // positives on source-dense subjects such as MH370. Exact copied sentences
+    // are still rejected above across every visible field.
+    const comparable =
+      (bodyFields.has(a.field) && bodyFields.has(b.field)) ||
+      (analysisFields.has(a.field) && analysisFields.has(b.field)) ||
+      a.field === b.field;
+    if (!comparable) continue;
     issues.push(
       `Semantic repetition across ${a.field} and ${b.field}: ${shared} shared detail terms; rewrite one to add new information. ` +
         `${a.field} currently says: "${quotedExcerpt(a.plain)}" ${b.field} currently says: "${quotedExcerpt(b.plain)}"`,
@@ -7423,6 +7451,15 @@ async function fixBannedPhrases(
 
   const remaining = scanBannedPhrases(updated);
   console.log(`fixBannedPhrases: done — ${remaining.length} phrase(s) still present after fix`);
+  if (source) {
+    const grounding = verifyArticleGrounding(updated, source);
+    if (!grounding.ok) {
+      console.warn(
+        `fixBannedPhrases: rejected an ungrounded rewrite — ${grounding.reasons.join("; ").slice(0, 500)}`,
+      );
+      return content;
+    }
+  }
   return updated;
 }
 
@@ -7554,6 +7591,188 @@ async function improveArticleQuality(
 
   const remaining = scanArticleQuality(updated);
   console.log(`improveArticleQuality: done — ${remaining.length} issue(s) still present after repair`);
+  if (source) {
+    const grounding = verifyArticleGrounding(updated, source);
+    if (!grounding.ok) {
+      console.warn(
+        `improveArticleQuality: rejected an ungrounded rewrite — ${grounding.reasons.join("; ").slice(0, 500)}`,
+      );
+      return content;
+    }
+  }
+  return updated;
+}
+
+function scanBodyIntraPageDuplication(content) {
+  return scanIntraPageDuplication({
+    ...content,
+    didYouKnowFacts: [],
+    analysisGood: [],
+    analysisBad: [],
+  });
+}
+
+function scanBodyQualityIssues(content) {
+  return scanArticleQuality(content).filter(
+    (issue) =>
+      issue.startsWith("article body is too short") ||
+      ARTICLE_BODY_FIELDS.some((field) => issue.startsWith(field)),
+  );
+}
+
+async function repairRepeatedBodySections(
+  env,
+  content,
+  source = null,
+  {
+    boundedProviderBudget = false,
+    onProgress = null,
+  } = {},
+) {
+  let updated = content;
+  const fieldOrder = [
+    "eyewitnessOrChronicle",
+    "aftermathParagraphs",
+    "conclusionParagraphs",
+    "overviewParagraphs",
+  ];
+  const minimumWords = {
+    overviewParagraphs: 95,
+    eyewitnessOrChronicle: 90,
+    aftermathParagraphs: 95,
+    conclusionParagraphs: 75,
+  };
+  const sourceMaterial = sourceBoundRepairContext(source, 5500);
+
+  for (const field of fieldOrder) {
+    const beforeIssues = [
+      ...scanBodyIntraPageDuplication(updated),
+      ...scanBodyQualityIssues(updated),
+    ];
+    const current = Array.isArray(updated[field]) ? updated[field] : [];
+    const fieldIsThin = current.some(
+      (paragraph) => wordCount(paragraph) < minimumWords[field],
+    );
+    const fieldIssues = beforeIssues.filter(
+      (issue) =>
+        issue.includes(field) ||
+        (fieldIsThin && issue.startsWith("article body is too short")),
+    );
+    if (fieldIssues.length === 0) continue;
+
+    if (current.length === 0) continue;
+    const otherSections = Object.fromEntries(
+      ARTICLE_BODY_FIELDS
+        .filter((name) => name !== field)
+        .map((name) => [name, updated[name] || []]),
+    );
+    const systemPrompt =
+      "You are repairing one repetitive section of a source-grounded history article. " +
+      "Rewrite only the requested array. Give this section a distinct editorial job and do not repeat sentences or fact lists from the retained sections. " +
+      "Use only the authoritative source material. Preserve the array length exactly, keep each paragraph substantive, and return one JSON object only. " +
+      "Do not add a quotation, person, date, number, cause, motive, or consequence absent from the source. " +
+      "Do not use generic importance phrases, hyphens, or em dashes. " +
+      WRITING_REWRITE_RULES + SOURCE_BOUND_REPAIR_RULES;
+    const compactIssues = fieldIssues
+      .slice(0, 6)
+      .map((issue) => issue.slice(0, 420));
+    const userMessage =
+      `${sourceMaterial ? `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` : ""}` +
+      `FIELD TO REWRITE: ${field}\n` +
+      `Each paragraph needs at least ${minimumWords[field]} words. Return exactly ${current.length} paragraphs.\n\n` +
+      `REPETITION FINDINGS:\n${compactIssues.map((issue) => `- ${issue}`).join("\n")}\n\n` +
+      `RETAINED SECTIONS, whose wording and fact sequence must not be repeated:\n${JSON.stringify(otherSections)}\n\n` +
+      `CURRENT ${field}:\n${JSON.stringify(current)}\n\n` +
+      `Return only {"${field}":["paragraph 1","paragraph 2"]}.`;
+
+    let parsed;
+    try {
+      const callRepairAI = boundedProviderBudget
+        ? callPublicationGateAI
+        : callAI;
+      const raw = await callRepairAI(
+        env,
+        [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+        {
+          maxTokens: 1800,
+          timeoutMs: 50_000,
+          ...(boundedProviderBudget
+            ? { providerAttemptLimit: 5, groqSectionAttemptLimit: 1 }
+            : {}),
+        },
+      );
+      parsed = parseJsonObjectFromAI(raw, `body repetition repair ${field}`);
+    } catch (err) {
+      console.warn(
+        `repairRepeatedBodySections: ${field} call failed (${err.message}) — retaining current checkpoint`,
+      );
+      continue;
+    }
+
+    const replacement = parsed?.[field];
+    if (
+      !Array.isArray(replacement) ||
+      replacement.length !== current.length ||
+      !replacement.every(
+        (paragraph) =>
+          typeof paragraph === "string" &&
+          wordCount(paragraph) >= minimumWords[field],
+      )
+    ) {
+      console.warn(
+        `repairRepeatedBodySections: ${field} returned an invalid paragraph shape — retaining current checkpoint`,
+      );
+      continue;
+    }
+
+    const candidate = { ...updated, [field]: replacement };
+    if (
+      scanBannedPhrases({ ...candidate, ...Object.fromEntries(
+        ARTICLE_BODY_FIELDS
+          .filter((name) => name !== field)
+          .map((name) => [name, []]),
+      ) }).length > 0
+    ) {
+      console.warn(
+        `repairRepeatedBodySections: ${field} reintroduced banned prose — retaining current checkpoint`,
+      );
+      continue;
+    }
+    if (articleBodyWordCount(candidate) < MIN_REAL_ARTICLE_BODY_WORDS) {
+      console.warn(
+        `repairRepeatedBodySections: ${field} reduced the article below the body floor — retaining current checkpoint`,
+      );
+      continue;
+    }
+    const grounding = verifyArticleGrounding(candidate, source);
+    if (!grounding.ok) {
+      console.warn(
+        `repairRepeatedBodySections: ${field} failed deterministic grounding — ${grounding.reasons.join("; ").slice(0, 500)}`,
+      );
+      continue;
+    }
+    const afterIssues = [
+      ...scanBodyIntraPageDuplication(candidate),
+      ...scanBodyQualityIssues(candidate),
+    ];
+    if (afterIssues.length >= beforeIssues.length) {
+      console.warn(
+        `repairRepeatedBodySections: ${field} did not reduce body repair issues (${beforeIssues.length} -> ${afterIssues.length}) — retaining current checkpoint`,
+      );
+      continue;
+    }
+
+    updated = candidate;
+    console.log(
+      `repairRepeatedBodySections: accepted ${field} (${beforeIssues.length} -> ${afterIssues.length} body repair issue(s)).`,
+    );
+    if (typeof onProgress === "function") {
+      await onProgress(updated, field);
+    }
+  }
   return updated;
 }
 
@@ -7960,11 +8179,13 @@ async function generateAndStore(
   let preferredPillars = [];
   let recentPillars = [];
   let recentEventFamilies = [];
+  let previousDayEventFamilies = [];
   if (!forcedEvent) {
     const sorted = existingIndex
       .slice()
       .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
     recentEventFamilies = collectRecentEventFamilies(existingIndex, now);
+    previousDayEventFamilies = collectPreviousDayEventFamilies(existingIndex, now);
 
     // Last 7 posts → pillars to avoid repeating this week
     recentPillars = [
@@ -8006,7 +8227,7 @@ async function generateAndStore(
     }
     if (recentEventFamilies.length > 0) {
       console.log(
-        `Blog AI: seven-day event-family cooldown — suppressing repeats of [${recentEventFamilies.join(", ")}] when alternatives exist.`,
+        `Blog AI: seven-day event-family variety signal [${recentEventFamilies.join(", ")}]; previous-day families [${previousDayEventFamilies.join(", ")}].`,
       );
     }
   }
@@ -8028,6 +8249,7 @@ async function generateAndStore(
         preferredPillars,
         recentPillars,
         recentEventFamilies,
+        previousDayEventFamilies,
       );
       selectedForcedEvent = selectedEvent.eventTitle;
       console.log(
@@ -9598,6 +9820,20 @@ async function enrichPublishedPost(
   let pillars;
   if (boundedRecovery) {
     await chk("bounded-preflight");
+    const persistBoundedRepair = async (nextContent, stage) => {
+      await blogKvPutIfChanged(
+        env,
+        `${KV_DRAFT_PREFIX}${slug}`,
+        JSON.stringify({
+          ...draft,
+          content: nextContent,
+          publishedAt,
+          boundedRepairStage: stage,
+          boundedRepairUpdatedAt: new Date().toISOString(),
+        }),
+        { expirationTtl: 3 * 86_400 },
+      );
+    };
     // Repair BEFORE validating. The bounded gate used to reject any imperfect
     // draft outright and block its topic. That assumed a bad TOPIC, but when
     // generation degrades to the weak Workers-AI fallback (cumulative Groq TPM
@@ -9609,28 +9845,45 @@ async function enrichPublishedPost(
     // These are a strict subset of the non-bounded sync pipeline, so the
     // synchronous request budget already accommodates them.
     let repaired = content;
+    repaired = await repairRepeatedBodySections(
+      env,
+      repaired,
+      groundingSource,
+      {
+        boundedProviderBudget: true,
+        onProgress: persistBoundedRepair,
+      },
+    );
     const bannedViolations = scanBannedPhrases(repaired);
     if (bannedViolations.length > 0) {
-      repaired = await fixBannedPhrases(
+      const bannedRepaired = await fixBannedPhrases(
         env,
         repaired,
         bannedViolations,
         groundingSource,
         { boundedProviderBudget: true },
       );
+      if (bannedRepaired !== repaired) {
+        repaired = bannedRepaired;
+        await persistBoundedRepair(repaired, "banned-phrases-pass-1");
+      }
     }
     const preRepairIssues = [
       ...scanArticleQuality(repaired),
       ...scanIntraPageDuplication(repaired),
     ];
     if (preRepairIssues.length > 0) {
-      repaired = await improveArticleQuality(
+      const qualityRepaired = await improveArticleQuality(
         env,
         repaired,
-        preRepairIssues,
+        preRepairIssues.slice(0, 18),
         groundingSource,
         { boundedProviderBudget: true },
       );
+      if (qualityRepaired !== repaired) {
+        repaired = qualityRepaired;
+        await persistBoundedRepair(repaired, "quality-pass-1");
+      }
     }
     let boundedIssues = [
       ...scanBannedPhrases(repaired),
@@ -9643,28 +9896,45 @@ async function enrichPublishedPost(
       // draft a second, smaller repair attempt before giving up on the whole
       // topic (2026-07-22: Godfrey of Bouillon was blocked after exactly one
       // pass on a fixable residual banned-phrase + source-anchor set).
+      repaired = await repairRepeatedBodySections(
+        env,
+        repaired,
+        groundingSource,
+        {
+          boundedProviderBudget: true,
+          onProgress: persistBoundedRepair,
+        },
+      );
       const secondBannedViolations = scanBannedPhrases(repaired);
       if (secondBannedViolations.length > 0) {
-        repaired = await fixBannedPhrases(
+        const secondBannedRepair = await fixBannedPhrases(
           env,
           repaired,
           secondBannedViolations,
           groundingSource,
           { boundedProviderBudget: true },
         );
+        if (secondBannedRepair !== repaired) {
+          repaired = secondBannedRepair;
+          await persistBoundedRepair(repaired, "banned-phrases-pass-2");
+        }
       }
       const secondQualityIssues = [
         ...scanArticleQuality(repaired),
         ...scanIntraPageDuplication(repaired),
       ];
       if (secondQualityIssues.length > 0) {
-        repaired = await improveArticleQuality(
+        const secondQualityRepair = await improveArticleQuality(
           env,
           repaired,
-          secondQualityIssues,
+          secondQualityIssues.slice(0, 18),
           groundingSource,
           { boundedProviderBudget: true },
         );
+        if (secondQualityRepair !== repaired) {
+          repaired = secondQualityRepair;
+          await persistBoundedRepair(repaired, "quality-pass-2");
+        }
       }
       boundedIssues = [
         ...scanBannedPhrases(repaired),
@@ -9674,14 +9944,15 @@ async function enrichPublishedPost(
     }
     const BOUNDED_ISSUE_BLOCK_THRESHOLD = 3;
     if (boundedIssues.length > BOUNDED_ISSUE_BLOCK_THRESHOLD) {
-      // Still showing MANY residual issues after two repair passes — a
-      // genuinely unfixable draft (or a topic whose source is too thin), not
-      // just a leftover style nit. Block the event and drop the draft/source
-      // package so the next round regenerates a different topic (restores
-      // the original design intent for badly-failing drafts specifically).
-      await markGroundingBlockedEvent(env, slug, content, boundedIssues);
+      // Quality failure is not evidence that the selected historical event or
+      // source package is false. Retain the best checkpoint so a later
+      // invocation can continue repairing only the remaining sections. The
+      // old path called markGroundingBlockedEvent here, deleting a complete
+      // draft/source and exhausting the replacement-topic budget (July 29).
+      // Factual/date/source-grounding failures still use the hard block below.
+      await persistBoundedRepair(repaired, "quality-residual");
       throw new Error(
-        `Bounded recovery rejected the draft before publication: ${boundedIssues.join("; ")}`,
+        `Bounded recovery retained the draft for another targeted repair pass: ${boundedIssues.join("; ")}`,
       );
     }
     if (boundedIssues.length > 0) {
@@ -9823,6 +10094,25 @@ async function enrichPublishedPost(
     await chk("pre-final-grounding");
     const finalGrounding = await verifyFinalGroundingWithRepair(env, enriched, groundingSource, slug);
     if (!finalGrounding.ok) {
+      if (boundedRecovery) {
+        const retainedContent = finalGrounding.content || enriched;
+        await blogKvPutIfChanged(
+          env,
+          `${KV_DRAFT_PREFIX}${slug}`,
+          JSON.stringify({
+            ...draft,
+            content: retainedContent,
+            publishedAt,
+            boundedRepairStage: "final-grounding-residual",
+            boundedRepairUpdatedAt: new Date().toISOString(),
+            boundedGroundingReasons: finalGrounding.reasons.slice(0, 5),
+          }),
+          { expirationTtl: 3 * 86_400 },
+        );
+        throw new Error(
+          `Bounded recovery retained the draft after final source-grounding failed — ${finalGrounding.reasons.join("; ")}`,
+        );
+      }
       await markGroundingBlockedEvent(env, slug, enriched, finalGrounding.reasons);
       throw new Error(
         `Refusing to publish ${slug}: final source-grounding check failed — ${finalGrounding.reasons.join("; ")}`,
@@ -11877,6 +12167,7 @@ const NON_PERSON_NAME_WORDS = new Set([
   "congress", "senate", "parliament", "county", "city", "states", "united",
   "battle", "fort", "river", "north", "south", "east", "west", "war",
   "republic", "empire", "kingdom", "house", "court", "government", "assembly",
+  "history", "source", "report", "timeline", "archive", "us",
 ]);
 const PERSON_EXTRACTION_EXTRA_RANKS = [
   "brigadier", "lieutenant", "commander", "marshal", "commodore",
@@ -11922,6 +12213,14 @@ function derivePersonNamesFromSourceText(sourceText, limit = 2) {
   );
   for (const match of text.matchAll(initialsShaped)) push(match[1]);
   return names;
+}
+
+function isPlausiblePersonTerm(value) {
+  const cleaned = stripPersonHonorifics(String(value || "").trim());
+  const normalized = normalizeTopicMatchText(cleaned);
+  if (!normalized) return false;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  return !words.some((word) => NON_PERSON_NAME_WORDS.has(word));
 }
 
 // Injects source-derived person keyTerms when the model omitted a named
@@ -11990,7 +12289,12 @@ function suppressPersonProfileLink(content, personName = "") {
 
 function unlinkedArticlePeople(content) {
   return (Array.isArray(content?.keyTerms) ? content.keyTerms : [])
-    .filter((term) => normalizeEntityType(term?.type) === "person" && term?.term)
+    .filter(
+      (term) =>
+        normalizeEntityType(term?.type) === "person" &&
+        term?.term &&
+        isPlausiblePersonTerm(term.term),
+    )
     .map(unlinkedArticlePerson)
     .filter((person) => person.slug && person.name);
 }
@@ -12961,6 +13265,7 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
   const termsById = new Map();
   for (const term of [mainEvent, ...rawTerms]) {
     const type = normalizeEntityType(term?.type);
+    if (type === "person" && !isPlausiblePersonTerm(term?.term)) continue;
     const slugPart = entitySlug(term?.term);
     if (!term?.term || !type || !slugPart) continue;
     const id = `${type}:${slugPart}`;
@@ -13727,6 +14032,102 @@ function extractArticleEntityStripHtml(html) {
   return range ? source.slice(range.start, range.end) : "";
 }
 
+function normalizeInvalidArticlePersonLabelsHtml(body) {
+  let html = String(body || "");
+  const range = findArticleEntityStripRange(html);
+  if (range) {
+    const sourceStrip = html.slice(range.start, range.end);
+    const stripDivStart = sourceStrip.search(
+      /<div class="[^"]*\bentity-strip\b[^"]*" data-entity-strip="1">/i,
+    );
+    const retainedStyle = stripDivStart > 0
+      ? sourceStrip.slice(0, stripDivStart)
+      : "";
+    const storyStart = sourceStrip.search(
+      /<section\b[^>]*\bclass="[^"]*\bstory-topic-section\b[^"]*"[^>]*>/i,
+    );
+    const storyEnd = storyStart >= 0
+      ? findElementBlockEnd(sourceStrip, storyStart, "section")
+      : -1;
+    const retainedStory = storyStart >= 0 && storyEnd > storyStart
+      ? sourceStrip.slice(storyStart, storyEnd)
+      : "";
+    const openingTag = /<(a|span)\b[^>]*\bclass="([^"]*)"[^>]*>/gi;
+    let cursor = 0;
+    let output = "";
+    let match;
+    while ((match = openingTag.exec(sourceStrip))) {
+      const classNames = String(match[2] || "").split(/\s+/).filter(Boolean);
+      if (!classNames.includes("person-pill")) continue;
+      const start = match.index;
+      const end = findElementBlockEnd(sourceStrip, start, match[1]);
+      if (end === -1) continue;
+      const card = sourceStrip.slice(start, end);
+      const label = unesc(
+        card.match(/class="person-pill-name">([\s\S]*?)<\/span>/i)?.[1]
+          ?.replace(/<[^>]+>/g, " ") || "",
+      ).replace(/\s+/g, " ").trim();
+      output += sourceStrip.slice(cursor, start);
+      if (isPlausiblePersonTerm(label)) output += card;
+      cursor = end;
+      openingTag.lastIndex = end;
+    }
+    output += sourceStrip.slice(cursor);
+
+    html = !/<(?:a|span)\b[^>]*\bclass="(?:[^"]*\s)?person-pill(?:\s[^"]*)?"/i.test(output)
+      ? html.slice(0, range.start) + retainedStyle + retainedStory + html.slice(range.end)
+      : html.slice(0, range.start) + output + html.slice(range.end);
+  }
+
+  // Remove bad Person mentions from legacy JSON-LD. These labels originated
+  // in the same extraction bug as the visible strip and must not remain as
+  // structured-data claims after the UI card is suppressed.
+  html = html.replace(
+    /(<script\b[^>]*type="application\/ld\+json"[^>]*>)([\s\S]*?)(<\/script>)/gi,
+    (script, open, raw, close) => {
+      try {
+        const data = JSON.parse(raw);
+        if (!Array.isArray(data?.mentions)) return script;
+        const mentions = data.mentions.filter(
+          (item) => item?.["@type"] !== "Person" || isPlausiblePersonTerm(item?.name),
+        );
+        if (mentions.length === data.mentions.length) return script;
+        return `${open}${JSON.stringify({ ...data, mentions })}${close}`;
+      } catch {
+        return script;
+      }
+    },
+  );
+
+  // The related-questions block copied the same invalid names into a hidden
+  // answer. Drop that one FAQ item when it contains no plausible person.
+  let searchFrom = 0;
+  while (searchFrom < html.length) {
+    const relativeStart = html.slice(searchFrom).search(
+      /<div\b[^>]*\bclass="[^"]*\bfaq-item\b[^"]*"[^>]*>/i,
+    );
+    if (relativeStart === -1) break;
+    const start = searchFrom + relativeStart;
+    const end = findElementBlockEnd(html, start, "div");
+    if (end === -1) break;
+    const block = html.slice(start, end);
+    const answer = unesc(
+      block.match(/<p>Key figures included\s+([\s\S]*?)<\/p>/i)?.[1]
+        ?.replace(/<[^>]+>/g, " ") || "",
+    ).replace(/[.]\s*$/, "").trim();
+    const names = answer
+      .split(/\s*(?:,|\band\b)\s*/i)
+      .filter(Boolean);
+    if (answer && names.length > 0 && names.every((name) => !isPlausiblePersonTerm(name))) {
+      html = html.slice(0, start) + html.slice(end);
+      searchFrom = start;
+    } else {
+      searchFrom = end;
+    }
+  }
+  return html;
+}
+
 function addHtmlClassToken(classNames, token) {
   const values = String(classNames || "")
     .split(/\s+/)
@@ -13837,12 +14238,6 @@ function assertRequiredContentBlocks(content) {
       String(fact.label || "").trim() &&
       String(fact.value || "").trim(),
   );
-  const namedPeople = (Array.isArray(content.keyTerms) ? content.keyTerms : []).filter(
-    (term) =>
-      term &&
-      String(term.type || "").toLowerCase() === "person" &&
-      String(term.term || "").trim(),
-  );
   const analysisCount = (items) =>
     (Array.isArray(items) ? items : []).filter(
       (item) =>
@@ -13857,7 +14252,6 @@ function assertRequiredContentBlocks(content) {
   if (!didYouKnowAudit.ok) {
     missing.push(`four distinct did-you-know facts (${didYouKnowAudit.reasons.join("; ")})`);
   }
-  if (namedPeople.length < 1) missing.push("one named person for the people strip");
   if (analysisCount(content.analysisGood) < 3) missing.push("three positive analysis items");
   if (analysisCount(content.analysisBad) < 3) missing.push("three critical analysis items");
   const bodyWords = articleBodyWordCount(content);
@@ -13905,8 +14299,6 @@ function assertArticleStructure(html) {
     ["independent evidence-map source", /data-evidence-role="independent"/i],
     ["analysis section", /<h2 class="h3">Analysis:/i],
     ["collapsed analysis disclosure", /<details class="analysis-disclosure\b/i],
-    ["people entity strip", /data-entity-strip="1"/i],
-    ["people entity card", /class="person-pill"/i],
   ];
   const missing = checks
     .filter(([, pattern]) => !pattern.test(source))
@@ -13976,7 +14368,9 @@ function softCheckArticleAssets(html, content) {
   const issues = [];
 
   const hasPersonTerms = (content.keyTerms || []).some(
-    (term) => String(term?.type || "").toLowerCase() === "person" && term?.term,
+    (term) =>
+      String(term?.type || "").toLowerCase() === "person" &&
+      isPlausiblePersonTerm(term?.term),
   );
 
   // Entity strip — repair trigger fires on page view when marker is absent
@@ -15178,24 +15572,71 @@ function normalizeArticleGenerationJournal(
   payload,
   date,
   sourceFingerprint,
+  budgetSourceFingerprint = sourceFingerprint,
 ) {
   const sameDailyArticle =
     payload &&
     payload.version === ARTICLE_GENERATION_VERSION &&
     payload.slug === buildSlug(date);
-  const retainedRequestBudget =
+  const existingRequestBudget =
     sameDailyArticle &&
     payload.requestBudget &&
     typeof payload.requestBudget === "object"
-      ? {
-          ...payload.requestBudget,
-          calls:
-            payload.requestBudget.calls &&
-            typeof payload.requestBudget.calls === "object"
-              ? { ...payload.requestBudget.calls }
-              : {},
-        }
+      ? payload.requestBudget
       : null;
+  const sourceChanged = Boolean(
+    sameDailyArticle &&
+    (payload.budgetSourceFingerprint || payload.sourceFingerprint) &&
+    (payload.budgetSourceFingerprint || payload.sourceFingerprint) !==
+      budgetSourceFingerprint
+  );
+  const legacyUsed =
+    Number.isInteger(existingRequestBudget?.used) &&
+    existingRequestBudget.used >= 0
+      ? existingRequestBudget.used
+      : 0;
+  const retainedRequestBudget = existingRequestBudget
+    ? {
+        ...existingRequestBudget,
+        sourceFingerprint: budgetSourceFingerprint,
+        // `used` remains the active-source counter for compatibility with
+        // existing journals and diagnostics. `dailyUsed` is the durable
+        // ceiling that survives one genuine topic rotation.
+        used: sourceChanged
+          ? 0
+          : Number.isInteger(existingRequestBudget.sourceUsed)
+            ? existingRequestBudget.sourceUsed
+            : legacyUsed,
+        sourceUsed: sourceChanged
+          ? 0
+          : Number.isInteger(existingRequestBudget.sourceUsed)
+            ? existingRequestBudget.sourceUsed
+            : legacyUsed,
+        dailyUsed:
+          Number.isInteger(existingRequestBudget.dailyUsed) &&
+          existingRequestBudget.dailyUsed >= 0
+            ? existingRequestBudget.dailyUsed
+            : legacyUsed,
+        calls:
+          existingRequestBudget.calls &&
+          typeof existingRequestBudget.calls === "object"
+            ? { ...existingRequestBudget.calls }
+            : {},
+        sourceCalls: sourceChanged
+          ? {}
+          : existingRequestBudget.sourceCalls &&
+              typeof existingRequestBudget.sourceCalls === "object"
+            ? { ...existingRequestBudget.sourceCalls }
+            : existingRequestBudget.calls &&
+                typeof existingRequestBudget.calls === "object"
+              ? { ...existingRequestBudget.calls }
+              : {},
+        rotations:
+          (Number.isInteger(existingRequestBudget.rotations)
+            ? existingRequestBudget.rotations
+            : 0) + (sourceChanged ? 1 : 0),
+      }
+    : null;
   if (
     !sameDailyArticle ||
     payload.sourceFingerprint !== sourceFingerprint ||
@@ -15206,6 +15647,7 @@ function normalizeArticleGenerationJournal(
       version: ARTICLE_GENERATION_VERSION,
       slug: buildSlug(date),
       sourceFingerprint,
+      budgetSourceFingerprint,
       createdAt: new Date().toISOString(),
       chunks: {},
       ...(retainedRequestBudget
@@ -15215,6 +15657,7 @@ function normalizeArticleGenerationJournal(
   }
   return {
     ...payload,
+    budgetSourceFingerprint,
     chunks: { ...payload.chunks },
     ...(retainedRequestBudget
       ? { requestBudget: retainedRequestBudget }
@@ -15226,9 +15669,15 @@ async function loadArticleGenerationJournal(
   env,
   date,
   sourceFingerprint,
+  budgetSourceFingerprint = sourceFingerprint,
 ) {
   if (!env?.BLOG_AI_KV?.get) {
-    return normalizeArticleGenerationJournal(null, date, sourceFingerprint);
+    return normalizeArticleGenerationJournal(
+      null,
+      date,
+      sourceFingerprint,
+      budgetSourceFingerprint,
+    );
   }
   const raw = await env.BLOG_AI_KV.get(articleGenerationJournalKey(date), {
     type: "json",
@@ -15245,6 +15694,7 @@ async function loadArticleGenerationJournal(
     payload,
     date,
     sourceFingerprint,
+    budgetSourceFingerprint,
   );
 }
 
@@ -15258,6 +15708,24 @@ function articleGenerationRequestBudgetLimit(env) {
     : DEFAULT_ARTICLE_GENERATION_REQUEST_BUDGET;
 }
 
+function articleGenerationReplacementRequestBudgetLimit(env) {
+  const configured = Number.parseInt(
+    String(env?.ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET || ""),
+    10,
+  );
+  return Number.isFinite(configured) && configured > 0
+    ? Math.min(
+        configured,
+        DEFAULT_ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET,
+      )
+    : DEFAULT_ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET;
+}
+
+function articleGenerationDailyRequestBudgetLimit(env) {
+  return articleGenerationRequestBudgetLimit(env) +
+    articleGenerationReplacementRequestBudgetLimit(env);
+}
+
 function articleGenerationBudgetRetryAt(now = new Date()) {
   return new Date(Date.UTC(
     now.getUTCFullYear(),
@@ -15266,11 +15734,26 @@ function articleGenerationBudgetRetryAt(now = new Date()) {
   ));
 }
 
-function articleGenerationBudgetError(date, used, limit) {
+function articleGenerationBudgetError(
+  date,
+  {
+    sourceUsed,
+    sourceLimit,
+    dailyUsed,
+    dailyLimit,
+    replacementAlreadyUsed = false,
+  },
+) {
   const retryAt = articleGenerationBudgetRetryAt();
+  const exhaustedDailyBudget = dailyUsed >= dailyLimit;
+  const budgetSummary = replacementAlreadyUsed
+    ? `the one replacement-topic allowance is already used (${dailyUsed}/${dailyLimit} daily)`
+    : exhaustedDailyBudget
+      ? `${dailyUsed}/${dailyLimit} daily exhausted`
+      : `${sourceUsed}/${sourceLimit} exhausted for this source`;
   const error = new Error(
     `AI provider capacity unavailable: article-generation request budget ` +
-    `${used}/${limit} exhausted for ${buildSlug(date)}; retained chunks resume after ` +
+    `${budgetSummary} for ${buildSlug(date)}; retained chunks resume after ` +
     `${retryAt.toISOString()}`,
   );
   error.code = "AI_CAPACITY_UNAVAILABLE";
@@ -15300,32 +15783,81 @@ function createArticleGenerationCheckpointer(
   return {
     journal,
     async consumeRequest(label) {
-      const limit = articleGenerationRequestBudgetLimit(env);
+      const dailyLimit = articleGenerationDailyRequestBudgetLimit(env);
       const existing = journal.requestBudget;
       const budgetDate = new Date().toISOString().slice(0, 10);
+      const sourceFingerprint = String(
+        journal.budgetSourceFingerprint || journal.sourceFingerprint || "",
+      );
       const budget =
         existing &&
         existing.date === budgetDate &&
-        Number.isInteger(existing.used) &&
-        existing.used >= 0 &&
+        existing.sourceFingerprint === sourceFingerprint &&
+        Number.isInteger(existing.sourceUsed ?? existing.used) &&
+        (existing.sourceUsed ?? existing.used) >= 0 &&
+        Number.isInteger(existing.dailyUsed ?? existing.used) &&
+        (existing.dailyUsed ?? existing.used) >= 0 &&
         existing.calls &&
         typeof existing.calls === "object"
-          ? existing
-          : { date: budgetDate, used: 0, calls: {} };
-      if (budget.used >= limit) {
-        throw articleGenerationBudgetError(date, budget.used, limit);
+          ? {
+              ...existing,
+              sourceUsed: existing.sourceUsed ?? existing.used,
+              dailyUsed: existing.dailyUsed ?? existing.used,
+              sourceCalls:
+                existing.sourceCalls &&
+                typeof existing.sourceCalls === "object"
+                  ? existing.sourceCalls
+                  : {},
+            }
+          : {
+              date: budgetDate,
+              sourceFingerprint,
+              used: 0,
+              sourceUsed: 0,
+              dailyUsed: 0,
+              calls: {},
+              sourceCalls: {},
+              rotations: 0,
+            };
+      const replacementAlreadyUsed = budget.rotations >= 2;
+      const sourceLimit = budget.rotations >= 1
+        ? articleGenerationReplacementRequestBudgetLimit(env)
+        : articleGenerationRequestBudgetLimit(env);
+      if (
+        replacementAlreadyUsed ||
+        budget.sourceUsed >= sourceLimit ||
+        budget.dailyUsed >= dailyLimit
+      ) {
+        throw articleGenerationBudgetError(date, {
+          sourceUsed: budget.sourceUsed,
+          sourceLimit,
+          dailyUsed: budget.dailyUsed,
+          dailyLimit,
+          replacementAlreadyUsed,
+        });
       }
       const normalizedLabel = String(label || "article chunk").slice(0, 80);
-      budget.used += 1;
-      budget.limit = limit;
+      budget.sourceUsed += 1;
+      budget.dailyUsed += 1;
+      budget.used = budget.sourceUsed;
+      budget.limit = sourceLimit;
+      budget.sourceLimit = sourceLimit;
+      budget.dailyLimit = dailyLimit;
       budget.calls[normalizedLabel] =
         (Number(budget.calls[normalizedLabel]) || 0) + 1;
+      budget.sourceCalls[normalizedLabel] =
+        (Number(budget.sourceCalls[normalizedLabel]) || 0) + 1;
       journal.requestBudget = budget;
       // Persist before the provider call. A timeout or malformed response must
       // still count, otherwise a fresh Worker invocation could spend the same
       // free-tier allowance again without seeing the earlier failed attempt.
       await persist();
-      return { used: budget.used, limit };
+      return {
+        used: budget.sourceUsed,
+        limit: sourceLimit,
+        dailyUsed: budget.dailyUsed,
+        dailyLimit,
+      };
     },
     async save(name, value) {
       journal.chunks[name] = value;
@@ -15631,10 +16163,15 @@ ${retryFeedback}`;
       ),
     }),
   );
+  const budgetSourceFingerprint = articleGenerationSourceFingerprint(
+    canonicalSourcePageTitle || forcedEvent,
+    sourceMaterial,
+  );
   const generationJournal = await loadArticleGenerationJournal(
     env,
     date,
     sourceFingerprint,
+    budgetSourceFingerprint,
   );
   const generationCheckpoint = createArticleGenerationCheckpointer(
     env,
@@ -15707,10 +16244,12 @@ ${retryFeedback}`;
       !forwardedTerms.some(
         (term) =>
           String(term?.type || "").toLowerCase() === "person" &&
-          String(term?.term || "").trim(),
+          isPlausiblePersonTerm(term?.term),
       )
     ) {
-      throw new Error("chunked article brief: keyTerms must include one named person");
+      console.warn(
+        "Blog AI: source names no reliable person; continuing without a People strip.",
+      );
     }
   };
 
@@ -15764,7 +16303,10 @@ Requirements:
 - curiosityTitle is the public headline. It must be a 35-65 character How, Why, What, Who, Which, or Where question with exactly one final question mark.
 - Build curiosityTitle around a surprising transformation, contradiction, overlooked place, hidden decision, or consequence explicitly present in the source. Retain the recognizable event name and never use generic clickbait.
 - title and eventTitle remain factual internal labels used to protect the event identity and date. Do not turn either one into a question.
-- keyTerms must include at least one real named person connected to the event.
+- Include a person keyTerm only when the evidence names a real, specific
+  individual connected to the event. Never manufacture a person to force a
+  People strip; an article may publish without one when the evidence names no
+  reliable individual.
 - sourceFacts must preserve the source's actors, numbers, chronology, and relationship verbs exactly. A source fact may say "later" when the source says "later", but may not change that into "led to".
 - Do not put inferred significance, legacy, policy effects, security changes, mental-health effects, or moral lessons in sourceFacts.
 - imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
@@ -15783,18 +16325,36 @@ Requirements:
   ) => {
     const merged = {};
     for (const field of fields) {
+      const checkpointName = `bodyField:${field}`;
+      const checkpointedField = reusableArticleGenerationChunk(
+        generationJournal,
+        checkpointName,
+        (parsed) =>
+          validateChunkedArticleBodyChunk(
+            parsed,
+            [field],
+            `checkpointed chunked article ${field}`,
+          ),
+      );
+      if (checkpointedField) {
+        Object.assign(merged, checkpointedField);
+        continue;
+      }
       const continuityContext =
         alreadyWritten || Object.keys(merged).length > 0
           ? { ...(alreadyWritten || {}), ...merged }
           : null;
-      const chunk = await generateChunkedArticleBodyField(
-        env,
-        model,
-        field,
-        sharedContext,
-        compactBrief,
-        continuityContext,
-        invokeChunkedArticleAI,
+      const chunk = await generationCheckpoint.save(
+        checkpointName,
+        await generateChunkedArticleBodyField(
+          env,
+          model,
+          field,
+          sharedContext,
+          compactBrief,
+          continuityContext,
+          invokeChunkedArticleAI,
+        ),
       );
       Object.assign(merged, chunk);
     }
@@ -15818,12 +16378,27 @@ Requirements:
         ),
     );
     if (!bodyA) {
-      try {
-        bodyA = await invokeBudgetedChunkedArticleAI(
-          env,
-          model,
-          "chunked article body A",
-          `CHUNKED ARTICLE FALLBACK - BODY A
+      const priorCombinedBodyAAttempts = Number(
+        generationJournal.requestBudget?.sourceCalls?.[
+          "chunked article body A"
+        ],
+      ) || 0;
+      if (priorCombinedBodyAAttempts > 0) {
+        console.warn(
+          "Blog: combined chunked article body A already failed for this source; resuming split-field checkpoints.",
+        );
+        bodyA = await generateSplitBodyFields(
+          ["overviewParagraphs", "eyewitnessOrChronicle"],
+          null,
+          invokeBudgetedChunkedArticleAI,
+        );
+      } else {
+        try {
+          bodyA = await invokeBudgetedChunkedArticleAI(
+            env,
+            model,
+            "chunked article body A",
+            `CHUNKED ARTICLE FALLBACK - BODY A
 ${sharedContext}
 
 Canonical brief:
@@ -15842,19 +16417,20 @@ Requirements:
 - Never place a raw URL in paragraph text. Refer to a source by name instead.
 - Do not convert chronology into causality or infer a motive, policy effect, institutional response, or preventive lesson.
 - eyewitnessOrChronicle must not invent a witness, memoir, newspaper, decree, archive, or quote. If the source names no account, analyze what the record confirms and leaves unresolved.`,
-          2300,
-          (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
-        );
-      } catch (err) {
-        if (!shouldRetryChunkOutputFailure(err)) throw err;
-        console.warn(
-          `Blog: combined chunked article body A failed (${err.message}); splitting into single-section calls.`,
-        );
-        bodyA = await generateSplitBodyFields(
-          ["overviewParagraphs", "eyewitnessOrChronicle"],
-          null,
-          invokeBudgetedChunkedArticleAI,
-        );
+            2300,
+            (parsed) => validateChunkedArticleBodyChunk(parsed, ["overviewParagraphs", "eyewitnessOrChronicle"], "chunked article body A"),
+          );
+        } catch (err) {
+          if (!shouldRetryChunkOutputFailure(err)) throw err;
+          console.warn(
+            `Blog: combined chunked article body A failed (${err.message}); splitting into single-section calls.`,
+          );
+          bodyA = await generateSplitBodyFields(
+            ["overviewParagraphs", "eyewitnessOrChronicle"],
+            null,
+            invokeBudgetedChunkedArticleAI,
+          );
+        }
       }
       await generationCheckpoint.save("bodyA", bodyA);
     }
@@ -15870,12 +16446,27 @@ Requirements:
         ),
     );
     if (!bodyB) {
-      try {
-        bodyB = await invokeBudgetedChunkedArticleAI(
-          env,
-          model,
-          "chunked article body B",
-          `CHUNKED ARTICLE FALLBACK - BODY B
+      const priorCombinedBodyBAttempts = Number(
+        generationJournal.requestBudget?.sourceCalls?.[
+          "chunked article body B"
+        ],
+      ) || 0;
+      if (priorCombinedBodyBAttempts > 0) {
+        console.warn(
+          "Blog: combined chunked article body B already failed for this source; resuming split-field checkpoints.",
+        );
+        bodyB = await generateSplitBodyFields(
+          ["aftermathParagraphs", "conclusionParagraphs"],
+          bodyA,
+          invokeBudgetedChunkedArticleAI,
+        );
+      } else {
+        try {
+          bodyB = await invokeBudgetedChunkedArticleAI(
+            env,
+            model,
+            "chunked article body B",
+            `CHUNKED ARTICLE FALLBACK - BODY B
 ${sharedContext}
 
 Canonical brief:
@@ -15897,19 +16488,20 @@ Requirements:
 - If the source does not state a broader consequence, do not claim one. Continue with documented chronology, legal proceedings, named responses, or limits in the record.
 - Never place a raw URL in paragraph text. Refer to a source by name instead.
 - Conclusion must reframe the event with a concrete source fact, not a modern policy lesson, preventive recommendation, or generic reflection.`,
-          2300,
-          (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
-        );
-      } catch (err) {
-        if (!shouldRetryChunkOutputFailure(err)) throw err;
-        console.warn(
-          `Blog: combined chunked article body B failed (${err.message}); splitting into single-section calls.`,
-        );
-        bodyB = await generateSplitBodyFields(
-          ["aftermathParagraphs", "conclusionParagraphs"],
-          bodyA,
-          invokeBudgetedChunkedArticleAI,
-        );
+            2300,
+            (parsed) => validateChunkedArticleBodyChunk(parsed, ["aftermathParagraphs", "conclusionParagraphs"], "chunked article body B"),
+          );
+        } catch (err) {
+          if (!shouldRetryChunkOutputFailure(err)) throw err;
+          console.warn(
+            `Blog: combined chunked article body B failed (${err.message}); splitting into single-section calls.`,
+          );
+          bodyB = await generateSplitBodyFields(
+            ["aftermathParagraphs", "conclusionParagraphs"],
+            bodyA,
+            invokeBudgetedChunkedArticleAI,
+          );
+        }
       }
       await generationCheckpoint.save("bodyB", bodyB);
     }
@@ -16368,7 +16960,7 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     { "term": "Exact phrase as it appears in the article text", "wikiUrl": "https://en.wikipedia.org/wiki/Exact_Article", "type": "person" },
     { "term": "Another key person, place, or event named in the article", "wikiUrl": "https://en.wikipedia.org/wiki/Another_Article", "type": "event" },
     "provide 5 to 8 entries total — key people, battles, organizations, treaties, or places that appear verbatim in the article body; type must be one of: person, place, event, organization",
-    "MANDATORY: at least one entry MUST have type 'person' naming a real, specific individual connected to this event — for example the leader, founder, scientist, author, inventor, official, commander, pilot, investigator, survivor, victim, or eyewitness named in the source. Every historical event involves named people; if no obvious protagonist exists, name the person most directly responsible for, affected by, or associated with the event. Never return zero people.",
+    "Include type 'person' only for a real, specific individual explicitly named by the supplied evidence. Never invent or infer a person merely to populate the People strip; zero people is valid when the evidence names none.",
     "include every named person who appears at least twice in the article body, plus any person in quickFacts Key Figure or organizerName; do not omit living officials, historians, witnesses, founders, directors, or authors if their full name appears in the prose"
   ],
   "wikiUrl": "https://en.wikipedia.org/wiki/Article",
@@ -16469,7 +17061,9 @@ Field requirements:
 - analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
 - Analysis must evaluate only source-documented actions or limitations. Do not invent why something worked, what it prevented, what changed because of it, who deserves credit beyond the source, or what a better alternative would have been.
 - Do not critique the article's writing, sourcing, repetition, or credibility inside analysisGood or analysisBad.
-- keyTerms must contain 5-8 entries and at least one real named person connected to the event.
+- keyTerms should contain 5-8 grounded entries. Include a real named person
+  only when the evidence explicitly names one; zero people is valid and safer
+  than an inferred or malformed identity.
 - imageUrl may be empty or a supported Wikimedia URL, never a placeholder.
 - Body fields overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs must total 900-1250 words. This is a hard publication gate.
 - overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs must each be arrays of exactly 2 paragraph strings, exactly 8 body paragraphs total.
@@ -17817,8 +18411,141 @@ function mechanicallyRepairBareOrderReferences(content, source) {
   return { content: working, repairedFieldPaths };
 }
 
+// Zero-token repair for optional claims that can be removed without changing
+// the article's factual core. This deliberately does not weaken any grounding
+// rule: every candidate edit is accepted only when the deterministic audit
+// reports fewer unsupported claims, and the caller re-runs all structural,
+// semantic, evidence, and grounding checks before publication.
+function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
+  const sourceMaterial = sourceMaterialForGrounding(source);
+  if (!sourceMaterial) return { content, repairedFieldPaths: [] };
+
+  let working = content;
+  const repairedFieldPaths = [];
+  for (let pass = 0; pass < 8; pass += 1) {
+    const findings = unsupportedGroundingClaims(working, sourceMaterial);
+    if (findings.length === 0) break;
+    let repaired = false;
+
+    for (const finding of findings) {
+      let candidate = null;
+
+      // Four Did You Know cards are sufficient. When a fifth optional card
+      // contains an unsupported relationship, dropping just that card is
+      // safer than asking another model to rewrite all facts (2026-07-29).
+      const didYouKnowMatch = finding.field.match(/^didYouKnowFacts\[(\d+)\]$/);
+      if (
+        didYouKnowMatch &&
+        Array.isArray(working.didYouKnowFacts) &&
+        working.didYouKnowFacts.length > MIN_DID_YOU_KNOW_FACTS
+      ) {
+        candidate = JSON.parse(JSON.stringify(working));
+        candidate.didYouKnowFacts.splice(Number(didYouKnowMatch[1]), 1);
+      }
+
+      // A long analysis sentence often states a supported condition and then
+      // appends an unsupported causal tail (", which forced ..."). Preserve
+      // the supported sentence prefix and discard only that trailing clause.
+      if (!candidate && finding.label === "coercive outcome") {
+        const fullText = getContentFieldByPath(working, finding.field);
+        if (typeof fullText === "string") {
+          const targetSentence = splitSentences(fullText).find(
+            (sentence) => sentence.slice(0, 240) === finding.sentence,
+          );
+          if (targetSentence) {
+            const trimmedSentence = targetSentence
+              .replace(
+                /,\s*(?:(?:which|and)\s+)?(?:compel(?:led|s|ling)?|forc(?:ed|ing))\b[\s\S]*$/i,
+                ".",
+              )
+              .replace(/\s+\./g, ".")
+              .trim();
+            if (
+              trimmedSentence !== targetSentence &&
+              wordCount(trimmedSentence) >= 12
+            ) {
+              candidate = JSON.parse(JSON.stringify(working));
+              setContentFieldByPath(
+                candidate,
+                finding.field,
+                fullText.replace(targetSentence, trimmedSentence),
+              );
+            }
+          }
+        }
+      }
+
+      // Quality rewrites sometimes append an unsupported institutional-purpose
+      // tail to an otherwise modest closing sentence (live July 29 example:
+      // ", with the Malaysian government and ICAO working ... to improve
+      // aviation safety"). Remove only that appended purpose clause. The
+      // candidate is accepted below only when the deterministic finding count
+      // falls, so this does not weaken the grounding rule.
+      if (
+        !candidate &&
+        ["institutional outcome", "causal claim"].includes(finding.label)
+      ) {
+        const fullText = getContentFieldByPath(working, finding.field);
+        if (typeof fullText === "string") {
+          const targetSentence = splitSentences(fullText).find(
+            (sentence) => sentence.slice(0, 240) === finding.sentence,
+          );
+          if (targetSentence) {
+            const trimmedSentence = targetSentence
+              .replace(
+                /,\s+with\s+[\s\S]*?\b(?:working|seeking|aiming|attempting|trying)\b[\s\S]*$/i,
+                ".",
+              )
+              .replace(/\s+\./g, ".")
+              .trim();
+            if (
+              trimmedSentence !== targetSentence &&
+              wordCount(trimmedSentence) >= 7
+            ) {
+              candidate = JSON.parse(JSON.stringify(working));
+              setContentFieldByPath(
+                candidate,
+                finding.field,
+                fullText.replace(targetSentence, trimmedSentence),
+              );
+            }
+          }
+        }
+      }
+
+      if (!candidate) continue;
+      const candidateFindings = unsupportedGroundingClaims(
+        candidate,
+        sourceMaterial,
+      );
+      if (candidateFindings.length >= findings.length) continue;
+      working = candidate;
+      repairedFieldPaths.push(finding.field);
+      repaired = true;
+      break;
+    }
+
+    if (!repaired) break;
+  }
+
+  return { content: working, repairedFieldPaths };
+}
+
 async function repairGroundingContradictions(env, content, reasons, source, callAIImpl = callAI) {
   if (!Array.isArray(reasons) || reasons.length === 0) return content;
+  const mechanical = mechanicallyRemoveOptionalUnsupportedClaims(
+    content,
+    source,
+  );
+  if (mechanical.repairedFieldPaths.length > 0) {
+    content = mechanical.content;
+    const remaining = verifyArticleGrounding(content, source);
+    console.log(
+      `Grounding repair removed optional unsupported claim(s) without an AI call (${mechanical.repairedFieldPaths.join(", ")}).`,
+    );
+    if (remaining.ok) return content;
+    reasons = remaining.reasons;
+  }
   const sourceMaterial = sourceBoundRepairContext(source);
   const repairPayload = {};
   for (const field of [...GROUNDING_REPAIRABLE_STRING_FIELDS, ...GROUNDING_REPAIRABLE_ARRAY_FIELDS]) {
@@ -22825,15 +23552,17 @@ function prepareHtmlResponse(body) {
         normalizeReadProgressBarHtml(
           normalizeArticleEvidenceMapDisclosureHtml(
             normalizeArticleEntityStripPresentationHtml(
-              normalizeStackedTitleHtml(
-                normalizeImageAltHtml(
-                  normalizeCrawlableLinksHtml(
-                    normalizeSearchPreviewHtml(
-                      normalizeHeadingAuditHtml(
-                        normalizeAiAnswerCardHtml(
-                          normalizeArticleLayoutHtml(
-                            stripDynSliderFiguresHtml(
-                              stripGoogleFundingChoices(body),
+              normalizeInvalidArticlePersonLabelsHtml(
+                normalizeStackedTitleHtml(
+                  normalizeImageAltHtml(
+                    normalizeCrawlableLinksHtml(
+                      normalizeSearchPreviewHtml(
+                        normalizeHeadingAuditHtml(
+                          normalizeAiAnswerCardHtml(
+                            normalizeArticleLayoutHtml(
+                              stripDynSliderFiguresHtml(
+                                stripGoogleFundingChoices(body),
+                              ),
                             ),
                           ),
                         ),
@@ -22928,6 +23657,8 @@ export const __contentGenerationTestHooks = {
   loadArticleGenerationJournal,
   createArticleGenerationCheckpointer,
   articleGenerationRequestBudgetLimit,
+  articleGenerationReplacementRequestBudgetLimit,
+  articleGenerationDailyRequestBudgetLimit,
   chunkedArticleBodyCapacityRepairFields,
   repairChunkedArticleBodyCapacity,
   reusableArticleGenerationChunk,
@@ -22977,6 +23708,7 @@ export const __contentGenerationTestHooks = {
   upsertEntitiesForContent,
   filterGroundingIssues,
   verifyArticleGrounding,
+  mechanicallyRemoveOptionalUnsupportedClaims,
   normalizeContentMetadata,
   validateContentSemanticsForPublish,
   validateContentDateForPublish,
@@ -22987,6 +23719,7 @@ export const __contentGenerationTestHooks = {
   buildArticleEntityStrip,
   buildArticleHistoryDiscoveryCard,
   normalizeArticleEntityStripPresentationHtml,
+  normalizeInvalidArticlePersonLabelsHtml,
   normalizeArticleHistoryEntityMeta,
   normalizeArticleHistoryDiscoveryCardHtml,
   normalizeHistoryEntityCanonicalLinksHtml,

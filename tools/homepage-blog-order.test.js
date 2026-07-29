@@ -102,7 +102,7 @@ test("every homepage article surface sorts before choosing its first item", () =
   );
 });
 
-test("the service worker refreshes the daily blog index before cache fallback", () => {
+test("the service worker refreshes fallback blog data while the homepage renders it server-side", () => {
   const indexRoute = serviceWorker.indexOf(
     'url.pathname === "/blog/index.json"',
   );
@@ -115,14 +115,11 @@ test("the service worker refreshes the daily blog index before cache fallback", 
   assert.match(routeBody, /caches[\s\S]*\.match\(request\)/);
   assert.match(blogWorker, /max-age=0, s-maxage=60, must-revalidate/);
   assert.match(seoWorker, /max-age=0, s-maxage=60, must-revalidate/);
-  assert.match(
-    seoWorker,
-    /target\.searchParams\.set\("homepage",String\(Math\.floor\(Date\.now\(\)\/60000\)\)\)/,
-  );
-  assert.match(
-    seoWorker,
-    /element\.append\(homepageBlogIndexFreshnessScript, \{ html: true \}\)/,
-  );
+  assert.match(seoWorker, /async function loadHomepageEditorialContent\(env\)/);
+  assert.match(seoWorker, /\.on\("#blogGrid"/);
+  assert.match(seoWorker, /element\.setAttribute\("data-ssr-ready", "true"\)/);
+  assert.doesNotMatch(seoWorker, /homepageBlogIndexFreshnessScript/);
+  assert.match(indexHtml, /serverGrid\.dataset\.ssrReady === "true"/);
   assert.match(indexHtml, /register\("\/sw\.js", \{ updateViaCache: "none" \}\)/);
 });
 

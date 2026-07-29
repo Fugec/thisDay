@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { gzipSync } from "node:zlib";
 
 import {
   __homepagePerformanceTestHooks as hooks,
@@ -85,7 +84,9 @@ test("homepage preload keeps only fields consumed by the browser", () => {
   const item = payload.events[0];
   const page = item.pages[0];
 
-  assert.equal(payload.version, 2);
+  assert.equal(payload.version, 3);
+  assert.equal(payload.partial, true);
+  assert.deepEqual(payload.counts, { events: 1, births: 1, deaths: 1 });
   assert.deepEqual(Object.keys(item), ["text", "year", "pages"]);
   assert.equal(item.pages.length, 1);
   assert.deepEqual(Object.keys(page), [
@@ -104,31 +105,52 @@ test("homepage preload keeps only fields consumed by the browser", () => {
   assert.equal("mobile" in page.content_urls, false);
 });
 
-test("homepage preload preserves every valid event, birth, and death", () => {
+test("homepage preload caps the initial preview while preserving full counts", () => {
   const payload = hooks.buildHomepagePreloadPayload({
     events: Array.from({ length: 47 }, (_, index) => rawItem(index)),
     births: Array.from({ length: 211 }, (_, index) => rawItem(index)),
     deaths: Array.from({ length: 135 }, (_, index) => rawItem(index)),
   });
-  assert.equal(payload.events.length, 47);
-  assert.equal(payload.births.length, 211);
-  assert.equal(payload.deaths.length, 135);
+  assert.equal(payload.events.length, 12);
+  assert.equal(payload.births.length, 6);
+  assert.equal(payload.deaths.length, 6);
+  assert.deepEqual(payload.counts, { events: 47, births: 211, deaths: 135 });
+  for (const person of [...payload.births, ...payload.deaths]) {
+    assert.ok(person.pages[0].thumbnail?.source || person.pages[0].originalimage?.source);
+    assert.match(person.pages[0].content_urls.desktop.page, /^https:\/\/en\.wikipedia\.org\/wiki\//);
+  }
 });
 
-test("compaction reduces a representative compressed preload by more than half", () => {
+test("preview reduces representative raw preload bytes by at least 85 percent", () => {
   const full = {
     events: Array.from({ length: 47 }, (_, index) => rawItem(index)),
     births: Array.from({ length: 211 }, (_, index) => rawItem(index)),
     deaths: Array.from({ length: 135 }, (_, index) => rawItem(index)),
   };
   const compact = hooks.buildHomepagePreloadPayload(full);
-  const fullBytes = gzipSync(JSON.stringify(full), { level: 9 }).length;
-  const compactBytes = gzipSync(JSON.stringify(compact), { level: 9 }).length;
+  const fullBytes = Buffer.byteLength(JSON.stringify(full));
+  const compactBytes = Buffer.byteLength(JSON.stringify(compact));
 
   assert.ok(
-    compactBytes < fullBytes * 0.5,
-    `expected >50% gzip reduction; full=${fullBytes}, compact=${compactBytes}`,
+    compactBytes < fullBytes * 0.15,
+    `expected >85% raw reduction; full=${fullBytes}, compact=${compactBytes}`,
   );
+  assert.ok(compactBytes < 30000, `expected preview below 30KB; compact=${compactBytes}`);
+});
+
+test("preview bounds long visible text and extracts", () => {
+  const longText = Array.from({ length: 200 }, () => "historical record").join(" ");
+  const longExtract = Array.from({ length: 200 }, () => "biographical detail").join(" ");
+  const item = rawItem();
+  item.text = longText;
+  item.pages[0].extract = longExtract;
+  const payload = hooks.buildHomepagePreloadPayload({
+    events: [item],
+    births: [item],
+    deaths: [item],
+  });
+  assert.ok(payload.events[0].text.length <= 600);
+  assert.ok(payload.events[0].pages[0].extract.length <= 240);
 });
 
 test("inline serialization cannot terminate its application/json script", () => {

@@ -11,7 +11,6 @@ import {
   siteNav,
   siteFooter,
   footerYearScript,
-  SITE_DESCRIPTION,
   NAV_CSS,
   FOOTER_CSS,
   navToggleScript,
@@ -65,7 +64,14 @@ import { sortBlogIndexNewestFirst } from "./shared/blog-index-order.js";
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
-const HOMEPAGE_PRELOAD_VERSION = 2;
+const HOMEPAGE_PRELOAD_VERSION = 3;
+const HOMEPAGE_PRELOAD_EVENT_LIMIT = 12;
+const HOMEPAGE_PRELOAD_PERSON_LIMIT = 6;
+const HOMEPAGE_PRELOAD_TEXT_LIMIT = 600;
+const HOMEPAGE_PRELOAD_EXTRACT_LIMIT = 240;
+const HOMEPAGE_TITLE = "On This Day in History: Events, Births & Deaths";
+const HOMEPAGE_DESCRIPTION =
+  "Explore historical events, famous birthdays and notable deaths for every day of the year, with sourced timelines, quizzes and daily articles.";
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
@@ -95,11 +101,21 @@ async function fetchCachedWikidataPersonFilmography(value, options = {}) {
   return fetchSharedWikidataPersonFilmography(value, options);
 }
 
+function truncateHomepagePreloadText(value, limit) {
+  const text = String(value || "").trim();
+  if (!text || text.length <= limit) return text;
+  const boundary = text.lastIndexOf(" ", limit - 1);
+  return `${text.slice(0, boundary > limit * 0.65 ? boundary : limit - 1).trim()}…`;
+}
+
 function compactHomepagePreloadPage(page) {
   if (!page || typeof page !== "object") return null;
   const title = String(page.title || page.normalizedtitle || "").trim();
   const description = String(page.description || "").trim();
-  const extract = String(page.extract || "").trim();
+  const extract = truncateHomepagePreloadText(
+    page.extract,
+    HOMEPAGE_PRELOAD_EXTRACT_LIMIT,
+  );
   const sourceUrl = String(page.content_urls?.desktop?.page || "").trim();
   const thumbnailUrl = String(page.thumbnail?.source || "").trim();
   const originalImageUrl = String(page.originalimage?.source || "").trim();
@@ -116,7 +132,10 @@ function compactHomepagePreloadPage(page) {
 
 function compactHomepagePreloadItem(item) {
   if (!item || typeof item !== "object") return null;
-  const text = String(item.text || "").trim();
+  const text = truncateHomepagePreloadText(
+    item.text,
+    HOMEPAGE_PRELOAD_TEXT_LIMIT,
+  );
   if (!text) return null;
   const page = compactHomepagePreloadPage(item.pages?.[0]);
   return {
@@ -126,6 +145,94 @@ function compactHomepagePreloadItem(item) {
   };
 }
 
+function homepagePreloadPersonScore(item) {
+  const page = item?.pages?.[0] || {};
+  const text = [
+    page.title,
+    page.description,
+    page.extract,
+    item?.text,
+  ]
+    .join(" ")
+    .toLowerCase();
+  let score = 0;
+  if (page.originalimage?.source) score += 8;
+  if (page.thumbnail?.source) score += 6;
+  if (page.content_urls?.desktop?.page) score += 4;
+  if (page.extract) score += Math.min(String(page.extract).length / 120, 8);
+  if (page.description) score += 2;
+  const signalPatterns = [
+    /\b(president|prime minister|chancellor|monarch|king|queen|emperor|pope)\b/i,
+    /\b(nobel|pulitzer|academy award|oscar|grammy|emmy|booker|tony award)\b/i,
+    /\b(actor|actress|singer|musician|composer|writer|novelist|poet|artist|filmmaker|director)\b/i,
+    /\b(scientist|physicist|chemist|mathematician|inventor|astronaut|explorer|philosopher)\b/i,
+    /\b(olympic|world champion|champion|hall of fame|record holder)\b/i,
+    /\b(founder|founded|pioneer|first|best known|one of the most|widely regarded|influential)\b/i,
+  ];
+  const iconicPatterns = [
+    /\b(father|mother) of\b/i,
+    /\bhighly influential\b/i,
+    /\bwidely (?:regarded|considered) as (?:one of|the)\b/i,
+    /\bone of the greatest\b/i,
+    /\binternational [a-z\s-]*icon\b/i,
+    /\bworld-record-holding\b/i,
+    /\b(supreme court|associate justice)\b/i,
+    /\b(nobel prize|academy awards?|triple crown|ballon d'or|fifa world player|grammy award winner)\b/i,
+    /\b(computer science|turing machine|cryptanalyst|theoretical computer science)\b/i,
+  ];
+  signalPatterns.forEach((pattern) => {
+    if (pattern.test(text)) score += 5;
+  });
+  iconicPatterns.forEach((pattern) => {
+    if (pattern.test(text)) score += 10;
+  });
+  if (/\b(reality television|television personality|internet personality|youtuber|tiktoker)\b/i.test(text)) {
+    score -= 4;
+  }
+  return score;
+}
+
+function selectHomepagePreloadPeople(items, limit = HOMEPAGE_PRELOAD_PERSON_LIMIT) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => {
+      const page = item?.pages?.[0];
+      return Boolean(
+        item?.text &&
+          page?.content_urls?.desktop?.page &&
+          (page?.thumbnail?.source || page?.originalimage?.source),
+      );
+    })
+    .map((item, sourceIndex) => ({
+      item,
+      sourceIndex,
+      score: homepagePreloadPersonScore(item),
+    }))
+    .sort((a, b) => b.score - a.score || a.sourceIndex - b.sourceIndex)
+    .slice(0, limit)
+    .map(({ item }) => item);
+}
+
+function selectHomepagePreloadEvents(items, limit = HOMEPAGE_PRELOAD_EVENT_LIMIT) {
+  const valid = (Array.isArray(items) ? items : []).filter(
+    (item) => item && String(item.text || "").trim(),
+  );
+  const selected = [];
+  const seen = new Set();
+  const add = (item) => {
+    if (!item || selected.length >= limit || seen.has(item)) return;
+    selected.push(item);
+    seen.add(item);
+  };
+  // Keep enough illustrated entries for the homepage carousel, then preserve
+  // source order for the remainder of the compact preview.
+  valid
+    .filter((item) => item?.pages?.[0]?.thumbnail?.source)
+    .slice(0, 3)
+    .forEach(add);
+  valid.forEach(add);
+  return selected;
+}
+
 function buildHomepagePreloadPayload(eventsData) {
   const compactItems = (items) =>
     (Array.isArray(items) ? items : [])
@@ -133,9 +240,15 @@ function buildHomepagePreloadPayload(eventsData) {
       .filter(Boolean);
   return {
     version: HOMEPAGE_PRELOAD_VERSION,
-    events: compactItems(eventsData?.events),
-    births: compactItems(eventsData?.births),
-    deaths: compactItems(eventsData?.deaths),
+    partial: true,
+    counts: {
+      events: Array.isArray(eventsData?.events) ? eventsData.events.length : 0,
+      births: Array.isArray(eventsData?.births) ? eventsData.births.length : 0,
+      deaths: Array.isArray(eventsData?.deaths) ? eventsData.deaths.length : 0,
+    },
+    events: compactItems(selectHomepagePreloadEvents(eventsData?.events)),
+    births: compactItems(selectHomepagePreloadPeople(eventsData?.births)),
+    deaths: compactItems(selectHomepagePreloadPeople(eventsData?.deaths)),
   };
 }
 
@@ -1467,14 +1580,77 @@ function buildEntityAdUnits() {
   return "";
 }
 
-async function buildHomepageVideoCards(env) {
-  if (!env.BLOG_AI_KV) return "";
-  const [indexRaw, ytRaw] = await Promise.all([
-    env.BLOG_AI_KV.get("index").catch(() => null),
-    env.BLOG_AI_KV.get("youtube:uploaded").catch(() => null),
-  ]);
-  const index = indexRaw ? JSON.parse(indexRaw) : [];
-  const yt = ytRaw ? JSON.parse(ytRaw) : {};
+function parseHomepageStoredJson(raw, fallback) {
+  if (!raw) return fallback;
+  try {
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return fallback;
+  }
+}
+
+function formatHomepagePostDate(post) {
+  const raw = post?.date || post?.publishedAt || "";
+  const parsed = raw ? new Date(raw) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString("en-US", {
+    timeZone: "UTC",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function homepagePostDescription(post, limit = 170) {
+  return truncateHomepagePreloadText(
+    post?.excerpt || post?.description || "Read the latest history article.",
+    limit,
+  );
+}
+
+function homepagePostImage(post) {
+  const value = String(
+    post?.imageUrl || post?.featuredImage || post?.heroImage || "",
+  ).trim();
+  return /^(?:https:\/\/|\/)/i.test(value) && !/^\/\//.test(value)
+    ? value
+    : "";
+}
+
+function buildHomepageBlogCards(posts) {
+  return sortBlogIndexNewestFirst(posts)
+    .filter(
+      (post) =>
+        /^[a-z0-9-]+$/.test(String(post?.slug || "")) && post?.title,
+    )
+    .slice(0, 6)
+    .map((post) => {
+      const title = String(post.title).trim();
+      const description = homepagePostDescription(post);
+      const imageUrl = homepagePostImage(post);
+      const dateLabel = formatHomepagePostDate(post);
+      const isWikimediaImage = /^(?:https:)?\/\/upload\.wikimedia\.org\//i.test(
+        imageUrl,
+      );
+      const imageHtml = imageUrl
+        ? isWikimediaImage
+          ? `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80" srcset="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=320&q=80 320w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80 600w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=960&q=80 960w" sizes="(max-width: 767px) 85vw, 33vw" alt="${escapeHtml(title)}" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" />`
+          : `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)}" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" />`
+        : "";
+      return `<a class="blog-card" href="/blog/${escapeHtml(post.slug)}/" style="text-decoration:none;color:inherit;">
+        ${imageHtml}
+        <div class="blog-card-body">
+          ${dateLabel ? `<div class="blog-card-date">${escapeHtml(dateLabel)}</div>` : ""}
+          <h3 class="homepage-section-title homepage-section-title-box">${escapeHtml(title)}</h3>
+          <p>${escapeHtml(description)}</p>
+          <span class="btn" style="align-self:flex-start;margin-top:auto">Read More <i class="bi bi-arrow-right" aria-hidden="true"></i></span>
+        </div>
+      </a>`;
+    })
+    .join("");
+}
+
+function buildHomepageVideoCards(index, yt) {
   const indexBySlug = Object.fromEntries(index.map((post) => [post.slug, post]));
   return Object.entries(yt)
     .filter(([, video]) => video?.youtubeId && video.privacy !== "private")
@@ -1503,9 +1679,78 @@ async function buildHomepageVideoCards(env) {
     .join("");
 }
 
+async function loadHomepageEditorialContent(env) {
+  if (!env.BLOG_AI_KV) {
+    return { posts: [], blogCards: "", videoCards: "", latestPost: null };
+  }
+  const [indexRaw, youtubeRaw] = await Promise.all([
+    env.BLOG_AI_KV.get("index").catch(() => null),
+    env.BLOG_AI_KV.get("youtube:uploaded").catch(() => null),
+  ]);
+  const posts = sortBlogIndexNewestFirst(
+    parseHomepageStoredJson(indexRaw, []),
+  );
+  const youtube = parseHomepageStoredJson(youtubeRaw, {});
+  return {
+    posts,
+    blogCards: buildHomepageBlogCards(posts),
+    videoCards: buildHomepageVideoCards(posts, youtube),
+    latestPost:
+      posts.find(
+        (post) =>
+          /^[a-z0-9-]+$/.test(String(post?.slug || "")) && post?.title,
+      ) || null,
+  };
+}
+
+function homepageDateLink(date) {
+  return {
+    month: MONTHS_ALL[date.getUTCMonth()],
+    day: date.getUTCDate(),
+    label: date.toLocaleDateString("en-US", {
+      timeZone: "UTC",
+      month: "long",
+      day: "numeric",
+    }),
+  };
+}
+
+function buildHomepageDiscoveryLinks(today) {
+  const date = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+  );
+  const previousDate = new Date(date);
+  previousDate.setUTCDate(previousDate.getUTCDate() - 1);
+  const nextDate = new Date(date);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const current = homepageDateLink(date);
+  const previous = homepageDateLink(previousDate);
+  const next = homepageDateLink(nextDate);
+  const links = [
+    [`/events/${current.month}/${current.day}/`, `Events on ${current.label}`],
+    [`/born/${current.month}/${current.day}/`, `Born on ${current.label}`],
+    [`/died/${current.month}/${current.day}/`, `Died on ${current.label}`],
+    [`/quiz/${current.month}/${current.day}/`, `Quiz for ${current.label}`],
+    [`/events/${previous.month}/${previous.day}/`, `Previous date: ${previous.label}`],
+    [`/events/${next.month}/${next.day}/`, `Next date: ${next.label}`],
+    ["/people/", "People in history"],
+    ["/topics/", "All history topics"],
+    ["/topics/world-war-ii/", "World War II"],
+    ["/topics/space-exploration/", "Space exploration"],
+    ["/topics/civil-rights/", "Civil rights"],
+    ["/topics/medical-breakthroughs/", "Medical breakthroughs"],
+  ];
+  return links
+    .map(
+      ([href, label]) =>
+        `<a href="${href}">${escapeHtml(label)}</a>`,
+    )
+    .join("");
+}
+
 async function handlePeopleIndexPage(request, env, url) {
   const raw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
-  const index = await refreshEntityIndexFromStoredEntities(env, raw ? JSON.parse(raw) : [], "person");
+  const index = parseStoredEntityIndex(raw);
   const people = index
     .filter((entry) => entry?.type === "person" && entry.slug && entry.name)
     .sort((a, b) => {
@@ -1589,7 +1834,7 @@ ${footerYearScript()}
 
 async function handlePeopleIndexJson(env) {
   const raw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
-  const index = await refreshEntityIndexFromStoredEntities(env, raw ? JSON.parse(raw) : [], "person");
+  const index = parseStoredEntityIndex(raw);
   const people = index
     .filter((entry) => entry?.type === "person" && entry.indexable && entry.slug && entry.name)
     .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
@@ -2132,6 +2377,26 @@ async function refreshEntityIndexFromStoredEntities(env, index, typeFilter = "pe
     return sorted;
   }
   return refreshed;
+}
+
+function parseStoredEntityIndex(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function refreshEntityIndexDuringScheduledMaintenance(env) {
+  if (!env.BLOG_AI_KV) return [];
+  const raw = await env.BLOG_AI_KV.get("entity-index-v1").catch(() => null);
+  return refreshEntityIndexFromStoredEntities(
+    env,
+    parseStoredEntityIndex(raw),
+    "person",
+  );
 }
 
 function stripGenericEntityContextSections(sections) {
@@ -6039,7 +6304,7 @@ async function servePeopleSitemap(siteUrl, env) {
       urls += `  <url>\n    <loc>${siteUrl}/died/${MONTHS_ALL[m]}/${d}/</loc>\n  </url>\n`;
     }
   }
-  const entityIndex = await refreshEntityIndexFromStoredEntities(env, entityRaw ? JSON.parse(entityRaw) : [], "person");
+  const entityIndex = parseStoredEntityIndex(entityRaw);
   for (const person of entityIndex.filter((entry) => entry?.type === "person" && entry.indexable && entry.url)) {
     urls += `  <url>\n    <loc>${siteUrl}${person.url}</loc>\n  </url>\n`;
   }
@@ -8242,18 +8507,64 @@ async function generateEventCommentary(env, mm, dd) {
   return commentary;
 }
 
+async function serveMaintenanceResponse(request, fetchImpl = fetch) {
+  const maintenanceUrl = new URL("/maintenance.html", request.url);
+  const maintenanceRequest = new Request(maintenanceUrl.toString(), {
+    method: request.method === "HEAD" ? "HEAD" : "GET",
+    headers: request.headers,
+    redirect: "manual",
+  });
+
+  let upstream;
+  try {
+    upstream = await fetchImpl(maintenanceRequest);
+  } catch (_) {
+    upstream = new Response(
+      "<!doctype html><html lang=\"en\"><head><meta charset=\"UTF-8\">" +
+        '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<meta name="robots" content="noindex, nofollow">' +
+        "<title>Temporarily Unavailable | thisDay.</title></head>" +
+        "<body><main><h1>Temporarily unavailable</h1>" +
+        "<p>Please try again shortly.</p></main></body></html>",
+      { headers: { "Content-Type": "text/html; charset=utf-8" } },
+    );
+  }
+
+  const headers = new Headers(upstream.headers);
+  headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  headers.set("Pragma", "no-cache");
+  headers.set("Expires", "0");
+  headers.set("Retry-After", "3600");
+  headers.set("X-Robots-Tag", "noindex, nofollow");
+  headers.delete("Age");
+  headers.delete("ETag");
+  headers.delete("Last-Modified");
+
+  return new Response(request.method === "HEAD" ? null : upstream.body, {
+    status: 503,
+    statusText: "Service Unavailable",
+    headers,
+  });
+}
+
 // --- Main Request Handler (for user requests) ---
 async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
 
+  // A maintenance document must never look like a normal cacheable page.
+  // Serving it as a temporary 503 keeps indexed URLs in search results and
+  // prevents CDN/browser caches from preserving its noindex directive.
+  if (url.pathname === "/maintenance.html") {
+    return serveMaintenanceResponse(request);
+  }
+
   // --- Maintenance Mode ---
-  // When maintenance mode is enabled, redirect to maintenance page
-  // except for preview parameter (?preview=secret) which allows viewing the live pages
+  // When maintenance mode is enabled, serve a temporary maintenance response
+  // except for preview parameter (?preview=secret) which allows viewing the live pages.
   const MAINTENANCE_ENABLED = false;
   const PREVIEW_SECRET = "secret";
   const isPreview = url.searchParams.get("preview") === PREVIEW_SECRET;
   const isExcludedRoute =
-    url.pathname === "/maintenance.html" ||
     url.pathname.startsWith("/css/") ||
     url.pathname.startsWith("/images/") ||
     url.pathname.startsWith("/icons/") ||
@@ -8294,12 +8605,7 @@ async function handleFetchRequest(request, env, ctx) {
       (route) => url.pathname === route || url.pathname.startsWith(route),
     );
 
-    if (isWorkerRoute) {
-      const maintenanceUrl = new URL(request.url);
-      maintenanceUrl.pathname = "/maintenance.html";
-      maintenanceUrl.search = "";
-      return Response.redirect(maintenanceUrl.toString(), 302);
-    }
+    if (isWorkerRoute) return serveMaintenanceResponse(request);
   }
 
   if (url.pathname === "/robots.txt") {
@@ -8757,7 +9063,21 @@ async function handleFetchRequest(request, env, ctx) {
     url.pathname !== "/index.html" &&
     url.pathname !== "/manifest.json"
   ) {
-    return fetch(request);
+    const upstream = await fetch(request);
+    if (
+      upstream.ok &&
+      url.searchParams.has("v") &&
+      /^\/(?:css|js)\/.+\.(?:css|js)$/i.test(url.pathname)
+    ) {
+      const versionedAsset = new Response(upstream.body, upstream);
+      versionedAsset.headers.set(
+        "Cache-Control",
+        "public, max-age=31536000, s-maxage=31536000, immutable",
+      );
+      versionedAsset.headers.set("Vary", "Accept-Encoding");
+      return versionedAsset;
+    }
+    return upstream;
   }
 
   if (url.pathname === "/manifest.json") {
@@ -8878,11 +9198,10 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   // Prepare dynamic meta tags and content based on fetched data
-  let dynamicDescription = SITE_DESCRIPTION;
+  let dynamicDescription = HOMEPAGE_DESCRIPTION;
   let dynamicKeywords =
     "thisDay, historical events, on this day, history, daily highlights, calendar, famous birthdays, anniversaries, notable deaths, world history, today in history, educational, timeline, trivia, historical figures, history quiz, daily quiz, history blog, history articles, YouTube Shorts history, this day in history, what happened today, historical milestones, Flipboard history";
-  let dynamicTitle =
-    "thisDay. | What Happened on This Day? | Historical Events";
+  let dynamicTitle = HOMEPAGE_TITLE;
   let ogImageUrl = "https://thisday.info/images/logo.png"; // Default fallback image
   const ogUrl = "https://thisday.info/"; // Canonical URL
 
@@ -8902,26 +9221,6 @@ async function handleFetchRequest(request, env, ctx) {
       ogImageUrl = `/image-proxy?src=${encodeURIComponent(rawImgUrl)}&w=1200&q=82`;
     }
 
-    // Pick the top 3-5 events for a concise description
-    const topEvents = eventsData.events
-      .slice(0, 5)
-      .map((event) => `In ${event.year}, ${event.text}`)
-      .join("; ");
-
-    const firstEventText = eventsData.events[0].text;
-    const titleSnippet =
-      firstEventText.length > 65
-        ? firstEventText.substring(0, firstEventText.lastIndexOf(" ", 65)) +
-          "..."
-        : firstEventText;
-    dynamicTitle = `On This Day, ${formattedDate}: ${eventsData.events[0].year}, ${titleSnippet} | thisDay.info`;
-
-    const rawDesc = `Discover what happened on ${formattedDate}: ${topEvents}. Explore historical events, births, and deaths.`;
-    dynamicDescription =
-      rawDesc.length > 155
-        ? rawDesc.substring(0, rawDesc.lastIndexOf(" ", 155)) + "..."
-        : rawDesc;
-
     // Add relevant keywords from event texts (simple approach)
     const eventKeywords = eventsData.events
       .slice(0, 10)
@@ -8939,7 +9238,20 @@ async function handleFetchRequest(request, env, ctx) {
   if (ogImageUrl === "https://thisday.info/images/logo.png") {
     ogImageUrl = `/og-image?title=${encodeURIComponent(dynamicTitle)}&date=${encodeURIComponent(formattedDate)}`;
   }
-  const homepageVideoCards = await buildHomepageVideoCards(env).catch(() => "");
+  const homepageEditorial = await loadHomepageEditorialContent(env).catch(
+    () => ({ posts: [], blogCards: "", videoCards: "", latestPost: null }),
+  );
+  const homepageVideoCards = homepageEditorial.videoCards;
+  const homepageBlogCards = homepageEditorial.blogCards;
+  const homepageLatestPost = homepageEditorial.latestPost;
+  const homepageLatestHref = homepageLatestPost?.slug
+    ? `/blog/${homepageLatestPost.slug}/`
+    : "/blog/";
+  const homepageLatestQuizHref = homepageLatestPost?.slug
+    ? `${homepageLatestHref}#quiz`
+    : "/blog/";
+  const homepageLatestImage = homepagePostImage(homepageLatestPost);
+  const homepageDiscoveryLinksHtml = buildHomepageDiscoveryLinks(today);
   const homepageEventsPath = `/events/${MONTHS_ALL[today.getMonth()]}/${today.getDate()}/`;
   const homepageHighlightsHtml = pickRandomHomepageHighlights(
     eventsData?.events,
@@ -8956,8 +9268,6 @@ async function handleFetchRequest(request, env, ctx) {
         `</a>`,
     )
     .join("");
-  const homepageBlogIndexFreshnessScript = `<script>(function(){var nativeFetch=window.fetch;if(typeof nativeFetch!=="function")return;window.fetch=function(input,init){try{var raw=typeof input==="string"?input:input&&input.url;var target=new URL(raw,window.location.href);if(target.origin===window.location.origin&&(target.pathname==="/blog/index.json"||target.pathname==="/blog/archive.json")){target.searchParams.set("homepage",String(Math.floor(Date.now()/60000)));input=typeof input==="string"?target.pathname+target.search+target.hash:new Request(target.toString(),input)}}catch(e){}return nativeFetch.call(this,input,init)}})();</script>`;
-
   // Fetch the original index.html from the origin server
   const originalResponse = await fetch(url.origin, request);
   let contentType = originalResponse.headers.get("content-type") || "";
@@ -8968,13 +9278,6 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   const rewriter = new HTMLRewriter()
-    .on("head", {
-      element(element) {
-        // This ships with the Worker, so repeat visitors escape the legacy
-        // cache-first service worker before the static v21 assets are committed.
-        element.append(homepageBlogIndexFreshnessScript, { html: true });
-      },
-    })
     // --- Meta Tags and Title ---
     .on("title", {
       element(element) {
@@ -9054,8 +9357,82 @@ async function handleFetchRequest(request, env, ctx) {
     .on("#videoGrid", {
       element(element) {
         if (homepageVideoCards) {
+          element.setAttribute("data-ssr-ready", "true");
           element.setInnerContent(homepageVideoCards, { html: true });
         }
+      },
+    })
+    .on("#blogGrid", {
+      element(element) {
+        if (homepageBlogCards) {
+          element.setAttribute("data-ssr-ready", "true");
+          element.setInnerContent(homepageBlogCards, { html: true });
+        }
+      },
+    })
+    .on("#homepageDiscoveryLinks", {
+      element(element) {
+        element.setAttribute("data-ssr-ready", "true");
+        element.setInnerContent(homepageDiscoveryLinksHtml, { html: true });
+      },
+    })
+    .on("#currentMonthYear", {
+      element(element) {
+        element.setInnerContent(
+          today.toLocaleDateString("en-US", { month: "long" }),
+        );
+      },
+    })
+    .on("#todayEventBtn", {
+      element(element) {
+        element.setAttribute("href", homepageEventsPath);
+      },
+    })
+    .on("#latest-article-title", {
+      element(element) {
+        if (homepageLatestPost?.title) {
+          element.setInnerContent(homepageLatestPost.title);
+        }
+      },
+    })
+    .on("#latest-article-desc", {
+      element(element) {
+        if (homepageLatestPost) {
+          element.setInnerContent(homepagePostDescription(homepageLatestPost));
+        }
+      },
+    })
+    .on("#latest-article-img", {
+      element(element) {
+        if (!homepageLatestPost) return;
+        element.setAttribute(
+          "alt",
+          homepageLatestPost.title || "Latest history article",
+        );
+        if (homepageLatestImage) {
+          if (/^(?:https:)?\/\/upload\.wikimedia\.org\//i.test(homepageLatestImage)) {
+            const imageBase = `/image-proxy?src=${encodeURIComponent(homepageLatestImage)}`;
+            element.setAttribute("src", `${imageBase}&w=800&q=82`);
+            element.setAttribute(
+              "srcset",
+              `${imageBase}&w=400&q=82 400w, ${imageBase}&w=800&q=82 800w, ${imageBase}&w=1200&q=82 1200w`,
+            );
+            element.setAttribute("sizes", "(max-width: 767px) 100vw, 50vw");
+          } else {
+            element.setAttribute("src", homepageLatestImage);
+          }
+        }
+      },
+    })
+    .on("#blog-quiz-btn", {
+      element(element) {
+        element.setAttribute("href", homepageLatestQuizHref);
+        if (homepageLatestPost) element.setAttribute("data-ssr-ready", "true");
+      },
+    })
+    .on("#heroQuizBtn", {
+      element(element) {
+        element.setAttribute("href", homepageLatestQuizHref);
       },
     })
     .on("#heroHighlightsList", {
@@ -9471,7 +9848,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=37>; rel=preload; as=style",
+      "</css/custom.css?v=39>; rel=preload; as=style",
     ].join(", "),
   );
 
@@ -9560,6 +9937,15 @@ async function handleScheduledEvent(env) {
     }
   } catch (e) {
     console.error("Quiz pre-generation failed:", e);
+  }
+
+  // Entity-index convergence belongs to maintenance, never to crawler-facing
+  // directory, JSON, or sitemap requests. The refresh compares before writing
+  // and therefore costs at most one KV put when stored entity metadata changed.
+  try {
+    await refreshEntityIndexDuringScheduledMaintenance(env);
+  } catch (e) {
+    console.error("Scheduled entity-index refresh failed:", e);
   }
 }
 
@@ -10798,8 +11184,17 @@ export const __archiveIndexabilityTestHooks = {
 
 export const __homepagePerformanceTestHooks = {
   HOMEPAGE_PRELOAD_VERSION,
+  HOMEPAGE_TITLE,
+  HOMEPAGE_DESCRIPTION,
   compactHomepagePreloadPage,
   compactHomepagePreloadItem,
   buildHomepagePreloadPayload,
   serializeInlineJson,
+  buildHomepageBlogCards,
+  buildHomepageDiscoveryLinks,
+  loadHomepageEditorialContent,
+};
+
+export const __indexabilityTestHooks = {
+  serveMaintenanceResponse,
 };

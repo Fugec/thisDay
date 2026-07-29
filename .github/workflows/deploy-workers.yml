@@ -6,6 +6,11 @@ on:
     paths:
       - "js/**"
       - "sw.js"
+      - "maintenance.html"
+      - "tools/homepage-*.test.js"
+      - "tools/indexing-guardrails.test.js"
+      - "tools/public-indexability.js"
+      - "tools/public-indexability.test.js"
       - "wrangler*.jsonc"
       - ".github/workflows/deploy-workers.yml"
   workflow_dispatch:
@@ -28,11 +33,14 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Check blog worker syntax
+      - name: Check worker and indexability syntax
         run: |
           node --check js/blog-ai-worker.js
+          node --check js/seo-worker.js
           node --check js/shared/ai-call.js
           node --check js/rss-worker.js
+          node --check sw.js
+          node --check tools/public-indexability.js
 
       # `tests/` is gitignored (see .gitignore) and never reaches this
       # checkout, so it cannot appear here — `node --test` silently ignores
@@ -43,7 +51,7 @@ jobs:
       # seo-text, ai-call, date-pages, entity-resolution, content-generation,
       # etc.) must be verified locally before merging any change to
       # js/blog-ai-worker.js or js/shared/ai-call.js.
-      - name: Run tracked blog production tests
+      - name: Run tracked production tests
         run: |
           FILES="tools/archive-indexability.test.js \
             tools/article-capacity-resume.test.js \
@@ -52,8 +60,13 @@ jobs:
             tools/automatic-article-enrichment.test.js \
             tools/evergreen-history-pipeline.test.js \
             tools/homepage-blog-order.test.js \
+            tools/homepage-preload.test.js \
+            tools/homepage-responsive-images.test.js \
+            tools/homepage-seo-performance.test.js \
+            tools/indexing-guardrails.test.js \
             tools/person-human-identity.test.js \
             tools/blog-article-presentation.test.js \
+            tools/public-indexability.test.js \
             tools/related-films.test.js"
           # node --test silently ignores a nonexistent explicit file argument
           # instead of failing — verify every listed file actually exists
@@ -66,6 +79,9 @@ jobs:
             fi
           done
           node --test $FILES
+
+      - name: Dry-run SEO worker bundle
+        run: npx wrangler@latest deploy --dry-run --config wrangler.jsonc
 
       - name: Dry-run blog worker bundle
         run: npx wrangler@latest deploy --dry-run --config wrangler-blog.jsonc
@@ -84,6 +100,9 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+
+      - name: Verify public pages remain indexable
+        run: node tools/public-indexability.js
 
       - name: Deploy RSS worker
         run: npx wrangler@latest deploy --config wrangler-rss.jsonc

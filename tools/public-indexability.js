@@ -26,6 +26,24 @@ export function robotsMetaDirectives(html) {
     .filter(Boolean);
 }
 
+export function isCloudflareManagedChallenge({
+  status,
+  headers = new Headers(),
+  html = "",
+}) {
+  if (status !== 403) return false;
+  const server = headers.get("server") || "";
+  const ray = headers.get("cf-ray") || "";
+  const body = String(html || "");
+  return Boolean(
+    /cloudflare/i.test(server) &&
+      ray &&
+      /(?:\bjust a moment\b|cf_chl_|cdn-cgi\/challenge-platform|enable javascript and cookies)/i.test(
+        body,
+      ),
+  );
+}
+
 export function inspectPublicIndexability({
   requestedUrl,
   finalUrl = requestedUrl,
@@ -39,6 +57,11 @@ export function inspectPublicIndexability({
     .join(",")
     .toLowerCase();
   const issues = [];
+  const cloudflareChallenge = isCloudflareManagedChallenge({
+    status,
+    headers,
+    html,
+  });
 
   if (status !== 200) issues.push(`returned HTTP ${status}`);
   if (/\bnoindex\b/.test(directives)) issues.push("declares noindex");
@@ -50,9 +73,21 @@ export function inspectPublicIndexability({
     status,
     metaDirectives,
     headerDirective,
+    cloudflareChallenge,
     issues,
     indexable: issues.length === 0,
   };
+}
+
+export function failingPublicIndexabilityResults(
+  results,
+  { allowCloudflareChallenge = false } = {},
+) {
+  return results.filter(
+    (result) =>
+      !result.indexable &&
+      !(allowCloudflareChallenge && result.cloudflareChallenge === true),
+  );
 }
 
 async function latestArticlePath(fetchImpl, site) {
@@ -119,8 +154,13 @@ export async function verifyPublicIndexability({
 
 async function runCli() {
   const results = await verifyPublicIndexability();
+  const allowCloudflareChallenge = process.argv.includes(
+    "--allow-cloudflare-challenge",
+  );
   for (const result of results) {
-    const state = result.indexable ? "PASS" : "FAIL";
+    const challengeSkipped =
+      allowCloudflareChallenge && result.cloudflareChallenge === true;
+    const state = result.indexable ? "PASS" : challengeSkipped ? "SKIP" : "FAIL";
     console.log(
       `${state} ${result.requestedUrl} -> ${result.finalUrl} ` +
         `(HTTP ${result.status}; robots: ${
@@ -128,9 +168,18 @@ async function runCli() {
           "default"
         })`,
     );
-    for (const issue of result.issues) console.error(`  ${issue}`);
+    if (challengeSkipped) {
+      console.warn("  GitHub runner was blocked by a Cloudflare managed challenge");
+    } else {
+      for (const issue of result.issues) console.error(`  ${issue}`);
+    }
   }
-  if (results.some((result) => !result.indexable)) process.exitCode = 1;
+  if (
+    failingPublicIndexabilityResults(results, { allowCloudflareChallenge })
+      .length
+  ) {
+    process.exitCode = 1;
+  }
 }
 
 if (

@@ -102,7 +102,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       - name: Verify public pages remain indexable
-        run: node tools/public-indexability.js
+        # GitHub datacenter IPs can receive Cloudflare managed challenges.
+        # The verifier skips only a positively identified challenge response;
+        # ordinary 4xx, noindex, and nofollow responses still fail deployment.
+        run: node tools/public-indexability.js --allow-cloudflare-challenge
 
       - name: Deploy RSS worker
         run: npx wrangler@latest deploy --config wrangler-rss.jsonc

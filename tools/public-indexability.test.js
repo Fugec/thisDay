@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  failingPublicIndexabilityResults,
   inspectPublicIndexability,
+  isCloudflareManagedChallenge,
   robotsMetaDirectives,
   verifyPublicIndexability,
 } from "./public-indexability.js";
@@ -44,6 +46,50 @@ test("public indexability accepts a canonical index-follow page", () => {
   });
   assert.equal(result.indexable, true);
   assert.deepEqual(result.issues, []);
+});
+
+test("only a confirmed Cloudflare challenge can be skipped explicitly", () => {
+  const challengeHtml = `<!doctype html><title>Just a moment...</title>
+    <meta name="robots" content="noindex,nofollow">
+    <script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>`;
+  const challengeHeaders = new Headers({
+    Server: "cloudflare",
+    "CF-Ray": "example-SJJ",
+  });
+  assert.equal(
+    isCloudflareManagedChallenge({
+      status: 403,
+      headers: challengeHeaders,
+      html: challengeHtml,
+    }),
+    true,
+  );
+
+  const challenge = inspectPublicIndexability({
+    requestedUrl: "https://thisday.info/",
+    status: 403,
+    headers: challengeHeaders,
+    html: challengeHtml,
+  });
+  const ordinaryNoindex = inspectPublicIndexability({
+    requestedUrl: "https://thisday.info/blocked",
+    status: 200,
+    html: '<meta name="robots" content="noindex,nofollow">',
+  });
+
+  assert.deepEqual(failingPublicIndexabilityResults([challenge]), [challenge]);
+  assert.deepEqual(
+    failingPublicIndexabilityResults([challenge], {
+      allowCloudflareChallenge: true,
+    }),
+    [],
+  );
+  assert.deepEqual(
+    failingPublicIndexabilityResults([ordinaryNoindex], {
+      allowCloudflareChallenge: true,
+    }),
+    [ordinaryNoindex],
+  );
 });
 
 test("live verifier checks the homepage, blog, and newest safe article slug", async () => {

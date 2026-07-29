@@ -10,6 +10,7 @@ import {
 
 const root = new URL("..", import.meta.url).pathname;
 const indexHtml = readFileSync(join(root, "index.html"), "utf8");
+const customCss = readFileSync(join(root, "css/custom.css"), "utf8");
 const clientSource = readFileSync(join(root, "js/script.js"), "utf8");
 const workerSource = readFileSync(join(root, "js/seo-worker.js"), "utf8");
 
@@ -55,6 +56,21 @@ test("server discovery links cover the daily cluster, adjacent dates, and topic 
   ]) {
     assert.match(html, new RegExp(`href="${href.replaceAll("/", "\\/")}"`));
   }
+});
+
+test("mobile discovery links form a 1.5-card snap slider", () => {
+  assert.match(
+    customCss,
+    /\.homepage-discovery-links\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;[^}]*scroll-snap-type:\s*x mandatory;/s,
+  );
+  assert.match(
+    customCss,
+    /\.homepage-discovery-links a\s*\{[^}]*flex:\s*0 0 calc\(\(100% - 0\.65rem\) \/ 1\.5\);[^}]*scroll-snap-align:\s*start;/s,
+  );
+  assert.match(
+    customCss,
+    /@media \(min-width: 768px\)[\s\S]*?\.homepage-discovery-links\s*\{[^}]*flex-wrap:\s*wrap;[^}]*overflow-x:\s*visible;/,
+  );
 });
 
 test("homepage blog cards are real internal links before JavaScript runs", () => {
@@ -122,7 +138,7 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=39/);
+  assert.match(indexHtml, /custom\.css\?v=40/);
   assert.match(indexHtml, /script\.js\?v=22/);
   assert.match(
     workerSource,
@@ -139,7 +155,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=39"),
+      new Request("https://thisday.info/css/custom.css?v=40"),
       {},
       { waitUntil() {} },
     );

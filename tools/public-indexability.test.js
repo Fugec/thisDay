@@ -48,8 +48,10 @@ test("public indexability accepts a canonical index-follow page", () => {
 
 test("live verifier checks the homepage, blog, and newest safe article slug", async () => {
   const requested = [];
-  const fetchImpl = async (url) => {
+  const userAgents = [];
+  const fetchImpl = async (url, options = {}) => {
     requested.push(url);
+    userAgents.push(new Headers(options.headers).get("user-agent") || "");
     if (url.endsWith("/blog/index.json")) {
       return new Response(JSON.stringify([{ slug: "29-july-2026" }]), {
         status: 200,
@@ -69,6 +71,8 @@ test("live verifier checks the homepage, blog, and newest safe article slug", as
     "https://thisday.info/blog/",
     "https://thisday.info/blog/29-july-2026/",
   ]);
+  assert.ok(userAgents.every((value) => value.includes("Mozilla/5.0")));
+  assert.ok(userAgents.every((value) => !/googlebot/i.test(value)));
   assert.equal(results.length, 3);
   assert.ok(results.every((result) => result.indexable));
 });

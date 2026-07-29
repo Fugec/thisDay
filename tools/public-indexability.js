@@ -1,8 +1,13 @@
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_SITE = "https://thisday.info";
-const GOOGLEBOT_USER_AGENT =
-  "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+// Do not impersonate Googlebot from CI: Cloudflare correctly challenges a
+// Googlebot user agent arriving from an unverified GitHub runner IP. The live
+// check validates the public response and crawler directives as a normal
+// browser; verified search-engine access belongs in Search Console.
+const INDEXABILITY_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 
 function htmlAttribute(tag, name) {
   const match = String(tag || "").match(
@@ -53,7 +58,7 @@ export function inspectPublicIndexability({
 async function latestArticlePath(fetchImpl, site) {
   try {
     const response = await fetchImpl(`${site}/blog/index.json`, {
-      headers: { Accept: "application/json", "User-Agent": GOOGLEBOT_USER_AGENT },
+      headers: { Accept: "application/json", "User-Agent": INDEXABILITY_USER_AGENT },
       redirect: "follow",
     });
     if (!response.ok) return "";
@@ -84,7 +89,7 @@ export async function verifyPublicIndexability({
     const requestedUrl = `${normalizedSite}${path}`;
     try {
       const response = await fetchImpl(requestedUrl, {
-        headers: { Accept: "text/html", "User-Agent": GOOGLEBOT_USER_AGENT },
+        headers: { Accept: "text/html", "User-Agent": INDEXABILITY_USER_AGENT },
         redirect: "follow",
       });
       const html = await response.text();

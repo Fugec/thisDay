@@ -2172,7 +2172,7 @@ article.p-4.rounded.border.shadow-sm {
 }
 
 .homepage-discovery {
-  padding: 1.5rem var(--gutter-x) 2.5rem;
+  padding: 1.5rem var(--gutter-x) 0;
 }
 
 .homepage-discovery .homepage-section-title {

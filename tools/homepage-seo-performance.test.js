@@ -64,6 +64,10 @@ test("homepage discovery reuses date-view tabs as a 1.5-card slider", () => {
   assert.match(indexHtml, /class="date-view-tabs homepage-discovery-links"/);
   assert.match(
     customCss,
+    /\.homepage-discovery\s*\{[^}]*padding:\s*1\.5rem var\(--gutter-x\) 0;/s,
+  );
+  assert.match(
+    customCss,
     /\.date-view-tabs\s*\{[^}]*display:\s*flex;[^}]*overflow-x:\s*auto;/s,
   );
   assert.match(
@@ -139,6 +143,10 @@ test("homepage editorial SSR loads the blog and video indexes once each", async 
   assert.equal(content.latestPost.slug, "29-july-2026");
   assert.match(content.blogCards, /Newest story/);
   assert.match(content.videoCards, /youtube\.com\/shorts\/abcdefghijk/);
+  assert.match(
+    content.videoCards,
+    /<h3 class="homepage-section-title homepage-section-title-box">/,
+  );
 });
 
 test("partial homepage data is upgraded before the complete day modal renders", () => {
@@ -150,7 +158,7 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=41/);
+  assert.match(indexHtml, /custom\.css\?v=42/);
   assert.match(indexHtml, /script\.js\?v=22/);
   assert.match(
     workerSource,
@@ -167,7 +175,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=41"),
+      new Request("https://thisday.info/css/custom.css?v=42"),
       {},
       { waitUntil() {} },
     );

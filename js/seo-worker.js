@@ -1670,7 +1670,7 @@ function buildHomepageVideoCards(index, yt) {
         </div>
         <div class="blog-card-body">
           <div class="blog-card-date">YouTube Shorts</div>
-          <h3>${escapeHtml(shortTitle)}</h3>
+          <h3 class="homepage-section-title homepage-section-title-box">${escapeHtml(shortTitle)}</h3>
           ${shortDesc ? `<p>${escapeHtml(shortDesc)}</p>` : ""}
           <span class="btn" style="align-self:flex-start;margin-top:auto">Watch <i class="bi bi-arrow-right"></i></span>
         </div>
@@ -9843,7 +9843,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=41>; rel=preload; as=style",
+      "</css/custom.css?v=42>; rel=preload; as=style",
     ].join(", "),
   );
 

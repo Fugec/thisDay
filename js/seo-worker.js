@@ -64,7 +64,7 @@ import { sortBlogIndexNewestFirst } from "./shared/blog-index-order.js";
 const WIKIPEDIA_USER_AGENT = "thisDay.info (kapetanovic.armin@gmail.com)";
 
 const KV_CACHE_TTL_SECONDS = 24 * 60 * 60; // KV entry valid for 24 hours
-const HOMEPAGE_PRELOAD_VERSION = 3;
+const HOMEPAGE_PRELOAD_VERSION = 4;
 const HOMEPAGE_PRELOAD_EVENT_LIMIT = 12;
 const HOMEPAGE_PRELOAD_PERSON_LIMIT = 6;
 const HOMEPAGE_PRELOAD_TEXT_LIMIT = 600;
@@ -212,6 +212,40 @@ function selectHomepagePreloadPeople(items, limit = HOMEPAGE_PRELOAD_PERSON_LIMI
     .map(({ item }) => item);
 }
 
+function homepageFeaturedPersonContent(item) {
+  if (!item || typeof item !== "object") return null;
+  const page = item.pages?.[0] || {};
+  const itemText = String(item.text || "").trim();
+  const title = String(
+    page.title || page.normalizedtitle || itemText.split(",")[0] || "",
+  ).trim();
+  const description = truncateHomepagePreloadText(
+    page.description || page.extract || itemText,
+    170,
+  );
+  const imageUrl = String(
+    page.originalimage?.source || page.thumbnail?.source || "",
+  ).trim();
+  if (!title) return null;
+  return { title, description, imageUrl };
+}
+
+function setHomepageFeaturedCardImage(element, imageUrl, alt) {
+  if (!element || !imageUrl) return;
+  element.setAttribute("alt", alt);
+  if (/^(?:https:)?\/\/upload\.wikimedia\.org\//i.test(imageUrl)) {
+    const imageBase = `/image-proxy?src=${encodeURIComponent(imageUrl)}`;
+    element.setAttribute("src", `${imageBase}&w=800&q=82`);
+    element.setAttribute(
+      "srcset",
+      `${imageBase}&w=400&q=82 400w, ${imageBase}&w=800&q=82 800w, ${imageBase}&w=1200&q=82 1200w`,
+    );
+    element.setAttribute("sizes", "(max-width: 900px) 70vw, 25vw");
+  } else {
+    element.setAttribute("src", imageUrl);
+  }
+}
+
 function selectHomepagePreloadEvents(items, limit = HOMEPAGE_PRELOAD_EVENT_LIMIT) {
   const valid = (Array.isArray(items) ? items : []).filter(
     (item) => item && String(item.text || "").trim(),
@@ -223,11 +257,12 @@ function selectHomepagePreloadEvents(items, limit = HOMEPAGE_PRELOAD_EVENT_LIMIT
     selected.push(item);
     seen.add(item);
   };
-  // Keep enough illustrated entries for the homepage carousel, then preserve
-  // source order for the remainder of the compact preview.
+  // Keep enough illustrated entries for the eight-card homepage event grid
+  // and its three-card carousel, then preserve source order for the remainder
+  // of the compact preview. This avoids a second full-events homepage request.
   valid
     .filter((item) => item?.pages?.[0]?.thumbnail?.source)
-    .slice(0, 3)
+    .slice(0, 8)
     .forEach(add);
   valid.forEach(add);
   return selected;
@@ -1623,7 +1658,7 @@ function buildHomepageBlogCards(posts) {
       (post) =>
         /^[a-z0-9-]+$/.test(String(post?.slug || "")) && post?.title,
     )
-    .slice(0, 6)
+    .slice(0, 8)
     .map((post) => {
       const title = String(post.title).trim();
       const description = homepagePostDescription(post);
@@ -1634,7 +1669,7 @@ function buildHomepageBlogCards(posts) {
       );
       const imageHtml = imageUrl
         ? isWikimediaImage
-          ? `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80" srcset="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=320&q=80 320w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80 600w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=960&q=80 960w" sizes="(max-width: 900px) 70vw, 33vw" alt="${escapeHtml(title)}" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" />`
+          ? `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80" srcset="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=320&q=80 320w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80 600w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=960&q=80 960w" sizes="(max-width: 900px) 70vw, 25vw" alt="${escapeHtml(title)}" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" />`
           : `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)}" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" />`
         : "";
       return `<a class="blog-card" href="/blog/${escapeHtml(post.slug)}/" style="text-decoration:none;color:inherit;">
@@ -9248,6 +9283,14 @@ async function handleFetchRequest(request, env, ctx) {
   const homepageLatestImage = homepagePostImage(homepageLatestPost);
   const homepageDiscoveryLinksHtml = buildHomepageDiscoveryLinks(today);
   const homepageEventsPath = `/events/${MONTHS_ALL[today.getMonth()]}/${today.getDate()}/`;
+  const homepageBornPath = `/born/${MONTHS_ALL[today.getMonth()]}/${today.getDate()}/`;
+  const homepageDiedPath = `/died/${MONTHS_ALL[today.getMonth()]}/${today.getDate()}/`;
+  const homepageFeaturedBirth = homepageFeaturedPersonContent(
+    selectHomepagePreloadPeople(eventsData?.births, 1)[0],
+  );
+  const homepageFeaturedDeath = homepageFeaturedPersonContent(
+    selectHomepagePreloadPeople(eventsData?.deaths, 1)[0],
+  );
   const homepageHighlightsHtml = pickRandomHomepageHighlights(
     eventsData?.events,
     3,
@@ -9400,23 +9443,11 @@ async function handleFetchRequest(request, env, ctx) {
     .on("#latest-article-img", {
       element(element) {
         if (!homepageLatestPost) return;
-        element.setAttribute(
-          "alt",
+        setHomepageFeaturedCardImage(
+          element,
+          homepageLatestImage,
           homepageLatestPost.title || "Latest history article",
         );
-        if (homepageLatestImage) {
-          if (/^(?:https:)?\/\/upload\.wikimedia\.org\//i.test(homepageLatestImage)) {
-            const imageBase = `/image-proxy?src=${encodeURIComponent(homepageLatestImage)}`;
-            element.setAttribute("src", `${imageBase}&w=800&q=82`);
-            element.setAttribute(
-              "srcset",
-              `${imageBase}&w=400&q=82 400w, ${imageBase}&w=800&q=82 800w, ${imageBase}&w=1200&q=82 1200w`,
-            );
-            element.setAttribute("sizes", "(max-width: 767px) 100vw, 50vw");
-          } else {
-            element.setAttribute("src", homepageLatestImage);
-          }
-        }
       },
     })
     .on("#blog-quiz-btn", {
@@ -9428,6 +9459,64 @@ async function handleFetchRequest(request, env, ctx) {
     .on("#heroQuizBtn", {
       element(element) {
         element.setAttribute("href", homepageLatestQuizHref);
+      },
+    })
+    .on("#bornTodayTitle", {
+      element(element) {
+        if (homepageFeaturedBirth?.title) {
+          element.setInnerContent(homepageFeaturedBirth.title);
+        }
+      },
+    })
+    .on("#bornTodayDesc", {
+      element(element) {
+        if (homepageFeaturedBirth?.description) {
+          element.setInnerContent(homepageFeaturedBirth.description);
+        }
+      },
+    })
+    .on("#bornTodayImg", {
+      element(element) {
+        if (!homepageFeaturedBirth) return;
+        setHomepageFeaturedCardImage(
+          element,
+          homepageFeaturedBirth.imageUrl,
+          `${homepageFeaturedBirth.title}, born on this day`,
+        );
+      },
+    })
+    .on("#bornTodayBtn", {
+      element(element) {
+        element.setAttribute("href", homepageBornPath);
+      },
+    })
+    .on("#diedTodayTitle", {
+      element(element) {
+        if (homepageFeaturedDeath?.title) {
+          element.setInnerContent(homepageFeaturedDeath.title);
+        }
+      },
+    })
+    .on("#diedTodayDesc", {
+      element(element) {
+        if (homepageFeaturedDeath?.description) {
+          element.setInnerContent(homepageFeaturedDeath.description);
+        }
+      },
+    })
+    .on("#diedTodayImg", {
+      element(element) {
+        if (!homepageFeaturedDeath) return;
+        setHomepageFeaturedCardImage(
+          element,
+          homepageFeaturedDeath.imageUrl,
+          `${homepageFeaturedDeath.title}, died on this day`,
+        );
+      },
+    })
+    .on("#diedTodayBtn", {
+      element(element) {
+        element.setAttribute("href", homepageDiedPath);
       },
     })
     .on("#heroHighlightsList", {
@@ -9843,7 +9932,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=43>; rel=preload; as=style",
+      "</css/custom.css?v=45>; rel=preload; as=style",
     ].join(", "),
   );
 
@@ -11183,6 +11272,7 @@ export const __homepagePerformanceTestHooks = {
   HOMEPAGE_DESCRIPTION,
   compactHomepagePreloadPage,
   compactHomepagePreloadItem,
+  homepageFeaturedPersonContent,
   buildHomepagePreloadPayload,
   serializeInlineJson,
   buildHomepageBlogCards,

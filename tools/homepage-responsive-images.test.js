@@ -18,7 +18,12 @@ test("homepage image helper builds width-descriptor proxy candidates", () => {
 });
 
 test("homepage cards reserve image space and defer below-fold decoding", () => {
-  for (const id of ["todayEventImg", "latest-article-img"]) {
+  for (const id of [
+    "todayEventImg",
+    "latest-article-img",
+    "bornTodayImg",
+    "diedTodayImg",
+  ]) {
     const image = indexHtml.match(new RegExp(`<img[\\s\\S]{0,500}id="${id}"[\\s\\S]{0,500}?\\/>`))?.[0] || "";
     assert.match(image, /width="800"/, `${id} must reserve width`);
     assert.match(image, /height="400"/, `${id} must reserve height`);
@@ -38,9 +43,8 @@ test("homepage editorial images use edge-to-edge proportional frames", () => {
     customCss,
     /\.quiz-card-img\s*\{[^}]*height:\s*auto[^}]*aspect-ratio:\s*16 \/ 9[^}]*object-fit:\s*cover[^}]*object-position:\s*center top/s,
   );
-  assert.match(indexHtml, /sizes="\(max-width: 900px\) 70vw, 33vw"/);
-  assert.match(indexHtml, /sizes="\(max-width: 900px\) 70vw, 50vw"/);
-  assert.match(seoWorker, /sizes="\(max-width: 900px\) 70vw, 33vw"/);
+  assert.match(indexHtml, /sizes="\(max-width: 900px\) 70vw, 25vw"/);
+  assert.match(seoWorker, /sizes="\(max-width: 900px\) 70vw, 25vw"/);
 });
 
 test("people, modal, and compact born/died images have explicit dimensions", () => {
@@ -58,11 +62,11 @@ test("carousel eagerly loads only its first responsive image", () => {
 });
 
 test("homepage static asset versions are current", () => {
-  assert.match(indexHtml, /js\/script\.js\?v=22/);
-  assert.match(indexHtml, /custom\.css\?v=43/);
-  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v27"/);
-  assert.match(serviceWorker, /"\/js\/script\.js\?v=22"/);
-  assert.match(serviceWorker, /"\/css\/custom\.css\?v=43"/);
-  assert.match(seoWorker, /custom\.css\?v=43/);
+  assert.match(indexHtml, /js\/script\.js\?v=23/);
+  assert.match(indexHtml, /custom\.css\?v=45/);
+  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v29"/);
+  assert.match(serviceWorker, /"\/js\/script\.js\?v=23"/);
+  assert.match(serviceWorker, /"\/css\/custom\.css\?v=45"/);
+  assert.match(seoWorker, /custom\.css\?v=45/);
   assert.match(seoWorker, /width="480" height="360" loading="lazy" decoding="async"/);
 });

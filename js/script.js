@@ -1456,6 +1456,38 @@ async function populatePeopleStrip() {
   });
 }
 
+function populateFeaturedPersonCard(person, kind) {
+  const isBirth = kind === "birth";
+  const prefix = isBirth ? "bornToday" : "diedToday";
+  const fallbackHref = isBirth ? "/born/today/" : "/died/today/";
+  const imgEl = document.getElementById(`${prefix}Img`);
+  const titleEl = document.getElementById(`${prefix}Title`);
+  const descEl = document.getElementById(`${prefix}Desc`);
+  const btnEl = document.getElementById(`${prefix}Btn`);
+
+  if (btnEl && !btnEl.getAttribute("href")) btnEl.href = fallbackHref;
+  if (!person || !titleEl) return;
+
+  const title = person.title || (isBirth ? "Born Today" : "Died Today");
+  const description = pickTeaserSentence(
+    person.pageDescription || person.pageExtract || person.description,
+  );
+  titleEl.textContent = title;
+  if (descEl && description) descEl.textContent = description;
+
+  const imageUrl = person.originalImageUrl || person.thumbnailUrl || "";
+  if (imgEl && imageUrl) {
+    imgEl.src = getOptimizedImageUrl(imageUrl, 800);
+    imgEl.srcset = getResponsiveImageSrcset(imageUrl, [400, 800, 1200]);
+    imgEl.sizes = "(max-width: 900px) 70vw, 25vw";
+    imgEl.alt = `${title}, ${isBirth ? "born" : "died"} on this day`;
+    imgEl.width = 800;
+    imgEl.height = 400;
+    imgEl.loading = "lazy";
+    imgEl.decoding = "async";
+  }
+}
+
 async function populateTodayEventCard() {
   const imgEl = document.getElementById("todayEventImg");
   const titleEl = document.getElementById("todayEventTitle");
@@ -1476,6 +1508,15 @@ async function populateTodayEventCard() {
     console.warn("Failed to fetch events for Today Event card:", error);
   }
 
+  populateFeaturedPersonCard(
+    selectHomepagePeople(eventsData.births || [], 1)[0],
+    "birth",
+  );
+  populateFeaturedPersonCard(
+    selectHomepagePeople(eventsData.deaths || [], 1)[0],
+    "death",
+  );
+
   const todaysEvents = Array.isArray(eventsData.events)
     ? eventsData.events.filter((item) => item && item.title)
     : [];
@@ -1492,8 +1533,11 @@ async function populateTodayEventCard() {
     return;
   }
 
-  const randomEvent =
-    todaysEvents[Math.floor(Math.random() * todaysEvents.length)];
+  const illustratedEvents = todaysEvents.filter(
+    (event) => event.thumbnailUrl || event.originalImageUrl,
+  );
+  const eventPool = illustratedEvents.length ? illustratedEvents : todaysEvents;
+  const randomEvent = eventPool[Math.floor(Math.random() * eventPool.length)];
 
   titleEl.textContent = randomEvent.title || "Today's Event";
   if (descEl)
@@ -1504,12 +1548,13 @@ async function populateTodayEventCard() {
 
   if (imgEl) {
     const rawUrl =
+      randomEvent.originalImageUrl ||
       randomEvent.thumbnailUrl ||
       randomEvent.featuredImage ||
       "https://placehold.co/800x400?text=No+Image";
     imgEl.src = getOptimizedImageUrl(rawUrl, 800);
     imgEl.srcset = getResponsiveImageSrcset(rawUrl, [400, 800, 1200]);
-    imgEl.sizes = "(max-width: 767px) 100vw, 50vw";
+    imgEl.sizes = "(max-width: 900px) 70vw, 25vw";
     imgEl.alt = randomEvent.title || "Today event image";
     imgEl.width = 800;
     imgEl.height = 400;

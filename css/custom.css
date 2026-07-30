@@ -864,10 +864,10 @@ body[data-page="v2"] > .people-strip {
 }
 .blog-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr) 280px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 #todaysEventsSection .blog-grid {
-  grid-template-columns: repeat(2, 1fr) 280px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .blog-cta-col {
   background: var(--btn-bg);
@@ -1175,6 +1175,9 @@ body[data-page="v2"] > .people-strip {
 .quiz-card {
   background: #fff;
   border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   overflow: hidden;
 }
 .quiz-card:last-child {
@@ -1190,6 +1193,10 @@ body[data-page="v2"] > .people-strip {
 .quiz-card-body {
   padding: 1.75rem 2rem;
   text-align: center;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
 }
 .quiz-card-body h2 {
   margin: 0 0 0.5rem;
@@ -1198,25 +1205,49 @@ body[data-page="v2"] > .people-strip {
   color: var(--text-muted);
   margin: 0 0 1.25rem;
   line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.quiz-card-body .btn {
+  margin-top: auto;
 }
 
-/* Event Wrap - Desktop: 3 columns inline full width (today's event first) */
+/* Featured Today: four equal cards on desktop. */
 .event-wrap {
   display: grid;
-  grid-template-columns: repeat(2, 1fr) !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   background: #fff;
 }
 
-@media (max-width: 960px) {
-  .event-wrap {
-    grid-template-columns: repeat(2, 1fr) !important;
+/* Match the blog-section card slider on tablets and phones. */
+@media (max-width: 900px) {
+  .event-section {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-anchor: none;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
-}
-
-@media (max-width: 640px) {
+  .event-section::-webkit-scrollbar {
+    display: none;
+  }
   .event-wrap {
-    grid-template-columns: 1fr !important;
+    display: flex;
+    flex-direction: row;
+    flex-shrink: 0;
+  }
+  .event-wrap .quiz-card {
+    flex: 0 0 70vw;
+    max-width: 70vw;
+    border-right: 1px solid var(--border);
+    border-bottom: none;
+    scroll-snap-align: start;
   }
 }
 
@@ -1974,12 +2005,10 @@ main.container {
     font-size: 1.2rem;
   }
 
-  .quiz-card,
   .event-card-preview {
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
-  .quiz-card:last-child,
   .event-card-preview:last-child {
     border-bottom: none;
   }
@@ -2047,10 +2076,6 @@ main.container {
   .event-count {
     display: block;
     font-size: 0.55rem;
-  }
-  .event-wrap {
-    display: grid;
-    grid-template-columns: repeat(1, 1fr) !important;
   }
 }
 
@@ -2226,35 +2251,21 @@ article.p-4.rounded.border.shadow-sm {
 }
 
 .homepage-discovery-links {
+  flex-wrap: wrap;
+  overflow-x: visible;
   margin-bottom: 0;
-  overscroll-behavior-inline: contain;
-  padding-bottom: 0.5rem;
-  scroll-padding-inline: 0;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0;
+  scroll-snap-type: none;
 }
 
 .homepage-discovery-links .date-view-tab {
-  flex: 0 0 calc((100% - 0.5rem) / 1.5);
+  flex: 0 0 auto;
   justify-content: center;
-  scroll-snap-align: start;
   text-align: center;
-  white-space: normal;
+  white-space: nowrap;
 }
 
 @media (min-width: 768px) {
-  .homepage-discovery-links {
-    flex-wrap: wrap;
-    overflow-x: visible;
-    padding-bottom: 0;
-    scroll-snap-type: none;
-  }
-
-  .homepage-discovery-links .date-view-tab {
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-
   .modal-timeline .modal-tl-actions.event-actions {
     display: flex;
     flex-direction: column;

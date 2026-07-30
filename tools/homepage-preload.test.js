@@ -84,7 +84,7 @@ test("homepage preload keeps only fields consumed by the browser", () => {
   const item = payload.events[0];
   const page = item.pages[0];
 
-  assert.equal(payload.version, 3);
+  assert.equal(payload.version, 4);
   assert.equal(payload.partial, true);
   assert.deepEqual(payload.counts, { events: 1, births: 1, deaths: 1 });
   assert.deepEqual(Object.keys(item), ["text", "year", "pages"]);
@@ -119,6 +119,36 @@ test("homepage preload caps the initial preview while preserving full counts", (
     assert.ok(person.pages[0].thumbnail?.source || person.pages[0].originalimage?.source);
     assert.match(person.pages[0].content_urls.desktop.page, /^https:\/\/en\.wikipedia\.org\/wiki\//);
   }
+});
+
+test("homepage preload prioritizes eight illustrated event cards", () => {
+  const withoutImages = Array.from({ length: 8 }, (_, index) => {
+    const item = rawItem(index);
+    delete item.pages[0].thumbnail;
+    delete item.pages[0].originalimage;
+    return item;
+  });
+  const illustrated = Array.from({ length: 8 }, (_, index) => rawItem(index + 20));
+  const payload = hooks.buildHomepagePreloadPayload({
+    events: [...withoutImages, ...illustrated],
+  });
+
+  assert.equal(payload.events.length, 12);
+  assert.equal(
+    payload.events.slice(0, 8).every((event) => event.pages[0]?.thumbnail?.source),
+    true,
+  );
+});
+
+test("featured birth and death cards reuse compact person metadata", () => {
+  const person = rawItem(5);
+  const content = hooks.homepageFeaturedPersonContent(person);
+
+  assert.deepEqual(content, {
+    title: "Example_Subject",
+    description: "A useful page description",
+    imageUrl: "https://upload.wikimedia.org/example.jpg",
+  });
 });
 
 test("preview reduces representative raw preload bytes by at least 85 percent", () => {

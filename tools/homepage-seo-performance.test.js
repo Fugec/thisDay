@@ -60,7 +60,7 @@ test("server discovery links cover the daily cluster, adjacent dates, and topic 
   assert.match(html, /class="bi bi-calendar-event" aria-hidden="true"/);
 });
 
-test("homepage discovery reuses date-view tabs as a 1.5-card slider", () => {
+test("homepage discovery reuses date-view tabs with every link visible", () => {
   assert.match(indexHtml, /class="date-view-tabs homepage-discovery-links"/);
   assert.match(
     customCss,
@@ -76,15 +76,15 @@ test("homepage discovery reuses date-view tabs as a 1.5-card slider", () => {
   );
   assert.match(
     customCss,
-    /\.homepage-discovery-links\s*\{[^}]*scroll-snap-type:\s*x mandatory;/s,
+    /\.homepage-discovery-links\s*\{[^}]*flex-wrap:\s*wrap;[^}]*overflow-x:\s*visible;[^}]*scroll-snap-type:\s*none;/s,
   );
   assert.match(
     customCss,
-    /\.homepage-discovery-links \.date-view-tab\s*\{[^}]*flex:\s*0 0 calc\(\(100% - 0\.5rem\) \/ 1\.5\);[^}]*scroll-snap-align:\s*start;/s,
+    /\.homepage-discovery-links \.date-view-tab\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/s,
   );
-  assert.match(
+  assert.doesNotMatch(
     customCss,
-    /@media \(min-width: 768px\)[\s\S]*?\.homepage-discovery-links\s*\{[^}]*flex-wrap:\s*wrap;[^}]*overflow-x:\s*visible;/,
+    /\.homepage-discovery-links \.date-view-tab\s*\{[^}]*calc\(\(100% - 0\.5rem\) \/ 1\.5\)/s,
   );
   assert.doesNotMatch(workerSource, /\.date-view-tabs\{display:flex/);
 });
@@ -104,6 +104,59 @@ test("homepage blog cards are real internal links before JavaScript runs", () =>
   assert.match(html, /loading="lazy"/);
   assert.match(workerSource, /\.on\("#blogGrid"/);
   assert.match(indexHtml, /dataset\.ssrReady === "true"/);
+});
+
+test("homepage article and event grids use four columns and eight cards", () => {
+  const posts = Array.from({ length: 10 }, (_, index) => ({
+    slug: `${30 - index}-july-2026`,
+    title: `Sourced history story ${index + 1}`,
+    description: `Concise article description ${index + 1}.`,
+    date: `2026-07-${String(30 - index).padStart(2, "0")}`,
+    imageUrl: "https://upload.wikimedia.org/example.jpg",
+  }));
+  const html = hooks.buildHomepageBlogCards(posts);
+
+  assert.equal((html.match(/class="blog-card"/g) || []).length, 8);
+  assert.match(
+    customCss,
+    /\.blog-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/s,
+  );
+  assert.match(
+    customCss,
+    /#todaysEventsSection \.blog-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/s,
+  );
+  assert.match(indexHtml, /posts\.slice\(0, 8\)/);
+  assert.match(indexHtml, /withImages\.slice\(0, 8\)/);
+});
+
+test("Featured Today includes four desktop cards and becomes one mobile slider", () => {
+  const section = indexHtml.match(
+    /<section class="event-section">([\s\S]*?)<\/section>/,
+  )?.[1] || "";
+
+  assert.equal((section.match(/class="quiz-card"/g) || []).length, 4);
+  assert.match(section, /id="todayEventCard"/);
+  assert.match(section, /id="latest-article-title"/);
+  assert.match(section, /id="bornTodayCard"/);
+  assert.match(section, /href="\/born\/today\/"/);
+  assert.match(section, /id="diedTodayCard"/);
+  assert.match(section, /href="\/died\/today\/"/);
+  assert.match(
+    customCss,
+    /\.event-wrap\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/s,
+  );
+  assert.match(
+    customCss,
+    /@media \(max-width: 900px\)[\s\S]*?\.event-section\s*\{[^}]*overflow-x:\s*auto;[^}]*scroll-snap-type:\s*x mandatory;/,
+  );
+  assert.match(
+    customCss,
+    /\.event-wrap \.quiz-card\s*\{[^}]*flex:\s*0 0 70vw;[^}]*scroll-snap-align:\s*start;/s,
+  );
+  assert.match(clientSource, /selectHomepagePeople\(eventsData\.births \|\| \[\], 1\)/);
+  assert.match(clientSource, /selectHomepagePeople\(eventsData\.deaths \|\| \[\], 1\)/);
+  assert.match(workerSource, /\.on\("#bornTodayTitle"/);
+  assert.match(workerSource, /\.on\("#diedTodayTitle"/);
 });
 
 test("homepage editorial SSR loads the blog and video indexes once each", async () => {
@@ -158,8 +211,8 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=43/);
-  assert.match(indexHtml, /script\.js\?v=22/);
+  assert.match(indexHtml, /custom\.css\?v=45/);
+  assert.match(indexHtml, /script\.js\?v=23/);
   assert.match(
     workerSource,
     /public, max-age=31536000, s-maxage=31536000, immutable/,
@@ -175,7 +228,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=43"),
+      new Request("https://thisday.info/css/custom.css?v=45"),
       {},
       { waitUntil() {} },
     );

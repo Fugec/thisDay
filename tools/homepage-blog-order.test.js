@@ -61,7 +61,7 @@ test("every homepage article surface sorts before choosing its first item", () =
   );
   assert.match(
     indexHtml,
-    /posts = sortBlogPostsNewestFirst\(posts\);[\s\S]{0,120}posts\.slice\(0, 6\)/,
+    /posts = sortBlogPostsNewestFirst\(posts\);[\s\S]{0,120}posts\.slice\(0, 8\)/,
   );
   assert.match(
     clientScript,

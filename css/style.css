@@ -752,9 +752,9 @@ article iframe {
   }
 }
 
-/* Blog grid: 3 columns */
-[data-page="v2"] .blog-grid {
-  grid-template-columns: repeat(3, 1fr) !important;
+/* Homepage editorial grids: four equal desktop columns. */
+[data-page="v2"] .blog-grid:not(.video-grid) {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
 }
 
 [data-page="v2"] .modal-body a {

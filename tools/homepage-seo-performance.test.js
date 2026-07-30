@@ -11,6 +11,7 @@ import {
 const root = new URL("..", import.meta.url).pathname;
 const indexHtml = readFileSync(join(root, "index.html"), "utf8");
 const customCss = readFileSync(join(root, "css/custom.css"), "utf8");
+const styleCss = readFileSync(join(root, "css/style.css"), "utf8");
 const clientSource = readFileSync(join(root, "js/script.js"), "utf8");
 const workerSource = readFileSync(join(root, "js/seo-worker.js"), "utf8");
 
@@ -125,6 +126,14 @@ test("homepage article and event grids use four columns and eight cards", () => 
     customCss,
     /#todaysEventsSection \.blog-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/s,
   );
+  assert.match(
+    styleCss,
+    /\[data-page="v2"\] \.blog-grid:not\(\.video-grid\)\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\) !important;/s,
+  );
+  assert.doesNotMatch(
+    styleCss,
+    /\.blog-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s,
+  );
   assert.match(indexHtml, /posts\.slice\(0, 8\)/);
   assert.match(indexHtml, /withImages\.slice\(0, 8\)/);
 });
@@ -152,6 +161,14 @@ test("Featured Today includes four desktop cards and becomes one mobile slider",
   assert.match(
     customCss,
     /\.event-wrap \.quiz-card\s*\{[^}]*flex:\s*0 0 70vw;[^}]*scroll-snap-align:\s*start;/s,
+  );
+  assert.match(
+    customCss,
+    /\.quiz-card-body\s*\{[^}]*text-align:\s*left;[^}]*align-items:\s*flex-start;/s,
+  );
+  assert.match(
+    customCss,
+    /\.quiz-card-body \.btn\s*\{[^}]*margin-top:\s*auto;[^}]*align-self:\s*flex-start;/s,
   );
   assert.match(clientSource, /selectHomepagePeople\(eventsData\.births \|\| \[\], 1\)/);
   assert.match(clientSource, /selectHomepagePeople\(eventsData\.deaths \|\| \[\], 1\)/);
@@ -211,7 +228,8 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=46/);
+  assert.match(indexHtml, /custom\.css\?v=47/);
+  assert.match(indexHtml, /style\.css\?v=10/);
   assert.match(indexHtml, /script\.js\?v=23/);
   assert.match(
     workerSource,
@@ -228,7 +246,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=46"),
+      new Request("https://thisday.info/css/custom.css?v=47"),
       {},
       { waitUntil() {} },
     );

@@ -1,0 +1,68 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-30-events-born-died-card-grid.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Shared card-shell, show-more, and era-filter-reveal helper functions",
+      "status": "completed",
+      "description": "**Goal:** Add buildDateCardShell, buildDateShowMoreBlock, buildDateShowMoreScript, and extend buildDateEraFilterScript/buildDateEraFilter with optional moreId/btnId, without changing any page's rendered output yet.\n\n**Files:**\n- Modify: js/seo-worker.js:5527-5572 (extend buildDateEraFilterScript/buildDateEraFilter)\n- Modify: js/seo-worker.js:5572 (insert buildDateCardShell, buildDateShowMoreScript, buildDateShowMoreBlock)\n- Modify: js/seo-worker.js:11198-11230 (__datePageEngagementTestHooks export)\n- Test: tests/date-pages.test.js (new describe(\"date card grid helpers\"))\n\n**Verify:** node --test tests/date-pages.test.js\n\n```json:metadata\n{\"files\": [\"js/seo-worker.js\", \"tests/date-pages.test.js\"], \"verifyCommand\": \"node --test tests/date-pages.test.js\", \"acceptanceCriteria\": [\"buildDateCardShell returns a .tl-card with the badge as a child, no tl-body/tl-node/tl-media\", \"buildDateShowMoreBlock returns {cardsHtml, moreScript}; no more-wrap when items fit visibleCount\", \"button label is Show ${remaining} more\", \"buildDateEraFilterScript/buildDateEraFilter accept optional moreId/btnId and reveal that wrap on a non-All chip click\", \"existing callers without moreId/btnId are unaffected\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: Rewrite the timeline CSS to a responsive card grid",
+      "status": "completed",
+      "blockedBy": [
+        0
+      ],
+      "description": "**Goal:** Replace the alternating-timeline CSS with the compact 4/3/2/1 grid system inside getSharedPageStyles().\n\n**Files:**\n- Modify: js/seo-worker.js:5359-5399 (the Events Timeline CSS block)\n- Test: tests/date-pages.test.js (new describe(\"date card grid CSS\"))\n\n**Verify:** node --test tests/date-pages.test.js && node --check js/seo-worker.js\n\n```json:metadata\n{\"files\": [\"js/seo-worker.js\", \"tests/date-pages.test.js\"], \"verifyCommand\": \"node --test tests/date-pages.test.js\", \"acceptanceCriteria\": [\".tl-wrap is display:grid with 4/3/2/1 columns at 1200/992/576px\", \".tl-card-badge is absolutely positioned, no separate .tl-node column\", \".tl-card-img fixed 200px height with .tl-card-img-cover/-contain variants\", \".tl-card-noimg reserves body padding instead of a placeholder box\", \"title clamped 2 lines, description clamped 3 lines\", \"old ::before rail and .tl-item-odd/-even rules removed\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: Wire the events page to the new card shell and pagination",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ],
+      "description": "**Goal:** generateEventsDateHTML renders the new grid markup: consolidated card shell, no alternating classes, pagination past 12 items, era-filter-aware reveal.\n\n**Files:**\n- Modify: js/seo-worker.js:6134-6194 (renderTimelineItem, othersHtml, buildDateEraFilter call)\n- Modify: js/seo-worker.js:6288-6293 (template embedding site)\n- Test: tests/date-pages.test.js:634-689 (describe(\"events page batch 2 blocks\"))\n\n**Verify:** node --test tests/date-pages.test.js\n\n```json:metadata\n{\"files\": [\"js/seo-worker.js\", \"tests/date-pages.test.js\"], \"verifyCommand\": \"node --test tests/date-pages.test.js\", \"acceptanceCriteria\": [\"each event card is .tl-item wrapping one .tl-card, no odd/even or tl-body/tl-node/tl-media\", \"event images use tl-card-img tl-card-img-contain\", \">12 others produces #events-more + Show N more button + show-more script\", \"buildEventAnchorNavigationScript needs no changes\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Wire the born (births) page to the new card shell and pagination",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ],
+      "description": "**Goal:** generateBornHTML renders the new grid markup with births-more/births-more-btn pagination.\n\n**Files:**\n- Modify: js/seo-worker.js:7106-7161 (renderBornTlItem, birthsHtml, buildDateEraFilter call)\n- Modify: js/seo-worker.js:7245-7251 (template embedding site)\n- Test: tests/date-pages.test.js:285-317\n- Test: tools/born-died-era-cards.test.js:43-69\n\n**Verify:** node --test tests/date-pages.test.js tools/born-died-era-cards.test.js\n\n```json:metadata\n{\"files\": [\"js/seo-worker.js\", \"tests/date-pages.test.js\", \"tools/born-died-era-cards.test.js\"], \"verifyCommand\": \"node --test tests/date-pages.test.js tools/born-died-era-cards.test.js\", \"acceptanceCriteria\": [\"each birth card uses buildDateCardShell with tl-card-img-cover\", \"19-person fixtures trigger id=births-more and Show 7 more\", \"tl-card-actions count stays 19 (hidden cards still in HTML)\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: Wire the died (deaths) page to the new card shell and pagination",
+      "status": "completed",
+      "blockedBy": [
+        1
+      ],
+      "description": "**Goal:** generateDiedHTML renders the new grid markup with deaths-more/deaths-more-btn pagination, keeping the gray badge color.\n\n**Files:**\n- Modify: js/seo-worker.js:7400-7455 (renderDiedTlItem, deathsHtml, buildDateEraFilter call)\n- Modify: js/seo-worker.js:7538-7545 (template embedding site)\n- Test: tests/date-pages.test.js:319-336\n- Test: tools/born-died-era-cards.test.js:71-91\n\n**Verify:** node --test tests/date-pages.test.js tools/born-died-era-cards.test.js\n\n```json:metadata\n{\"files\": [\"js/seo-worker.js\", \"tests/date-pages.test.js\", \"tools/born-died-era-cards.test.js\"], \"verifyCommand\": \"node --test tests/date-pages.test.js tools/born-died-era-cards.test.js\", \"acceptanceCriteria\": [\"each death card uses buildDateCardShell with badgeStyle background:#6c757d and tl-card-img-cover\", \"19-person fixtures trigger id=deaths-more and Show 7 more\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 6: Stop normalizeDatePageCleanLayoutHtml from flattening the new pagination",
+      "status": "completed",
+      "blockedBy": [
+        2,
+        3,
+        4
+      ],
+      "description": "**Goal:** Remove the expandDateTimelineHtml call from the serve-time cleanup pipeline so #events-more/#births-more/#deaths-more survive being served, on both cache miss and cache hit.\n\n**Files:**\n- Modify: js/seo-worker.js:5883-5885\n- Test: tools/born-died-era-cards.test.js:175-218\n\n**Verify:** node --test tools/born-died-era-cards.test.js\n\n**Context:** commit 797e9f9 (2026-07-28) deliberately removed this exact pagination pattern and added expandDateTimelineHtml to flatten it in cached HTML. That function also runs on freshly generated HTML, so it would silently undo Tasks 3-5 without this fix. User was informed and explicitly approved reintroducing the pattern (2026-07-30). Keep this change minimal/isolated (1 line) for easy revert if needed.\n\n```json:metadata\n{\"files\": [\"js/seo-worker.js\", \"tools/born-died-era-cards.test.js\"], \"verifyCommand\": \"node --test tools/born-died-era-cards.test.js\", \"acceptanceCriteria\": [\"normalizeDatePageCleanLayoutHtml no longer calls expandDateTimelineHtml\", \"expandDateTimelineHtml stays defined and exported, not deleted\", \"a synthetic #births-more wrap survives normalizeDatePageCleanLayoutHtml unmerged while all other cleanup behaviors are unaffected\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 7: Bump cache-key versions and run full verification",
+      "status": "completed",
+      "blockedBy": [
+        5
+      ],
+      "description": "**Goal:** Force every date to regenerate with the new grid on next visit; confirm the whole change set is internally consistent.\n\n**Files:**\n- Modify: js/seo-worker.js:577,7757,7875,8280 (gen-post-v50->v51, born-v33->v34, died-v32->v33)\n- Test: tests/date-pages.test.js:461-472, tools/born-died-era-cards.test.js:168-172, tools/date-page-controls.test.js:67\n\n**Verify:** node --test tests/date-pages.test.js tools/born-died-era-cards.test.js tools/date-page-controls.test.js tools/homepage-responsive-images.test.js tests/routes.test.js tests/schema.test.js tests/seo-text.test.js\n\n```json:metadata\n{\"files\": [\"js/seo-worker.js\", \"tests/date-pages.test.js\", \"tools/born-died-era-cards.test.js\", \"tools/date-page-controls.test.js\"], \"verifyCommand\": \"node --test tests/date-pages.test.js tools/born-died-era-cards.test.js tools/date-page-controls.test.js tools/homepage-responsive-images.test.js tests/routes.test.js tests/schema.test.js tests/seo-text.test.js\", \"acceptanceCriteria\": [\"all three date-page KV cache keys bumped by exactly one version\", \"DATE_PERSON_MEDIA_EDGE_CACHE_VERSION untouched\", \"no stray old-version string remains anywhere in js/seo-worker.js\", \"full relevant suite green\", \"design doc status line updated\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-07-30T23:59:00Z"
+}

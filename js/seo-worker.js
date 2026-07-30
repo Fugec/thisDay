@@ -1634,7 +1634,7 @@ function buildHomepageBlogCards(posts) {
       );
       const imageHtml = imageUrl
         ? isWikimediaImage
-          ? `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80" srcset="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=320&q=80 320w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80 600w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=960&q=80 960w" sizes="(max-width: 767px) 85vw, 33vw" alt="${escapeHtml(title)}" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" />`
+          ? `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80" srcset="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=320&q=80 320w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=600&q=80 600w, /image-proxy?src=${encodeURIComponent(imageUrl)}&w=960&q=80 960w" sizes="(max-width: 900px) 70vw, 33vw" alt="${escapeHtml(title)}" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" />`
           : `<img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)}" class="blog-card-img" width="600" height="400" loading="lazy" decoding="async" />`
         : "";
       return `<a class="blog-card" href="/blog/${escapeHtml(post.slug)}/" style="text-decoration:none;color:inherit;">
@@ -9843,7 +9843,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=42>; rel=preload; as=style",
+      "</css/custom.css?v=43>; rel=preload; as=style",
     ].join(", "),
   );
 

@@ -158,7 +158,7 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=42/);
+  assert.match(indexHtml, /custom\.css\?v=43/);
   assert.match(indexHtml, /script\.js\?v=22/);
   assert.match(
     workerSource,
@@ -175,7 +175,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=42"),
+      new Request("https://thisday.info/css/custom.css?v=43"),
       {},
       { waitUntil() {} },
     );

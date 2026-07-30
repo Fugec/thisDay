@@ -167,11 +167,11 @@ describe("Born and died major-person era cards", () => {
     assert.match(html, /data-major-persons-timeline="births"/);
     assert.match(html, /data-cached-major-persons="births"/);
     assert.match(html, /class="era-chip era-chip-active" aria-pressed="true"/);
-    assert.match(seoSource, /born-v35-/);
-    assert.match(seoSource, /died-v34-/);
+    assert.match(seoSource, /born-v36-/);
+    assert.match(seoSource, /died-v35-/);
     assert.match(seoSource, /DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 6/);
-    assert.doesNotMatch(seoSource, /born-v36-/);
-    assert.doesNotMatch(seoSource, /died-v35-/);
+    assert.doesNotMatch(seoSource, /born-v37-/);
+    assert.doesNotMatch(seoSource, /died-v36-/);
   });
 
   it("cleans a cached date page without flattening an existing more-wrap", () => {

@@ -64,7 +64,7 @@ test("cached date pages receive the same control classes without a KV rewrite", 
   );
   assert.match(
     seoWorker,
-    /const kvKey = `gen-post-v52-[\s\S]*?const normalizedControls = normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /const kvKey = `gen-post-v53-[\s\S]*?const normalizedControls = normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
   );
   assert.match(seoWorker, /navigationBlock\.match\(\/<a\\b/);
   assert.match(seoWorker, /link\.includes\(className\)/);

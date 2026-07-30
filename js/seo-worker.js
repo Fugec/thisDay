@@ -574,7 +574,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v52/born-v35/died-v34) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v53/born-v36/died-v35) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
@@ -5995,11 +5995,24 @@ function normalizeDatePageCleanLayoutHtml(
   const legacyEraScript = ([...removedRegion.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/gi)]
     .map((match) => match[0])
     .find((script) => script.includes(`[data-era-filter="${eraKey}"]`))) || "";
+  // Pagination's wrap/button live inside the card-box (before cardEnd) and
+  // survive untouched; only their scripts sit in the discarded removedRegion,
+  // so both must be rebuilt here too or "Show N more" silently loses its
+  // click/scroll handlers on every render (this function always reconstructs
+  // the trailing section, not just for legacy cached HTML).
+  const moreId = `${eraKey}-more`;
+  const btnId = `${eraKey}-more-btn`;
+  const hasMoreWrap = source.slice(0, cardEnd).includes(`id="${btnId}"`);
   const eraScript = legacyEraScript
     ? buildDateEraFilterScript(
         eraKey,
         `.tl-item[data-era-item="${eraKey}"]`,
+        hasMoreWrap ? moreId : undefined,
+        hasMoreWrap ? btnId : undefined,
       )
+    : "";
+  const showMoreScript = hasMoreWrap
+    ? buildDateShowMoreScript(moreId, btnId)
     : "";
   const bottomNavigation = buildDateBottomNavigationForRoute(
     monthName,
@@ -6011,7 +6024,7 @@ function normalizeDatePageCleanLayoutHtml(
   // Trim whitespace trailing the removed old-style bottom nav so this stays
   // idempotent whether or not that legacy div is still present to match.
   const bottomTail = source.slice(oldBottomEnd).replace(/^\s+(?=<\/main>)/, "");
-  return `${source.slice(0, cardEnd)}\n  ${eraScript}\n  ${bottomNavigation}\n${bottomTail}`;
+  return `${source.slice(0, cardEnd)}\n  ${eraScript}\n  ${showMoreScript}\n  ${bottomNavigation}\n${bottomTail}`;
 }
 
 function generateEventsDateHTML(
@@ -7792,7 +7805,7 @@ async function handleBornPage(request, env, ctx, url) {
   const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v35-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v36-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -7910,7 +7923,7 @@ async function handleDiedPage(request, env, ctx, url) {
   const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v34-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v35-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -8315,7 +8328,7 @@ async function handleEventsDatePage(request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v52-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v53-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {

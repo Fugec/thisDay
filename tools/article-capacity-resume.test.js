@@ -764,9 +764,9 @@ test("article generation request budget reserves one bounded replacement topic a
   assert.equal(resumed.requestBudget.date, new Date().toISOString().slice(0, 10));
   assert.equal(kv.puts.length, 6);
 
-  assert.equal(hooks.articleGenerationRequestBudgetLimit({}), 8);
+  assert.equal(hooks.articleGenerationRequestBudgetLimit({}), 12);
   assert.equal(hooks.articleGenerationReplacementRequestBudgetLimit({}), 14);
-  assert.equal(hooks.articleGenerationDailyRequestBudgetLimit({}), 22);
+  assert.equal(hooks.articleGenerationDailyRequestBudgetLimit({}), 26);
   assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "4" }), 4);
   assert.equal(
     hooks.articleGenerationReplacementRequestBudgetLimit({
@@ -781,7 +781,44 @@ test("article generation request budget reserves one bounded replacement topic a
     }),
     10,
   );
-  assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "100" }), 8);
+  assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "100" }), 12);
+});
+
+test("only repeated-opening continuity failures may degrade gracefully", () => {
+  const repeatedOpening = {
+    ok: false,
+    issues: [
+      "conclusionParagraphs repeats the opening pattern used by eyewitnessOrChronicle",
+    ],
+    repairFields: ["conclusionParagraphs"],
+  };
+  assert.equal(
+    hooks.isLowRiskChunkedContinuityFailure(repeatedOpening),
+    true,
+  );
+  assert.equal(
+    hooks.isLowRiskChunkedContinuityFailure({
+      ...repeatedOpening,
+      issues: [
+        ...repeatedOpening.issues,
+        "conclusion does not clearly pick up enough earlier body detail",
+      ],
+    }),
+    false,
+  );
+
+  const worker = readFileSync(
+    new URL("../js/blog-ai-worker.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    worker,
+    /!lastResortRecovery &&\s*!isLowRiskChunkedContinuityFailure\(continuity\)/,
+  );
+  assert.match(
+    worker,
+    /if \(!lastResortRecovery && !lowRiskContinuity\) \{\s*throw new Error\(`chunked article fallback continuity failed/,
+  );
 });
 
 test("optional unsupported claims are removed locally without weakening grounding gates", () => {
@@ -869,6 +906,155 @@ test("optional unsupported claims are removed locally without weakening groundin
     "The cause of the disappearance remains unknown.",
   );
   assert.equal(hooks.verifyArticleGrounding(mh370Repaired.content, mh370Source).ok, true);
+});
+
+test("legislative idiom, causal denials, and optional labels do not strand a complete article", () => {
+  const source = {
+    pageTitle: "Social Security Amendments of 1965",
+    text:
+      "President Lyndon B. Johnson signed the Social Security Amendments of 1965 into law on July 30, 1965. " +
+      "The legislation established Medicare and Medicaid.",
+    sourceExtract:
+      "The American Medical Association opposed earlier health insurance legislation. " +
+      "A committee feared that adding health insurance would kill the entire bill.",
+  };
+  const content = {
+    title: "Social Security Amendments of 1965 — July 30, 1965",
+    eventTitle: "Social Security Amendments of 1965",
+    historicalYear: 1965,
+    quickFacts: [
+      { label: "Event", value: "Social Security Amendments of 1965" },
+      { label: "Date", value: "July 30, 1965" },
+      { label: "Location", value: "Washington, D.C." },
+      { label: "Key Figure", value: "Lyndon B. Johnson" },
+      { label: "Source Detail", value: "The legislation established Medicare and Medicaid" },
+      { label: "Confirmed Outcome", value: "First federal public health insurance programs created" },
+    ],
+    analysisBad: [
+      {
+        title: "AMA Opposition Blocked Earlier Bills",
+        detail:
+          "A committee feared that adding health insurance would kill the entire bill. " +
+          "The source does not quantify the association's influence or claim its opposition was the sole cause of failure.",
+      },
+    ],
+  };
+
+  const before = hooks.verifyArticleGrounding(content, source);
+  assert.equal(before.ok, false);
+  assert.match(before.reasons.join(" "), /quickFacts\[5\]\.value/);
+  assert.match(before.reasons.join(" "), /analysisBad\[0\]\.title/);
+  assert.doesNotMatch(before.reasons.join(" "), /perpetrator attribution|sole cause/);
+
+  const repaired = hooks.mechanicallyRemoveOptionalUnsupportedClaims(content, source);
+  assert.deepEqual(repaired.repairedFieldPaths, [
+    "quickFacts[5].value",
+    "analysisBad[0].title",
+  ]);
+  assert.deepEqual(repaired.content.quickFacts[5], {
+    label: "Source Subject",
+    value: "Social Security Amendments of 1965",
+  });
+  assert.equal(
+    repaired.content.analysisBad[0].title,
+    "Source Documented Limitation",
+  );
+  assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
+});
+
+test("chunk continuity catches copied body sentences before enrichment", () => {
+  const repeated =
+    "The committee record lists the same dated vote and the same participating institutions in full.";
+  const paragraph = (opening, extra) =>
+    `${opening} ${repeated} ${extra} ` +
+    "The archival account supplies names, dates, locations, and procedural details that keep this section tied to the canonical event. ".repeat(8);
+  const content = {
+    title: "Congress Passes a Documented Act — July 30, 1965",
+    eventTitle: "Congress Passes a Documented Act",
+    historicalDate: "July 30, 1965",
+    historicalYear: 1965,
+    location: "Washington, D.C.",
+    organizerName: "Lyndon B. Johnson",
+    sourceFacts: [
+      "Congress recorded the vote in 1965.",
+      "Lyndon B. Johnson signed the act.",
+    ],
+    overviewParagraphs: [
+      paragraph("The overview establishes the documented act.", "It introduces the measure."),
+      paragraph("The overview then follows committee work.", "It distinguishes the earlier proposal."),
+    ],
+    eyewitnessOrChronicle: [
+      paragraph("The chronology follows the roll call.", "It names the chamber."),
+      paragraph("The record then reaches the signing.", "It names the ceremony."),
+    ],
+    aftermathParagraphs: [
+      paragraph("Implementation required administrative work.", "Agencies updated their procedures."),
+      paragraph("Later records describe program operation.", "The statute remained the reference."),
+    ],
+    conclusionParagraphs: [
+      paragraph("The conclusion returns to the enacted text.", "The documented vote remains central."),
+      paragraph("The final record separates proposal from law.", "The dated sequence closes the account."),
+    ],
+  };
+
+  const audit = hooks.auditChunkedArticleContinuity(content);
+  assert.equal(audit.ok, false);
+  assert.match(audit.issues.join(" "), /body cross-section duplicate/);
+  assert.ok(audit.repairFields.includes("conclusionParagraphs"));
+  assert.equal(hooks.isLowRiskChunkedContinuityFailure(audit), false);
+});
+
+test("source attribution and beyond-Wikipedia rationale are article-level quality signals", () => {
+  const body = {
+    eventTitle: "A Documented Event",
+    title: "A Documented Event — July 30, 1965",
+    sourcePages: [
+      {
+        title: "Independent legislative archive",
+        publisher: "University Archive",
+        verifiedIndependent: true,
+      },
+    ],
+    overviewParagraphs: [
+      "The archival record identifies the 1965 event, date, place, institutions, and formal action. ".repeat(14),
+    ],
+    eyewitnessOrChronicle: [
+      "Lyndon Johnson and named participants followed the dated procedure through committee review and a recorded vote. ".repeat(13),
+    ],
+    aftermathParagraphs: [
+      "Federal administrators implemented the enacted 1965 provisions through documented institutional procedures. ".repeat(14),
+    ],
+    conclusionParagraphs: [
+      "The final 1965 account separates the proposal, vote, enactment, and later administration into distinct stages. ".repeat(12),
+    ],
+    didYouKnowFacts: [
+      "The 1965 record identifies a named institution and a dated vote with enough detail for independent review.",
+      "A second 1965 source records the same event from a separate institutional archive for comparison.",
+      "The enacted text distinguishes two documented program components administered under separate titles in 1965.",
+      "The archive preserves named participants, locations, and procedural steps from the 1965 legislative sequence.",
+    ],
+    editorialNote:
+      "The archival record from 1965 identifies the event, the institutions, and the dated procedure. This measured note keeps those concrete details together and distinguishes proposal, vote, enactment, and administration without adding a modern comparison or unsupported lesson for readers.",
+  };
+  const issues = hooks.scanArticleQuality(body);
+  assert.doesNotMatch(
+    issues.join(" "),
+    /eyewitnessOrChronicle needs|aftermathParagraphs needs|conclusionParagraphs needs/,
+  );
+
+  const repaired = hooks.ensureSourceComparisonContentRationale(body);
+  assert.match(repaired.contentRationale, /Wikipedia/);
+  assert.match(repaired.contentRationale, /University Archive/);
+  assert.ok(repaired.contentRationale.split(/\s+/).length >= 35);
+});
+
+test("secondary Wikimedia figures receive filename-grounded alt text", () => {
+  const alt = hooks.groundedSecondaryImageAlt(
+    "https://upload.wikimedia.org/wikipedia/commons/f/f5/Lyndon_B._Johnson_photo_portrait-Black%27n_white.jpg",
+    "Social Security Amendments of 1965",
+  );
+  assert.match(alt, /Lyndon B\. Johnson photo portrait/i);
+  assert.doesNotMatch(alt, /^via Wikimedia$/i);
 });
 
 test("undersized chunked body selects only the shortest field for targeted repair", () => {

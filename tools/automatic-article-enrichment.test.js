@@ -92,6 +92,43 @@ test("event fallbacks omit unsupported significance prose instead of filling spa
   );
 });
 
+test("short event leads reuse validated article copy so the evergreen card does not depend on AI capacity", () => {
+  const articleParagraph = Array.from(
+    { length: 125 },
+    (_, index) => `grounded${index}`,
+  ).join(" ") + ".";
+  const secondArticleParagraph = Array.from(
+    { length: 75 },
+    (_, index) => `verified${index}`,
+  ).join(" ") + ".";
+  const entity = {
+    type: "event",
+    slug: "example-law-1965",
+    name: "Example Law",
+    url: "/history/example-law-1965/",
+    wikiUrl: "https://en.wikipedia.org/wiki/Example_Law",
+    historyQualityGateVersion: 2,
+    summary:
+      "Example Law became law in 1965 and created two documented public programs.",
+    intro:
+      "Example Law became law in 1965 and created two documented public programs.",
+  };
+  const sections = hooks.buildFallbackEntityBodySections(entity, {
+    overviewParagraphs: [articleParagraph, secondArticleParagraph],
+  });
+  const words = sections
+    .flatMap((section) => section.paragraphs)
+    .join(" ")
+    .split(/\s+/)
+    .filter(Boolean).length;
+
+  assert.ok(words >= 150, `expected at least 150 fallback words, got ${words}`);
+  assert.equal(
+    hooks.blogEntityQualityEligible({ ...entity, bodySections: sections }),
+    true,
+  );
+});
+
 test("secondary article images exclude the hero and duplicate Wikimedia files", () => {
   const images = hooks.uniqueSecondaryArticleImages(
     hero,

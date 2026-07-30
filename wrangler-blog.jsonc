@@ -45,9 +45,9 @@
     // concurrent Groq article chunks, preventing parallel TPM exhaustion.
     "GROQ_QUOTA_POOL_IDS": "",
     // Durable per-source logical AI-call ceiling. Five calls create the normal
-    // checkpointed article; eight leaves targeted repair headroom and reserves
-    // free-tier capacity for final grounding/publication gates.
-    "ARTICLE_GENERATION_REQUEST_BUDGET": "8",
+    // checkpointed article; twelve also covers both split-body fallbacks, one
+    // malformed-chunk retry, and the two targeted repair stages.
+    "ARTICLE_GENERATION_REQUEST_BUDGET": "12",
     // One genuinely different replacement source may use up to fourteen calls;
     // prompt variants get no new allowance and a third topic is blocked.
     "ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET": "14",

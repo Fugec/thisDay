@@ -234,6 +234,44 @@ test("future article metadata retains the history card title, image, and descrip
   );
 });
 
+test("history card promotion is not confused by its CSS class name", () => {
+  const stored = `<!doctype html><html><head><style>.story-topic-section{margin-top:1rem}</style></head><body>
+    <div class="entity-strip people-strip" data-entity-strip="1"><div class="entity-strip-content people-track-wrap"><h2 class="h3">People in this story</h2><div class="entity-person-chips people-track"><span class="person-pill"><span class="person-pill-name">Example Person</span></span></div></div></div>
+  </body></html>`;
+  const entityMeta = JSON.stringify([
+    {
+      type: "event",
+      slug: "example-event-1965",
+      name: "Example Event",
+      url: "/history/example-event-1965/",
+      wikiUrl: "https://en.wikipedia.org/wiki/Example_Event",
+      historyLinkEligible: true,
+      historyCardQualified: true,
+      historyQualityGateVersion: 2,
+      evergreenHistoryVersion: 1,
+    },
+    {
+      type: "person",
+      slug: "example-person",
+      name: "Example Person",
+      url: "/people/example-person/",
+      wikiUrl: "https://en.wikipedia.org/wiki/Example_Person",
+    },
+  ]);
+
+  const promoted = blogHooks.normalizeArticleHistoryDiscoveryCardHtml(
+    stored,
+    entityMeta,
+  );
+
+  assert.match(promoted, /<section class="story-topic-section"/);
+  assert.match(promoted, /data-history-entity-link="1"/);
+  assert.equal(
+    (promoted.match(/<section class="story-topic-section"/g) || []).length,
+    1,
+  );
+});
+
 test("serve-time history link migration preserves the date article canonical", () => {
   const stored = `<!doctype html><html><head>
     <link rel="canonical" href="https://thisday.info/blog/17-july-2026/" />

@@ -40,7 +40,7 @@ function makePerson(year, index) {
 const people = years.map(makePerson);
 
 describe("Born and died major-person era cards", () => {
-  it("renders every ranked birth in a paginated card grid with the shared action wrapper", () => {
+  it("renders every ranked birth immediately with the shared action wrapper", () => {
     const html = hooks.generateBornHTML(
       "https://thisday.info",
       "july",
@@ -56,8 +56,7 @@ describe("Born and died major-person era cards", () => {
     assert.match(html, /aria-label="Filter people born on this day by era"/);
     assert.match(html, /class="era-chip era-chip-active" aria-pressed="true"/);
     assert.match(html, /data-era-item="births"/);
-    assert.match(html, /id="births-more"/);
-    assert.match(html, />Show 7 more</);
+    assert.doesNotMatch(html, /id="births-more"|Show \d+ more/);
     assert.match(html, /Major Person 20/);
     assert.equal((html.match(/class="tl-card-actions"/g) || []).length, 19);
     assert.match(html, /class="dyn-slider-shell"/);
@@ -69,7 +68,7 @@ describe("Born and died major-person era cards", () => {
     assert.doesNotMatch(html, /person-filmography|Open the Calendar|All Blog Posts/);
   });
 
-  it("renders every ranked death in a paginated card grid with the same clean layout", () => {
+  it("renders every ranked death immediately with the same clean layout", () => {
     const html = hooks.generateDiedHTML(
       "https://thisday.info",
       "july",
@@ -82,8 +81,7 @@ describe("Born and died major-person era cards", () => {
     assert.match(html, /aria-label="Filter people who died on this day by era"/);
     assert.match(html, /class="era-chip era-chip-active" aria-pressed="true"/);
     assert.match(html, /data-era-item="deaths"/);
-    assert.match(html, /id="deaths-more"/);
-    assert.match(html, />Show 7 more</);
+    assert.doesNotMatch(html, /id="deaths-more"|Show \d+ more/);
     assert.match(html, /Major Person 20/);
     assert.equal((html.match(/class="tl-card-actions"/g) || []).length, 19);
     assert.match(html, /class="dyn-slider-shell"/);
@@ -167,14 +165,14 @@ describe("Born and died major-person era cards", () => {
     assert.match(html, /data-major-persons-timeline="births"/);
     assert.match(html, /data-cached-major-persons="births"/);
     assert.match(html, /class="era-chip era-chip-active" aria-pressed="true"/);
-    assert.match(seoSource, /born-v36-/);
-    assert.match(seoSource, /died-v35-/);
+    assert.match(seoSource, /born-v37-/);
+    assert.match(seoSource, /died-v36-/);
     assert.match(seoSource, /DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 6/);
-    assert.doesNotMatch(seoSource, /born-v37-/);
-    assert.doesNotMatch(seoSource, /died-v36-/);
+    assert.doesNotMatch(seoSource, /born-v38-/);
+    assert.doesNotMatch(seoSource, /died-v37-/);
   });
 
-  it("cleans a cached date page without flattening an existing more-wrap", () => {
+  it("expands and cleans a cached date page without changing its KV key", () => {
     const oldHtml = `<!doctype html><html><head>
       <style id="date-person-filmography-style">.person-filmography{display:block}</style>
       <style>.date-story-float{display:grid}@media(max-width:700px){.date-story-float{display:block}}.tl-item{display:flex}</style>
@@ -207,8 +205,7 @@ describe("Born and died major-person era cards", () => {
     assert.equal(cleanedTwice, cleaned);
     assert.match(cleaned, />One</);
     assert.match(cleaned, />Two</);
-    assert.equal((cleaned.match(/class="tl-wrap"/g) || []).length, 2);
-    assert.match(cleaned, /id="births-more"/);
+    assert.equal((cleaned.match(/class="tl-wrap"/g) || []).length, 1);
     assert.equal((cleaned.match(/class="tl-card-actions"/g) || []).length, 2);
     assert.equal((cleaned.match(/decoding="async"/g) || []).length, 2);
     assert.match(cleaned, /content-visibility:auto;contain-intrinsic-size:auto 420px/);
@@ -217,6 +214,6 @@ describe("Born and died major-person era cards", () => {
     assert.doesNotMatch(cleaned, /bootstrap\.bundle\.min\.js|"@type":"Quiz"|ai-card-patch-v2/);
     assert.match(cleaned, /class="date-bottom-navigation/);
     assert.match(cleaned, /data-cached-major-persons="births"/);
-    assert.doesNotMatch(cleaned, /IMDb|Major events|Featured article|Open the Calendar|date-story-float/);
+    assert.doesNotMatch(cleaned, /births-more|Show all|IMDb|Major events|Featured article|Open the Calendar|date-story-float/);
   });
 });

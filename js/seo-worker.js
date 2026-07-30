@@ -574,7 +574,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v53/born-v36/died-v35) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v55/born-v37/died-v36) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
@@ -5372,7 +5372,6 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .tl-btn{font-size:15px!important;font-weight:400!important;padding:9px 10px!important;display:flex!important;justify-content:center!important;width:100%!important;box-sizing:border-box}
 .tl-thumb{width:100%;height:auto;max-height:130px;object-fit:contain;border-radius:8px;display:block;background:rgba(0,0,0,.04);padding:4px}
 .tl-thumb-blank{width:100%;height:100px;border-radius:8px;background:rgba(0,0,0,.05);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:1.6rem}
-.tl-more-btn-wrap{grid-column:1/-1;display:flex;justify-content:center;margin-top:6px}
 @media(max-width:1199px){.tl-wrap{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:991px){.tl-wrap{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:575px){.tl-wrap{grid-template-columns:1fr}}
@@ -5503,10 +5502,7 @@ const DATE_TIMELINE_AD_HTML = `<aside class="ad-unit date-timeline-ad" data-date
        data-full-width-responsive="true"></ins>
 </aside>`;
 
-function buildDateEraFilterScript(filterKey, itemSelector, moreId, btnId) {
-  const revealMoreSnippet = moreId && btnId
-    ? `if(!all){var moreWrap=document.getElementById('${moreId}'),moreBtn=document.getElementById('${btnId}');if(moreWrap)moreWrap.style.display='block';if(moreBtn)moreBtn.style.display='none';}`
-    : "";
+function buildDateEraFilterScript(filterKey, itemSelector) {
   return `<script>(function(){
 var row=document.querySelector('[data-era-filter="${filterKey}"]');
 if(!row)return;
@@ -5517,7 +5513,6 @@ this.classList.add('era-chip-active');
 this.setAttribute('aria-pressed','true');
 var min=parseInt(this.dataset.min,10),max=parseInt(this.dataset.max,10);
 var all=isNaN(min);
-${revealMoreSnippet}
 document.querySelectorAll('${itemSelector}').forEach(function(item){
 var y=parseInt(item.dataset.year,10);
 item.style.display=(all||(y>=min&&y<=max))?'':'none';
@@ -5531,8 +5526,6 @@ function buildDateEraFilter({
   ariaLabel,
   filterKey,
   itemSelector,
-  moreId,
-  btnId,
 }) {
   const list = Array.isArray(items) ? items : [];
   const years = list.map((item) => parseInt(item?.year, 10) || 0);
@@ -5552,7 +5545,7 @@ function buildDateEraFilter({
       )
       .join("")}
   </div>`;
-  const scriptHtml = buildDateEraFilterScript(filterKey, itemSelector, moreId, btnId);
+  const scriptHtml = buildDateEraFilterScript(filterKey, itemSelector);
   return { chipsHtml, scriptHtml };
 }
 
@@ -5577,42 +5570,6 @@ function buildDateCardShell({
     ${actionsHtml ? `<div class="tl-card-actions">${actionsHtml}</div>` : ""}
   </div>
 </div>`;
-}
-
-function buildDateShowMoreScript(moreId, btnId) {
-  return `<script>(function(){
-var btn=document.getElementById('${btnId}');
-var wrap=document.getElementById('${moreId}');
-if(!btn||!wrap)return;
-var observer=null;
-function reveal(){
-wrap.style.display='block';
-btn.style.display='none';
-if(observer)observer.disconnect();
-}
-btn.addEventListener('click',reveal);
-if('IntersectionObserver' in window){
-var firstCheck=true;
-observer=new IntersectionObserver(function(entries){
-if(firstCheck){firstCheck=false;return;}
-entries.forEach(function(entry){if(entry.isIntersecting)reveal();});
-},{rootMargin:'200px 0px'});
-observer.observe(btn);
-}
-})();</script>`;
-}
-
-function buildDateShowMoreBlock({ items, renderItem, visibleCount, moreId, btnId }) {
-  const list = Array.isArray(items) ? items : [];
-  const visible = list.slice(0, visibleCount);
-  const rest = list.slice(visibleCount);
-  const visibleHtml = visible.map(renderItem).join("");
-  if (rest.length === 0) {
-    return { cardsHtml: visibleHtml, moreScript: "" };
-  }
-  const restHtml = rest.map(renderItem).join("");
-  const cardsHtml = `${visibleHtml}<div id="${moreId}" style="display:none">${restHtml}</div><div class="tl-more-btn-wrap"><button type="button" id="${btnId}" class="site-btn">Show ${rest.length} more</button></div>`;
-  return { cardsHtml, moreScript: buildDateShowMoreScript(moreId, btnId) };
 }
 
 function buildExpandedCachedMajorPersonsScript(type) {
@@ -5924,7 +5881,9 @@ function normalizeDatePageCleanLayoutHtml(
       '<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-8565025017387209" crossorigin="anonymous"></script></head>',
     );
   }
-  source = ensureTimelineCardActionWrappersHtml(source);
+  source = ensureTimelineCardActionWrappersHtml(
+    expandDateTimelineHtml(source, routeType),
+  );
   source = ensureEraChipPressedStateHtml(source);
 
   const markerPatterns = routeType === "born"
@@ -5995,24 +5954,11 @@ function normalizeDatePageCleanLayoutHtml(
   const legacyEraScript = ([...removedRegion.matchAll(/<script\b[^>]*>[\s\S]*?<\/script>/gi)]
     .map((match) => match[0])
     .find((script) => script.includes(`[data-era-filter="${eraKey}"]`))) || "";
-  // Pagination's wrap/button live inside the card-box (before cardEnd) and
-  // survive untouched; only their scripts sit in the discarded removedRegion,
-  // so both must be rebuilt here too or "Show N more" silently loses its
-  // click/scroll handlers on every render (this function always reconstructs
-  // the trailing section, not just for legacy cached HTML).
-  const moreId = `${eraKey}-more`;
-  const btnId = `${eraKey}-more-btn`;
-  const hasMoreWrap = source.slice(0, cardEnd).includes(`id="${btnId}"`);
   const eraScript = legacyEraScript
     ? buildDateEraFilterScript(
         eraKey,
         `.tl-item[data-era-item="${eraKey}"]`,
-        hasMoreWrap ? moreId : undefined,
-        hasMoreWrap ? btnId : undefined,
       )
-    : "";
-  const showMoreScript = hasMoreWrap
-    ? buildDateShowMoreScript(moreId, btnId)
     : "";
   const bottomNavigation = buildDateBottomNavigationForRoute(
     monthName,
@@ -6024,7 +5970,7 @@ function normalizeDatePageCleanLayoutHtml(
   // Trim whitespace trailing the removed old-style bottom nav so this stays
   // idempotent whether or not that legacy div is still present to match.
   const bottomTail = source.slice(oldBottomEnd).replace(/^\s+(?=<\/main>)/, "");
-  return `${source.slice(0, cardEnd)}\n  ${eraScript}\n  ${showMoreScript}\n  ${bottomNavigation}\n${bottomTail}`;
+  return `${source.slice(0, cardEnd)}\n  ${eraScript}\n  ${bottomNavigation}\n${bottomTail}`;
 }
 
 function generateEventsDateHTML(
@@ -6191,10 +6137,6 @@ function generateEventsDateHTML(
   // Events card grid.
   const renderTimelineItem = (e) => {
     const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
-    const storyUrl =
-      typeof safeBlogStoryUrl === "function"
-        ? safeBlogStoryUrl(eventStoryLinks.get(e))
-        : "";
     const th = e.pages?.[0]?.thumbnail?.source || "";
     const yearStr = escapeHtml(String(e.year));
     const eventAnchorId = historicalEventAnchorId(e);
@@ -6211,8 +6153,8 @@ function generateEventsDateHTML(
         ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
         : `<img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
       : "";
-    const actionsHtml = storyUrl || w
-      ? `${storyUrl ? `<a href="${escapeHtml(storyUrl)}" class="site-btn site-btn-primary tl-btn">Read our story</a>` : ""}${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn tl-btn">Wikipedia source</a>` : ""}`
+    const actionsHtml = w
+      ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn tl-btn">Wikipedia source</a>`
       : "";
     const card = buildDateCardShell({
       year: yearStr,
@@ -6225,13 +6167,7 @@ function generateEventsDateHTML(
     });
     return `<div id="${escapeHtml(eventAnchorId)}" class="tl-item" data-year="${parseInt(e.year, 10) || 0}" data-era-item="events">${card}</div>`;
   };
-  const eventsShowMore = buildDateShowMoreBlock({
-    items: others,
-    renderItem: renderTimelineItem,
-    visibleCount: 12,
-    moreId: "events-more",
-    btnId: "events-more-btn",
-  });
+  const eventsHtml = others.map(renderTimelineItem).join("");
 
   // Filtering is display-only; every event stays in the HTML for SEO.
   const {
@@ -6242,8 +6178,6 @@ function generateEventsDateHTML(
     ariaLabel: "Filter events by era",
     filterKey: "events",
     itemSelector: '.tl-item[data-era-item="events"]',
-    moreId: "events-more",
-    btnId: "events-more-btn",
   });
 
   return `<!DOCTYPE html><html lang="en">
@@ -6340,11 +6274,10 @@ ${siteNav()}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
     ${others.length > 0 ? `
     ${eraChipsHtml}
-    <div class="tl-wrap">${eventsShowMore.cardsHtml}</div>` : ""}
+    <div class="tl-wrap">${eventsHtml}</div>` : ""}
     </div>
   </div>
-  ${eraChipScript}
-  ${eventsShowMore.moreScript}`
+  ${eraChipScript}`
       : `<div class="alert alert-info">No events found for ${escapeHtml(mDisplay)} ${day}.</div>`
   }
   ${buildDateBottomNavigationForRoute(monthName, day, "events")}
@@ -7191,13 +7124,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     return `<div class="tl-item" data-year="${parseInt(b.year, 10) || 0}" data-era-item="births">${card}</div>`;
   };
 
-  const birthsShowMore = buildDateShowMoreBlock({
-    items: othersB,
-    renderItem: renderBornTlItem,
-    visibleCount: 12,
-    moreId: "births-more",
-    btnId: "births-more-btn",
-  });
+  const birthsHtml = othersB.map(renderBornTlItem).join("");
   const {
     chipsHtml: birthEraChipsHtml,
     scriptHtml: birthEraChipScript,
@@ -7206,8 +7133,6 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     ariaLabel: "Filter people born on this day by era",
     filterKey: "births",
     itemSelector: '.tl-item[data-era-item="births"]',
-    moreId: "births-more",
-    btnId: "births-more-btn",
   });
 
   return `<!DOCTYPE html><html lang="en">
@@ -7298,12 +7223,11 @@ ${siteNav()}
       <h2 class="h5 mb-1" id="major-births-heading">More major people born on ${escapeHtml(mDisplay)} ${day}</h2>
       <p class="text-muted mb-3" style="font-size:14px">Notable people are ranked by substantive profile depth and public notability.</p>
       ${birthEraChipsHtml}
-      <div class="tl-wrap">${birthsShowMore.cardsHtml}</div>
+      <div class="tl-wrap">${birthsHtml}</div>
     </section>` : ""}
     </div>
   </div>
-  ${birthEraChipScript}
-  ${birthsShowMore.moreScript}` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  ${birthEraChipScript}` : `<div class="alert alert-info">No birthday data found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   ${buildDateBottomNavigationForRoute(monthName, day, "born")}
 </main>
 ${dateEngagementScript}
@@ -7485,13 +7409,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     return `<div class="tl-item" data-year="${parseInt(d.year, 10) || 0}" data-era-item="deaths">${card}</div>`;
   };
 
-  const deathsShowMore = buildDateShowMoreBlock({
-    items: othersD,
-    renderItem: renderDiedTlItem,
-    visibleCount: 12,
-    moreId: "deaths-more",
-    btnId: "deaths-more-btn",
-  });
+  const deathsHtml = othersD.map(renderDiedTlItem).join("");
   const {
     chipsHtml: deathEraChipsHtml,
     scriptHtml: deathEraChipScript,
@@ -7500,8 +7418,6 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     ariaLabel: "Filter people who died on this day by era",
     filterKey: "deaths",
     itemSelector: '.tl-item[data-era-item="deaths"]',
-    moreId: "deaths-more",
-    btnId: "deaths-more-btn",
   });
 
   return `<!DOCTYPE html><html lang="en">
@@ -7590,12 +7506,11 @@ ${siteNav()}
       <h2 class="h5 mb-1" id="major-deaths-heading">More major people who died on ${escapeHtml(mDisplay)} ${day}</h2>
       <p class="text-muted mb-3" style="font-size:14px">Notable people are ranked by substantive profile depth and public notability.</p>
       ${deathEraChipsHtml}
-      <div class="tl-wrap">${deathsShowMore.cardsHtml}</div>
+      <div class="tl-wrap">${deathsHtml}</div>
     </section>` : ""}
     </div>
   </div>
-  ${deathEraChipScript}
-  ${deathsShowMore.moreScript}` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
+  ${deathEraChipScript}` : `<div class="alert alert-info">No death records found for ${escapeHtml(mDisplay)} ${day}.</div>`}
   ${buildDateBottomNavigationForRoute(monthName, day, "died")}
 </main>
 ${dateEngagementScript}
@@ -7805,7 +7720,7 @@ async function handleBornPage(request, env, ctx, url) {
   const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v36-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v37-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -7923,7 +7838,7 @@ async function handleDiedPage(request, env, ctx, url) {
   const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v35-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v36-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -8328,7 +8243,7 @@ async function handleEventsDatePage(request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v53-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v55-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -11279,8 +11194,6 @@ export const __datePageEngagementTestHooks = {
   buildPublishedDateRouteMap,
   findMatchingDateBlogEntry,
   buildDateCardShell,
-  buildDateShowMoreBlock,
-  buildDateShowMoreScript,
   buildDateEraFilterScript,
   buildDateEraFilter,
 };

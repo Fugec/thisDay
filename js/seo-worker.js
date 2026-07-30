@@ -5362,10 +5362,8 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .tl-card{position:relative;height:100%;border:1px solid var(--cbr);border-radius:10px;overflow:hidden;background:var(--bg);transition:box-shadow .15s;display:flex;flex-direction:column}
 .tl-card:hover{box-shadow:var(--shadow)}
 .tl-card-badge{position:absolute;top:10px;left:10px;z-index:2;display:inline-block;background:var(--btn-bg);color:#fff;font-size:13px;font-weight:400;padding:4px 9px;border-radius:20px;white-space:nowrap;font-family:Georgia,serif;letter-spacing:.01em;box-shadow:0 1px 4px rgba(0,0,0,.25)}
-.tl-card-img{width:100%;height:200px;display:block}
-.tl-card-img-cover{object-fit:cover;object-position:top}
-.tl-card-img-contain{object-fit:contain;background:var(--bg-alt)}
-.tl-card-img-blank{width:100%;height:200px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:2rem;background:rgba(0,0,0,.05)}
+.tl-card-img{width:100%;height:auto;aspect-ratio:1/1;object-fit:cover;object-position:center top;display:block;filter:none}
+.tl-card-img-blank{width:100%;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:2rem;background:rgba(0,0,0,.05)}
 .tl-card-noimg .tl-card-body{padding-top:34px}
 .tl-card-body{padding:14px 16px;flex:1;display:flex;flex-direction:column;min-width:0}
 .tl-card-title{font-weight:700;font-size:15px;line-height:1.4;color:var(--text);margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -5594,7 +5592,9 @@ if(observer)observer.disconnect();
 }
 btn.addEventListener('click',reveal);
 if('IntersectionObserver' in window){
+var firstCheck=true;
 observer=new IntersectionObserver(function(entries){
+if(firstCheck){firstCheck=false;return;}
 entries.forEach(function(entry){if(entry.isIntersecting)reveal();});
 },{rootMargin:'200px 0px'});
 observer.observe(btn);
@@ -6195,8 +6195,8 @@ function generateEventsDateHTML(
     );
     const imgHtml = th
       ? w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img tl-card-img-contain" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
-        : `<img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img tl-card-img-contain" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
       : "";
     const actionsHtml = storyUrl || w
       ? `${storyUrl ? `<a href="${escapeHtml(storyUrl)}" class="site-btn site-btn-primary tl-btn">Read our story</a>` : ""}${w ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn tl-btn">Wikipedia source</a>` : ""}`
@@ -7158,8 +7158,8 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     const imgLink = profileUrl || w;
     const imgHtml = th
       ? imgLink
-        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img tl-card-img-cover" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
-        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img tl-card-img-cover" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
+        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : "";
     const actionBtn = profileUrl
       ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
@@ -7451,8 +7451,8 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     const imgLink = profileUrl || w;
     const imgHtml = th
       ? imgLink
-        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img tl-card-img-cover" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
-        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img tl-card-img-cover" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
+        ? `<a href="${escapeHtml(imgLink)}"${profileUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'"></a>`
+        : `<img src="${escapeHtml(th)}" alt="${name}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-person\\'></i></div>'">`
       : "";
     const actionBtn = profileUrl
       ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`

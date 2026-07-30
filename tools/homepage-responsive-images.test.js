@@ -41,7 +41,7 @@ test("homepage editorial images use edge-to-edge proportional frames", () => {
   );
   assert.match(
     customCss,
-    /\.quiz-card-img\s*\{[^}]*height:\s*auto[^}]*aspect-ratio:\s*16 \/ 9[^}]*object-fit:\s*cover[^}]*object-position:\s*center top/s,
+    /\.quiz-card-img\s*\{[^}]*height:\s*auto[^}]*aspect-ratio:\s*1 \/ 1[^}]*object-fit:\s*cover[^}]*object-position:\s*center top/s,
   );
   assert.match(indexHtml, /sizes="\(max-width: 900px\) 70vw, 25vw"/);
   assert.match(seoWorker, /sizes="\(max-width: 900px\) 70vw, 25vw"/);
@@ -63,10 +63,10 @@ test("carousel eagerly loads only its first responsive image", () => {
 
 test("homepage static asset versions are current", () => {
   assert.match(indexHtml, /js\/script\.js\?v=23/);
-  assert.match(indexHtml, /custom\.css\?v=45/);
-  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v29"/);
+  assert.match(indexHtml, /custom\.css\?v=46/);
+  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v30"/);
   assert.match(serviceWorker, /"\/js\/script\.js\?v=23"/);
-  assert.match(serviceWorker, /"\/css\/custom\.css\?v=45"/);
-  assert.match(seoWorker, /custom\.css\?v=45/);
+  assert.match(serviceWorker, /"\/css\/custom\.css\?v=46"/);
+  assert.match(seoWorker, /custom\.css\?v=46/);
   assert.match(seoWorker, /width="480" height="360" loading="lazy" decoding="async"/);
 });

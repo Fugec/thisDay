@@ -216,9 +216,14 @@ function homepageFeaturedPersonContent(item) {
   if (!item || typeof item !== "object") return null;
   const page = item.pages?.[0] || {};
   const itemText = String(item.text || "").trim();
+  const textName = itemText.includes(",")
+    ? itemText.slice(0, itemText.indexOf(",")).trim()
+    : "";
   const title = String(
-    page.title || page.normalizedtitle || itemText.split(",")[0] || "",
-  ).trim();
+    textName || page.normalizedtitle || page.title || itemText || "",
+  )
+    .replace(/_/g, " ")
+    .trim();
   const description = truncateHomepagePreloadText(
     page.description || page.extract || itemText,
     170,
@@ -9932,7 +9937,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=45>; rel=preload; as=style",
+      "</css/custom.css?v=46>; rel=preload; as=style",
     ].join(", "),
   );
 

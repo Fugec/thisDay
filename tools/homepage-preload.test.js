@@ -145,10 +145,22 @@ test("featured birth and death cards reuse compact person metadata", () => {
   const content = hooks.homepageFeaturedPersonContent(person);
 
   assert.deepEqual(content, {
-    title: "Example_Subject",
+    title: "Example Subject",
     description: "A useful page description",
     imageUrl: "https://upload.wikimedia.org/example.jpg",
   });
+});
+
+test("featured person names prefer the readable on-this-day label", () => {
+  const person = rawItem(5);
+  person.text = "James Anderson, English cricketer and record-setting bowler";
+  person.pages[0].title = "James_Anderson_(cricketer)";
+  delete person.pages[0].normalizedtitle;
+
+  assert.equal(
+    hooks.homepageFeaturedPersonContent(person).title,
+    "James Anderson",
+  );
 });
 
 test("preview reduces representative raw preload bytes by at least 85 percent", () => {

@@ -6788,6 +6788,8 @@ const WRITING_REWRITE_RULES =
   "- Create controlled burstiness: place an occasional short declarative sentence beside a longer layered one, and never write three sentences of similar length or shape in a row. Do not use fragments as decoration.\n" +
   "- Vary sentence openings. Do not march through a paragraph with repeated 'The...' openings, identical subjects, or the same grammatical pattern.\n" +
   "- Reject neat balanced triads, mirrored sentence pairs, symmetrical both-sides hedging, and formulaic transition phrases. Let the evidence determine the shape of the paragraph.\n" +
+  "- Do not default to 'not X, but Y' for contrast. Vary how a contrast lands instead of reusing that one construction.\n" +
+  "- One hedge per claim is enough ('may well', 'seems', 'is thought to'). Never stack two in the same clause ('it may potentially be possible that').\n" +
   "- Keep a serious feature-magazine register: vivid and readable, never chatty, breezy, promotional, second-person, or theatrically over-written.\n" +
   "- Preserve paragraph-local facts. Keep every supported clause, qualifier, example, name, place, date, and number. During a rewrite, introduce no new entity, characterization, comparison, source, or cross-reference.\n" +
   "- Prefer concrete, slightly less predictable verbs when they are exact. Do not reach for a thesaurus, purple prose, or an image the source does not support.\n" +
@@ -19798,22 +19800,26 @@ async function reviewContentWithSEOExpert(content, env, source = null) {
     "When rewriting: add the specific fact being avoided, replace mood labels with concrete observable detail, " +
     "open with a striking fact or consequence. Preserve paragraph count exactly.\n\n" +
     "JOB 2 — HUMAN VOICE (model: a curious, guiding narrator, not an AI assistant):\n" +
-    "- Default to long, winding sentences built from stacked clauses and parentheticals joined by commas. Drop in a short declarative only to mark a turn or land a point. Never write a run of clipped declaratives.\n" +
+    "- Front-load the subject. Start a sentence with the thing it's about, not a setup clause ('The treaty barred new missiles' not 'Under its terms, the treaty barred new missiles').\n" +
+    "- Default to long, winding sentences built from stacked clauses and parentheticals joined by commas. After one, drop in a short 2-4 word fragment of your own to mark the turn, invented fresh for this article, never a stock phrase reused from these instructions or repeated elsewhere in the piece. Never write a run of clipped declaratives, and never let three sentences in a row run the same length or shape.\n" +
+    "- Winding is not the same as run-on. A winding sentence has ONE main clause carrying real subordinate clauses, parentheticals, or an appositive, not three or four independent clauses stitched together with repeated 'and,'. If a sentence needs more than one 'and' joining two full clauses, split it into two sentences instead.\n" +
     "- A guiding first-person-plural narrator is welcome: 'we have come to call', 'what we really wonder about', 'what catches our eye'. Never address the reader as 'you'.\n" +
-    "- Hedge where the evidence is genuinely uncertain: 'may well', 'would have', 'could have been', 'seems', 'appears', 'is generally assumed', 'has been suggested'. When scholars disagree, name who argues what instead of flattening it into one tidy consensus.\n" +
+    "- Hedge where the evidence is genuinely uncertain: 'may well', 'would have', 'could have been', 'seems', 'appears', 'is generally assumed', 'has been suggested'. One hedge per claim is enough, never stack two. When scholars disagree, name who argues what instead of flattening it into one tidy consensus.\n" +
     "- Use contractions where they fit ('didn't', 'wasn't', 'it's').\n" +
-    "- Open sentences different ways: a fronted prepositional or subordinate clause, a consequence, occasionally a sentence-initial 'And', 'But', 'Yet', or 'Except that'. Do not march three sentences from the same subject or pattern.\n" +
+    "- Open sentences different ways: a fronted prepositional or subordinate clause, a consequence, occasionally a sentence-initial 'And', 'But', or 'Yet'. Do not march three sentences from the same subject or pattern.\n" +
     "- Replace AI connectors ('Furthermore', 'Moreover', 'Additionally', 'In conclusion', 'Notably', 'Significantly') with conversational ones ('And yet', 'In other words', 'That is to say', 'After all', 'Even so', 'What matters is').\n" +
     "- Vary paragraph length too. An occasional one-sentence paragraph can carry a turn in the argument.\n" +
-    "- Clarity first. Every sentence must land on first read. Prefer plain words and concrete verbs; reach for a complex word only when the idea itself is complex.\n" +
-    "- Cut words that don't earn their place. An adjective or adverb must add information, not enthusiasm. Strip filler frames ('It's important to note that the treaty failed' becomes 'The treaty failed') and say each idea once, well.\n" +
+    "- Clarity first. Every sentence must land on first read. Prefer the everyday word over the formal one ('forever' not 'permanent', 'usually' not 'frequently', 'give out' not 'deteriorate'); reach for a complex word only when the idea itself is complex. Drop in one sharp, concrete, period-specific word or image per section (a real object, place, rank, or role) so the prose doesn't read flat.\n" +
+    "- Cut words that don't earn their place. An adjective or adverb must add information, not enthusiasm. Strip filler frames ('It's important to note that the treaty failed' becomes 'The treaty failed'), say each idea once, well, and never restate the sentence you just wrote in slightly different words.\n" +
     "- Quality beats length. Keep the article above the real-article floor, but never add padding or repeat a source fact just to sound substantial. If a paragraph repeats an earlier detail, replace it with a new source-supported consequence, limitation, action, or uncertainty.\n" +
     "- No marketing hype, buzzwords, or forced warmth. Honest and specific beats impressive-sounding: write what the evidence supports, plainly.\n" +
     "- Prefer active voice. Use passive only when the actor is genuinely unknown or beside the point.\n" +
     "PROHIBITIONS: No rhetorical questions to the reader. No 'Picture this', 'So,', 'You have to understand'. " +
-    "No sentence fragments as decoration. No chatty filler: 'That's the thing', 'It's a shame, really', 'He saw it all'.\n" +
-    "DISCIPLINE: Meaning is invariant. A trim that changes what a sentence claims is a bug, so keep the fact. " +
-    "And never flatten a quirky, specific sentence into smooth generic prose. These rules serve the voice, they do not replace it.\n\n" +
+    "No sentence fragments as decoration. No chatty filler: 'That's the thing', 'It's a shame, really', 'He saw it all'. " +
+    "No stiff parallel triads as a default rhythm ('faster, cheaper, and more reliable'). No 'not X, but Y' as the go-to way to contrast two things, vary it instead.\n" +
+    "DISCIPLINE: Meaning is invariant. A trim that changes what a sentence claims is a bug, so keep the fact, and never soften or drop a hedge in the process. " +
+    "And never flatten a quirky, specific sentence into smooth generic prose. These rules serve the voice, they do not replace it. " +
+    "Before returning, proofread your own output for mechanical slips: stray quote marks, dropped apostrophes, double spaces, or stray ALL-CAPS words. Then reread each changed sentence once more: does it read like a knowledgeable person wrote it in a hurry, not a template, with every fact and hedge intact?\n\n" +
     SOURCE_BOUND_REPAIR_RULES + "\n" +
     WRITING_REWRITE_RULES + "\n" +
     "PUNCTUATION: Use only periods, commas, and question marks. Never use em dashes (—), en dashes (–), semicolons (;), colons (:), or a hyphen between words (write 'best known', not 'best-known'). Convert any such break to a period or comma with correct grammar.\n\n" +

@@ -224,10 +224,9 @@ function homepageFeaturedPersonContent(item) {
   )
     .replace(/_/g, " ")
     .trim();
-  const description = truncateHomepagePreloadText(
-    page.description || page.extract || itemText,
-    170,
-  );
+  const description =
+    buildTlCardExtractSnippet(page.extract, 260) ||
+    truncateHomepagePreloadText(page.description || itemText, 170);
   const imageUrl = String(
     page.originalimage?.source || page.thumbnail?.source || "",
   ).trim();
@@ -574,7 +573,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v55/born-v37/died-v36) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v56/born-v38/died-v37) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
@@ -2091,6 +2090,24 @@ function cleanWikiExtract(value) {
     text = lastStop >= 0 ? trimmed.slice(0, lastStop + 1).trim() : trimmed;
   }
   return text;
+}
+
+// Gives events/born/died tl-cards a fuller preview of the page extract before
+// the reader has to click through to Wikipedia. Truncates on a sentence
+// boundary when possible so the card never ends mid-clause.
+function buildTlCardExtractSnippet(rawExtract, maxChars = 220) {
+  const cleaned = cleanWikiExtract(rawExtract);
+  if (!cleaned) return "";
+  if (cleaned.length <= maxChars) return cleaned;
+  const truncated = cleaned.slice(0, maxChars);
+  const lastStop = Math.max(
+    truncated.lastIndexOf(". "),
+    truncated.lastIndexOf("! "),
+    truncated.lastIndexOf("? "),
+  );
+  if (lastStop > 60) return truncated.slice(0, lastStop + 1);
+  const lastSpace = truncated.lastIndexOf(" ");
+  return `${truncated.slice(0, lastSpace > 0 ? lastSpace : maxChars)}…`;
 }
 
 function splitEntityHydratedSections(entity) {
@@ -5368,6 +5385,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .tl-card-body{padding:14px 16px;flex:1;display:flex;flex-direction:column;min-width:0}
 .tl-card-title{font-weight:700;font-size:15px;line-height:1.4;color:var(--text);margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .tl-card-desc{font-size:14px;color:#333;line-height:1.6;margin-bottom:6px;font-style:italic;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.tl-card-extract{font-size:13px;color:var(--text-muted);line-height:1.55;margin-bottom:8px;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .tl-card-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-top:auto}
 .tl-btn{font-size:15px!important;font-weight:400!important;padding:9px 10px!important;display:flex!important;justify-content:center!important;width:100%!important;box-sizing:border-box}
 .tl-thumb{width:100%;height:auto;max-height:130px;object-fit:contain;border-radius:8px;display:block;background:rgba(0,0,0,.04);padding:4px}
@@ -6160,7 +6178,7 @@ function generateEventsDateHTML(
       year: yearStr,
       title: titleText,
       desc: descText || pageDesc,
-      extract: "",
+      extract: escapeHtml(buildTlCardExtractSnippet(e.pages?.[0]?.extract || "")),
       imgHtml,
       actionsHtml,
       hasImage: Boolean(th),
@@ -7110,13 +7128,13 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     const actionBtn = profileUrl
       ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
       : w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>`
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn tl-btn">Wikipedia source</a>`
         : "";
     const card = buildDateCardShell({
       year,
       title: name,
       desc,
-      extract: "",
+      extract: escapeHtml(buildTlCardExtractSnippet(b.pages?.[0]?.extract || "")),
       imgHtml,
       actionsHtml: actionBtn,
       hasImage: Boolean(th),
@@ -7394,14 +7412,14 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     const actionBtn = profileUrl
       ? `<a href="${escapeHtml(profileUrl)}" class="site-btn site-btn-primary tl-btn">View Profile</a>`
       : w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn site-btn-primary tl-btn">Read More</a>`
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn tl-btn">Wikipedia source</a>`
         : "";
     const card = buildDateCardShell({
       year,
       badgeStyle: "background:#6c757d",
       title: name,
       desc,
-      extract: "",
+      extract: escapeHtml(buildTlCardExtractSnippet(d.pages?.[0]?.extract || "")),
       imgHtml,
       actionsHtml: actionBtn,
       hasImage: Boolean(th),
@@ -7720,7 +7738,7 @@ async function handleBornPage(request, env, ctx, url) {
   const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v37-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v38-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -7838,7 +7856,7 @@ async function handleDiedPage(request, env, ctx, url) {
   const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v36-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v37-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -8243,7 +8261,7 @@ async function handleEventsDatePage(request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v55-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v56-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {

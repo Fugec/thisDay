@@ -90,8 +90,13 @@ const DEFAULT_ARTICLE_GENERATION_REQUEST_BUDGET = 12;
 // proved that malformed combined/split body responses can spend several calls
 // before the rest of the article is saved. Split fields are now checkpointed
 // individually below; fourteen leaves bounded headroom for the replacement
-// while the first topic stays at twelve and a third is forbidden.
+// while the first topic stays at twelve. A third rotation is no longer flatly
+// forbidden (2026-07-31 fix below) — it's allowed when enough daily budget
+// remains to make attempting one worthwhile.
 const DEFAULT_ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET = 14;
+// See the 2026-07-31 comment at the rotation-cap check itself (in
+// createArticleGenerationCheckpointer) for the incident this addresses.
+const MIN_VIABLE_ROTATION_BUDGET = 8;
 const FEATURED_IMAGE_CHECK_MARKER = "<!-- featured-image-check-v1 -->";
 const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
 const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
@@ -5135,18 +5140,22 @@ export default {
                   ? '<section class="amazon-related'
                   : patchedHtml.includes("<!-- Quiz CTA -->")
                     ? "<!-- Quiz CTA -->"
-                    : patchedHtml.includes("You Might Also Like")
-                      ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
-                      : "</article>";
+                    : patchedHtml.includes('<h2 class="h3">You Might Also Like</h2>')
+                      ? '<h2 class="h3">You Might Also Like</h2>'
+                      : patchedHtml.includes("You Might Also Like")
+                        ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
+                        : "</article>";
               patchedHtml = patchedHtml.replace(
                 afterWikiAnchor,
                 exploreHtml + "\n          " + afterWikiAnchor,
               );
             }
           } else {
-            const quizAnchor = patchedHtml.includes("You Might Also Like")
-              ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
-              : "</article>";
+            const quizAnchor = patchedHtml.includes('<h2 class="h3">You Might Also Like</h2>')
+              ? '<h2 class="h3">You Might Also Like</h2>'
+              : patchedHtml.includes("You Might Also Like")
+                ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
+                : "</article>";
             patchedHtml = patchedHtml.replace(
               quizAnchor,
               quizCta + "\n          " + quizAnchor,
@@ -5207,9 +5216,11 @@ export default {
               ? '<section class="amazon-related'
               : patchedHtml.includes("<!-- Quiz CTA -->")
                 ? "<!-- Quiz CTA -->"
-                : patchedHtml.includes("You Might Also Like")
-                  ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
-                  : "</article>";
+                : patchedHtml.includes('<h2 class="h3">You Might Also Like</h2>')
+                  ? '<h2 class="h3">You Might Also Like</h2>'
+                  : patchedHtml.includes("You Might Also Like")
+                    ? '<h2 class="h5 mb-3">You Might Also Like</h2>'
+                    : "</article>";
           patchedHtml = patchedHtml.replace(
             anchor,
             exploreCard + "\n          " + anchor,
@@ -8804,7 +8815,11 @@ async function generateAndStore(
     break;
   }
   } catch (err) {
-    if (selectedEvent && isStructurallyIncompleteChunkFailure(err)) {
+    if (
+      selectedEvent &&
+      (isStructurallyIncompleteChunkFailure(err) ||
+        isRepeatedContinuityDuplicateFailure(err))
+    ) {
       // 2026-07-26: a structurally-incomplete provider response (missing/short
       // continuity array, no JSON returned) is a known fallback-provider
       // weakness (observed repeatedly from NVIDIA NIM once Groq/OpenRouter/
@@ -8814,8 +8829,11 @@ async function generateAndStore(
       // defer: do not block, so the next attempt retries the SAME event fresh
       // (ideally once a more reliable provider is available) instead of
       // rotating away from a perfectly good topic.
+      // 2026-07-31: extended to cross-section duplicate content for the same
+      // reason (see isRepeatedContinuityDuplicateFailure) — it hit two
+      // unrelated topics the same day and burned both allowed rotations.
       console.warn(
-        `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" hit a structurally-incomplete provider response — not blocking; the next attempt retries the same event.`,
+        `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" hit a structurally-incomplete or duplicate-content provider response — not blocking; the next attempt retries the same event.`,
       );
     } else if (selectedEvent && !isAIProviderCapacityError(err)) {
       await markGroundingBlockedEvent(env, buildSlug(now), selectedEvent, [err.message]);
@@ -15896,8 +15914,9 @@ function articleGenerationBudgetError(
 ) {
   const retryAt = articleGenerationBudgetRetryAt();
   const exhaustedDailyBudget = dailyUsed >= dailyLimit;
+  const remainingDaily = Math.max(0, dailyLimit - dailyUsed);
   const budgetSummary = replacementAlreadyUsed
-    ? `the one replacement-topic allowance is already used (${dailyUsed}/${dailyLimit} daily)`
+    ? `too little daily budget remains for another topic rotation (${remainingDaily}/${dailyLimit} left, needs ${MIN_VIABLE_ROTATION_BUDGET})`
     : exhaustedDailyBudget
       ? `${dailyUsed}/${dailyLimit} daily exhausted`
       : `${sourceUsed}/${sourceLimit} exhausted for this source`;
@@ -15969,7 +15988,19 @@ function createArticleGenerationCheckpointer(
               sourceCalls: {},
               rotations: 0,
             };
-      const replacementAlreadyUsed = budget.rotations >= 2;
+      // 2026-07-31 incident: a flat "2 rotations and no more, ever" cap
+      // stranded a fully-sourced, ready candidate (START I) with 7 of the
+      // day's 26 calls still unspent, because two unrelated topics happened
+      // to fail the same day. A further rotation now needs the daily budget
+      // to actually support one, not an arbitrary count of rotations already
+      // spent — MIN_VIABLE_ROTATION_BUDGET is the call count a real
+      // generation attempt used that day (brief + 4 body fields + facts +
+      // analysis + continuity repair, ~8-11 calls for the Treaty of Breda
+      // attempt), so anything less remaining isn't worth starting.
+      const remainingDailyBudget = dailyLimit - budget.dailyUsed;
+      const replacementAlreadyUsed =
+        budget.rotations >= 2 &&
+        remainingDailyBudget < MIN_VIABLE_ROTATION_BUDGET;
       const sourceLimit = budget.rotations >= 1
         ? articleGenerationReplacementRequestBudgetLimit(env)
         : articleGenerationRequestBudgetLimit(env);
@@ -16088,6 +16119,29 @@ function isStructurallyIncompleteChunkFailure(error) {
   );
 }
 
+// 2026-07-31 incident: two unrelated topics (Patrick Francis Healy, then the
+// Treaty of Breda) both failed generation on the exact same shape — the
+// chunked continuity-repair pass produced sentences copied verbatim across
+// body sections (auditChunkedArticleContinuity's "body cross-section
+// duplicate" check) and never fixed it in its own retry. This was NOT
+// covered by isStructurallyIncompleteChunkFailure (that detector is about
+// responses that are too short/incomplete, not ones that duplicate content),
+// so the July 25/26 self-heal treated both as genuine topic defects, blocked
+// them, and burned both of the day's two allowed topic rotations before a
+// perfectly good third candidate (START I) ever got a real attempt — the
+// exact "provider-shape glitch exhausts the whole candidate pool" pattern
+// the July 26 fix addressed for missing/short arrays, just with a different
+// symptom. The enrichment-side bounded-recovery path already treats this
+// same failure shape as a tolerable residual rather than a blocker (2026-07-22,
+// repairRepeatedBodySections); this extends that same leniency to the earlier
+// generation-stage self-heal, so the topic is retried fresh instead of
+// rotated away from.
+function isRepeatedContinuityDuplicateFailure(error) {
+  return /chunked article continuity repair:[\s\S]*body cross-section duplicate/i.test(
+    String(error?.message || error || ""),
+  );
+}
+
 async function callChunkedArticleAI(
   env,
   model,
@@ -16176,6 +16230,11 @@ async function callChunkedArticleAI(
             /((?:overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs)) must contain at least (\d+) item\(s\), got (\d+)/,
           );
         const missingField = rejection.match(/missing (\w+) array/);
+        // 2026-07-31: a cross-section duplicate rejection previously fell
+        // through to the generic correction message, which was not specific
+        // enough to reliably stop the model from repeating the same sentence
+        // across sections on retry (see isRepeatedContinuityDuplicateFailure).
+        const duplicateSentence = /body cross-section duplicate/i.test(rejection);
         const correction = countMismatch
           ? (() => {
               const [, field, exact, got] = countMismatch;
@@ -16187,9 +16246,11 @@ async function callChunkedArticleAI(
             })()
           : missingField
             ? `Your response omitted the required "${missingField[1]}" field entirely. Every field listed in the requested JSON shape must appear in your response, even if you also believe the retained content already covers it.`
-            : needsConcreteDetail
-              ? "For every flagged item, keep only source-supported claims and add an explicit proper name, calendar year, number, place, or institution copied from the canonical brief or its sourceFacts. Check each required item separately before returning."
-              : "Correct the exact structural or quality failure while keeping every claim source-grounded.";
+            : duplicateSentence
+              ? "You repeated an identical or near-identical sentence across two different sections. Rewrite the rejected section(s) so every sentence is unique to that section: keep the same facts but express them with different wording, or drop the repeated sentence and replace it with a different source-supported detail."
+              : needsConcreteDetail
+                ? "For every flagged item, keep only source-supported claims and add an explicit proper name, calendar year, number, place, or institution copied from the canonical brief or its sourceFacts. Check each required item separately before returning."
+                : "Correct the exact structural or quality failure while keeping every claim source-grounded.";
         retryFeedback =
           `\n\nPREVIOUS RESPONSE REJECTED: ${rejection}\n` +
           `${correction} Do not invent a replacement detail. Return only the complete JSON object requested above, with no planning or explanation.`;
@@ -22279,7 +22340,7 @@ ${analysisBadItems}
               .join("");
             const relatedSection = related.length > 0
               ? `<section class="mt-5">
-            <h2 class="h5 mb-3">You Might Also Like</h2>
+            <h2 class="h3">You Might Also Like</h2>
             <div class="row g-3">${cards}
             </div>
           </section>`
@@ -23573,6 +23634,14 @@ function normalizeArticleLayoutHtml(body) {
       '<h2 class="h3">Did You Know?</h2>\n          <section class="dyn-slider-shell',
     );
   }
+
+  // 2026-07-31: "You Might Also Like" used a smaller h5 class while every
+  // other section heading (Did You Know?, Analysis:) uses h3. Upgrade older
+  // stored posts to match; buildPostHTML now renders h3 directly.
+  html = html.replace(
+    '<h2 class="h5 mb-3">You Might Also Like</h2>',
+    '<h2 class="h3">You Might Also Like</h2>',
+  );
 
   const freeLibraryRange = findDivBlockRangeContaining(
     html,

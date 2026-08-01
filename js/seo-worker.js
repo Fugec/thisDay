@@ -573,7 +573,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 
 // T5: Edge HTML cache. Raised to 1h after confirming correct HIT/MISS behavior
 // and the quiz exclusion on the 300s rollout. Safe because the underlying
-// date-page KV caches (gen-post-v56/born-v38/died-v37) already tolerate up to a 7-day
+// date-page KV caches (gen-post-v57/born-v39/died-v38) already tolerate up to a 7-day
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
@@ -6020,7 +6020,7 @@ function generateEventsDateHTML(
       : new Map();
   const featuredAnchorId = featured ? historicalEventAnchorId(featured) : "";
   const majorEventsSummary = buildMajorEventsSummary(
-    rankedEvents.slice(1, 4),
+    rankedEvents.slice(1, 5),
     mDisplay,
     day,
     eventStoryLinks,
@@ -6739,7 +6739,7 @@ function buildMajorEventsSummary(
   storyLinks = new Map(),
   { heading = "", description = "" } = {},
 ) {
-  const items = (Array.isArray(events) ? events : []).slice(0, 3);
+  const items = (Array.isArray(events) ? events : []).slice(0, 4);
   if (!items.length) return "";
 
   const rows = items
@@ -7001,6 +7001,16 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     displayedBirths,
     5,
   );
+  const majorEventsSummary = buildMajorEventsSummary(
+    rankDateEventsBySignificance(eventsData?.events || []).slice(0, 4),
+    mDisplay,
+    day,
+    new Map(),
+    {
+      heading: `Major events on ${mDisplay} ${day}`,
+      description: "See what else happened on this day in history.",
+    },
+  );
   const ogImg = featImg || `${siteUrl}/images/logo.png`;
   const pageTitle = featured
     ? `${featName} & Other Famous Birthdays on ${mDisplay} ${day}`
@@ -7233,6 +7243,7 @@ ${siteNav()}
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
+    ${majorEventsSummary}
     ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
     ${DATE_TIMELINE_AD_HTML}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
@@ -7287,6 +7298,16 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
     featured,
     displayedDeaths,
     5,
+  );
+  const majorEventsSummary = buildMajorEventsSummary(
+    rankDateEventsBySignificance(eventsData?.events || []).slice(0, 4),
+    mDisplay,
+    day,
+    new Map(),
+    {
+      heading: `Major events on ${mDisplay} ${day}`,
+      description: "See what else happened on this day in history.",
+    },
   );
   const ogImg = featImg || `${siteUrl}/images/logo.png`;
   const pageTitle = featured
@@ -7516,6 +7537,7 @@ ${siteNav()}
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
     ${featRemainder && !featImg ? `<p class="mb-3 text-center">${escapeHtml(featRemainder)}</p>` : ""}
+    ${majorEventsSummary}
     ${didYouKnowFacts.length > 0 ? buildDidYouKnowSlider(didYouKnowFacts) : ""}
     ${DATE_TIMELINE_AD_HTML}
     <hr style="border:none;border-top:1px solid var(--cbr);margin:20px 0 16px"/>` : ""}
@@ -7738,7 +7760,7 @@ async function handleBornPage(request, env, ctx, url) {
   const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `born-v38-${hostKey}-${monthName}-${day}`;
+  const kvKey = `born-v39-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -7856,7 +7878,7 @@ async function handleDiedPage(request, env, ctx, url) {
   const dPad = String(day).padStart(2, "0");
 
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `died-v37-${hostKey}-${monthName}-${day}`;
+  const kvKey = `died-v38-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {
@@ -8261,7 +8283,7 @@ async function handleEventsDatePage(request, env, ctx, url) {
 
   // Try KV cache (7-day TTL)
   const hostKey = (url.host || "").toLowerCase().replace(/[^a-z0-9.-]/g, "");
-  const kvKey = `gen-post-v56-${hostKey}-${monthName}-${day}`;
+  const kvKey = `gen-post-v57-${hostKey}-${monthName}-${day}`;
   const bypassCache = authorizedDatePageCacheBypass(request, env, url);
   try {
     if (env.EVENTS_KV && !bypassCache) {

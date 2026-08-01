@@ -556,6 +556,11 @@ const TDQ_FLOAT_BAR_HTML =
 // surrounding float-bar script.
 const TDQ_FLOAT_TRIGGER_JS =
   "var trigger=document.querySelector('.dyn-slider-shell');if(trigger){var ticking=false;var syncBar=function(){if(trigger.getBoundingClientRect().top<=window.innerHeight*.72){showBar();}else{hideBar();}ticking=false;};var requestSync=function(){if(ticking)return;ticking=true;window.requestAnimationFrame(syncBar);};window.addEventListener('scroll',requestSync,{passive:true});window.addEventListener('resize',requestSync,{passive:true});syncBar();}";
+// Reuses the same Web Share API + clipboard fallback pattern already proven
+// on the quiz's "Share Your Score" button (seo-worker.js). No new dependency:
+// navigator.share/navigator.clipboard are both already used elsewhere.
+const ARTICLE_SHARE_JS =
+  "(function(){var btn=document.getElementById('article-share-btn');if(!btn)return;btn.addEventListener('click',function(){var shareUrl=location.origin+location.pathname;var title=document.title;if(navigator.share){navigator.share({title:title,url:shareUrl}).catch(function(){});}else if(navigator.clipboard){navigator.clipboard.writeText(shareUrl).then(function(){var orig=btn.innerHTML;btn.innerHTML='<i class=\"bi bi-check-lg\"></i> Copied';setTimeout(function(){btn.innerHTML=orig;},2000);});}});})();";
 const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
 const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const BLOG_HISTORY_QUALITY_GATE_VERSION = 2;
@@ -5240,6 +5245,29 @@ export default {
             patchedHtml = patchedHtml.replace(
               "</html>",
               progressJs + "</html>",
+            );
+          }
+        }
+        // Inject the share button into older posts that were stored without it
+        if (
+          !patchedHtml.includes("article-share-btn") &&
+          patchedHtml.includes('<article class="p-4 rounded border"')
+        ) {
+          const shareHtml = `<div class="d-flex justify-content-end mb-3">
+            <button type="button" id="article-share-btn" class="site-btn"><i class="bi bi-share-fill"></i> Share</button>
+          </div>
+
+          `;
+          patchedHtml = patchedHtml
+            .replace(
+              /(<article class="p-4 rounded border"[^>]*>\s*)/,
+              `$1${shareHtml}`,
+            )
+            .replace("</body>", `<script>${ARTICLE_SHARE_JS}</script></body>`);
+          if (!patchedHtml.includes(ARTICLE_SHARE_JS)) {
+            patchedHtml = patchedHtml.replace(
+              "</html>",
+              `<script>${ARTICLE_SHARE_JS}</script></html>`,
             );
           }
         }
@@ -22251,6 +22279,10 @@ ${breadcrumbJsonLd}
 
         <article class="p-4 rounded border" style="background-color: var(--bg); color: var(--text)">
 
+          <div class="d-flex justify-content-end mb-3">
+            <button type="button" id="article-share-btn" class="site-btn"><i class="bi bi-share-fill"></i> Share</button>
+          </div>
+
           ${buildArticleAnswerBlock(c)}
 
           <!-- Did You Know -->
@@ -22455,6 +22487,7 @@ ${analysisBadItems}
   <script>
     ${footerYearScript()}
   </script>
+  <script>${ARTICLE_SHARE_JS}</script>
 
   <!-- Google Ads: 60 Seconds on Site -->
   <script>

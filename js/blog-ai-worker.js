@@ -8684,7 +8684,7 @@ async function generateAndStore(
           const repaired = await repairGroundingContradictions(
             env,
             content,
-            grounding.reasons,
+            [...grounding.reasons, ...grounding.advisoryReasons],
             groundingSource,
           );
           if (repaired && repaired !== content) {
@@ -16115,8 +16115,17 @@ function shouldRetryChunkOutputFailure(error) {
 // blocking the topic through the one path this fix didn't cover. NOT
 // widened to analysisGood/analysisBad/didYouKnowFacts, which have used
 // `min` for unrelated, pre-existing reasons and are out of scope here.
+//
+// 2026-08-01: "contains a thin paragraph" (validateChunkedArticleBodyChunk's
+// CHUNKED_BODY_PARAGRAPH_MIN_WORDS floor) is the same family of failure —
+// the provider wrote something, just not enough of it — and the Slavery
+// Abolition Act 1833 no-publish showed it getting treated as a genuine bad
+// topic (blocked and rotated away from) when a fresh attempt at the same,
+// perfectly legitimate topic was far more likely to just produce a longer
+// paragraph. This does not touch the word-count floor itself — a thin
+// paragraph is still rejected — it only changes what happens next.
 function isStructurallyIncompleteChunkFailure(error) {
-  return /no JSON object returned|JSON parse failed|must contain exactly \d+ item\(s\)|missing \w+ array|(?:overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs) must contain at least \d+ item\(s\)/i.test(
+  return /no JSON object returned|JSON parse failed|must contain exactly \d+ item\(s\)|missing \w+ array|(?:overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs) must contain at least \d+ item\(s\)|contains a thin paragraph/i.test(
     String(error?.message || error || ""),
   );
 }
@@ -16237,6 +16246,12 @@ async function callChunkedArticleAI(
         // enough to reliably stop the model from repeating the same sentence
         // across sections on retry (see isRepeatedContinuityDuplicateFailure).
         const duplicateSentence = /body cross-section duplicate/i.test(rejection);
+        // 2026-08-01: a thin-paragraph rejection previously fell through to
+        // the generic correction message. Name the exact field and the word
+        // floor it must clear.
+        const thinParagraphField = rejection.match(
+          /(\w+) contains a thin paragraph/,
+        );
         const correction = countMismatch
           ? (() => {
               const [, field, exact, got] = countMismatch;
@@ -16250,7 +16265,9 @@ async function callChunkedArticleAI(
             ? `Your response omitted the required "${missingField[1]}" field entirely. Every field listed in the requested JSON shape must appear in your response, even if you also believe the retained content already covers it.`
             : duplicateSentence
               ? "You repeated an identical or near-identical sentence across two different sections. Rewrite the rejected section(s) so every sentence is unique to that section: keep the same facts but express them with different wording, or drop the repeated sentence and replace it with a different source-supported detail."
-              : needsConcreteDetail
+              : thinParagraphField
+                ? `Every paragraph in ${thinParagraphField[1]} must be at least ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS} words. Expand the short paragraph(s) with genuinely new source-supported detail — do not pad with filler or repeat a sentence to reach the count.`
+                : needsConcreteDetail
                 ? "For every flagged item, keep only source-supported claims and add an explicit proper name, calendar year, number, place, or institution copied from the canonical brief or its sourceFacts. Check each required item separately before returning."
                 : "Correct the exact structural or quality failure while keeping every claim source-grounded.";
         retryFeedback =
@@ -16443,15 +16460,19 @@ ${retryFeedback}`;
         `chunked article brief: public question-title contract failed — ${curiosityTitleValidation.reasons.join("; ")}`,
       );
     }
+    // Rescue a person-less (or entirely empty) brief from the source text
+    // BEFORE the hard array-length check below — the 2026-08-01 First
+    // Sino-Japanese War no-publish showed the model can return a totally
+    // empty keyTerms array, and the previous ordering threw on that empty
+    // array before this rescue ever ran, defeating its whole purpose (the
+    // 2026-07-25 "keyTerms must include one named person" fix). scanLimit
+    // mirrors the slice(0, 8) forward window below; injection prepends so
+    // the person lands inside it.
+    ensurePersonKeyTermFromSource(parsed, sourceMaterial, { scanLimit: 8 });
     requireChunkArray(parsed, "keyTerms", {
       min: 1,
       label: "chunked article brief",
     });
-    // Rescue a person-less brief from the source text before failing the
-    // whole chunked run (the 2026-07-25 "keyTerms must include one named
-    // person" no-publish). scanLimit mirrors the slice(0, 8) forward window
-    // below; injection prepends so the person lands inside it.
-    ensurePersonKeyTermFromSource(parsed, sourceMaterial, { scanLimit: 8 });
     const forwardedTerms = parsed.keyTerms.slice(0, 8);
     if (
       !forwardedTerms.some(
@@ -18145,6 +18166,26 @@ const GROUNDING_CLAIM_RISK_RULES = [
   },
 ];
 
+// These categories have no history of catching a real error, only ordinary
+// biographical/administrative prose ("she co-founded a theatre group", "the
+// daughter of a civil engineer", "the war ended") — words nearly every
+// historical narrative uses, often phrased differently than the source even
+// when the underlying fact is true. 2026-08-01: a single article accumulated
+// 8 findings across these categories and was blocked outright. Categories
+// tied to an actual documented incident (casualty numbers, perpetrator/order
+// attribution, succession, causal/coercive/enabling/preventive claims) are
+// NOT in this set and still hard-block. A finding in one of these categories
+// is still surfaced to the repair pass — it just no longer fails the whole
+// article on its own if repair doesn't fully clear it.
+const GROUNDING_ADVISORY_ONLY_LABELS = new Set([
+  "parent relationship",
+  "sibling relationship",
+  "extended-family relationship",
+  "marital relationship",
+  "institutional outcome",
+  "ending outcome",
+]);
+
 // A source can state a direct casualty outcome with a plain predicate while an
 // article uses equivalent causal syntax: "the arson killed 36 people" supports
 // "the attack resulted in 36 deaths." Keep this equivalence deliberately
@@ -18345,14 +18386,17 @@ function unsupportedGroundingClaims(content, sourceMaterial) {
 }
 
 /**
- * Deterministic grounding gate. Returns { ok, reasons[] }. A no-op (ok:true)
- * when no source is available (e.g. a manually forced event), so admin force
- * paths are never blocked.
+ * Deterministic grounding gate. Returns { ok, reasons[], advisoryReasons[] }.
+ * advisoryReasons are findings in a low-risk category (GROUNDING_ADVISORY_ONLY_LABELS)
+ * — still worth surfacing to a repair pass, but they never affect `ok` on
+ * their own. A no-op (ok:true) when no source is available (e.g. a manually
+ * forced event), so admin force paths are never blocked.
  */
 function verifyArticleGrounding(content, source) {
   const reasons = [];
+  const advisoryReasons = [];
   if (!source || (!source.pageTitle && !source.text && !source.sourceExtract)) {
-    return { ok: true, reasons };
+    return { ok: true, reasons, advisoryReasons };
   }
   const articleText = articleGroundingText(content);
   const articleLower = articleText.toLowerCase();
@@ -18391,12 +18435,15 @@ function verifyArticleGrounding(content, source) {
   // review: it catches unsupported hard assertions without treating omissions
   // or clearly hedged interpretation as factual contradictions.
   for (const finding of unsupportedGroundingClaims(content, sourceMaterial)) {
-    reasons.push(
-      `unsupported ${finding.label} in ${finding.field}: "${finding.sentence}"`,
-    );
+    const message = `unsupported ${finding.label} in ${finding.field}: "${finding.sentence}"`;
+    if (GROUNDING_ADVISORY_ONLY_LABELS.has(finding.label)) {
+      advisoryReasons.push(message);
+    } else {
+      reasons.push(message);
+    }
   }
 
-  return { ok: reasons.length === 0, reasons };
+  return { ok: reasons.length === 0, reasons, advisoryReasons };
 }
 
 // The LLM final-grounding grader frequently faults an article for OMITTING

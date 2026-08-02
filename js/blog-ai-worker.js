@@ -530,7 +530,8 @@ const BLOG_NAV_WIDTH_FIX_CSS =
 const TDQ_FLOAT_BAR_CSS =
   `#tdq-float-bar{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));z-index:1040;width:min(720px,calc(100% - 24px));display:grid;grid-template-columns:88px minmax(0,1fr) auto;gap:.8rem;align-items:center;margin:0;padding:.8rem .9rem;border:1px solid var(--border,#cfe0cf);border-radius:9px;background:var(--bg-alt,#f2f7f2);box-shadow:0 18px 42px rgba(27,58,45,.22);opacity:0;pointer-events:none;transform:translate(-50%,calc(100% + 32px));transition:opacity .22s ease,transform .22s ease;font-family:Lora,serif}
 #tdq-float-bar.tdq-float-visible{opacity:1;pointer-events:auto;transform:translate(-50%,0)}
-.tdq-float-visual{width:88px;height:68px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.06);color:var(--btn-bg,#1b3a2d);font-size:1.25rem}
+.tdq-float-visual{width:88px;height:68px;border-radius:7px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.06);color:var(--btn-bg,#1b3a2d);font-size:1.25rem;overflow:hidden}
+.tdq-float-visual img{width:100%;height:100%;object-fit:cover;display:block}
 .tdq-float-copy{display:flex;min-width:0;flex-direction:column;gap:2px}
 .tdq-float-kicker{font-size:12px;font-weight:600;color:var(--text-muted,#5c7a65);text-transform:uppercase;letter-spacing:.05em}
 .tdq-float-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;line-height:1.35;color:var(--text,#1a2e20)}
@@ -540,9 +541,15 @@ const TDQ_FLOAT_BAR_CSS =
 #tdq-float-btn:focus-visible{outline:2px solid var(--btn-bg,#1b3a2d);outline-offset:4px;border-radius:2px}
 @media(max-width:575px){#tdq-float-bar{grid-template-columns:64px minmax(0,1fr);gap:.65rem;padding:.65rem .7rem}.tdq-float-visual{width:64px;height:64px}#tdq-float-btn{grid-column:2;justify-self:start}}
 @media(prefers-reduced-motion:reduce){#tdq-float-bar{transition:none}}`;
-const TDQ_FLOAT_BAR_HTML =
-  `<aside id="tdq-float-bar" class="major-event-item tdq-float-bar" aria-label="Article quiz" aria-hidden="true" inert>
-    <span class="tdq-float-visual" aria-hidden="true"><i class="bi bi-patch-question-fill"></i></span>
+// Shows the article's own featured image in the float bar's visual slot
+// (matching what a reader just scrolled past) instead of a generic icon,
+// falling back to the icon when no usable image URL is available.
+function tdqFloatBarHtml(imageUrl) {
+  const visual = imageUrl
+    ? `<img src="/image-proxy?src=${encodeURIComponent(imageUrl)}&w=176&h=136&fit=cover&q=75" alt="" loading="lazy" width="88" height="68">`
+    : `<i class="bi bi-patch-question-fill"></i>`;
+  return `<aside id="tdq-float-bar" class="major-event-item tdq-float-bar" aria-label="Article quiz" aria-hidden="true" inert>
+    <span class="tdq-float-visual" aria-hidden="true">${visual}</span>
     <span class="major-event-copy tdq-float-copy">
       <span class="tdq-float-kicker">Quick quiz</span>
       <strong class="tdq-float-title">Test Your Knowledge</strong>
@@ -550,6 +557,7 @@ const TDQ_FLOAT_BAR_HTML =
     </span>
     <button type="button" id="tdq-float-btn" class="major-event-source tdq-float-action">Start Quiz<i class="bi bi-arrow-right" aria-hidden="true"></i></button>
   </aside>`;
+}
 // The float bar anchors on the Did You Know slider, the same structural
 // trigger the date pages use. Section headings vary per pillar so heading
 // text is never a reliable anchor. showBar/hideBar are defined by the
@@ -803,7 +811,13 @@ ${gridItems}
   </section>`;
 }
 
-const MIN_DID_YOU_KNOW_FACTS = 4;
+// 2026-08-02: lowered 4 -> 3. The Meiji Restoration no-publish showed a
+// provider return 5 raw facts with only 3 usable (2 lacked a concrete
+// name/date/number) — a real but modest shortfall that still blocked an
+// otherwise clean topic under the old 4-fact floor. 3 distinct, concrete
+// facts is still a meaningful bar; MAX stays at 5 so a good response is
+// unaffected.
+const MIN_DID_YOU_KNOW_FACTS = 3;
 const MAX_DID_YOU_KNOW_FACTS = 5;
 
 function normalizeArticleDidYouKnowFact(value) {
@@ -5284,7 +5298,8 @@ export default {
           !patchedHtml.includes("quiz-deferred")
         ) {
           const floatCss = `<style id="tdq-float-card-style">${TDQ_FLOAT_BAR_CSS}</style>`;
-          const floatHtml = TDQ_FLOAT_BAR_HTML;
+          const heroImgMatch = patchedHtml.match(/article-hero-fig">\s*<img[^>]*\bsrc="\/image-proxy\?src=([^&"]+)/);
+          const floatHtml = tdqFloatBarHtml(heroImgMatch ? decodeURIComponent(heroImgMatch[1]) : "");
           const floatJs = `<script>(function(){var bar=document.getElementById('tdq-float-bar');var btn=document.getElementById('tdq-float-btn');var closeBtn=document.getElementById('tdq-close');if(!bar||!btn)return;function showBar(){bar.classList.add('tdq-float-visible');bar.setAttribute('aria-hidden','false');bar.removeAttribute('inert');}function hideBar(){bar.classList.remove('tdq-float-visible');bar.setAttribute('aria-hidden','true');bar.setAttribute('inert','');}btn.addEventListener('click',function(){hideBar();var overlay=document.getElementById('tdq-overlay');var popup=document.getElementById('tdq-popup');if(overlay)overlay.style.display='block';if(popup){popup.style.display='block';requestAnimationFrame(function(){popup.classList.add('tdq-popup-open');});}document.body.style.overflow='hidden';if(typeof maybeLoadAndShowQuiz==='function')maybeLoadAndShowQuiz();});if(closeBtn)closeBtn.addEventListener('click',function(){setTimeout(showBar,300);});${TDQ_FLOAT_TRIGGER_JS}})();<\/script>`;
           const bodyClose = patchedHtml.includes("</body>")
             ? "</body>"
@@ -16152,8 +16167,17 @@ function shouldRetryChunkOutputFailure(error) {
 // perfectly legitimate topic was far more likely to just produce a longer
 // paragraph. This does not touch the word-count floor itself — a thin
 // paragraph is still rejected — it only changes what happens next.
+//
+// 2026-08-02: didYouKnowFacts IS widened now, reversing the 2026-07-26 note
+// above for this one specific message shape. The Meiji Restoration no-publish
+// showed a provider return 5 raw facts with only 3 usable (2 lacked a concrete
+// name/date/number) — the same "wrote something, just not quite enough of it"
+// pattern as a thin paragraph, just caught by auditDidYouKnowFacts instead.
+// Scoped to the exact "must contain at least N distinct concrete facts"
+// wording so analysisGood/analysisBad's unrelated `min` failures still don't
+// match.
 function isStructurallyIncompleteChunkFailure(error) {
-  return /no JSON object returned|JSON parse failed|must contain exactly \d+ item\(s\)|missing \w+ array|(?:overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs) must contain at least \d+ item\(s\)|contains a thin paragraph/i.test(
+  return /no JSON object returned|JSON parse failed|must contain exactly \d+ item\(s\)|missing \w+ array|(?:overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs) must contain at least \d+ item\(s\)|contains a thin paragraph|didYouKnowFacts must contain at least \d+ distinct concrete facts/i.test(
     String(error?.message || error || ""),
   );
 }
@@ -22524,7 +22548,7 @@ ${analysisBadItems}
 
   <!-- Floating quiz bar — slides up when the Did You Know slider scrolls in -->
   <style id="tdq-float-card-style">${TDQ_FLOAT_BAR_CSS}</style>
-  ${quizReady ? TDQ_FLOAT_BAR_HTML : ""}
+  ${quizReady ? tdqFloatBarHtml(featuredImageUrl) : ""}
   <script>
   (function(){
     var bar=document.getElementById('tdq-float-bar');
@@ -23889,6 +23913,9 @@ function normalizeTdqFloatBarHtml(body) {
   const source = String(body || "");
   if (!source.includes('id="tdq-float-bar"')) return source;
 
+  const heroImgMatch = source.match(/article-hero-fig">\s*<img[^>]*\bsrc="\/image-proxy\?src=([^&"]+)/);
+  const heroImageUrl = heroImgMatch ? decodeURIComponent(heroImgMatch[1]) : "";
+
   let html = source
     .replace(
       /<style\b[^>]*\bid="tdq-float-card-style"[^>]*>[\s\S]*?<\/style>/gi,
@@ -23913,7 +23940,7 @@ function normalizeTdqFloatBarHtml(body) {
     )
     .replace(
       /<(?:div|aside)\b[^>]*\bid="tdq-float-bar"[^>]*>[\s\S]*?<\/(?:div|aside)>/i,
-      TDQ_FLOAT_BAR_HTML,
+      tdqFloatBarHtml(heroImageUrl),
     )
     .replace(
       "function showBar(){bar.classList.add('tdq-float-visible');}",

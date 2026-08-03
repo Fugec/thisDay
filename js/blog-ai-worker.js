@@ -10559,6 +10559,16 @@ async function enrichPublishedPost(
     if (repaired !== content) {
       await persistBoundedRepair(repaired, "content-rationale-mechanical");
     }
+    let boundedIssues = [
+      ...scanBannedPhrases(repaired),
+      ...scanArticleQuality(repaired),
+      ...scanIntraPageDuplication(repaired),
+    ];
+    if (boundedIssues.length === 0) {
+      console.log(
+        `Blog: bounded recovery core for ${slug} is already clean; skipping provider repair passes.`,
+      );
+    } else {
     repaired = await repairRepeatedBodySections(
       env,
       repaired,
@@ -10599,7 +10609,7 @@ async function enrichPublishedPost(
         await persistBoundedRepair(repaired, "quality-pass-1");
       }
     }
-    let boundedIssues = [
+    boundedIssues = [
       ...scanBannedPhrases(repaired),
       ...scanArticleQuality(repaired),
       ...scanIntraPageDuplication(repaired),
@@ -10655,6 +10665,7 @@ async function enrichPublishedPost(
         ...scanArticleQuality(repaired),
         ...scanIntraPageDuplication(repaired),
       ];
+    }
     }
     const BOUNDED_ISSUE_BLOCK_THRESHOLD = 3;
     if (boundedIssues.length > BOUNDED_ISSUE_BLOCK_THRESHOLD) {

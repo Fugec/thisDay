@@ -55,6 +55,32 @@ const N_SCENES = 1;
 const XFADE_TRANSITIONS = ["fade"];
 
 /**
+ * Motion for a single still: a visible but restrained 7-second breathing
+ * zoom with a small diagonal drift. The former one-pulse-over-the-whole-video
+ * movement was almost imperceptible on 20–45 second Shorts.
+ */
+export function buildSingleImageMotion(durationS) {
+  const d = Math.max(1, Math.round(durationS * FPS));
+  const cycleFrames = Math.max(2, Math.round(7 * FPS));
+  const halfCycle = Math.floor(cycleFrames / 2);
+  const phase = `mod(on,${cycleFrames})`;
+  const zMin = 1.02;
+  const zMax = 1.16;
+  const zRange = 0.14;
+  const zoom =
+    `if(lte(${phase},${halfCycle}),` +
+    `${zMin}+${zRange}*(${phase}/${halfCycle}),` +
+    `${zMax}-${zRange}*((${phase}-${halfCycle})/${cycleFrames - halfCycle}))`;
+  const x =
+    `iw/2-(iw/zoom/2)+(iw-iw/zoom)*0.18*` +
+    `sin(2*PI*on/${cycleFrames})`;
+  const y =
+    `ih/2-(ih/zoom/2)+(ih-ih/zoom)*0.12*` +
+    `cos(2*PI*on/${cycleFrames})`;
+  return { d, cycleFrames, zoom, x, y };
+}
+
+/**
  * Builds an FFmpeg zoompan filter string for a static-image scene (Ken Burns).
  * 6 distinct motion patterns cycled per scene index for maximum visual variety.
  * Input images are pre-scaled to 115% so zoom never reveals black edges.
@@ -78,12 +104,13 @@ function buildKenBurns(sceneIdx, durationS, inLabel, outLabel) {
   let zoom, x, y;
 
   switch (sceneIdx % 6) {
-    case 0: // zoom-in, anchor centre
-      // pzoom accumulates smoothly; clamp at Z_END to avoid overshoot
-      zoom = `if(eq(on,0),${Z_START},min(${Z_END},pzoom+${INC}))`;
-      x = `iw/2-(iw/zoom/2)`;
-      y = `ih/2-(ih/zoom/2)`;
+    case 0: { // repeated zoom pulse + restrained diagonal drift
+      const motion = buildSingleImageMotion(durationS);
+      zoom = motion.zoom;
+      x = motion.x;
+      y = motion.y;
       break;
+    }
     case 1: // zoom-out, anchor centre
       zoom = `if(eq(on,0),${Z_END},max(${Z_START},pzoom-${INC}))`;
       x = `iw/2-(iw/zoom/2)`;
@@ -1692,24 +1719,15 @@ async function generateMultiSceneVideo(
       const endScreenIdx = captionStartIdx + captionPNGPaths.length;
       cmd.input(endScreenPath);
 
-      // Per-scene filter: pulsing zoom — image breathes in then out over full scene.
-      // Z_MIN=1.0 → Z_MAX=1.18 → Z_MIN creates a gentle heartbeat feel.
+      // Per-scene filter: a visible 7-second breathing zoom with restrained
+      // diagonal drift. The branded header and captions remain static.
       // Image occupies W × IMG_H below the header; pad adds HEADER_H+1 px black at top.
       const HEADER_H = 480;
       const IMG_H = H - HEADER_H - 1;
-      const Z_MIN = 1.0;
-      const Z_MAX = 1.18;
-      const Z_RANGE_STR = (Z_MAX - Z_MIN).toFixed(4);
       const sceneParts = bgFiles.map((_, i) => {
-        const d    = Math.round(sceneDurations[i] * FPS);
-        const half = Math.floor(d / 2);
-        // First half: zoom in Z_MIN → Z_MAX; second half: zoom out Z_MAX → Z_MIN
-        const zoom =
-          `if(lte(on,${half}),` +
-            `${Z_MIN.toFixed(4)}+${Z_RANGE_STR}*(on/${half}),` +
-            `${Z_MAX.toFixed(4)}-${Z_RANGE_STR}*((on-${half})/${d - half}))`;
-        const x = `iw/2-(iw/zoom/2)`;
-        const y = `ih/2-(ih/zoom/2)`;
+        const { d, zoom, x, y } = buildSingleImageMotion(
+          sceneDurations[i],
+        );
         // Cinematic grade: slight warmth (lift reds, drop blues) + desaturation + film grain
         const grade = `eq=saturation=0.82:contrast=1.06:gamma_r=1.04:gamma_b=0.94,noise=alls=9:allf=t`;
         // Zoompan outputs W×IMG_H; pad pushes it down below the header panel

@@ -7,13 +7,15 @@
  * 1. A browser tab opens automatically with Google's consent screen.
  * 2. Authorise the app for your YouTube channel.
  * 3. Google redirects to localhost — the script captures the code automatically.
- * 4. Your YOUTUBE_REFRESH_TOKEN is printed — add it to .env (and GitHub Secrets).
+ * 4. Your YOUTUBE_REFRESH_TOKEN is printed, or written to
+ *    YOUTUBE_AUTH_TOKEN_FILE when that safer automation option is supplied.
  */
 
 import { google } from 'googleapis';
 import { createServer } from 'http';
 import { URL } from 'url';
 import { exec } from 'child_process';
+import { writeFileSync } from 'fs';
 import 'dotenv/config';
 
 const PORT = 3838;
@@ -27,7 +29,10 @@ const client = new google.auth.OAuth2(
 
 const authUrl = client.generateAuthUrl({
   access_type: 'offline',
-  scope: ['https://www.googleapis.com/auth/youtube.upload'],
+  scope: [
+    'https://www.googleapis.com/auth/youtube.upload',
+    'https://www.googleapis.com/auth/youtube.force-ssl',
+  ],
   prompt: 'consent',
 });
 
@@ -39,7 +44,7 @@ const opener = process.platform === 'win32'
     : `xdg-open "${authUrl}"`;
 
 console.log('\nOpening browser for Google authorisation...');
-exec(opener);
+if (process.env.YOUTUBE_AUTH_NO_OPEN !== 'true') exec(opener);
 console.log('If the browser did not open, visit this URL manually:\n');
 console.log(authUrl + '\n');
 
@@ -73,6 +78,12 @@ const token = await new Promise((resolve, reject) => {
   });
 });
 
-console.log('\n✓ Success! Add this to your .env file and GitHub Secrets:\n');
-console.log('YOUTUBE_REFRESH_TOKEN=' + token.refresh_token);
-console.log();
+const tokenOutputPath = process.env.YOUTUBE_AUTH_TOKEN_FILE;
+if (tokenOutputPath) {
+  writeFileSync(tokenOutputPath, `${token.refresh_token}\n`, { mode: 0o600 });
+  console.log(`\n✓ Success! Refresh token saved securely to ${tokenOutputPath}.\n`);
+} else {
+  console.log('\n✓ Success! Add this to your .env file and GitHub Secrets:\n');
+  console.log('YOUTUBE_REFRESH_TOKEN=' + token.refresh_token);
+  console.log();
+}

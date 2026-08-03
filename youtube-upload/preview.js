@@ -9,8 +9,13 @@ import "dotenv/config";
 import { getPostIndex, getDidYouKnow, getQuickFacts, getArticleText, getPostWikipediaUrl } from "./lib/kv.js";
 import { generateVideo } from "./lib/video.js";
 import { videoHeadlineTitle, videoMatchTitle } from "./lib/titles.js";
-import { generateNarration, buildNarrationScript, buildNarrationParts } from "./lib/elevenlabs.js";
-import { selectInterestingNarrationFacts } from "./lib/narration-selection.js";
+import { generateNarration, buildNarrationParts } from "./lib/elevenlabs.js";
+import {
+  assessNarrationCaptionIntegrity,
+  auditNarrationTopicConnection,
+  buildNarrationTopicContext,
+  selectInterestingNarrationFacts,
+} from "./lib/narration-selection.js";
 import { getMusicPath } from "./lib/music.js";
 
 function getTodaySlug() {
@@ -41,19 +46,35 @@ async function main() {
     getPostWikipediaUrl(slug),
   ]);
   const rawItems = [...(dyk || []), ...(qf || [])];
+  const topicContext = buildNarrationTopicContext(post, qf);
   const selectedItems = selectInterestingNarrationFacts(
     videoMatchTitle(post),
     rawItems,
     articleText,
-    { limit: 3, dateHint: videoHeadlineTitle(post) },
+    { limit: 3, dateHint: videoHeadlineTitle(post), topicContext },
   );
   const contentItems = selectedItems;
   const narrationItems = selectedItems;
+  const narrationParts = buildNarrationParts(post, narrationItems);
+  const topicAudit = auditNarrationTopicConnection(
+    videoMatchTitle(post),
+    narrationParts,
+    topicContext,
+  );
+  if (!topicAudit.ok) {
+    throw new Error(
+      "NARRATION_TOPIC_MISMATCH: preview refused unrelated narration facts",
+    );
+  }
 
-  const script = buildNarrationScript(post, narrationItems);
+  const script = narrationParts.join(" ");
   console.log(`Narration script: "${script}"`);
 
   const { path: narrationPath, words } = await generateNarration(slug, script);
+  const captionAudit = assessNarrationCaptionIntegrity(script, words);
+  if (!captionAudit.ok) {
+    throw new Error(`NARRATION_CAPTION_MISMATCH: ${captionAudit.reason}`);
+  }
   const bgMusicPath = getMusicPath();
   const useAiImage = process.env.USE_AI_IMAGE !== "false";
 
@@ -64,7 +85,7 @@ async function main() {
     useAiImage,
     contentItems: selectedItems,
     wikiArticleUrl: wikiUrl,
-    narrationParts: buildNarrationParts(post, narrationItems),
+    narrationParts,
   });
 
   console.log(`\n✓ Preview video ready: ${videoResult.path}`);

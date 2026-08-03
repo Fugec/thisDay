@@ -18882,7 +18882,7 @@ const GROUNDING_EXPLICIT_CAUSAL_DENIAL_PATTERN =
 // claim that an actor prevented an outcome. Keep genuine preventive claims
 // auditable while excluding only explicit source/record limitation framing.
 const GROUNDING_SOURCE_LIMITATION_PATTERN =
-  /(?:\b(?:source|sources|record|records|evidence|source material)\b[\s\S]{0,240}\b(?:(?:does|do|did|can|could)\s+not|cannot|fail(?:s|ed)?\s+to|omit(?:s|ted|ting)?|without|absence|lack)\b[\s\S]{0,240}\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,120}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b|^\s*(?:this|the|that)\s+(?:absence|lack|omission)\b[\s\S]{0,120}\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,120}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b)/i;
+  /(?:\b(?:source|sources|record|records|evidence|source material)\b[\s\S]{0,240}\b(?:(?:does|do|did|can|could)\s+not|cannot|fail(?:s|ed)?\s+to|omit(?:s|ted|ting)?|without|absence|lack)\b[\s\S]{0,240}\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,120}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|memoriali[sz](?:e[ds]?|ing|ation)|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b|^\s*(?:this|the|that)\s+(?:absence|lack|omission)\b[\s\S]{0,120}\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,120}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|memoriali[sz](?:e[ds]?|ing|ation)|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b)/i;
 const GROUNDING_SUPPORT_STOPWORDS = new Set([
   "about", "after", "again", "against", "also", "among", "another", "around",
   "article", "because", "before", "being", "between", "both", "caused", "causes",
@@ -19619,6 +19619,55 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
                 finding.field,
                 fullText.replace(targetSentence, trimmedSentence),
               );
+            }
+          }
+        }
+      }
+
+      // A provider can append an unsupported causal conclusion to an
+      // otherwise source-grounded sentence (live August 3 example: "and it
+      // prompted discussions about ..."). Trim only that trailing causal
+      // clause. Keep enough prose for the field's existing structural floor;
+      // the candidate is still accepted only when the grounding audit loses
+      // at least one finding.
+      if (!candidate && finding.label === "causal claim") {
+        const fullText = getContentFieldByPath(working, finding.field);
+        if (typeof fullText === "string") {
+          const targetSentence = splitSentences(fullText).find(
+            (sentence) => sentence.slice(0, 240) === finding.sentence,
+          );
+          if (targetSentence) {
+            const trimmedSentence = targetSentence
+              .replace(
+                /,\s*(?:(?:which|and)\s+)?(?:it\s+)?(?:lead(?:s|ing)?\s+to|led\s+to|prompt(?:ed|s|ing)?|result(?:ed|s|ing)?\s+in|trigger(?:ed|s|ing)?)\b[\s\S]*$/i,
+                ".",
+              )
+              .replace(/\s+\./g, ".")
+              .trim();
+            if (
+              trimmedSentence !== targetSentence &&
+              wordCount(trimmedSentence) >= 7
+            ) {
+              const remainingText = fullText
+                .replace(targetSentence, trimmedSentence)
+                .replace(/\s+/g, " ")
+                .trim();
+              const rootField = finding.field.split(/[.[\]]/)[0];
+              const minimumRemainingWords = /^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(
+                finding.field,
+              )
+                ? 60
+                : ARTICLE_BODY_FIELDS.includes(rootField)
+                  ? CHUNKED_BODY_PARAGRAPH_MIN_WORDS
+                  : 12;
+              if (wordCount(remainingText) >= minimumRemainingWords) {
+                candidate = JSON.parse(JSON.stringify(working));
+                setContentFieldByPath(
+                  candidate,
+                  finding.field,
+                  remainingText,
+                );
+              }
             }
           }
         }

@@ -1193,7 +1193,7 @@ test("source limitations and direct quotations are not historical outcome or ord
       {
         title: "Unnamed individual victims",
         detail:
-          "While the source gives the aggregate numbers of twenty three killed and twenty two injured, it does not list the names of the deceased or injured individuals. This absence prevents a fuller assessment of the individual experiences represented by the aggregate toll.",
+          "While the source gives the aggregate numbers of twenty three killed and twenty two injured it does not list the names of any of the deceased or injured individuals This absence of personal identifiers limits the ability to understand the human impact of the event beyond statistical totals and prevents a more detailed memorialization of those affected",
       },
       {
         title: "No firsthand accounts",
@@ -1231,6 +1231,38 @@ test("source limitations and direct quotations are not historical outcome or ord
     }],
   }, source);
   assert.match(realOrderClaim.reasons.join(" "), /unsupported order attribution/);
+});
+
+test("an unsupported trailing causal clause is removed without thinning the body", () => {
+  const source = {
+    pageTitle: "2019 El Paso Walmart shooting",
+    text:
+      "On August 3, 2019, Patrick Crusius attacked a Walmart in El Paso, Texas.",
+    sourceExtract:
+      "The Federal Bureau of Investigation investigated the manifesto as domestic terrorism and a hate crime. Patrick Crusius received multiple life sentences without parole.",
+  };
+  const content = {
+    aftermathParagraphs: [
+      "Following the arrest and sentencing of Patrick Crusius, the community of El Paso and the broader United States reflected on the tragedy. The shooting was described as the deadliest attack on Latinos in modern American history, underscoring the targeted nature of the violence. The Federal Bureau of Investigation's investigation highlighted the extremist content of the manifesto and the gunman's intent to emulate a high profile hate crime. The case reinforced the FBI's role in addressing domestic terrorism and hate crimes, and it prompted discussions about the monitoring of extremist forums. The legal proceedings, culminating in multiple life sentences without parole, demonstrated the judicial system's response to the crime. The event remains a stark reminder of the impact of white nationalist ideology and the importance of vigilance against hate based violence.",
+    ],
+  };
+
+  const before = hooks.verifyArticleGrounding(content, source);
+  assert.match(before.reasons.join(" "), /unsupported causal claim/);
+
+  const repaired = hooks.mechanicallyRemoveOptionalUnsupportedClaims(
+    content,
+    source,
+  );
+  assert.deepEqual(repaired.repairedFieldPaths, ["aftermathParagraphs[0]"]);
+  assert.doesNotMatch(
+    repaired.content.aftermathParagraphs[0],
+    /prompted discussions/i,
+  );
+  assert.ok(
+    repaired.content.aftermathParagraphs[0].split(/\s+/).length >= 110,
+  );
+  assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
 });
 
 test("chunk continuity catches copied body sentences before enrichment", () => {

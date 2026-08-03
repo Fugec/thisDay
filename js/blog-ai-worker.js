@@ -19352,6 +19352,46 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
         }
       }
 
+      // 2026-08-03 Treaty of Greenville incident: a source-bound repair
+      // repeatedly appended self-referential attribution sentences such as
+      // "the source notes ... was a direct outcome" and then extended them
+      // into an unsupported claim about later recurring relations. These
+      // sentences are optional commentary, not factual core. Remove only the
+      // flagged sentence when enough substantive text remains in that field;
+      // the candidate is accepted below only if the deterministic grounding
+      // finding count falls, and the caller re-runs every publication gate.
+      if (!candidate && finding.label === "order attribution") {
+        const fullText = getContentFieldByPath(working, finding.field);
+        if (typeof fullText === "string") {
+          const targetSentence = splitSentences(fullText).find(
+            (sentence) => sentence.slice(0, 240) === finding.sentence,
+          );
+          if (
+            targetSentence &&
+            /\b(?:direct outcome|explicitly (?:noted|stated)|source (?:material )?(?:notes|states))\b/i.test(
+              targetSentence,
+            )
+          ) {
+            const remainingText = fullText
+              .replace(targetSentence, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+            const rootField = finding.field.split(/[.[\]]/)[0];
+            const minimumRemainingWords = /^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(
+              finding.field,
+            )
+              ? 60
+              : ARTICLE_BODY_FIELDS.includes(rootField)
+                ? CHUNKED_BODY_PARAGRAPH_MIN_WORDS
+                : 12;
+            if (wordCount(remainingText) >= minimumRemainingWords) {
+              candidate = JSON.parse(JSON.stringify(working));
+              setContentFieldByPath(candidate, finding.field, remainingText);
+            }
+          }
+        }
+      }
+
       if (!candidate) continue;
       const candidateFindings = unsupportedGroundingClaims(
         candidate,

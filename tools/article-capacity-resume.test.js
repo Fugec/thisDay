@@ -934,6 +934,52 @@ test("optional unsupported claims are removed locally without weakening groundin
   assert.equal(hooks.verifyArticleGrounding(mh370Repaired.content, mh370Source).ok, true);
 });
 
+test("a source-attribution tail cannot strand the Treaty of Greenville article", () => {
+  const supportedAftermath =
+    "The agreement described a boundary between United States territory and the lands retained by the participating nations. " +
+    "Its terms listed named rivers, forts, and settlements and recorded the land cession in the treaty text. " +
+    "The document also specified annuity payments and identified the parties responsible for carrying out those provisions. " +
+    "These clauses appear in the supplied record alongside the treaty date, the named representatives, and the location of the negotiations. " +
+    "The surviving text therefore provides concrete terms that can be described without adding a later policy effect or broader historical claim. " +
+    "Each provision remains tied to the language preserved in the agreement and to the institutions explicitly named there.";
+  const supportedAnalysis =
+    "The treaty text supplies specific boundary language, named parties, and payment terms that make the documented agreement unusually concrete. " +
+    "Those provisions can be evaluated directly from the supplied record without assuming a broader effect. " +
+    "The named rivers, forts, representatives, and annual sums give readers verifiable details while keeping the analysis within the source. " +
+    "This precision is the strongest feature of the surviving document and does not require an inferred legacy.";
+  const source = {
+    pageTitle: "Treaty of Greenville",
+    text: "The Treaty of Greenville was signed on August 3, 1795.",
+    sourceExtract:
+      "The treaty text defined a boundary using named rivers, forts, and settlements. " +
+      "It also specified annuity payments and identified the parties to the agreement.",
+  };
+  const content = {
+    aftermathParagraphs: [supportedAftermath],
+    analysisGood: [{
+      title: "Documented Payment Terms",
+      detail:
+        `${supportedAnalysis} The source notes that these payments were a direct outcome of the treaty, creating a structured form of compensation that became a recurring feature in subsequent U.S. Indigenous relations.`,
+    }],
+  };
+
+  const before = hooks.verifyArticleGrounding(content, source);
+  assert.equal(before.ok, false);
+  assert.match(before.reasons.join(" "), /unsupported order attribution/);
+
+  const repaired = hooks.mechanicallyRemoveOptionalUnsupportedClaims(content, source);
+  assert.deepEqual(repaired.repairedFieldPaths, [
+    "analysisGood[0].detail",
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(repaired.content),
+    /direct outcome|explicitly noted|recurring feature/i,
+  );
+  assert.ok(repaired.content.aftermathParagraphs[0].split(/\s+/).length >= 95);
+  assert.ok(repaired.content.analysisGood[0].detail.split(/\s+/).length >= 60);
+  assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
+});
+
 test("legislative idiom, causal denials, and optional labels do not strand a complete article", () => {
   const source = {
     pageTitle: "Social Security Amendments of 1965",

@@ -22,6 +22,22 @@ export async function getUploaded() {
   return raw ? JSON.parse(raw) : {};
 }
 
+export function collectReplacedYoutubeIds(entry, currentYoutubeId = "") {
+  const values = [
+    entry?.youtubeId,
+    ...(Array.isArray(entry?.replacesYoutubeIds)
+      ? entry.replacesYoutubeIds
+      : []),
+    entry?.replacesYoutubeId,
+    ...(Array.isArray(entry?.retiredYoutubeIds)
+      ? entry.retiredYoutubeIds
+      : []),
+  ];
+  return [...new Set(values.map((value) => String(value || "").trim()))]
+    .filter(Boolean)
+    .filter((value) => value !== currentYoutubeId);
+}
+
 export async function markUploaded(
   slug,
   youtubeId,
@@ -29,12 +45,28 @@ export async function markUploaded(
   metadata = {},
 ) {
   const tracker = await getUploaded();
+  const replacedYoutubeIds = [
+    ...(Array.isArray(metadata?.replacesYoutubeIds)
+      ? metadata.replacesYoutubeIds
+      : []),
+    metadata?.replacesYoutubeId,
+  ];
+  const normalizedReplacements = [
+    ...new Set(
+      replacedYoutubeIds.map((value) => String(value || "").trim()),
+    ),
+  ]
+    .filter(Boolean)
+    .filter((value) => value !== youtubeId);
   tracker[slug] = {
     youtubeId,
     uploadedAt: new Date().toISOString(),
     privacy,
-    ...(metadata?.replacesYoutubeId && metadata.replacesYoutubeId !== youtubeId
-      ? { replacesYoutubeId: metadata.replacesYoutubeId }
+    ...(normalizedReplacements.length > 0
+      ? {
+          replacesYoutubeId: normalizedReplacements[0],
+          replacesYoutubeIds: normalizedReplacements,
+        }
       : {}),
     ...(metadata?.topicAudit ? { topicAudit: metadata.topicAudit } : {}),
   };

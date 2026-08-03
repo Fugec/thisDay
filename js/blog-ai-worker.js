@@ -7610,6 +7610,57 @@ function scanArticleQuality(content) {
   return issues;
 }
 
+// Bounded recovery must not ask a provider to rewrite an already valid core
+// merely because its optional quality scan uses a higher presentation bar
+// than the publication contract. Strengthen the two known gaps directly from
+// retained evidence: long source passages for short Did You Know cards, and
+// the canonical source-page identity for analysis of what that record omits.
+function strengthenBoundedCoreFromSource(content, source) {
+  if (!content || !source) return content;
+  let next = content;
+
+  const facts = Array.isArray(content.didYouKnowFacts)
+    ? content.didYouKnowFacts
+    : [];
+  if (facts.some((fact) => wordCount(fact) < 35)) {
+    const sourceMaterial = sourceMaterialForGrounding(source);
+    const derivedFacts = sourceDerivedDidYouKnowFacts(sourceMaterial, content);
+    const derivedAudit = auditDidYouKnowFacts({
+      ...content,
+      didYouKnowFacts: derivedFacts,
+    });
+    if (
+      derivedAudit.ok &&
+      derivedAudit.facts.length >= MIN_DID_YOU_KNOW_FACTS &&
+      derivedAudit.facts.every((fact) => wordCount(fact) >= 35)
+    ) {
+      next = { ...next, didYouKnowFacts: derivedAudit.facts };
+    }
+  }
+
+  const sourceTitle = String(
+    source.pageTitle || content.sourcePageTitle || content.eventTitle || "",
+  ).replace(/\s+/g, " ").trim();
+  if (sourceTitle) {
+    for (const field of ["analysisGood", "analysisBad"]) {
+      if (!Array.isArray(next[field])) continue;
+      let changed = false;
+      const items = next[field].map((item) => {
+        const detail = String(item?.detail || "").trim();
+        if (!detail || hasHardFact(detail)) return item;
+        const anchoredDetail =
+          `In the ${sourceTitle} source record, ` +
+          `${detail.charAt(0).toLowerCase()}${detail.slice(1)}`;
+        changed = true;
+        return { ...item, detail: anchoredDetail };
+      });
+      if (changed) next = { ...next, [field]: items };
+    }
+  }
+
+  return next;
+}
+
 function ensureSourceComparisonContentRationale(content) {
   const existing = plainText(content?.contentRationale);
   if (/\bWikipedia\b/i.test(existing) && wordCount(existing) >= 35) {
@@ -10500,7 +10551,11 @@ async function enrichPublishedPost(
     // that dedup, strip filler, and expand — then apply the strict validation.
     // These are a strict subset of the non-bounded sync pipeline, so the
     // synchronous request budget already accommodates them.
-    let repaired = ensureSourceComparisonContentRationale(content);
+    let repaired = strengthenBoundedCoreFromSource(content, groundingSource);
+    if (repaired !== content) {
+      await persistBoundedRepair(repaired, "core-source-strengthening");
+    }
+    repaired = ensureSourceComparisonContentRationale(repaired);
     if (repaired !== content) {
       await persistBoundedRepair(repaired, "content-rationale-mechanical");
     }
@@ -25050,6 +25105,7 @@ export const __contentGenerationTestHooks = {
   assertArticleStructure,
   scanBannedPhrases,
   scanArticleQuality,
+  strengthenBoundedCoreFromSource,
   scanIntraPageDuplication,
   ensureSourceComparisonContentRationale,
   savePublishedPost,

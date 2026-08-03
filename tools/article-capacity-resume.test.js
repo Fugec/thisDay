@@ -1265,6 +1265,69 @@ test("an unsupported trailing causal clause is removed without thinning the body
   assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
 });
 
+test("bounded recovery strengthens short core modules from retained sources", () => {
+  const source = {
+    pageTitle: "2019 El Paso Walmart shooting",
+    text:
+      "On August 3, 2019, Patrick Crusius attacked a Walmart in El Paso, Texas.",
+    sourcePages: [
+      {
+        pageTitle: "2019 El Paso Walmart shooting",
+        pageUrl: "https://en.wikipedia.org/wiki/2019_El_Paso_shooting",
+        extract:
+          "Patrick Crusius drove about 650 miles from Allen, Texas, to El Paso in a 2012 Honda Civic before the August 3, 2019 shooting. Investigators recorded his stops for fuel and his arrival near Cielo Vista Mall before the attack began at the Walmart.",
+      },
+      {
+        pageTitle: "Federal case record",
+        pageUrl: "https://www.justice.gov/example/el-paso-case",
+        publisher: "United States Department of Justice",
+        verifiedIndependent: true,
+        extract:
+          "In 2023, Patrick Crusius pleaded guilty to ninety federal murder and hate crime charges. A federal court imposed ninety consecutive life sentences, while later state proceedings ended with another guilty plea and a life sentence without parole on April 21, 2025.",
+      },
+      {
+        pageTitle: "FBI investigation record",
+        pageUrl: "https://www.fbi.gov/example/el-paso-investigation",
+        publisher: "Federal Bureau of Investigation",
+        verifiedIndependent: true,
+        extract:
+          "The Federal Bureau of Investigation examined the El Paso Walmart shooting as domestic terrorism and a hate crime. The retained record describes the manifesto, the weapon, the law enforcement response, and the investigation without supplying names or firsthand accounts for every person affected.",
+      },
+    ],
+  };
+  const content = {
+    sourcePageTitle: source.pageTitle,
+    eventTitle: "El Paso Walmart shooting occurs",
+    didYouKnowFacts: [
+      "Patrick Crusius drove 650 miles to El Paso before the August 3, 2019 attack.",
+      "The Federal Bureau of Investigation treated the shooting as domestic terrorism.",
+      "A federal court imposed ninety consecutive life sentences in 2023.",
+    ],
+    analysisBad: [{
+      title: "Missing Victim Identities",
+      detail:
+        "While the source gives aggregate totals it does not list the names of every deceased or injured individual. This absence limits the ability to understand the human impact beyond statistics and leaves the supplied record without a detailed memorialization of each person affected by the shooting and its aftermath.",
+    }],
+  };
+
+  const strengthened = hooks.strengthenBoundedCoreFromSource(content, source);
+  assert.notEqual(strengthened, content);
+  assert.ok(strengthened.didYouKnowFacts.length >= 3);
+  assert.ok(
+    strengthened.didYouKnowFacts.every(
+      (fact) => fact.split(/\s+/).length >= 35,
+    ),
+  );
+  assert.match(
+    strengthened.analysisBad[0].detail,
+    /^In the 2019 El Paso Walmart shooting source record,/,
+  );
+  const residual = hooks.scanArticleQuality(strengthened).filter(
+    (issue) => /^(?:analysisBad|didYouKnowFacts)\[/.test(issue),
+  );
+  assert.deepEqual(residual, []);
+});
+
 test("chunk continuity catches copied body sentences before enrichment", () => {
   const repeated =
     "The committee record lists the same dated vote and the same participating institutions in full.";

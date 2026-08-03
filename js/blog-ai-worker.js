@@ -16254,6 +16254,105 @@ function isLowRiskChunkedContinuityFailure(continuity) {
   );
 }
 
+// When a later body chunk copies complete sentences from an earlier chunk,
+// deletion is safer than another generative rewrite: it cannot introduce a
+// claim, alter a number, or weaken grounding. Accept the mechanical result
+// only when the later section still has at least one substantive paragraph,
+// the complete article remains above its body floor, and the full continuity
+// audit becomes clean. Otherwise return null and keep the existing AI repair.
+function mechanicallyPruneRepeatedBodySentences(content, continuity) {
+  if (
+    !(continuity?.issues || []).some((issue) =>
+      String(issue || "").startsWith("body cross-section duplicate:")
+    )
+  ) {
+    return null;
+  }
+  const requestedFields = (continuity?.repairFields || [])
+    .filter((field) => ARTICLE_BODY_FIELDS.includes(field))
+    .sort(
+      (left, right) =>
+        ARTICLE_BODY_FIELDS.indexOf(left) - ARTICLE_BODY_FIELDS.indexOf(right),
+    );
+  if (requestedFields.length === 0) return null;
+
+  let candidate = content;
+  const repairedFields = {};
+  let droppedSentenceCount = 0;
+  for (const field of requestedFields) {
+    const fieldIndex = ARTICLE_BODY_FIELDS.indexOf(field);
+    const earlierSentenceKeys = new Set(
+      ARTICLE_BODY_FIELDS
+        .slice(0, fieldIndex)
+        .flatMap((earlierField) =>
+          (candidate?.[earlierField] || []).flatMap((paragraph) =>
+            splitSentences(paragraph, 20)
+          )
+        )
+        .map(normalizeForCompare)
+        .filter(Boolean),
+    );
+    if (earlierSentenceKeys.size === 0) continue;
+
+    const currentParagraphs = Array.isArray(candidate?.[field])
+      ? candidate[field]
+      : [];
+    const retainedParagraphs = [];
+    let fieldDropped = 0;
+    for (const paragraph of currentParagraphs) {
+      const retainedSentences = splitSentences(paragraph, 20).filter(
+        (sentence) => {
+          const key = normalizeForCompare(sentence);
+          if (key && earlierSentenceKeys.has(key)) {
+            fieldDropped += 1;
+            return false;
+          }
+          return Boolean(key);
+        },
+      );
+      const retainedParagraph = retainedSentences.join(" ").trim();
+      if (retainedParagraph) retainedParagraphs.push(retainedParagraph);
+    }
+    if (fieldDropped === 0) continue;
+
+    let replacement = retainedParagraphs;
+    if (
+      replacement.some(
+        (paragraph) => wordCount(paragraph) < CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
+      )
+    ) {
+      const mergedRemainder = replacement.join(" ").trim();
+      replacement = wordCount(mergedRemainder) >=
+          CHUNKED_BODY_PARAGRAPH_MIN_WORDS
+        ? [mergedRemainder]
+        : [];
+    }
+    if (replacement.length === 0) return null;
+
+    const nextCandidate = { ...candidate, [field]: replacement };
+    try {
+      validateChunkedArticleBodyChunk(
+        nextCandidate,
+        [field],
+        "mechanical body duplicate repair",
+      );
+    } catch {
+      return null;
+    }
+    if (articleBodyWordCount(nextCandidate) < MIN_REAL_ARTICLE_BODY_WORDS) {
+      return null;
+    }
+    candidate = nextCandidate;
+    repairedFields[field] = replacement;
+    droppedSentenceCount += fieldDropped;
+  }
+
+  if (droppedSentenceCount === 0) return null;
+  const repairedAudit = auditChunkedArticleContinuity(candidate);
+  if (!repairedAudit.ok) return null;
+  return { repairedFields, droppedSentenceCount };
+}
+
 async function repairChunkedArticleContinuity(
   env,
   model,
@@ -16316,10 +16415,25 @@ ${fieldGuidance}
         fields,
         "chunked article continuity repair",
       );
-      const repairedAudit = auditChunkedArticleContinuity({
+      let repairedCandidate = {
         ...content,
         ...parsed,
-      });
+      };
+      let repairedAudit = auditChunkedArticleContinuity(repairedCandidate);
+      if (!repairedAudit.ok) {
+        const mechanicalRepair = mechanicallyPruneRepeatedBodySentences(
+          repairedCandidate,
+          repairedAudit,
+        );
+        if (mechanicalRepair) {
+          Object.assign(parsed, mechanicalRepair.repairedFields);
+          repairedCandidate = { ...content, ...parsed };
+          repairedAudit = auditChunkedArticleContinuity(repairedCandidate);
+          console.warn(
+            `Blog: removed ${mechanicalRepair.droppedSentenceCount} exact sentence duplicate(s) from continuity-repair output; no second repair call used.`,
+          );
+        }
+      }
       if (!repairedAudit.ok) {
         throw new Error(
           `chunked article continuity repair: ${repairedAudit.issues.join("; ")}`,
@@ -17557,6 +17671,37 @@ Requirements:
     ...analysis,
   }, date);
   let continuity = auditChunkedArticleContinuity(merged);
+  if (!continuity.ok && continuity.repairFields.length > 0) {
+    const mechanicalRepair = mechanicallyPruneRepeatedBodySentences(
+      merged,
+      continuity,
+    );
+    if (mechanicalRepair) {
+      Object.assign(merged, mechanicalRepair.repairedFields);
+      if (
+        mechanicalRepair.repairedFields.overviewParagraphs ||
+        mechanicalRepair.repairedFields.eyewitnessOrChronicle
+      ) {
+        await generationCheckpoint.save("bodyA", {
+          overviewParagraphs: merged.overviewParagraphs,
+          eyewitnessOrChronicle: merged.eyewitnessOrChronicle,
+        });
+      }
+      if (
+        mechanicalRepair.repairedFields.aftermathParagraphs ||
+        mechanicalRepair.repairedFields.conclusionParagraphs
+      ) {
+        await generationCheckpoint.save("bodyB", {
+          aftermathParagraphs: merged.aftermathParagraphs,
+          conclusionParagraphs: merged.conclusionParagraphs,
+        });
+      }
+      continuity = auditChunkedArticleContinuity(merged);
+      console.warn(
+        `Blog: removed ${mechanicalRepair.droppedSentenceCount} exact cross-section duplicate sentence(s) from retained body prose; no repair call used.`,
+      );
+    }
+  }
   if (!continuity.ok && continuity.repairFields.length > 0) {
     console.warn(
       `Blog: repairing chunked continuity fields [${continuity.repairFields.join(", ")}] — ${continuity.issues.join("; ")}`,
@@ -24713,6 +24858,7 @@ export const __contentGenerationTestHooks = {
   prioritizeDedicatedEventSourceCandidates,
   auditChunkedArticleContinuity,
   isLowRiskChunkedContinuityFailure,
+  mechanicallyPruneRepeatedBodySentences,
   repairChunkedArticleContinuity,
   articleGenerationJournalKey,
   articleGenerationSourceFingerprint,

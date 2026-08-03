@@ -1221,6 +1221,105 @@ test("chunk continuity catches copied body sentences before enrichment", () => {
   assert.equal(hooks.isLowRiskChunkedContinuityFailure(audit), false);
 });
 
+test("exact later-section copies are removed locally when a substantive conclusion remains", async () => {
+  const repeated =
+    "In 2025, Patrick Crusius pleaded guilty to state charges and received a life sentence without parole in El Paso.";
+  const paragraph = (section) =>
+    Array.from(
+      { length: 9 },
+      (_, index) =>
+        `${section} record ${index + 1} identifies Patrick Crusius, El Paso, the 2019 Walmart attack, and a documented stage of the federal or state proceedings.`,
+    ).join(" ");
+  const conclusion = (section) =>
+    `The ${section.toLowerCase()} begins with a distinct review of the documented El Paso record. ${repeated} ${paragraph(section)}`;
+  const content = {
+    title: "2019 El Paso Walmart Shooting — August 3, 2019",
+    eventTitle: "2019 El Paso Walmart shooting",
+    historicalDate: "August 3, 2019",
+    historicalYear: 2019,
+    location: "El Paso, Texas",
+    organizerName: "Patrick Crusius",
+    sourceFacts: [
+      "The Walmart attack occurred in El Paso in 2019.",
+      "Patrick Crusius later faced federal and state proceedings.",
+    ],
+    overviewParagraphs: [
+      paragraph("Overview first"),
+      paragraph("Overview second"),
+    ],
+    eyewitnessOrChronicle: [
+      paragraph("Chronicle first"),
+      paragraph("Chronicle second"),
+    ],
+    aftermathParagraphs: [
+      `The first aftermath passage follows the separate state proceedings in El Paso. ${repeated} ${paragraph("Aftermath first")}`,
+      paragraph("Aftermath second"),
+    ],
+    conclusionParagraphs: [
+      conclusion("Conclusion first"),
+      conclusion("Conclusion second"),
+    ],
+  };
+
+  const before = hooks.auditChunkedArticleContinuity(content);
+  assert.equal(before.ok, false);
+  assert.match(before.issues.join(" "), /body cross-section duplicate/);
+
+  const repaired = hooks.mechanicallyPruneRepeatedBodySentences(
+    content,
+    before,
+  );
+  assert.ok(repaired, "a grounded 110+ word remainder should be repairable without AI");
+  assert.equal(repaired.droppedSentenceCount, 2);
+  assert.equal(
+    hooks.auditChunkedArticleContinuity({
+      ...content,
+      ...repaired.repairedFields,
+    }).ok,
+    true,
+  );
+  assert.ok(
+    repaired.repairedFields.conclusionParagraphs.every(
+      (value) => !value.includes(repeated),
+    ),
+  );
+
+  let repairCalls = 0;
+  const acceptedRepair = await hooks.repairChunkedArticleContinuity(
+    {},
+    "test-model",
+    content,
+    "source-grounded context",
+    {
+      title: content.title,
+      eventTitle: content.eventTitle,
+      historicalDate: content.historicalDate,
+      historicalYear: content.historicalYear,
+      location: content.location,
+      organizerName: content.organizerName,
+      sourceFacts: content.sourceFacts,
+    },
+    before,
+    async (_env, _model, _label, _prompt, _maxTokens, validate) => {
+      repairCalls += 1;
+      const parsed = {
+        conclusionParagraphs: [...content.conclusionParagraphs],
+      };
+      validate(parsed);
+      return parsed;
+    },
+  );
+  assert.equal(repairCalls, 1);
+  assert.equal(
+    hooks.auditChunkedArticleContinuity({
+      ...content,
+      ...acceptedRepair,
+    }).ok,
+    true,
+    "duplicate output from the repair provider must be cleaned before validation rejects it",
+  );
+});
+
 test("source attribution and beyond-Wikipedia rationale are article-level quality signals", () => {
   const body = {
     eventTitle: "A Documented Event",

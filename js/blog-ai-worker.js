@@ -8532,6 +8532,14 @@ async function generateLearningBlocks(env, content) {
 }
 
 function groundLearningBlocks(content) {
+  // Timeline is optional post-publish enrichment. Most core drafts do not
+  // carry one, so avoid constructing and normalizing the full body + evidence
+  // corpus only to discover there is nothing to filter. On the Free Workers
+  // CPU limit this unnecessary pass consumed the remaining budget after a
+  // clean bounded preflight (August 3, 2026).
+  if (!Array.isArray(content?.timeline) || content.timeline.length === 0) {
+    return;
+  }
   const sourceMaterial = sourceMaterialForGrounding(
     groundingSourceFromContent(content),
   );
@@ -25094,6 +25102,7 @@ export const __contentGenerationTestHooks = {
   validateContentDateForPublish,
   validateDirectCitationsForPublish,
   validateSourcedTimelineForPublish,
+  groundLearningBlocks,
   ensureAutomaticTimelineForPublish,
   validateOriginalValueForPublish,
   buildArticleEntityStrip,

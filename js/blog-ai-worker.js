@@ -15805,6 +15805,19 @@ async function generateChunkedArticleBodyField(
   invokeChunkedArticleAI = callChunkedArticleAI,
 ) {
   const label = `chunked article ${field}`;
+  // 2026-08-03 Treaty of Greenville incident: the fallback provider ignored
+  // the two-paragraph conclusion limit three times and exhausted a 1,700-token
+  // response mid-string (roughly 17,000 output characters each time). A split
+  // conclusion is the final body component and the validator has accepted one
+  // substantive paragraph since July 26, so give this field a compact output
+  // contract. The total-body publication floor still runs after all four
+  // fields are assembled and triggers targeted capacity repair if necessary.
+  const paragraphTarget = field === "conclusionParagraphs" ? 1 : 2;
+  const maxTokens = field === "conclusionParagraphs" ? 700 : 1700;
+  const paragraphPlaceholders = Array.from(
+    { length: paragraphTarget },
+    (_, index) => `paragraph ${index + 1}`,
+  );
   const existingSection = alreadyWritten
     ? `Already written body fields, for continuity and non-repetition:\n${JSON.stringify(alreadyWritten, null, 2)}\n\n`
     : "";
@@ -15820,22 +15833,21 @@ Canonical brief:
 ${JSON.stringify(compactBrief, null, 2)}
 
 ${existingSection}Write only this JSON:
-{
-  "${field}":["paragraph 1","paragraph 2"]
-}
+${JSON.stringify({ [field]: paragraphPlaceholders }, null, 2)}
 
 Requirements:
 - Return exactly one top-level key: "${field}".
 - ${chunkedArticleBodyFieldGuidance(field)}
-- The array must contain exactly 2 paragraphs.
+- The array must contain exactly ${paragraphTarget} paragraph${paragraphTarget === 1 ? "" : "s"}.
 - Each paragraph should be 145-175 words, source-grounded, and non-repetitive.
 - Absolute minimum is ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS} words, but aim for at least ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 25} words to leave margin.
-- Count both paragraphs before responding. If either paragraph is below ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 15} words, add source-grounded detail before returning.
+- Count every requested paragraph before responding. If one is below ${CHUNKED_BODY_PARAGRAPH_MIN_WORDS + 15} words, add source-grounded detail before returning.
+- Do not exceed ${paragraphTarget === 1 ? 220 : 380} words total. Close the JSON object immediately after the requested array; do not continue with another field or explanation.
 - Every paragraph must end with terminal punctuation.
 - Never place a raw URL in paragraph text. Refer to a source by name; URLs belong only in source metadata.
 - Do not convert chronology into causality. Never invent what the event led to, prevented, enabled, changed, created, ended, or made effective.
 - Do not use hyphens or em dashes in article body prose.`,
-    1700,
+    maxTokens,
     (parsed) => validateChunkedArticleBodyChunk(parsed, [field], label),
   );
 }
@@ -24517,6 +24529,7 @@ export const __contentGenerationTestHooks = {
   articleGenerationDailyRequestBudgetLimit,
   chunkedArticleBodyCapacityRepairFields,
   repairChunkedArticleBodyCapacity,
+  generateChunkedArticleBodyField,
   reusableArticleGenerationChunk,
   shouldRetryChunkOutputFailure,
   canDistributeIndependentArticleWork,

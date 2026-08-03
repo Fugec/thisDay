@@ -650,6 +650,30 @@ test("invalid checkpoint chunks are discarded before reuse", () => {
   assert.equal(journal.chunks.facts, undefined);
 });
 
+test("a split conclusion uses a compact one-paragraph output contract", async () => {
+  let invocation = null;
+  const paragraph = Array(150).fill("grounded").join(" ") + ".";
+  const result = await hooks.generateChunkedArticleBodyField(
+    {},
+    "model",
+    "conclusionParagraphs",
+    "Authoritative source material.",
+    { eventTitle: "Treaty of Greenville" },
+    { aftermathParagraphs: [paragraph] },
+    async (_env, _model, label, prompt, maxTokens) => {
+      invocation = { label, prompt, maxTokens };
+      return { conclusionParagraphs: [paragraph] };
+    },
+  );
+
+  assert.equal(invocation.label, "chunked article conclusionParagraphs");
+  assert.equal(invocation.maxTokens, 700);
+  assert.match(invocation.prompt, /array must contain exactly 1 paragraph\./);
+  assert.match(invocation.prompt, /Do not exceed 220 words total\./);
+  assert.doesNotMatch(invocation.prompt, /"paragraph 2"/);
+  assert.equal(result.conclusionParagraphs.length, 1);
+});
+
 test("article generation request budget reserves one bounded replacement topic and resets on a new UTC day", async () => {
   const kv = makeKvMock();
   const env = {

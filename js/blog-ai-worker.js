@@ -18881,8 +18881,26 @@ const GROUNDING_EXPLICIT_CAUSAL_DENIAL_PATTERN =
 // assessment." That is an epistemic source limitation, not a historical
 // claim that an actor prevented an outcome. Keep genuine preventive claims
 // auditable while excluding only explicit source/record limitation framing.
-const GROUNDING_SOURCE_LIMITATION_PATTERN =
-  /(?:\b(?:source|sources|record|records|evidence|source material)\b[\s\S]{0,240}\b(?:(?:does|do|did|can|could)\s+not|cannot|fail(?:s|ed)?\s+to|omit(?:s|ted|ting)?|without|absence|lack)\b[\s\S]{0,240}\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,120}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|memoriali[sz](?:e[ds]?|ing|ation)|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b|^\s*(?:this|the|that)\s+(?:absence|lack|omission)\b[\s\S]{0,120}\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,120}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|memoriali[sz](?:e[ds]?|ing|ation)|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b)/i;
+const GROUNDING_SOURCE_LIMITATION_SUBJECT_PATTERN =
+  /\b(?:source|sources|record|records|evidence|source material)\b/i;
+const GROUNDING_SOURCE_LIMITATION_MARKER_PATTERN =
+  /\b(?:(?:does|do|did|can|could)\s+not|cannot|fail(?:s|ed)?\s+to|omit(?:s|ted|ting)?|without|absence|lack)\b/i;
+const GROUNDING_SOURCE_LIMITATION_ANAPHORA_PATTERN =
+  /^\s*(?:this|the|that)\s+(?:absence|lack|omission)\b/i;
+const GROUNDING_EPISTEMIC_PREVENTION_PATTERN =
+  /\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,160}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|memoriali[sz](?:e[ds]?|ing|ation)|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b/i;
+
+function isGroundingSourceLimitation(sentence) {
+  const value = String(sentence || "");
+  const explicitSourceLimitation =
+    GROUNDING_SOURCE_LIMITATION_SUBJECT_PATTERN.test(value) &&
+    GROUNDING_SOURCE_LIMITATION_MARKER_PATTERN.test(value);
+  return (
+    (explicitSourceLimitation ||
+      GROUNDING_SOURCE_LIMITATION_ANAPHORA_PATTERN.test(value)) &&
+    GROUNDING_EPISTEMIC_PREVENTION_PATTERN.test(value)
+  );
+}
 const GROUNDING_SUPPORT_STOPWORDS = new Set([
   "about", "after", "again", "against", "also", "among", "another", "around",
   "article", "because", "before", "being", "between", "both", "caused", "causes",
@@ -19163,7 +19181,7 @@ function unsupportedGroundingClaims(content, sourceMaterial) {
         }
         if (
           rule.label === "preventive outcome" &&
-          GROUNDING_SOURCE_LIMITATION_PATTERN.test(sentence)
+          isGroundingSourceLimitation(sentence)
         ) {
           continue;
         }
@@ -19620,6 +19638,29 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
                 fullText.replace(targetSentence, trimmedSentence),
               );
             }
+          }
+        }
+      }
+
+      // Belt-and-suspenders fallback for a source-limitation sentence that
+      // reaches the findings list after provider punctuation/normalization.
+      // Rephrase only "and prevents a fuller assessment/memorialization" as
+      // the equivalent record-bounded statement "the source does not
+      // provide ...". Genuine actor/outcome prevention claims never match.
+      if (!candidate && finding.label === "preventive outcome") {
+        const fullText = getContentFieldByPath(working, finding.field);
+        if (
+          typeof fullText === "string" &&
+          GROUNDING_SOURCE_LIMITATION_SUBJECT_PATTERN.test(fullText) &&
+          GROUNDING_SOURCE_LIMITATION_MARKER_PATTERN.test(fullText)
+        ) {
+          const repairedText = fullText.replace(
+            /\band\s+prevent(?:ed|s|ing)?\s+(?=(?:a|the)\s+(?:(?:fuller|more detailed)\s+)?(?:assessment|evaluation|identification|interpretation|memoriali[sz]ation|reconstruction|understanding|verification|view)\b)/i,
+            "and the source does not provide ",
+          );
+          if (repairedText !== fullText) {
+            candidate = JSON.parse(JSON.stringify(working));
+            setContentFieldByPath(candidate, finding.field, repairedText);
           }
         }
       }

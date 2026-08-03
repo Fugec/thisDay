@@ -177,25 +177,41 @@ export function scoreHistoricalEventSignificance(event, options = {}) {
       ? options.previousDayEventFamilies
       : [],
   );
+  const saturatedFamilies = new Set(
+    Array.isArray(options?.saturatedEventFamilies)
+      ? options.saturatedEventFamilies
+      : [],
+  );
+  const familyCounts =
+    options?.eventFamilyCounts && typeof options.eventFamilyCounts === "object"
+      ? options.eventFamilyCounts
+      : {};
+  const activeFamilies = new Set([...recentFamilies, ...saturatedFamilies]);
   const repeatedFamilies = [
     ...new Set(
       (Array.isArray(event?.eventFamilies) ? event.eventFamilies : []).filter(
-        (family) => recentFamilies.has(family),
+        (family) => activeFamilies.has(family),
       ),
     ),
   ];
   const repeatedPreviousDayFamilies = repeatedFamilies.filter((family) =>
     previousDayFamilies.has(family),
   );
-  // A same-family story on the immediately preceding UTC date is much more
-  // visible to readers than a repeat several days later. Keep every candidate
-  // eligible, but make the adjacent-day tie-breaker strong enough to prefer a
-  // comparably significant fresh subject. Older seven-day repeats retain the
-  // existing light touch.
+  const maxFamilyCount = repeatedFamilies.reduce(
+    (max, family) => Math.max(max, Number(familyCounts[family]) || 0),
+    0,
+  );
+  // The blog selector now separates fresh and repeated candidates before this
+  // scorer runs. These points therefore order candidates within a group and
+  // make the emergency all-repeat fallback prefer the least saturated theme;
+  // pageview popularity can no longer lift a repeat above a source-ready fresh
+  // topic merely by erasing a small tie-breaker.
   const varietyPenalty = repeatedPreviousDayFamilies.length > 0
-    ? 18
-    : repeatedFamilies.length > 0
-      ? 6
+    ? 24
+    : repeatedFamilies.some((family) => recentFamilies.has(family))
+      ? 12 + Math.min(6, Math.max(0, maxFamilyCount - 1) * 2)
+      : repeatedFamilies.length > 0
+        ? 8 + Math.min(6, Math.max(0, maxFamilyCount - 2) * 2)
       : 0;
   const selectionScore = editorialScore - varietyPenalty;
 

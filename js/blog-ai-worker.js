@@ -412,6 +412,8 @@ const SOURCE_PAGE_RELEVANCE_STOPWORDS = new Set([
   "before", "into", "its", "their", "his", "her", "this", "that", "united", "states",
 ]);
 const EVENT_FAMILY_REPEAT_WINDOW_DAYS = 7;
+const EVENT_FAMILY_FREQUENCY_WINDOW_DAYS = 21;
+const EVENT_FAMILY_FREQUENCY_LIMIT = 2;
 // Royal/papal succession detection, shared by the scorer and the event-family
 // cooldown. Runs against normalizeTopicMatchText output (lowercased, no
 // punctuation). July 11 2026 incident: "Election of pope Adrian V" stacked
@@ -425,51 +427,228 @@ const ROYAL_SUCCESSION_PATTERN =
 // (Skylab reentry 217, Branson spaceflight 199, 1982 World Cup final 268);
 // fuller source pages are fetched after selection anyway.
 const MIN_CANDIDATE_EXTRACT_CHARS = 150;
+// Recurring editorial themes used before article generation. These are more
+// specific than BLOG_PILLARS: two stories can both be Science & Technology
+// without both being spaceflight, and an aviation achievement belongs to the
+// same reader-visible theme as an aviation disaster. Keep the rules grounded
+// in explicit text/metadata signals; an unclassified event remains eligible.
+//
+// The catalog deliberately spans every main site pillar so variety protection
+// is not limited to the disaster families that originally motivated it.
 const EVENT_FAMILY_RULES = [
   {
+    name: "aviation",
+    pillar: "Exploration & Discovery",
+    pattern:
+      /\b(?:aircraft|airliner|airplane|aeroplane|aviation|aviator|airline|airport|helicopter|jetliner|flight|plane|pilot|boeing|airbus|aeroflot|concorde|lockheed|mcdonnell douglas|de havilland|tupolev|antonov|embraer|bombardier|fokker|cessna)\b|\b(?:dc|md|tu|il)-?\d{1,3}\b/,
+  },
+  {
+    name: "maritime",
+    pillar: "Exploration & Discovery",
+    pattern:
+      /\b(?:boat|ferry|maritime|naval vessel|ocean liner|passenger liner|patrol boat|ship|shipping|shipwreck|steamship|submarine|vessel)\b/,
+  },
+  {
+    name: "rail transport",
+    pillar: "Science & Technology",
+    pattern:
+      /\b(?:locomotive|metro|railroad|railway|subway|train|tram)\b/,
+  },
+  {
+    name: "road or automotive transport",
+    pillar: "Science & Technology",
+    pattern:
+      /\b(?:automobile|automotive|highway|motor vehicle|motorcar|road accident|road transport|traffic collision)\b/,
+  },
+  {
     name: "shooting",
+    pillar: "Disasters & Accidents",
     pattern: /\b(shooting|shootings|shootout|gunman|gunmen|opened fire)\b/,
   },
   {
-    name: "bombing",
-    pattern: /\b(bombing|bombings|bomb attack|bomb blast|suicide bomb(?:er|ing)?|car bomb)\b/,
-  },
-  {
-    name: "aviation crash",
+    name: "bombing or terrorism",
+    pillar: "War & Conflict",
     pattern:
-      /\b(aircraft|airliner|airplane|aeroplane|helicopter|flight|plane)\b.{0,120}\b(crash|crashes|crashed|breaks apart|disappear(?:s|ed|ance)?|vanish(?:es|ed)?|missing|debris|wreckage|shot down|hijack(?:ed|ing)?)\b|\b(crash|crashes|crashed|breaks apart|disappear(?:s|ed|ance)?|vanish(?:es|ed)?|missing|debris|wreckage|shot down|hijack(?:ed|ing)?)\b.{0,120}\b(aircraft|airliner|airplane|aeroplane|helicopter|flight|plane)\b/,
+      /\b(?:bomb attack|bomb blast|bombing|bombings|car bomb|suicide bomb(?:er|ing)?|terror attack|terrorism|terrorist attack)\b/,
   },
   {
     name: "earthquake or tsunami",
+    pillar: "Disasters & Accidents",
     pattern: /\b(earthquake|tsunami|seismic)\b/,
   },
   {
-    name: "flood",
-    pattern: /\b(flood|floods|flooding)\b/,
+    name: "storm or flood",
+    pillar: "Disasters & Accidents",
+    pattern:
+      /\b(?:blizzard|cyclone|flood|floods|flooding|hurricane|storm surge|typhoon)\b/,
+  },
+  {
+    name: "volcano or wildfire",
+    pillar: "Disasters & Accidents",
+    pattern:
+      /\b(?:eruption|forest fire|volcanic|volcano|wildfire|wildfires)\b/,
+  },
+  {
+    name: "industrial or structural disaster",
+    pillar: "Disasters & Accidents",
+    pattern:
+      /\b(?:building collapse|chemical spill|dam failure|factory fire|industrial accident|mine disaster|mining disaster|nuclear accident|oil spill|structural collapse)\b/,
   },
   {
     name: "assassination",
+    pillar: "Politics & Government",
     pattern: /\b(assassination|assassinated)\b/,
   },
   {
-    name: "battle or siege",
-    pattern: /\b(battle|siege)\b/,
+    name: "war battle or siege",
+    pillar: "War & Conflict",
+    pattern:
+      /\b(?:armed conflict|battle|invasion|military campaign|siege|war)\b/,
   },
   {
-    name: "coup",
-    pattern: /\b(coup|military takeover)\b/,
+    name: "coup or regime overthrow",
+    pillar: "Politics & Government",
+    pattern: /\b(?:coup|military takeover|overthrows? the government|regime overthrow)\b/,
   },
   {
-    name: "treaty",
-    pattern: /\btreaty\b/,
-  },
-  {
-    name: "independence",
-    pattern: /\bindependence\b/,
+    name: "revolution or uprising",
+    pillar: "War & Conflict",
+    pattern: /\b(?:rebellion|revolt|revolution|uprising)\b/,
   },
   {
     name: "royal or papal succession",
+    pillar: "Politics & Government",
     pattern: ROYAL_SUCCESSION_PATTERN,
+  },
+  {
+    name: "election",
+    pillar: "Politics & Government",
+    pattern:
+      /\b(?:elected president|election|general election|parliamentary election|presidential election|referendum)\b/,
+  },
+  {
+    name: "treaty or diplomacy",
+    pillar: "Politics & Government",
+    pattern:
+      /\b(?:armistice|diplomatic relations|peace accord|peace agreement|peace conference|summit|treaty)\b/,
+  },
+  {
+    name: "independence or statehood",
+    pillar: "Politics & Government",
+    pattern:
+      /\b(?:becomes? a state|declares? independence|independence|statehood|sovereignty)\b/,
+  },
+  {
+    name: "law constitution or court",
+    pillar: "Politics & Government",
+    pattern:
+      /\b(?:act of parliament|constitutional amendment|constitution|court ruling|law is enacted|legislation|signed into law|supreme court|verdict)\b/,
+  },
+  {
+    name: "civil or human rights",
+    pillar: "Social & Human Rights",
+    pattern:
+      /\b(?:abolition|apartheid|civil rights|desegregation|emancipation|equal rights|human rights|labor rights|segregation|suffrage|voting rights|women s rights|workers rights)\b/,
+  },
+  {
+    name: "spaceflight or astronomy",
+    pillar: "Exploration & Discovery",
+    pattern:
+      /\b(?:astronaut|astronomy|cosmonaut|lunar|moon landing|observatory|orbit|planet|rocket|satellite|space mission|space probe|spacecraft|spaceflight)\b/,
+  },
+  {
+    name: "exploration or expedition",
+    pillar: "Exploration & Discovery",
+    pattern:
+      /\b(?:circumnavigation|expedition|exploration|explorer|polar journey|voyage)\b/,
+  },
+  {
+    name: "science or invention",
+    pillar: "Science & Technology",
+    pattern:
+      /\b(?:breakthrough|computer|discovery|experiment|invented|invention|laboratory|patent|physicist|scientific|scientist|technology)\b/,
+  },
+  {
+    name: "epidemic or public health",
+    pillar: "Health & Medicine",
+    pattern:
+      /\b(?:disease outbreak|epidemic|pandemic|public health|quarantine)\b/,
+  },
+  {
+    name: "medicine",
+    pillar: "Health & Medicine",
+    pattern:
+      /\b(?:clinical trial|doctor|hospital|medical|medicine|surgery|treatment|vaccine|vaccination)\b/,
+  },
+  {
+    name: "literature or publishing",
+    pillar: "Arts & Culture",
+    pattern:
+      /\b(?:author|book|literature|novel|novelist|poem|poet|publication|published|publisher)\b/,
+  },
+  {
+    name: "film theatre or television",
+    pillar: "Arts & Culture",
+    pattern:
+      /\b(?:broadcast|cinema|film|motion picture|television|theater|theatre)\b/,
+  },
+  {
+    name: "music",
+    pillar: "Arts & Culture",
+    pattern:
+      /\b(?:album|band|composer|concert|music|musician|opera|orchestra|singer|song|symphony)\b/,
+  },
+  {
+    name: "visual art or architecture",
+    pillar: "Arts & Culture",
+    pattern:
+      /\b(?:architect|architecture|art exhibition|artist|museum opens?|painter|painting|sculptor|sculpture)\b/,
+  },
+  {
+    name: "sports",
+    pillar: "Sports",
+    pattern:
+      /\b(?:baseball|basketball|boxing|championship|cricket|football|grand prix|hockey|olympic|paralympic|rugby|soccer|sports|tennis|tournament|world cup)\b/,
+  },
+  {
+    name: "economy business or finance",
+    pillar: "Economy & Business",
+    pattern:
+      /\b(?:banking|business|company|corporation|currency|economy|financial|inflation|market crash|stock exchange|stock market|trade agreement|wall street)\b/,
+  },
+  {
+    name: "institution founding",
+    pillar: "Politics & Government",
+    pattern:
+      /\b(?:agency is established|establishes? the|founded|founding|organization is established|university is founded)\b/,
+  },
+  {
+    name: "religion",
+    pillar: "Arts & Culture",
+    pattern:
+      /\b(?:church council|ecumenical council|religious reform|schism|synod)\b/,
+  },
+  {
+    name: "education",
+    pillar: "Social & Human Rights",
+    pattern:
+      /\b(?:college|education reform|school integration|university)\b/,
+  },
+  {
+    name: "personal honor or career milestone",
+    pillar: "Famous Persons",
+    pattern:
+      /\b(?:awarded the|inducted into|knighted|receives? the nobel prize|wins? the nobel prize)\b/,
+  },
+  {
+    name: "notable birth",
+    pillar: "Born on This Day",
+    pattern: /\b(?:birth of|is born|was born)\b/,
+  },
+  {
+    name: "notable death",
+    pillar: "Died on This Day",
+    pattern: /\b(?:death of|died at age|dies at age)\b/,
   },
 ];
 const EVERY_OTHER_DAYS = 1; // Generate every N days
@@ -2764,44 +2943,144 @@ function isBroadEventContextPage(event) {
 function eventFamiliesFromText(...values) {
   const haystack = normalizeTopicMatchText(values.filter(Boolean).join(" "));
   if (!haystack) return [];
-  return EVENT_FAMILY_RULES
+  const matches = EVENT_FAMILY_RULES
     .filter((rule) => rule.pattern.test(haystack))
     .map((rule) => rule.name);
+  // A royal/papal election is one succession theme, not a generic modern
+  // election too. Keeping this exclusive prevents a week of presidential
+  // politics from incorrectly suppressing a coronation fallback (and vice
+  // versa) while retaining both rules for their real subjects.
+  if (matches.includes("royal or papal succession")) {
+    return matches.filter((family) => family !== "election");
+  }
+  return matches;
+}
+
+function recurringTopicFamilyCatalog() {
+  return EVENT_FAMILY_RULES.map(({ name, pillar }) => ({ name, pillar }));
+}
+
+function eventFamilyMetadataValues(record) {
+  const sourcePages = Array.isArray(record?.sourcePages)
+    ? record.sourcePages
+    : Array.isArray(record?.pages)
+      ? record.pages
+      : [];
+  return [
+    record?.pageTitle,
+    record?.sourcePageTitle,
+    record?.notabilityPageTitle,
+    record?.eventTitle,
+    record?.title,
+    record?.text,
+    record?.sourceText,
+    record?.description,
+    record?.pageDescription,
+    record?.notabilityPageDescription,
+    ...sourcePages.flatMap((page) => [
+      page?.pageTitle,
+      page?.title,
+      page?.normalizedtitle,
+      page?.description,
+      page?.pageDescription,
+    ]),
+  ].filter(Boolean);
 }
 
 function eventFamiliesForCandidate(event) {
-  return eventFamiliesFromText(event?.pageTitle, event?.text);
+  return eventFamiliesFromText(...eventFamilyMetadataValues(event));
 }
 
-function collectRecentEventFamilies(index, targetDate, days = EVENT_FAMILY_REPEAT_WINDOW_DAYS) {
-  const targetMs =
-    targetDate && typeof targetDate.getTime === "function"
-      ? targetDate.getTime()
-      : Date.parse(String(targetDate || ""));
-  if (!Array.isArray(index) || !Number.isFinite(targetMs)) return [];
-  const cutoffMs = targetMs - days * 24 * 60 * 60 * 1000;
+function eventPillarsForCandidate(event) {
+  const families = new Set(
+    Array.isArray(event?.eventFamilies)
+      ? event.eventFamilies
+      : eventFamiliesForCandidate(event),
+  );
   return [
     ...new Set(
-      index
-        .filter((entry) => {
-          const publishedMs = Date.parse(entry?.publishedAt || "");
-          return Number.isFinite(publishedMs) && publishedMs < targetMs && publishedMs >= cutoffMs;
-        })
-        .flatMap((entry) => eventFamiliesFromText(entry.eventTitle, entry.title)),
+      EVENT_FAMILY_RULES
+        .filter((rule) => families.has(rule.name))
+        .map((rule) => rule.pillar),
     ),
   ];
 }
 
-function collectPreviousDayEventFamilies(index, targetDate) {
-  const target = targetDate instanceof Date
-    ? targetDate
-    : new Date(targetDate);
-  if (!Array.isArray(index) || !Number.isFinite(target.getTime())) return [];
-  const targetDayStart = Date.UTC(
-    target.getUTCFullYear(),
-    target.getUTCMonth(),
-    target.getUTCDate(),
+function utcDayStartMs(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return NaN;
+  return Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
   );
+}
+
+function collectEventFamilyCounts(index, targetDate, days) {
+  const targetDayStart = utcDayStartMs(targetDate);
+  const boundedDays = Math.max(1, Number.parseInt(String(days), 10) || 1);
+  if (!Array.isArray(index) || !Number.isFinite(targetDayStart)) return {};
+  const cutoffMs = targetDayStart - boundedDays * 24 * 60 * 60 * 1000;
+  const counts = {};
+  for (const entry of index) {
+    const publishedMs = Date.parse(entry?.publishedAt || "");
+    if (
+      !Number.isFinite(publishedMs) ||
+      publishedMs < cutoffMs ||
+      publishedMs >= targetDayStart
+    ) {
+      continue;
+    }
+    for (const family of new Set(eventFamiliesForCandidate(entry))) {
+      counts[family] = (counts[family] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+function collectRecentEventFamilies(index, targetDate, days = EVENT_FAMILY_REPEAT_WINDOW_DAYS) {
+  return Object.keys(collectEventFamilyCounts(index, targetDate, days));
+}
+
+function collectSaturatedEventFamilies(
+  index,
+  targetDate,
+  {
+    days = EVENT_FAMILY_FREQUENCY_WINDOW_DAYS,
+    limit = EVENT_FAMILY_FREQUENCY_LIMIT,
+  } = {},
+) {
+  const counts = collectEventFamilyCounts(index, targetDate, days);
+  return Object.entries(counts)
+    .filter(([, count]) => count >= limit)
+    .map(([family]) => family);
+}
+
+function collectEventFamilyHistory(index, targetDate) {
+  const recentCounts = collectEventFamilyCounts(
+    index,
+    targetDate,
+    EVENT_FAMILY_REPEAT_WINDOW_DAYS,
+  );
+  const frequencyCounts = collectEventFamilyCounts(
+    index,
+    targetDate,
+    EVENT_FAMILY_FREQUENCY_WINDOW_DAYS,
+  );
+  return {
+    recentFamilies: Object.keys(recentCounts),
+    recentCounts,
+    saturatedFamilies: Object.entries(frequencyCounts)
+      .filter(([, count]) => count >= EVENT_FAMILY_FREQUENCY_LIMIT)
+      .map(([family]) => family),
+    frequencyCounts,
+    previousDayFamilies: collectPreviousDayEventFamilies(index, targetDate),
+  };
+}
+
+function collectPreviousDayEventFamilies(index, targetDate) {
+  const targetDayStart = utcDayStartMs(targetDate);
+  if (!Array.isArray(index) || !Number.isFinite(targetDayStart)) return [];
   const previousDayStart = targetDayStart - 24 * 60 * 60 * 1000;
   return [
     ...new Set(
@@ -2814,45 +3093,62 @@ function collectPreviousDayEventFamilies(index, targetDate) {
             publishedMs < targetDayStart
           );
         })
-        .flatMap((entry) => eventFamiliesFromText(entry.eventTitle, entry.title)),
+        .flatMap((entry) => eventFamiliesForCandidate(entry)),
     ),
   ];
 }
 
-function filterRecentEventFamilyRepeats(events, recentFamilies) {
+function filterRecentEventFamilyRepeats(
+  events,
+  recentFamilies,
+  saturatedFamilies = [],
+) {
   if (!Array.isArray(events) || events.length === 0) {
     return {
       candidates: [],
       repeated: [],
       suppressed: [],
+      fallbackCandidates: [],
       fallbackUsed: false,
     };
   }
   const recent = new Set(Array.isArray(recentFamilies) ? recentFamilies : []);
-  if (recent.size === 0) {
-    return {
-      candidates: events,
-      repeated: [],
-      suppressed: [],
-      fallbackUsed: false,
-    };
-  }
+  const saturated = new Set(
+    Array.isArray(saturatedFamilies) ? saturatedFamilies : [],
+  );
+  const active = new Set([...recent, ...saturated]);
 
   const annotated = events.map((event) => ({
     ...event,
     eventFamilies: eventFamiliesForCandidate(event),
   }));
   const repeated = annotated.filter((event) =>
-    event.eventFamilies.some((family) => recent.has(family)),
+    event.eventFamilies.some((family) => active.has(family)),
+  );
+  const fresh = annotated.filter((event) =>
+    !event.eventFamilies.some((family) => active.has(family)),
   );
 
-  // Event-family variety is a ranking hint, never an eligibility restriction.
-  // The shared ranker applies a small, visible tie-breaker to repeated
-  // families while keeping every otherwise qualified candidate selectable.
+  // Prefer a genuinely fresh topic before source discovery. Repeats remain a
+  // bounded fallback pool so a date with no source-ready alternative still
+  // publishes instead of failing solely for variety.
+  if (fresh.length === 0) {
+    return {
+      candidates: annotated.map((event) => ({
+        ...event,
+        eventFamilyFallbackUsed: repeated.length > 0,
+      })),
+      repeated,
+      suppressed: [],
+      fallbackCandidates: repeated,
+      fallbackUsed: repeated.length > 0,
+    };
+  }
   return {
-    candidates: annotated,
+    candidates: fresh,
     repeated,
-    suppressed: [],
+    suppressed: repeated,
+    fallbackCandidates: repeated,
     fallbackUsed: false,
   };
 }
@@ -2884,7 +3180,46 @@ function demoteSourceTopicMismatches(candidates) {
 }
 
 function rankBlogEventCandidates(events, options = {}) {
-  return demoteSourceTopicMismatches(rankHistoricalEventCandidates(events, options));
+  const recentPillars = new Set(
+    Array.isArray(options?.recentPillars) ? options.recentPillars : [],
+  );
+  const preferredPillars = new Set(
+    Array.isArray(options?.preferredPillars) ? options.preferredPillars : [],
+  );
+  const adjusted = rankHistoricalEventCandidates(events, options).map(
+    (event) => {
+      const eventPillars = eventPillarsForCandidate(event);
+      const repeatsRecentPillar = eventPillars.some((pillar) =>
+        recentPillars.has(pillar),
+      );
+      const matchesPreferredPillar = eventPillars.some((pillar) =>
+        preferredPillars.has(pillar),
+      );
+      const pillarVarietyAdjustment = repeatsRecentPillar
+        ? -4
+        : matchesPreferredPillar
+          ? 6
+          : 0;
+      return {
+        ...event,
+        eventPillars,
+        pillarVarietyAdjustment,
+        selectionScore:
+          (Number(event.selectionScore) || 0) + pillarVarietyAdjustment,
+      };
+    },
+  );
+  adjusted.sort((left, right) => {
+    if (right.selectionScore !== left.selectionScore) {
+      return right.selectionScore - left.selectionScore;
+    }
+    const yearDifference =
+      (Number.parseInt(right?.year, 10) || 0) -
+      (Number.parseInt(left?.year, 10) || 0);
+    if (yearDifference) return yearDifference;
+    return (left.sourceIndex || 0) - (right.sourceIndex || 0);
+  });
+  return demoteSourceTopicMismatches(adjusted);
 }
 
 // ---------------------------------------------------------------------------
@@ -3024,6 +3359,8 @@ async function chooseEventForDate(
   recentPillars = [],
   recentEventFamilies = [],
   previousDayEventFamilies = [],
+  saturatedEventFamilies = [],
+  eventFamilyCounts = {},
 ) {
   const monthName = MONTH_NAMES[date.getUTCMonth()];
   const day = date.getUTCDate();
@@ -3044,6 +3381,7 @@ async function chooseEventForDate(
       : "";
 
   let candidateEvents = [];
+  let suppressedFamilyCandidates = [];
   let allEvents = [];
   try {
     let eventsData =
@@ -3116,17 +3454,39 @@ async function chooseEventForDate(
           haystack.includes(String(taken || "").toLowerCase()),
         );
       });
-    const familyGuard = filterRecentEventFamilyRepeats(candidateEvents, recentEventFamilies);
+    const familyGuard = filterRecentEventFamilyRepeats(
+      candidateEvents,
+      recentEventFamilies,
+      saturatedEventFamilies,
+    );
     if (familyGuard.repeated.length > 0) {
-      console.log(
-        `Event selector: retaining ${familyGuard.repeated.length} candidate(s) from recent event families with a soft variety tie-breaker: ${recentEventFamilies.join(", ")}.`,
-      );
+      const activeFamilies = [
+        ...new Set([...recentEventFamilies, ...saturatedEventFamilies]),
+      ];
+      if (familyGuard.fallbackUsed) {
+        console.warn(
+          `Event selector: every eligible candidate repeats an active topic family; retaining the repeated pool as a publication fallback [${activeFamilies.join(", ")}].`,
+        );
+      } else {
+        console.log(
+          `Event selector: suppressed ${familyGuard.suppressed.length} repeated-theme candidate(s) while fresh alternatives are evaluated [${activeFamilies.join(", ")}].`,
+        );
+      }
     }
+    suppressedFamilyCandidates = familyGuard.suppressed;
     candidateEvents = familyGuard.candidates;
-    candidateEvents = rankBlogEventCandidates(candidateEvents, {
+    const familyRankingOptions = {
+      recentPillars,
+      preferredPillars,
       recentEventFamilies,
       previousDayEventFamilies,
-    });
+      saturatedEventFamilies,
+      eventFamilyCounts,
+    };
+    candidateEvents = rankBlogEventCandidates(
+      candidateEvents,
+      familyRankingOptions,
+    );
     try {
       candidateEvents = await applyPageviewNotabilityRerank(candidateEvents);
       // The pageview re-rank sorts purely by combined editorial+pageview
@@ -3149,11 +3509,37 @@ async function chooseEventForDate(
     }
     if (candidateEvents.length > 0) {
       const originalFirst = candidateEvents[0];
-      const sourceReady = await selectSourceReadyCandidate(
+      const fallbackReserve = suppressedFamilyCandidates.length > 0 ? 2 : 0;
+      let sourceReady = await selectSourceReadyCandidate(
         candidateEvents,
         fetch,
-        { requireArticleCapacity: true },
+        {
+          requireArticleCapacity: true,
+          candidateLimit: SOURCE_READY_EVENT_CANDIDATE_LIMIT - fallbackReserve,
+        },
       );
+      if (!sourceReady && suppressedFamilyCandidates.length > 0) {
+        const rankedFallbacks = rankBlogEventCandidates(
+          suppressedFamilyCandidates,
+          familyRankingOptions,
+        ).map((candidate) => ({
+          ...candidate,
+          eventFamilyFallbackUsed: true,
+        }));
+        sourceReady = await selectSourceReadyCandidate(
+          rankedFallbacks,
+          fetch,
+          {
+            requireArticleCapacity: true,
+            candidateLimit: fallbackReserve,
+          },
+        );
+        if (sourceReady) {
+          console.warn(
+            `Event selector: no source-ready fresh theme was found within the bounded candidate budget; using repeated-family fallback "${sourceReady.pageTitle}" so publication can continue.`,
+          );
+        }
+      }
       if (sourceReady) {
         candidateEvents = [
           sourceReady,
@@ -3166,7 +3552,7 @@ async function chooseEventForDate(
         }
       } else {
         console.warn(
-          `Event selector: none of the top ${Math.min(candidateEvents.length, SOURCE_READY_EVENT_CANDIDATE_LIMIT)} candidates had both a reachable independent source and enough packed evidence for a full article.`,
+          `Event selector: none of the bounded fresh or repeated fallback candidates had both a reachable independent source and enough packed evidence for a full article.`,
         );
         candidateEvents = [];
       }
@@ -3225,6 +3611,12 @@ async function chooseEventForDate(
         selected.articleSourcePagesExpanded === true,
       articleEvidenceCapacityFallback:
         selected.articleEvidenceCapacityFallback === true,
+      ...(selected.eventFamilyFallbackUsed === true
+        ? {
+            eventFamilyFallbackUsed: true,
+            eventFamilyFallbackFamilies: selected.eventFamilies || [],
+          }
+        : {}),
     };
     const canonicalSourceHeadline = sourceEventHeadline(
       selected.text,
@@ -5995,7 +6387,31 @@ function preparedDraftSourceEvent(payload, date) {
   };
 }
 
-async function loadPreparedDraftSource(env, date) {
+function preparedDraftSourceFamilyPolicy(selectedEvent, existingIndex, date) {
+  const history = collectEventFamilyHistory(existingIndex, date);
+  const activeFamilies = new Set([
+    ...history.recentFamilies,
+    ...history.saturatedFamilies,
+  ]);
+  const eventFamilies = eventFamiliesForCandidate(selectedEvent);
+  const repeatedFamilies = eventFamilies.filter((family) =>
+    activeFamilies.has(family),
+  );
+  const fallbackApproved = selectedEvent?.eventFamilyFallbackUsed === true;
+  return {
+    ok: repeatedFamilies.length === 0 || fallbackApproved,
+    eventFamilies,
+    repeatedFamilies,
+    fallbackApproved,
+    history,
+  };
+}
+
+async function loadPreparedDraftSource(
+  env,
+  date,
+  { existingIndex = null } = {},
+) {
   try {
     const payload = await env.BLOG_AI_KV.get(draftSourceKey(date), {
       type: "json",
@@ -6003,6 +6419,21 @@ async function loadPreparedDraftSource(env, date) {
     const selectedEvent = preparedDraftSourceEvent(payload, date);
     if (!selectedEvent && payload) {
       await env.BLOG_AI_KV.delete(draftSourceKey(date)).catch(() => {});
+      return null;
+    }
+    if (selectedEvent && Array.isArray(existingIndex)) {
+      const policy = preparedDraftSourceFamilyPolicy(
+        selectedEvent,
+        existingIndex,
+        date,
+      );
+      if (!policy.ok) {
+        await env.BLOG_AI_KV.delete(draftSourceKey(date)).catch(() => {});
+        console.warn(
+          `Blog AI: discarded cached source "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" because its topic family is now protected (${policy.repeatedFamilies.join(", ")}); selecting a fresh source.`,
+        );
+        return null;
+      }
     }
     return selectedEvent;
   } catch (err) {
@@ -6038,16 +6469,16 @@ async function maybePrepareBlogDraftSource(env) {
   }
 
   const post = await env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`);
+  const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
+  const existingIndex = indexRaw ? JSON.parse(indexRaw) : [];
   if (post) {
-    const indexRaw = await env.BLOG_AI_KV.get(KV_INDEX_KEY);
-    const index = indexRaw ? JSON.parse(indexRaw) : [];
-    if (index.some((entry) => entry?.slug === slug)) {
+    if (existingIndex.some((entry) => entry?.slug === slug)) {
       console.log(`Blog AI: post:${slug} is already public — source preparation skipped.`);
       return { status: "published", slug };
     }
   }
 
-  const prepared = await loadPreparedDraftSource(env, now);
+  const prepared = await loadPreparedDraftSource(env, now, { existingIndex });
   if (prepared) {
     console.log(`Blog AI: source package for ${slug} is already prepared.`);
     return { status: "prepared", slug, eventTitle: prepared.eventTitle };
@@ -8278,12 +8709,17 @@ async function generateAndStore(
   let recentPillars = [];
   let recentEventFamilies = [];
   let previousDayEventFamilies = [];
+  let saturatedEventFamilies = [];
+  let eventFamilyCounts = {};
   if (!forcedEvent) {
     const sorted = existingIndex
       .slice()
       .sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
-    recentEventFamilies = collectRecentEventFamilies(existingIndex, now);
-    previousDayEventFamilies = collectPreviousDayEventFamilies(existingIndex, now);
+    const eventFamilyHistory = collectEventFamilyHistory(existingIndex, now);
+    recentEventFamilies = eventFamilyHistory.recentFamilies;
+    previousDayEventFamilies = eventFamilyHistory.previousDayFamilies;
+    saturatedEventFamilies = eventFamilyHistory.saturatedFamilies;
+    eventFamilyCounts = eventFamilyHistory.frequencyCounts;
 
     // Last 7 posts → pillars to avoid repeating this week
     recentPillars = [
@@ -8325,7 +8761,7 @@ async function generateAndStore(
     }
     if (recentEventFamilies.length > 0) {
       console.log(
-        `Blog AI: seven-day event-family variety signal [${recentEventFamilies.join(", ")}]; previous-day families [${previousDayEventFamilies.join(", ")}].`,
+        `Blog AI: protected topic families — seven-day [${recentEventFamilies.join(", ")}], 21-day saturated [${saturatedEventFamilies.join(", ")}], previous-day [${previousDayEventFamilies.join(", ")}].`,
       );
     }
   }
@@ -8333,7 +8769,7 @@ async function generateAndStore(
   let selectedForcedEvent = forcedEvent;
   let selectedEvent = null;
   if (!selectedForcedEvent) {
-    selectedEvent = await loadPreparedDraftSource(env, now);
+    selectedEvent = await loadPreparedDraftSource(env, now, { existingIndex });
     if (selectedEvent) {
       selectedForcedEvent = selectedEvent.eventTitle;
       console.log(
@@ -8348,6 +8784,8 @@ async function generateAndStore(
         recentPillars,
         recentEventFamilies,
         previousDayEventFamilies,
+        saturatedEventFamilies,
+        eventFamilyCounts,
       );
       selectedForcedEvent = selectedEvent.eventTitle;
       console.log(

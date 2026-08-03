@@ -16537,8 +16537,11 @@ function createArticleGenerationCheckpointer(
       // analysis + continuity repair, ~8-11 calls for the Treaty of Breda
       // attempt), so anything less remaining isn't worth starting.
       const remainingDailyBudget = dailyLimit - budget.dailyUsed;
-      const replacementAlreadyUsed =
+      const openingAnotherRotation =
         budget.rotations >= 2 &&
+        budget.sourceUsed === 0;
+      const replacementAlreadyUsed =
+        openingAnotherRotation &&
         remainingDailyBudget < MIN_VIABLE_ROTATION_BUDGET;
       const sourceLimit = budget.rotations >= 1
         ? articleGenerationReplacementRequestBudgetLimit(env)

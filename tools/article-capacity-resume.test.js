@@ -905,6 +905,53 @@ test("article generation request budget reserves one bounded replacement topic a
   assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "100" }), 12);
 });
 
+test("the minimum viable rotation gate cannot stop an article already in progress", async () => {
+  const kv = makeKvMock();
+  const env = {
+    BLOG_AI_KV: kv,
+    ARTICLE_GENERATION_DAILY_REQUEST_BUDGET: "34",
+  };
+  const date = new Date();
+  const fingerprint = hooks.articleGenerationSourceFingerprint(
+    "2019 El Paso Walmart shooting",
+    "grounded source material",
+  );
+  kv.store.set(
+    hooks.articleGenerationJournalKey(date),
+    JSON.stringify({
+      version: 1,
+      slug: hooks.articleGenerationJournalKey(date).replace(
+        "article-generation-v1:",
+        "",
+      ),
+      sourceFingerprint: fingerprint,
+      budgetSourceFingerprint: fingerprint,
+      chunks: { brief: { eventTitle: "2019 El Paso Walmart shooting" } },
+      requestBudget: {
+        date: new Date().toISOString().slice(0, 10),
+        sourceFingerprint: fingerprint,
+        used: 6,
+        sourceUsed: 6,
+        dailyUsed: 27,
+        calls: { brief: 1 },
+        sourceCalls: { brief: 1 },
+        rotations: 3,
+      },
+    }),
+  );
+  const journal = await hooks.loadArticleGenerationJournal(
+    env,
+    date,
+    fingerprint,
+  );
+  const result = await hooks
+    .createArticleGenerationCheckpointer(env, date, journal)
+    .consumeRequest("resume analysis");
+  assert.equal(result.used, 7);
+  assert.equal(result.dailyUsed, 28);
+  assert.equal(result.dailyLimit, 34);
+});
+
 test("only repeated-opening continuity failures may degrade gracefully", () => {
   const repeatedOpening = {
     ok: false,

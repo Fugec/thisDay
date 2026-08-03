@@ -1116,6 +1116,92 @@ function publishableDidYouKnowFacts(facts, content = null) {
   );
 }
 
+// A facts provider can return fluent but content-free Did You Know cards even
+// when the retained evidence pack contains hundreds of words of concrete,
+// already-vetted material. Do not spend another AI call asking the same quota
+// pool to recover. Instead, group complete adjacent sentences from each source
+// section into publication-sized cards. Every resulting word came directly
+// from the authoritative pack; the normal hard-fact, distinctness, quality,
+// visible-URL, and final grounding gates still run afterward.
+function sourceDerivedDidYouKnowFacts(sourceMaterial, content = {}) {
+  const sections = String(sourceMaterial || "")
+    .split(/\n{2,}/)
+    .map((section) => section.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const candidatesBySection = sections.map((section) => {
+    // buildArticleEvidencePack renders every section as "Source label: body".
+    // Remove that display label so the public card begins with the evidence,
+    // while retaining the complete source sentences byte-for-byte otherwise.
+    const separator = section.indexOf(": ");
+    const body = separator >= 3 && separator <= 180
+      ? section.slice(separator + 2).trim()
+      : section;
+    const sentences = splitSentences(body, 20);
+    const candidates = [];
+
+    for (let index = 0; index < sentences.length;) {
+      const grouped = [];
+      let words = 0;
+      let cursor = index;
+      while (cursor < sentences.length && words < 35) {
+        const sentence = String(sentences[cursor] || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!sentence) {
+          cursor += 1;
+          continue;
+        }
+        grouped.push(sentence);
+        words += wordCount(sentence);
+        cursor += 1;
+      }
+
+      const candidate = normalizeArticleDidYouKnowFact(grouped.join(" "));
+      const hasCompleteEnding = /[.!?]["')\]]?\s*$/.test(candidate) &&
+        !/(?:…|\.\.\.)["')\]]?\s*$/.test(candidate);
+      if (
+        words >= 35 &&
+        words <= 90 &&
+        hasHardFact(candidate) &&
+        !/\b(?:https?:\/\/|www\.)/i.test(candidate) &&
+        hasCompleteEnding
+      ) {
+        candidates.push(candidate);
+        index = cursor;
+      } else {
+        index += 1;
+      }
+    }
+    return candidates;
+  }).filter((candidates) => candidates.length > 0);
+
+  // Round-robin across sources before taking a second passage from one page.
+  // This reduces both editorial repetition and dependence on a single source.
+  const selected = [];
+  const maximumDepth = Math.max(
+    0,
+    ...candidatesBySection.map((candidates) => candidates.length),
+  );
+  for (let depth = 0; depth < maximumDepth; depth += 1) {
+    for (const candidates of candidatesBySection) {
+      const candidate = candidates[depth];
+      if (!candidate) continue;
+      if (
+        selected.some((existing) =>
+          didYouKnowFactsAreNearDuplicates(existing, candidate, content)
+        )
+      ) {
+        continue;
+      }
+      selected.push(candidate);
+      if (selected.length >= MAX_DID_YOU_KNOW_FACTS) {
+        return selected;
+      }
+    }
+  }
+  return selected;
+}
+
 function buildDidYouKnowSlider(facts, content = null) {
   const cleanedFacts = publishableDidYouKnowFacts(facts, content);
   if (!cleanedFacts.length) return "";
@@ -17333,14 +17419,33 @@ Requirements:
       exact: 6,
       label: "chunked article facts",
     });
-    requireChunkArray(parsed, "didYouKnowFacts", {
-      min: MIN_DID_YOU_KNOW_FACTS,
-      label: "chunked article facts",
-    });
-    const didYouKnowAudit = auditDidYouKnowFacts({
+    // Missing, short, and vague arrays are all recoverable from the same
+    // retained evidence. Keep a non-array response on the normal fail-closed
+    // path when the evidence itself cannot supply enough complete passages.
+    if (!Array.isArray(parsed.didYouKnowFacts)) {
+      parsed.didYouKnowFacts = [];
+    }
+    let didYouKnowAudit = auditDidYouKnowFacts({
       ...compactBrief,
       didYouKnowFacts: parsed.didYouKnowFacts,
     });
+    if (!didYouKnowAudit.ok) {
+      const sourceDerivedFacts = sourceDerivedDidYouKnowFacts(
+        sourceMaterial,
+        compactBrief,
+      );
+      const sourceDerivedAudit = auditDidYouKnowFacts({
+        ...compactBrief,
+        didYouKnowFacts: sourceDerivedFacts,
+      });
+      if (sourceDerivedAudit.ok) {
+        parsed.didYouKnowFacts = sourceDerivedAudit.facts;
+        didYouKnowAudit = sourceDerivedAudit;
+        console.warn(
+          `Blog: replaced unusable provider Did You Know output with ${sourceDerivedAudit.facts.length} direct source passages; no repair call used.`,
+        );
+      }
+    }
     if (!didYouKnowAudit.ok) {
       throw new Error(
         `chunked article facts: ${didYouKnowAudit.reasons.join("; ")}`,

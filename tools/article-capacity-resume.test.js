@@ -1328,6 +1328,16 @@ test("bounded recovery strengthens short core modules from retained sources", ()
   assert.deepEqual(residual, []);
 });
 
+test("timeline grounding skips the evidence corpus when no timeline exists", () => {
+  const coreDraft = {
+    overviewParagraphs: ["A complete core article paragraph."],
+    get sourcePages() {
+      throw new Error("source pages must not be inspected without a timeline");
+    },
+  };
+  assert.doesNotThrow(() => hooks.groundLearningBlocks(coreDraft));
+});
+
 test("chunk continuity catches copied body sentences before enrichment", () => {
   const repeated =
     "The committee record lists the same dated vote and the same participating institutions in full.";

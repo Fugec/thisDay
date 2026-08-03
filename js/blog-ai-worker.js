@@ -18876,6 +18876,13 @@ const GROUNDING_LEGISLATIVE_KILL_PATTERN =
   /\bkill(?:ed|s|ing)?\s+(?:(?:the|an?)\s+)?(?:entire\s+)?(?:bill|legislation|measure|package|proposal|amendment)\b/gi;
 const GROUNDING_EXPLICIT_CAUSAL_DENIAL_PATTERN =
   /^\s*(?:the\s+)?(?:available\s+)?(?:source|sources|record|records|evidence|source material)\b[\s\S]{0,320}\b(?:does|do|did)\s+not\b[\s\S]{0,240}\b(?:claim|establish|show|demonstrate|prove|state|attribute)\b[\s\S]{0,180}\b(?:because(?:\s+of)?|caus(?:e[ds]?|ing)|due to|lead(?:s|ing)? to|led to|result(?:ed|s|ing)? in|trigger(?:ed|s|ing)?)\b/i;
+// An analysis sentence can describe what the retained evidence cannot show,
+// e.g. "the source does not list the victims, which prevents a fuller
+// assessment." That is an epistemic source limitation, not a historical
+// claim that an actor prevented an outcome. Keep genuine preventive claims
+// auditable while excluding only explicit source/record limitation framing.
+const GROUNDING_SOURCE_LIMITATION_PATTERN =
+  /(?:\b(?:source|sources|record|records|evidence|source material)\b[\s\S]{0,240}\b(?:(?:does|do|did|can|could)\s+not|cannot|fail(?:s|ed)?\s+to|omit(?:s|ted|ting)?|without|absence|lack)\b[\s\S]{0,240}\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,120}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b|^\s*(?:this|the|that)\s+(?:absence|lack|omission)\b[\s\S]{0,120}\b(?:block(?:ed|s|ing)?|prevent(?:ed|s|ing)?)\b[\s\S]{0,120}\b(?:assess(?:ment)?|evaluat(?:e[ds]?|ing|ion)?|identif(?:y|ied|ying)|interpret(?:ed|ing|ation)?|reconstruct(?:ed|ing|ion)?|understand(?:ing)?|verif(?:y|ied|ying|ication)|view)\b)/i;
 const GROUNDING_SUPPORT_STOPWORDS = new Set([
   "about", "after", "again", "against", "also", "among", "another", "around",
   "article", "because", "before", "being", "between", "both", "caused", "causes",
@@ -18890,9 +18897,9 @@ const GROUNDING_CLAIM_RISK_RULES = [
   {
     label: "order attribution",
     claim:
-      /\b(?:authori[sz](?:e[ds]?|ing)|command(?:ed|s|ing)?|direct(?:ed|s|ing)?|order(?:ed|s|ing)?)\b/i,
+      /\b(?:authori[sz](?:e[ds]?|ing)|command(?:ed|s|ing)?|direct(?:ed|s|ing)|direct(?=\s+(?:consequence|effect|outcome|result)\b)|order(?:ed|s|ing)?)\b/i,
     support:
-      /\b(?:authori[sz](?:e[ds]?|ing)|command(?:ed|s|ing)?|direct(?:ed|s|ing)?|order(?:ed|s|ing)?)\b/i,
+      /\b(?:authori[sz](?:e[ds]?|ing)|command(?:ed|s|ing)?|direct(?:ed|s|ing)|direct(?=\s+(?:consequence|effect|outcome|result)\b)|order(?:ed|s|ing)?)\b/i,
   },
   {
     label: "perpetrator attribution",
@@ -19151,6 +19158,12 @@ function unsupportedGroundingClaims(content, sourceMaterial) {
         if (
           rule.label === "causal claim" &&
           GROUNDING_EXPLICIT_CAUSAL_DENIAL_PATTERN.test(sentence)
+        ) {
+          continue;
+        }
+        if (
+          rule.label === "preventive outcome" &&
+          GROUNDING_SOURCE_LIMITATION_PATTERN.test(sentence)
         ) {
           continue;
         }

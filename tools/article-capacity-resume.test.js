@@ -1179,6 +1179,60 @@ test("legislative idiom, causal denials, and optional labels do not strand a com
   assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
 });
 
+test("source limitations and direct quotations are not historical outcome or order claims", () => {
+  const source = {
+    pageTitle: "2019 El Paso shooting",
+    text:
+      "On August 3, 2019, Patrick Crusius attacked a Walmart in El Paso, Texas. Twenty three people were killed and twenty two were injured.",
+    sourceExtract:
+      "Federal prosecutors charged Patrick Crusius with hate crimes and firearms offenses. The source describes the gunman, the weapon, and the law enforcement response.",
+  };
+  const content = {
+    eventTitle: "2019 El Paso Walmart shooting",
+    analysisBad: [
+      {
+        title: "Unnamed individual victims",
+        detail:
+          "While the source gives the aggregate numbers of twenty three killed and twenty two injured, it does not list the names of the deceased or injured individuals. This absence prevents a fuller assessment of the individual experiences represented by the aggregate toll.",
+      },
+      {
+        title: "No firsthand accounts",
+        detail:
+          "The source focuses on Patrick Crusius, the manifesto, the weapon, and the law enforcement response, but it does not include any direct quotes or statements from witnesses, survivors, or first responders in El Paso.",
+      },
+    ],
+  };
+  const sourceLimitationGrounding = hooks.verifyArticleGrounding(
+    content,
+    source,
+  );
+  assert.equal(
+    sourceLimitationGrounding.ok,
+    true,
+    sourceLimitationGrounding.reasons.join("; "),
+  );
+
+  const realPreventiveClaim = hooks.verifyArticleGrounding({
+    ...content,
+    analysisBad: [{
+      title: "Unsupported outcome",
+      detail:
+        "The police response prevented another attack by Patrick Crusius in El Paso after the 2019 Walmart shooting.",
+    }],
+  }, source);
+  assert.match(realPreventiveClaim.reasons.join(" "), /unsupported preventive outcome/);
+
+  const realOrderClaim = hooks.verifyArticleGrounding({
+    ...content,
+    analysisBad: [{
+      title: "Unsupported direction",
+      detail:
+        "Patrick Crusius directed the law enforcement response in El Paso after the 2019 Walmart shooting.",
+    }],
+  }, source);
+  assert.match(realOrderClaim.reasons.join(" "), /unsupported order attribution/);
+});
+
 test("chunk continuity catches copied body sentences before enrichment", () => {
   const repeated =
     "The committee record lists the same dated vote and the same participating institutions in full.";

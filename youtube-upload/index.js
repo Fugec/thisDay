@@ -41,12 +41,23 @@ import {
   updateIndexEntry,
   deleteIndexEntry,
 } from "./lib/kv.js";
-import { selectInterestingNarrationFacts } from "./lib/narration-selection.js";
+import {
+  assessNarrationCaptionIntegrity,
+  auditNarrationTopicConnection,
+  buildNarrationTopicContext,
+  selectInterestingNarrationFacts,
+} from "./lib/narration-selection.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
 import { videoHeadlineTitle, videoMatchTitle } from "./lib/titles.js";
 import { verifyKvReadWriteAccess } from "./lib/kv.js";
 import { checkVideoQuality } from "./lib/video-quality.js";
-import { uploadToYoutube, verifyYoutubeAuth } from "./lib/youtube.js";
+import {
+  auditYoutubeVideo,
+  getYoutubeVideo,
+  setYoutubeVideoPrivacy,
+  uploadToYoutube,
+  verifyYoutubeAuth,
+} from "./lib/youtube.js";
 import {
   acquireUploadLock,
   getUploaded,
@@ -63,7 +74,6 @@ import { postToMeta } from "./lib/meta.js";
 import { postToTikTok } from "./lib/tiktok.js";
 import {
   generateNarration,
-  buildNarrationScript,
   buildNarrationParts,
 } from "./lib/elevenlabs.js";
 
@@ -154,6 +164,19 @@ async function waitForPublishedPost(slug, {
   return { posts: await getPostIndex(), post: null };
 }
 
+async function waitForYoutubeAudit(post, youtubeId, expectedPrivacy) {
+  let lastAudit = null;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const video = await getYoutubeVideo(youtubeId);
+    lastAudit = auditYoutubeVideo(post, video, { expectedPrivacy });
+    if (lastAudit.ok) return video;
+    if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+  throw new Error(
+    `YOUTUBE_METADATA_MISMATCH: ${lastAudit?.reasons.join("; ") || "video was not readable"}`,
+  );
+}
+
 /**
  * Ensures today's post exists in KV. If not found, calls POST /blog/publish
  * to generate it, waits 60 s for propagation, then returns the refreshed index.
@@ -236,11 +259,16 @@ function ensureSocialPrereqs() {
 
 async function main() {
   const privacyMode = process.env.YOUTUBE_PRIVACY || "public";
+  const holdForTopicReview =
+    process.env.HOLD_FOR_TOPIC_REVIEW === "true";
   const allowSilentVideo = process.env.ALLOW_SILENT_VIDEO === "true";
   const maxUploadsPerRun = 1; // FORCE: Only upload 1 video per run
 
   const todaySlug = getTodaySlug();
   console.log(`YouTube privacy mode: ${privacyMode}`);
+  if (holdForTopicReview) {
+    console.log("Manual topic review hold: enabled");
+  }
   if (allowSilentVideo) {
     console.warn("Warning: ALLOW_SILENT_VIDEO=true — uploads may have no narration.");
   }
@@ -350,11 +378,19 @@ async function main() {
         const wikiArticleUrl = await getPostWikipediaUrl(post.slug).catch(
           () => null,
         );
+        const narrationTopicContext = buildNarrationTopicContext(
+          post,
+          quickFacts,
+        );
         const selectedNarrationItems = selectInterestingNarrationFacts(
           videoMatchTitle(post),
           contentItems,
           articleText,
-          { limit: 3, dateHint: videoHeadlineTitle(post) },
+          {
+            limit: 3,
+            dateHint: videoHeadlineTitle(post),
+            topicContext: narrationTopicContext,
+          },
         );
         if (selectedNarrationItems.length > 0) {
           console.log(
@@ -370,15 +406,65 @@ async function main() {
         }
 
         const narrationItems = selectedNarrationItems;
-
-        const script = buildNarrationScript(
+        const preparedNarrationParts = buildNarrationParts(
           post,
           narrationItems,
+        );
+        // Date trimming can remove the only topic anchor from an otherwise
+        // eligible candidate. Audit the exact post-trim text that TTS will
+        // receive, drop any disconnected part, and require the remaining
+        // script to pass as a whole.
+        const preparedTopicAudit = auditNarrationTopicConnection(
+          videoMatchTitle(post),
+          preparedNarrationParts,
+          narrationTopicContext,
+        );
+        const narrationParts = preparedTopicAudit.results
+          .filter((result) => result.connected)
+          .map((result) => result.text);
+        if (narrationParts.length !== preparedNarrationParts.length) {
+          console.warn(
+            `  ⚠ Dropped ${preparedNarrationParts.length - narrationParts.length} narration fact(s) after the exact TTS-text topic check.`,
+          );
+        }
+        const script = narrationParts.join(" ");
+        const topicAudit = auditNarrationTopicConnection(
+          videoMatchTitle(post),
+          narrationParts,
+          narrationTopicContext,
+        );
+        if (!topicAudit.ok) {
+          const failures = topicAudit.results
+            .filter((result) => !result.connected)
+            .map((result) => `${result.reason}: ${result.text}`)
+            .join(" | ");
+          throw new Error(
+            `NARRATION_TOPIC_MISMATCH: refusing upload for ${post.slug}` +
+              (failures ? ` — ${failures}` : ""),
+          );
+        }
+        const storedTopicAudit = {
+          version: topicAudit.version,
+          checkedAt: new Date().toISOString(),
+          title: topicAudit.title,
+          connected: true,
+          facts: narrationParts,
+          script,
+        };
+        console.log(
+          `  ✓ Narration topic audit passed (${topicAudit.checkedFacts}/${topicAudit.checkedFacts} connected).`,
         );
         const { path: narrPath, words: narrWords } = await generateNarration(
           post.slug,
           script,
         );
+        const captionAudit = assessNarrationCaptionIntegrity(script, narrWords);
+        if (!captionAudit.ok) {
+          throw new Error(
+            `NARRATION_CAPTION_MISMATCH: ${captionAudit.reason}`,
+          );
+        }
+        storedTopicAudit.captionCoverage = captionAudit.coverage;
         narrationPath = narrPath;
         if (!narrationPath && !allowSilentVideo) {
           throw new Error(
@@ -425,10 +511,7 @@ async function main() {
             useAiImage,
             contentItems: selectedNarrationItems,
             wikiArticleUrl,
-            narrationParts: buildNarrationParts(
-              post,
-              narrationItems,
-            ),
+            narrationParts,
             qualityHint,
           });
           videoPath = videoResult.path;
@@ -467,19 +550,79 @@ async function main() {
           console.log(`  ⚠ Already uploaded by a concurrent run — skipping.`);
           continue;
         }
-        console.log("  Uploading to YouTube...");
-        const youtubeId = await uploadToYoutube(videoPath, post, videoCuts);
+        const finalTopicAudit = auditNarrationTopicConnection(
+          videoMatchTitle(post),
+          narrationParts,
+          narrationTopicContext,
+        );
+        const finalCaptionAudit = assessNarrationCaptionIntegrity(
+          script,
+          narrWords,
+        );
+        if (!finalTopicAudit.ok || !finalCaptionAudit.ok) {
+          throw new Error(
+            "PRE_UPLOAD_RECHECK_FAILED: narration topic or captions changed after rendering",
+          );
+        }
+
+        console.log("  Uploading to YouTube as a private review video...");
+        const replacedUpload = freshUploaded[post.slug] || null;
+        const stagedPrivacy = privacyMode === "public" ? "private" : privacyMode;
+        const youtubeId = await uploadToYoutube(videoPath, post, videoCuts, {
+          privacyStatus: stagedPrivacy,
+        });
         console.log(`  ✓ https://www.youtube.com/shorts/${youtubeId}`);
 
+        await waitForYoutubeAudit(post, youtubeId, stagedPrivacy);
+        console.log(
+          `  ✓ YouTube metadata and ${stagedPrivacy} review status verified.`,
+        );
+
+        const requiresManualReview =
+          holdForTopicReview || Boolean(replacedUpload?.youtubeId);
+        let privacy = stagedPrivacy;
+        if (privacyMode === "public" && !requiresManualReview) {
+          const promotionTopicAudit = auditNarrationTopicConnection(
+            videoMatchTitle(post),
+            narrationParts,
+            narrationTopicContext,
+          );
+          const promotionCaptionAudit = assessNarrationCaptionIntegrity(
+            script,
+            narrWords,
+          );
+          if (!promotionTopicAudit.ok || !promotionCaptionAudit.ok) {
+            throw new Error(
+              "PUBLICATION_TOPIC_RECHECK_FAILED: private upload retained for review",
+            );
+          }
+          await setYoutubeVideoPrivacy(youtubeId, "public");
+          await waitForYoutubeAudit(post, youtubeId, "public");
+          privacy = "public";
+          console.log("  ✓ Final topic recheck passed; video is public.");
+        } else if (privacyMode === "public") {
+          console.log(
+            "  ✓ Replacement remains private pending the separate reviewed-promotion pass.",
+          );
+        }
+
         // Record in KV tracker (overwrites previous entry for re-uploads)
-        const privacy = privacyMode;
-        await markUploaded(post.slug, youtubeId, privacy);
+        await markUploaded(post.slug, youtubeId, privacy, {
+          replacesYoutubeId: replacedUpload?.youtubeId || "",
+          topicAudit: storedTopicAudit,
+        });
         console.log(
           `  Tracker updated: youtube:uploaded[${post.slug}] (privacy=${privacy})`,
         );
-        const metaOk = await postToMeta(videoPath, post, youtubeId);
-        const tiktokOk = await postToTikTok(videoPath, post, youtubeId);
-        await markSocialPosted(post.slug, { meta: metaOk, tiktok: tiktokOk });
+        if (privacy === "public") {
+          const metaOk = await postToMeta(videoPath, post, youtubeId);
+          const tiktokOk = await postToTikTok(videoPath, post, youtubeId);
+          await markSocialPosted(post.slug, { meta: metaOk, tiktok: tiktokOk });
+        } else {
+          console.log(
+            `  Review upload is ${privacy}; social publishing is deferred until public promotion.`,
+          );
+        }
         await notifyUpload(post, youtubeId, videoPath);
         await recordPipelineSuccess("youtube");
       } catch (err) {

@@ -22,10 +22,33 @@ export async function getUploaded() {
   return raw ? JSON.parse(raw) : {};
 }
 
-export async function markUploaded(slug, youtubeId, privacy = "public") {
+export async function markUploaded(
+  slug,
+  youtubeId,
+  privacy = "public",
+  metadata = {},
+) {
   const tracker = await getUploaded();
-  tracker[slug] = { youtubeId, uploadedAt: new Date().toISOString(), privacy };
+  tracker[slug] = {
+    youtubeId,
+    uploadedAt: new Date().toISOString(),
+    privacy,
+    ...(metadata?.replacesYoutubeId && metadata.replacesYoutubeId !== youtubeId
+      ? { replacesYoutubeId: metadata.replacesYoutubeId }
+      : {}),
+    ...(metadata?.topicAudit ? { topicAudit: metadata.topicAudit } : {}),
+  };
   await kvPut(TRACKER_KEY, JSON.stringify(tracker));
+}
+
+export async function updateUploaded(slug, updates = {}) {
+  const tracker = await getUploaded();
+  if (!tracker[slug]) {
+    throw new Error(`No YouTube upload is tracked for ${slug}`);
+  }
+  tracker[slug] = { ...tracker[slug], ...updates };
+  await kvPut(TRACKER_KEY, JSON.stringify(tracker));
+  return tracker[slug];
 }
 
 /**

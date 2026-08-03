@@ -206,6 +206,7 @@ function withTimeout(promise, timeoutMs, message) {
  * @param {string} videoPath  - Path to the MP4 file
  * @param {{ slug: string, title: string, eventTitle?: string, description: string, publishedAt: string }} post
  * @param {number[]} [cuts]   - Scene boundary timestamps for chapter markers
+ * @param {{ privacyStatus?: "private" | "unlisted" | "public" }} [options]
  * @returns {Promise<string>} YouTube video ID
  */
 // Retry only transient network/server failures — never 4xx (quota, auth, or an
@@ -218,7 +219,12 @@ function isRetryableUploadError(err) {
   );
 }
 
-export async function uploadToYoutube(videoPath, post, cuts = []) {
+export async function uploadToYoutube(
+  videoPath,
+  post,
+  cuts = [],
+  { privacyStatus = process.env.YOUTUBE_PRIVACY || "public" } = {},
+) {
   const youtube = getYoutubeClient();
   const requestBody = {
     snippet: {
@@ -230,7 +236,7 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
       defaultAudioLanguage: "en",
     },
     status: {
-      privacyStatus: process.env.YOUTUBE_PRIVACY || "public",
+      privacyStatus,
       selfDeclaredMadeForKids: false,
     },
   };
@@ -282,4 +288,81 @@ export async function uploadToYoutube(videoPath, post, cuts = []) {
 export async function verifyYoutubeAuth() {
   const auth = getOAuth2Client();
   await auth.getAccessToken();
+}
+
+export async function getYoutubeVideo(videoId) {
+  if (!videoId) throw new Error("Missing YouTube video ID");
+  const youtube = getYoutubeClient();
+  const response = await youtube.videos.list({
+    part: ["snippet", "status"],
+    id: [videoId],
+  });
+  return response.data.items?.[0] || null;
+}
+
+/**
+ * Checks that a staged YouTube upload has the exact article metadata and the
+ * expected non-public/public state. This is pure so the same contract is used
+ * during upload, reviewed promotion, and unit tests.
+ */
+export function auditYoutubeVideo(post, video, { expectedPrivacy } = {}) {
+  const reasons = [];
+  const expectedTitle = buildVideoTitle(post);
+  const expectedArticleUrl = `https://thisday.info/blog/${post.slug}/`;
+  if (!video?.id) reasons.push("video is missing");
+  if (video?.snippet?.title !== expectedTitle) {
+    reasons.push("YouTube title does not match the article topic");
+  }
+  if (!String(video?.snippet?.description || "").includes(expectedArticleUrl)) {
+    reasons.push("YouTube description does not link to the source article");
+  }
+  if (
+    expectedPrivacy &&
+    video?.status?.privacyStatus !== expectedPrivacy
+  ) {
+    reasons.push(
+      `expected privacy ${expectedPrivacy}, found ${video?.status?.privacyStatus || "unknown"}`,
+    );
+  }
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    expectedTitle,
+    actualTitle: video?.snippet?.title || "",
+    expectedPrivacy: expectedPrivacy || null,
+    actualPrivacy: video?.status?.privacyStatus || null,
+  };
+}
+
+export async function setYoutubeVideoPrivacy(videoId, privacyStatus) {
+  if (!videoId) throw new Error("Missing YouTube video ID");
+  if (!["private", "unlisted", "public"].includes(privacyStatus)) {
+    throw new Error(`Unsupported YouTube privacy status: ${privacyStatus}`);
+  }
+  const current = await getYoutubeVideo(videoId);
+  if (!current) throw new Error(`YouTube video ${videoId} was not found`);
+  const currentStatus = current.status || {};
+  const youtube = getYoutubeClient();
+  const response = await youtube.videos.update({
+    part: ["status"],
+    requestBody: {
+      id: videoId,
+      status: {
+        privacyStatus,
+        selfDeclaredMadeForKids:
+          currentStatus.selfDeclaredMadeForKids === true,
+        ...(typeof currentStatus.embeddable === "boolean"
+          ? { embeddable: currentStatus.embeddable }
+          : {}),
+        ...(typeof currentStatus.publicStatsViewable === "boolean"
+          ? { publicStatsViewable: currentStatus.publicStatsViewable }
+          : {}),
+        ...(currentStatus.license ? { license: currentStatus.license } : {}),
+        ...(typeof currentStatus.containsSyntheticMedia === "boolean"
+          ? { containsSyntheticMedia: currentStatus.containsSyntheticMedia }
+          : {}),
+      },
+    },
+  });
+  return response.data;
 }

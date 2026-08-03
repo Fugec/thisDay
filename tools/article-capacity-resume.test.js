@@ -1563,9 +1563,14 @@ test("failsafe permits one recovery attempt and has a non-overlapping concurrenc
       .length,
     1,
   );
+  assert.match(
+    workflow,
+    /\/blog\/recover-post-figures\?slug=\$\{SLUG\}/,
+    "a failsafe publication must start optional enrichment after its one-minute verification wait",
+  );
 });
 
-test("Evergreen maintenance has one 00:55 trigger instead of a duplicate midnight race", () => {
+test("post-publish enrichment starts at 00:16 and retains one hourly retry trigger", () => {
   const worker = readFileSync(
     new URL("../js/blog-ai-worker.js", import.meta.url),
     "utf8",
@@ -1575,12 +1580,15 @@ test("Evergreen maintenance has one 00:55 trigger instead of a duplicate midnigh
     "utf8",
   );
 
+  assert.match(worker, /const DAILY_PUBLICATION_CRON = "5,10,15,16 0 \* \* \*"/);
+  assert.match(worker, /const POST_PUBLISH_RECOVERY_MINUTES = new Set\(\[16\]\)/);
+  assert.match(worker, /return "post-publish-recovery"/);
   assert.match(worker, /const RECOVERY_CRON = "50 0 \* \* \*"/);
   assert.match(worker, /const EVERGREEN_HISTORY_RETRY_CRON = "55 \* \* \* \*"/);
   assert.doesNotMatch(worker, /const RECOVERY_CRON = "50,55 0 \* \* \*"/);
   assert.match(
     wrangler,
-    /"crons": \["5,10,15 0 \* \* \*", "50 0 \* \* \*", "25 1 \* \* \*", "55 \* \* \* \*"\]/,
+    /"crons": \["5,10,15,16 0 \* \* \*", "50 0 \* \* \*", "25 1 \* \* \*", "55 \* \* \* \*"\]/,
   );
   assert.doesNotMatch(wrangler, /50,55 0 \* \* \*/);
 });

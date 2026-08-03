@@ -96,6 +96,26 @@ test("protected topic families cannot reopen while a fresh family exists", () =>
   assert.equal(provenNoFreshFallback.ok, true);
 });
 
+test("date-specific event sources are checked before broad subject pages", () => {
+  const ranked = hooks.prioritizeDedicatedEventSourceCandidates([
+    { pageTitle: "Niger" },
+    { pageTitle: "Firestone (company)" },
+    { pageTitle: "2023 Slovenia floods" },
+    { pageTitle: "2019 El Paso shooting" },
+    { pageTitle: "La Scala" },
+  ]);
+  assert.deepEqual(
+    ranked.map((candidate) => candidate.pageTitle),
+    [
+      "2023 Slovenia floods",
+      "2019 El Paso shooting",
+      "Niger",
+      "Firestone (company)",
+      "La Scala",
+    ],
+  );
+});
+
 test("a Groq 429 opens one durable shared circuit instead of probing all seven keys", async () => {
   __resetGroqModelCacheForTests();
   const originalFetch = globalThis.fetch;

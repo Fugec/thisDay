@@ -2480,7 +2480,7 @@ function sourcePageRelevanceTokens(value) {
 }
 
 const DEDICATED_EVENT_SOURCE_PAGE_RE =
-  /\b(?:ambush|assassination|attack|battle|bombing|case|collapse|convention|crash|disaster|fire|flight\s+\d+|incident|massacre|revolution|siege|treaty|uprising)\b/i;
+  /\b(?:ambush|assassination|attack|battle|bombing|case|collapse|convention|coup|crash|disaster|earthquake|fire|flight\s+\d+|floods?|genocide|incident|massacre|riots?|revolution|shooting|siege|treaty|uprising)\b/i;
 
 // Wikipedia "on this day" sentences often report event X but only reference a
 // different, causally-related event Y in a trailing subordinate clause, e.g.
@@ -3193,6 +3193,20 @@ function demoteSourceTopicMismatches(candidates) {
   return [...clean, ...mismatched];
 }
 
+function prioritizeDedicatedEventSourceCandidates(candidates) {
+  if (!Array.isArray(candidates) || candidates.length < 2) return candidates;
+  const isDedicated = (event) => {
+    const title = String(event?.pageTitle || "");
+    return (
+      DEDICATED_EVENT_SOURCE_PAGE_RE.test(title) ||
+      /\b(?:1\d{3}|20\d{2})\b/.test(title)
+    );
+  };
+  const dedicated = candidates.filter(isDedicated);
+  if (dedicated.length === 0) return candidates;
+  return [...dedicated, ...candidates.filter((event) => !isDedicated(event))];
+}
+
 function rankBlogEventCandidates(events, options = {}) {
   const recentPillars = new Set(
     Array.isArray(options?.recentPillars) ? options.recentPillars : [],
@@ -3504,6 +3518,10 @@ async function chooseEventForDate(
       // The pageview re-rank sorts purely by combined editorial+pageview
       // score with no awareness of sourceTopicMismatch and can otherwise
       // re-promote a mismatched candidate above a clean one (2026-07-25).
+      candidateEvents = demoteSourceTopicMismatches(candidateEvents);
+      candidateEvents = prioritizeDedicatedEventSourceCandidates(candidateEvents);
+      // Specificity must not pull a dedicated-but-mismatched causal-context
+      // page back ahead of a clean subject page.
       candidateEvents = demoteSourceTopicMismatches(candidateEvents);
       const preview = candidateEvents
         .slice(0, 3)
@@ -11704,10 +11722,11 @@ async function fetchExpandedWikipediaSourcePage(
 const INDEPENDENT_REFERENCE_FETCH_LIMIT = 4;
 // Source checks proceed in bounded waves. The old hard limit of three could
 // declare that a date had no usable topic while dozens of qualified events
-// remained. Five keeps the Free-plan external-subrequest worst case bounded
-// while allowing a second wave when the first shortlist has weak references.
+// remained. Seven remains inside the Free-plan 50-subrequest ceiling in the
+// worst case (one feed + four pageviews + up to six source checks each), while
+// allowing a full third wave when the first shortlist has weak references.
 const SOURCE_READY_EVENT_CANDIDATE_WAVE_SIZE = 3;
-const SOURCE_READY_EVENT_CANDIDATE_LIMIT = 5;
+const SOURCE_READY_EVENT_CANDIDATE_LIMIT = 7;
 // The article generator receives only the first 5,500 characters of source
 // material on the free-provider path. Topic readiness must therefore be judged
 // against that exact packed window, not the much larger raw sum of every
@@ -12204,7 +12223,12 @@ async function selectSourceReadyCandidate(candidates, fetchImpl = fetch, options
         fetchImpl,
         options,
       );
-      if (!citation) continue;
+      if (!citation) {
+        console.warn(
+          `Event selector: skipped "${candidate.pageTitle}" because no reachable independent source could be verified.`,
+        );
+        continue;
+      }
       let sourceReadyEvent = {
         ...selectedEvent,
         sourcePages: normalizeSourcePages([
@@ -24578,6 +24602,7 @@ export const __contentGenerationTestHooks = {
   preparedDraftSourceEvent,
   filterRecentEventFamilyRepeats,
   preparedDraftSourceFamilyPolicy,
+  prioritizeDedicatedEventSourceCandidates,
   auditChunkedArticleContinuity,
   isLowRiskChunkedContinuityFailure,
   repairChunkedArticleContinuity,

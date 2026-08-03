@@ -21,3 +21,14 @@ test("YouTube upload installs and verifies FFmpeg without a release-discovery ac
   assert.match(workflow, /ffmpeg -version/);
   assert.match(workflow, /ffprobe -version/);
 });
+
+test("YouTube workflow can safely reconcile a transitive replacement chain", () => {
+  assert.match(workflow, /- retire-replaced/);
+  assert.match(workflow, /retire_video_id:/);
+  assert.match(
+    workflow,
+    /inputs\.mode == 'promote-reviewed' \|\| inputs\.mode == 'retire-replaced'/,
+  );
+  assert.match(workflow, /PROMOTE_RETIRE_ONLY:/);
+  assert.match(workflow, /PROMOTE_RETIRE_VIDEO_ID:/);
+});

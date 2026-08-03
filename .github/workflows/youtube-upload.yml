@@ -20,6 +20,7 @@ on:
         options:
           - upload-private
           - promote-reviewed
+          - retire-replaced
       slug:
         description: "Blog slug, for example 3-august-2026"
         required: true
@@ -29,6 +30,10 @@ on:
         required: false
         type: boolean
         default: false
+      retire_video_id:
+        description: "For retire-replaced only: an older same-article YouTube ID to make private"
+        required: false
+        type: string
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -127,8 +132,8 @@ jobs:
           META_SKIP_FACEBOOK: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
           TIKTOK_SKIP: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
 
-      - name: Promote reviewed video to public
-        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'promote-reviewed'
+      - name: Promote or reconcile reviewed video
+        if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'promote-reviewed' || inputs.mode == 'retire-replaced')
         run: node promote-reviewed.js
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -139,3 +144,5 @@ jobs:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           PROMOTE_SLUG: ${{ inputs.slug }}
           PROMOTE_CONFIRM_TOPIC_REVIEW: ${{ inputs.confirm_topic_review }}
+          PROMOTE_RETIRE_ONLY: ${{ inputs.mode == 'retire-replaced' && 'true' || 'false' }}
+          PROMOTE_RETIRE_VIDEO_ID: ${{ inputs.retire_video_id }}

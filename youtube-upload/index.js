@@ -60,6 +60,7 @@ import {
 } from "./lib/youtube.js";
 import {
   acquireUploadLock,
+  collectReplacedYoutubeIds,
   getUploaded,
   markUploaded,
   recordQuotaSignal,
@@ -614,6 +615,10 @@ async function main() {
         // Record in KV tracker (overwrites previous entry for re-uploads)
         await markUploaded(post.slug, youtubeId, privacy, {
           replacesYoutubeId: replacedUpload?.youtubeId || "",
+          replacesYoutubeIds: collectReplacedYoutubeIds(
+            replacedUpload,
+            youtubeId,
+          ),
           topicAudit: storedTopicAudit,
         });
         console.log(

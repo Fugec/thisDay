@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 
 import {
+  extractArticleTextFromHtml,
   extractDidYouKnowFromHtml,
   extractQuickFactsFromHtml,
 } from "./lib/kv.js";
 import {
+  assessNarrationCaptionIntegrity,
+  auditNarrationTopicConnection,
+  buildNarrationTopicContext,
   isInterestingNarrationFact,
   selectInterestingNarrationFacts,
 } from "./lib/narration-selection.js";
@@ -12,6 +16,8 @@ import {
   buildNarrationParts,
   buildNarrationScript,
 } from "./lib/elevenlabs.js";
+import { buildVideoTitle } from "./lib/titles.js";
+import { auditYoutubeVideo } from "./lib/youtube.js";
 
 const TITLE =
   "John F. Kennedy Jr. Dies in Plane Crash — July 16, 1999";
@@ -131,10 +137,172 @@ function testArticleTextOnlyFillsMissingStrongFacts() {
   ]);
 }
 
+function testElPasoCityProfileCannotBecomeNarration() {
+  const post = {
+    title: "How Did the 2019 El Paso Walmart Shooting Unfold?",
+    factualTitle: "El Paso Walmart shooting occurs — August 3, 2019",
+    eventTitle: "El Paso Walmart shooting occurs",
+    sourcePageTitle: "2019 El Paso Walmart shooting",
+    description:
+      "Patrick Crusius drove to El Paso before the attack at the Walmart near Cielo Vista Mall.",
+    keywords:
+      "El Paso, Walmart shooting, domestic terrorism, white nationalism, 8chan, 2019",
+    keyTerms: [{ term: "Patrick Crusius", type: "person" }],
+  };
+  const didYouKnow = [
+    "Video ‘We changed lives’: TLC Foundation shuts down after decades of helping terminal and sick children Video 14 WestJet flights cancelled at London International Airport Video Investigation continues into a boating crash.",
+    "El Paso is a city in and the county seat of El Paso County, Texas. It is the 23rd-most populous city in the U.S. with a population of 678,815 at the 2020 census.",
+    "Crusius surrendered and was arrested and charged with capital murder in connection with the shooting. He posted a manifesto with white nationalist and anti-immigrant themes on 8chan shortly before the attack.",
+    "The El Paso metropolitan area has an estimated 879,000 residents. El Paso stands on the Rio Grande across the Mexico–United States border from Ciudad Juárez.",
+  ];
+  const quickFacts = [
+    "Event: El Paso Walmart shooting occurs",
+    "Date: August 3, 2019",
+    "Location: El Paso, Texas, United States",
+    "Key Figure: Patrick Crusius, a 21-year-old gunman",
+    "Investigation: The Federal Bureau of Investigation investigated the shooting as an act of domestic terrorism and a hate crime.",
+    "Source Subject: 2019 El Paso Walmart shooting",
+  ];
+  const topicContext = buildNarrationTopicContext(post, quickFacts);
+  const selected = selectInterestingNarrationFacts(
+    post.eventTitle,
+    [...didYouKnow, ...quickFacts],
+    null,
+    {
+      limit: 3,
+      dateHint: post.factualTitle,
+      topicContext,
+    },
+  );
+  const audit = auditNarrationTopicConnection(
+    post.eventTitle,
+    selected,
+    topicContext,
+  );
+
+  assert.equal(selected.length, 3);
+  assert.equal(audit.ok, true);
+  assert.ok(
+    selected.every((fact) =>
+      /shooting|attack|gunman|Crusius|terrorism|hate crime|manifesto/i.test(fact),
+    ),
+  );
+  assert.ok(
+    selected.every(
+      (fact) =>
+        !/population|populous|census|residents|Rio Grande|Ciudad Juárez|WestJet|TLC Foundation/i.test(
+          fact,
+        ),
+    ),
+  );
+}
+
+function testArticleFallbackUsesBodyOnly() {
+  const html = `
+    <p class="article-meta">Published August 3, 2026 by thisDay Editorial Team.</p>
+    <p class="dyn-fact">El Paso has a population of 678,815 residents.</p>
+    <!-- Overview -->
+    <section><p>Patrick Crusius opened fire at the El Paso Walmart, killing shoppers and beginning the documented law-enforcement response to the shooting.</p></section>
+    <section><p>The Federal Bureau of Investigation investigated the attack as domestic terrorism and a hate crime while prosecutors pursued federal and state charges.</p></section>
+    <!-- Personal Analysis -->
+    <p>Unrelated recommendation copy after the article body.</p>`;
+  const articleText = extractArticleTextFromHtml(html);
+  assert.match(articleText, /Patrick Crusius opened fire/);
+  assert.match(articleText, /Federal Bureau of Investigation/);
+  assert.doesNotMatch(articleText, /population of 678,815|recommendation copy/);
+}
+
+function testCaptionIntegrityMustMatchApprovedScript() {
+  const script =
+    "Patrick Crusius surrendered after the El Paso Walmart shooting.";
+  const matchingWords = script
+    .split(/\s+/)
+    .map((word, index) => ({ word, start: index, end: index + 0.5 }));
+  assert.equal(assessNarrationCaptionIntegrity(script, matchingWords).ok, true);
+  assert.equal(
+    assessNarrationCaptionIntegrity(script, [
+      { word: "El", start: 0, end: 0.2 },
+      { word: "Paso", start: 0.2, end: 0.4 },
+      { word: "population", start: 0.4, end: 0.8 },
+    ]).ok,
+    false,
+  );
+}
+
+function testTopicAuditNeedsTwoConnectedFacts() {
+  const context = {
+    text: "Apollo 11 moon landing Neil Armstrong Buzz Aldrin",
+    coreText: "Apollo 11 moon landing",
+    personTerms: ["Neil Armstrong", "Buzz Aldrin"],
+    locationText: "Moon",
+  };
+  assert.equal(
+    auditNarrationTopicConnection(
+      "Apollo 11 moon landing",
+      [
+        "Apollo 11 landed on the Moon with Neil Armstrong in command.",
+        "Buzz Aldrin landed with Armstrong and joined him on the lunar surface.",
+      ],
+      context,
+    ).ok,
+    true,
+  );
+  assert.equal(
+    auditNarrationTopicConnection(
+      "Apollo 11 moon landing",
+      ["Apollo 11 landed on the Moon with Neil Armstrong in command."],
+      context,
+    ).ok,
+    false,
+  );
+}
+
+function testYoutubeReviewMetadataMustMatchArticle() {
+  const post = {
+    slug: "3-august-2026",
+    title: "How Did the 2019 El Paso Walmart Shooting Unfold?",
+    eventTitle: "El Paso Walmart shooting occurs",
+    description: "The documented events and aftermath of the Walmart shooting.",
+    publishedAt: "2026-08-03T00:00:00.000Z",
+  };
+  const video = {
+    id: "review-video",
+    snippet: {
+      title: buildVideoTitle(post),
+      description:
+        "Private review\nhttps://thisday.info/blog/3-august-2026/",
+    },
+    status: { privacyStatus: "private" },
+  };
+  assert.equal(
+    auditYoutubeVideo(post, video, { expectedPrivacy: "private" }).ok,
+    true,
+  );
+  assert.equal(
+    auditYoutubeVideo(post, {
+      ...video,
+      snippet: { ...video.snippet, title: "A video about El Paso city" },
+    }, { expectedPrivacy: "private" }).ok,
+    false,
+  );
+  assert.equal(
+    auditYoutubeVideo(post, {
+      ...video,
+      status: { privacyStatus: "public" },
+    }, { expectedPrivacy: "private" }).ok,
+    false,
+  );
+}
+
 testCurrentMarkupExtraction();
 testInterestingFactSelection();
 testNarrationContainsFactsOnly();
 testAllFillerFailsClosed();
 testArticleTextOnlyFillsMissingStrongFacts();
+testElPasoCityProfileCannotBecomeNarration();
+testArticleFallbackUsesBodyOnly();
+testCaptionIntegrityMustMatchApprovedScript();
+testTopicAuditNeedsTwoConnectedFacts();
+testYoutubeReviewMetadataMustMatchArticle();
 
 console.log("Video text tests passed.");

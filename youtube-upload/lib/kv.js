@@ -137,12 +137,24 @@ export async function getPostContent(slug) {
  * @param {string} slug
  * @returns {Promise<string|null>}
  */
-export async function getArticleText(slug) {
-  const raw = await kvGet(`post:${slug}`);
-  if (!raw) return null;
+export function extractArticleTextFromHtml(raw) {
+  const html = String(raw || "");
+  if (!html) return null;
 
-  const paras = [...raw.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/gi)]
-    .map(([, v]) =>
+  // Current generated posts place the substantive body between these stable
+  // render markers. Scope to it so metadata, Did You Know cards, navigation,
+  // and unrelated recommendation copy cannot become narration fallback text.
+  const bodyStart = html.indexOf("<!-- Overview -->");
+  const bodyEnd = html.indexOf("<!-- Personal Analysis -->", bodyStart + 1);
+  const source = bodyStart >= 0 && bodyEnd > bodyStart
+    ? html.slice(bodyStart, bodyEnd)
+    : html;
+
+  const paras = [...source.matchAll(/<p([^>]*)>([\s\S]*?)<\/p>/gi)]
+    .filter(([, attrs]) =>
+      !/\b(?:article-meta|dyn-fact|tdq-|amazon-|evidence-map)\b/i.test(attrs),
+    )
+    .map(([, , v]) =>
       decodeEntities(
         v
           .replace(/<[^>]+>/g, " ")
@@ -150,10 +162,15 @@ export async function getArticleText(slug) {
           .trim(),
       ),
     )
-    .filter((s) => s.length > 60 && s.length < 800)
+    .filter((s) => s.length > 60 && s.length < 1600)
     .slice(0, 8);
 
-  return paras.length > 0 ? paras.join(" ").slice(0, 2000) : null;
+  return paras.length > 0 ? paras.join(" ").slice(0, 2500) : null;
+}
+
+export async function getArticleText(slug) {
+  const raw = await kvGet(`post:${slug}`);
+  return extractArticleTextFromHtml(raw);
 }
 
 /**

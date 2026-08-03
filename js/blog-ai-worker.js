@@ -667,20 +667,26 @@ const EVERY_OTHER_DAYS = 1; // Generate every N days
 // scheduled invocations. Generation has no same-night retry minute: durable
 // provider circuits and the chunk journal let the 00:35 failsafe resume safely
 // instead of launching overlapping or quota-draining retries.
-const DAILY_PUBLICATION_CRON = "5,10,15 0 * * *";
+const DAILY_PUBLICATION_CRON = "5,10,15,16 0 * * *";
 const DRAFT_PREPARATION_MINUTES = new Set([5]);
 const DRAFT_GENERATION_MINUTES = new Set([10]);
 const DRAFT_ENRICHMENT_MINUTES = new Set([15]);
+// The 00:15 phase publishes the validated factual core and stores the
+// post-publish outbox. Give optional timeline/figure/quiz/entity work a fresh
+// invocation one minute later instead of waiting for the hourly :55 pass.
+// :50 and :55 remain bounded retries when publication runs long or a provider
+// is temporarily unavailable.
+const POST_PUBLISH_RECOVERY_MINUTES = new Set([16]);
 const WORKERS_AI_GENERATION_MINUTES = new Set();
-// Entity recovery has one isolated midnight invocation. Evergreen recovery is
-// handled by the hourly :55 trigger below, including 00:55; keeping 00:55 in
-// both expressions would race two maintenance invocations against the same
-// article and provider/KV budget.
+// Entity recovery has one isolated midnight invocation. The current article's
+// first evergreen/outbox attempt is 00:16; the hourly :55 trigger below is its
+// retry. Keeping 00:55 in the entity expression would still race two
+// maintenance invocations against the same article and provider/KV budget.
 const RECOVERY_CRON = "50 0 * * *";
 const ENTITY_RECOVERY_MINUTE = 50;
 // A second isolated invocation repairs at most one older pending companion.
 // Keeping backlog work separate prevents an old failure from displacing the
-// current day's required edition at 00:55.
+// current day's one-minute post-publish attempt or its 00:55 retry.
 const EVERGREEN_HISTORY_BACKLOG_CRON = "25 1 * * *";
 // Retry only the current day's still-pending companion after provider
 // cooldowns. These invocations are GET-only when the queue is empty and never
@@ -771,6 +777,9 @@ function scheduledBlogPhase(cron, scheduledMinute) {
     if (DRAFT_PREPARATION_MINUTES.has(scheduledMinute)) return "prepare";
     if (DRAFT_GENERATION_MINUTES.has(scheduledMinute)) return "generate";
     if (DRAFT_ENRICHMENT_MINUTES.has(scheduledMinute)) return "enrich";
+    if (POST_PUBLISH_RECOVERY_MINUTES.has(scheduledMinute)) {
+      return "post-publish-recovery";
+    }
     return "ignore";
   }
   if (cron === RECOVERY_CRON) {
@@ -3963,7 +3972,13 @@ export default {
           }
           return;
         }
-        if (phase === "history-recovery") {
+        // The daily 00:16 invocation is the normal first attempt, one minute
+        // after the 00:15 core-publication slot. The hourly :55 invocation is
+        // the same idempotent current-day recovery path and remains a retry.
+        if (
+          phase === "post-publish-recovery" ||
+          phase === "history-recovery"
+        ) {
           const guarded = await prepareBlogKvBudget(env, "maintenance");
           if (!guarded.budget.allowPhase) return;
           const scheduledDate = Number.isFinite(Number(event?.scheduledTime))

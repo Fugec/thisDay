@@ -8,8 +8,27 @@ on:
   schedule:
     - cron: "0 13 * * 1,2,4,5"
 
-  # Allow a manual run from the Actions tab (e.g. to back-fill or re-upload)
+  # Manual reuploads are always private first. A separate reviewed-promotion
+  # mode rechecks the stored narration audit before changing YouTube privacy.
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Upload privately for review, or promote an audited review upload"
+        required: true
+        type: choice
+        default: upload-private
+        options:
+          - upload-private
+          - promote-reviewed
+      slug:
+        description: "Blog slug, for example 3-august-2026"
+        required: true
+        type: string
+      confirm_topic_review:
+        description: "Required only for promote-reviewed: confirm the narration facts were inspected"
+        required: false
+        type: boolean
+        default: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -58,7 +77,14 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Run narration topic-safety tests
+        run: |
+          node --check index.js
+          node --check promote-reviewed.js
+          node test-video-text.js
+
       - name: Upload new posts to YouTube
+        if: github.event_name != 'workflow_dispatch' || inputs.mode == 'upload-private'
         run: node index.js
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -70,9 +96,12 @@ jobs:
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
           ELEVENLABS_API_KEY_2: ${{ secrets.ELEVENLABS_API_KEY_2 }}
           ELEVENLABS_API_KEY_3: ${{ secrets.ELEVENLABS_API_KEY_3 }}
-          YOUTUBE_PRIVACY: ${{ secrets.YOUTUBE_PRIVACY }}
+          # Every public upload is staged privately in code. Force manual
+          # reuploads private even if the scheduled channel uses another mode.
+          YOUTUBE_PRIVACY: ${{ github.event_name == 'workflow_dispatch' && 'private' || secrets.YOUTUBE_PRIVACY }}
+          HOLD_FOR_TOPIC_REVIEW: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
           ALLOW_SILENT_VIDEO: ${{ secrets.ALLOW_SILENT_VIDEO }}
-          REUPLOAD_SLUGS: ${{ secrets.REUPLOAD_SLUGS }}
+          REUPLOAD_SLUGS: ${{ github.event_name == 'workflow_dispatch' && inputs.slug || secrets.REUPLOAD_SLUGS }}
           MAX_UPLOADS_PER_RUN: ${{ secrets.MAX_UPLOADS_PER_RUN }}
           BLOG_WORKER_URL: ${{ secrets.BLOG_WORKER_URL }}
           YOUTUBE_REGEN_SECRET: ${{ secrets.YOUTUBE_REGEN_SECRET }}
@@ -94,3 +123,18 @@ jobs:
           META_IG_USER_ID: ${{ secrets.META_IG_USER_ID }}
           TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
           TIKTOK_OPEN_ID: ${{ secrets.TIKTOK_OPEN_ID }}
+          META_SKIP_FACEBOOK: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
+          TIKTOK_SKIP: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
+
+      - name: Promote reviewed video to public
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'promote-reviewed'
+        run: node promote-reviewed.js
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          PROMOTE_SLUG: ${{ inputs.slug }}
+          PROMOTE_CONFIRM_TOPIC_REVIEW: ${{ inputs.confirm_topic_review }}

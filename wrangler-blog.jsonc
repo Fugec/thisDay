@@ -67,24 +67,28 @@
   // The main SEO worker (seo-worker.js) keeps handling everything else.
   "routes": [{ "pattern": "thisday.info/blog/*", "zone_name": "thisday.info" }],
 
-  // Cron pipeline — primary publication runs at 00:05/00:10/00:15 UTC.
+  // Cron pipeline — primary publication runs at 00:05/00:10/00:15 UTC,
+  // followed by optional post-publish enrichment at 00:16.
   // 00:05 vets and caches the source package after warmup-worker (00:01).
   // 00:10 generates the lightweight draft from that cache with a fresh
   // external-subrequest budget. There is no immediate generation retry:
   // provider cooldowns persist across invocations and validated article chunks
   // remain resumable for the single 00:35 GitHub failsafe attempt.
   // Blog post is the source of truth for the video narration + metadata.
-  // 00:15 enrichment runs in a separate invocation with a fresh external
+  // 00:15 core enrichment/publication runs in a separate invocation with a fresh external
   // subrequest budget. A bounded rejection blocks that topic but does not
   // regenerate another full article in the same capacity window.
+  // 00:16 uses another fresh invocation for timeline, figures, quiz, entities,
+  // and the evergreen card. This normally completes the optional outbox one
+  // minute after core publication; 00:50 and hourly :55 remain retries.
   // 00:50 runs the dedicated entity-recovery pass (ENTITY_RECOVERY_CRON): a fresh
   // invocation with full subrequest budget re-links any people strips the budget-starved
   // 00:05 generation left unlinked. Must stay after the 00:35 failsafe.
-  // The hourly :55 trigger promotes the daily article's Evergreen companion,
+  // The hourly :55 trigger retries the daily article's Evergreen companion,
   // including at 00:55. It is intentionally not duplicated in the 00:50
   // entity-recovery expression.
   // 01:25 retries at most one older pending companion in a separate invocation,
-  // so backlog repair never displaces the current day's 00:55 edition.
+  // so backlog repair never displaces the current day's immediate edition.
   // :55 hourly retries only today's still-pending companion after provider
   // cooldowns, AND is the pass that fetches inline person/event figures + the
   // quiz for a freshly published post (recoverPublishedPostEnrichment). They
@@ -96,7 +100,7 @@
   // YouTube upload is scheduled separately on Mon/Tue/Thu/Fri at 13:00 UTC
   // (about 09:00 Eastern during daylight saving time).
   "triggers": {
-    "crons": ["5,10,15 0 * * *", "50 0 * * *", "25 1 * * *", "55 * * * *"],
+    "crons": ["5,10,15,16 0 * * *", "50 0 * * *", "25 1 * * *", "55 * * * *"],
   },
 
   // KV namespaces — blog posts/index and shared events/quiz cache.

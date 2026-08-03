@@ -81,6 +81,68 @@ const INTEREST_PATTERNS = [
   /\b(?:wife|husband|sister|brother|daughter|son|president|queen|king|emperor)\b/i,
 ];
 
+// A sentence can be factually true and still be the wrong subject for the
+// video. This happened on 2026-08-03 when El Paso census/geography passages
+// outranked facts about the Walmart shooting. Reject page-shell noise and
+// generic place profiles before the existing "interestingness" scorer runs.
+const NAVIGATION_NOISE_PATTERNS = [
+  /(?:^|\s)video\s+[^.!?]{5,120}\s+video\s+/i,
+  /\b(?:flights? cancelled|click here|watch live|latest videos?|more stories|related stories)\b/i,
+  /\b(?:newsletter|sign up|subscribe|advertisement)\b/i,
+];
+
+const PLACE_PROFILE_PATTERNS = [
+  /\b(?:county seat|metropolitan area)\b/i,
+  /\b(?:most|least|\d+(?:st|nd|rd|th)-most) populous\b/i,
+  /\bpopulation of\s+[\d,]+\b/i,
+  /\b\d{4} census\b/i,
+  /\bstands? on (?:the )?[^.!?]{0,80}\b(?:border|river)\b/i,
+  /\bis a city in\b/i,
+  /\bacross the .{0,40}\bborder from\b/i,
+  /\b(?:estimated|approximately)\s+[\d,]+\s+residents\b/i,
+];
+
+const EVENT_CONNECTION_PATTERN =
+  /\b(?:adopted|announced|appointed|arrest(?:ed|s)?|attack(?:ed|s)?|awarded|battle|became|began|captur(?:e[ds]?|ing)|charged|coup|crash(?:ed|es)?|created|crowned|decid(?:ed|es)|declared|dedicated|died|disappear(?:ed|s)?|discovered|dissolved|elected|enacted|ended|established|execut(?:ed|es)|fired|fought|founded|gunman|investigat(?:ed|es|ion)|introduced|invaded|issued|kill(?:ed|s)?|landed|launch(?:ed|es)|manifesto|murder(?:ed|s)?|opened|passed|pleaded|prosecut(?:ed|ion)|published|ratified|reached|reign(?:ed|s)?|released|rescu(?:ed|es)|resigned|revolt(?:ed|s)?|salut(?:ed|es|ing)|sentenced|served|shooting|signed|struck|surrender(?:ed|s)?|trial|unveiled|vanish(?:ed|es)|won|wound(?:ed|s)?)\b/i;
+
+const EVENT_ROLE_CONNECTIONS = [
+  {
+    event: /\b(?:attack|kill|massacre|murder|shoot|terror)\w*\b/i,
+    fact: /\b(?:attacker|gunman|killer|perpetrator|shooter|suspect|terrorist)\b/i,
+  },
+  {
+    event: /\b(?:battle|invasion|war)\w*\b/i,
+    fact: /\b(?:army|commander|general|soldier|troops?)\b/i,
+  },
+  {
+    event: /\b(?:elect|election|president|prime minister)\w*\b/i,
+    fact: /\b(?:candidate|president|prime minister|winner)\b/i,
+  },
+];
+
+const TOPIC_GENERIC_TOKENS = new Set([
+  "article",
+  "began",
+  "begins",
+  "city",
+  "county",
+  "date",
+  "event",
+  "figure",
+  "history",
+  "key",
+  "location",
+  "occurred",
+  "occurs",
+  "source",
+  "state",
+  "states",
+  "subject",
+  "united",
+  "year",
+  "years",
+]);
+
 function normalizeText(value) {
   return String(value || "")
     .replace(/&(?:nbsp|amp|quot|apos|#39);/gi, " ")
@@ -165,6 +227,234 @@ function tokenOverlap(left, right) {
   return shared / Math.min(a.size, b.size);
 }
 
+function topicTokenSet(value) {
+  return new Set(
+    narrationTokens(value).filter((token) => !TOPIC_GENERIC_TOKENS.has(token)),
+  );
+}
+
+function quickFactValue(quickFacts, label) {
+  const pattern = new RegExp(`^${label}\\s*:\\s*(.+)$`, "i");
+  for (const value of Array.isArray(quickFacts) ? quickFacts : []) {
+    const match = normalizeText(value).match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return "";
+}
+
+function topicContextParts(topicContext, title = "") {
+  if (!topicContext || typeof topicContext !== "object") {
+    return {
+      text: normalizeText(topicContext),
+      coreText: normalizeText(title),
+      personTerms: [],
+      locationText: "",
+    };
+  }
+  return {
+    text: normalizeText(topicContext.text),
+    coreText: normalizeText(topicContext.coreText || title),
+    personTerms: Array.isArray(topicContext.personTerms)
+      ? topicContext.personTerms.map(normalizeText).filter(Boolean)
+      : [],
+    locationText: normalizeText(topicContext.locationText),
+  };
+}
+
+/**
+ * Builds a trusted topic context from the post's canonical metadata and
+ * event-bearing Quick Facts. Date/location-only facts are deliberately
+ * excluded so a city profile cannot bootstrap its own relevance.
+ */
+export function buildNarrationTopicContext(post, quickFacts = []) {
+  const factContext = (Array.isArray(quickFacts) ? quickFacts : [])
+    .map((value) => normalizeText(value))
+    .filter((value) =>
+      /^(?:event|key figure|source subject|source detail|confirmed outcome|investigation|trial|decision|record):/i.test(
+        value,
+      ),
+    );
+  const keyTerms = Array.isArray(post?.keyTerms)
+    ? post.keyTerms.map((term) => term?.term).filter(Boolean)
+    : [];
+  const personTerms = Array.isArray(post?.keyTerms)
+    ? post.keyTerms
+        .filter((term) => term?.type === "person")
+        .map((term) => term?.term)
+        .filter(Boolean)
+    : [];
+  const text = [
+    post?.eventTitle,
+    post?.sourcePageTitle,
+    post?.factualTitle,
+    post?.keywords,
+    post?.description,
+    ...keyTerms,
+    ...factContext,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return {
+    text,
+    coreText: [
+      post?.eventTitle,
+      post?.sourcePageTitle,
+      post?.factualTitle,
+      post?.title,
+    ]
+      .filter(Boolean)
+      .join(" "),
+    personTerms,
+    locationText: [
+      post?.location,
+      quickFactValue(quickFacts, "Location"),
+    ]
+      .filter(Boolean)
+      .join(" "),
+  };
+}
+
+export function narrationTopicConnection(value, title, topicContext = "") {
+  const text = normalizeText(value);
+  if (!text) {
+    return {
+      connected: false,
+      reason: "empty narration fact",
+      titleMatches: [],
+      contextMatches: [],
+      personMatches: [],
+      locationMatches: [],
+    };
+  }
+  if (NAVIGATION_NOISE_PATTERNS.some((pattern) => pattern.test(text))) {
+    return {
+      connected: false,
+      reason: "page navigation or unrelated headline noise",
+      titleMatches: [],
+      contextMatches: [],
+      personMatches: [],
+      locationMatches: [],
+    };
+  }
+  const context = topicContextParts(topicContext, title);
+  const personTokens = topicTokenSet(context.personTerms.join(" "));
+  const locationTokens = topicTokenSet(context.locationText);
+  const backgroundTokens = new Set([...personTokens, ...locationTokens]);
+  const coreTokens = new Set(
+    [...topicTokenSet(`${title} ${context.coreText}`)].filter(
+      (token) => !backgroundTokens.has(token),
+    ),
+  );
+  const contextTokens = new Set(
+    [...topicTokenSet(`${title} ${context.text}`)].filter(
+      (token) => !backgroundTokens.has(token),
+    ),
+  );
+  const factTokens = topicTokenSet(text);
+  const titleMatches = [...factTokens].filter((token) => coreTokens.has(token));
+  const contextMatches = [...factTokens].filter((token) => contextTokens.has(token));
+  const personMatches = [...factTokens].filter((token) => personTokens.has(token));
+  const locationMatches = [...factTokens].filter((token) => locationTokens.has(token));
+  const hasEventConnection = EVENT_CONNECTION_PATTERN.test(text);
+  const compatibleRole = EVENT_ROLE_CONNECTIONS.some(
+    ({ event, fact }) => event.test([...coreTokens].join(" ")) && fact.test(text),
+  );
+  if (
+    PLACE_PROFILE_PATTERNS.some((pattern) => pattern.test(text)) &&
+    titleMatches.length === 0 &&
+    !compatibleRole
+  ) {
+    return {
+      connected: false,
+      reason: "generic place profile",
+      titleMatches,
+      contextMatches,
+      personMatches,
+      locationMatches,
+    };
+  }
+  const connected =
+    titleMatches.length >= 2 ||
+    ((titleMatches.length >= 1 || contextMatches.length >= 1) &&
+      hasEventConnection) ||
+    (contextMatches.length >= 2 && hasEventConnection) ||
+    (personMatches.length >= 1 && (compatibleRole || hasEventConnection));
+
+  return {
+    connected,
+    reason: connected
+      ? "shares canonical topic anchors"
+      : "does not identify the event, its actor, or a documented event action",
+    titleMatches,
+    contextMatches,
+    personMatches,
+    locationMatches,
+  };
+}
+
+export function auditNarrationTopicConnection(
+  title,
+  facts,
+  topicContext = "",
+  { minimumFacts = 2 } = {},
+) {
+  const items = (Array.isArray(facts) ? facts : [])
+    .map((fact) => normalizeText(fact))
+    .filter(Boolean);
+  const results = items.map((text) => ({
+    text,
+    ...narrationTopicConnection(text, title, topicContext),
+  }));
+  return {
+    version: 1,
+    ok:
+      results.length >= minimumFacts &&
+      results.every((result) => result.connected) &&
+      results.some(
+        (result) =>
+          result.titleMatches.length > 0 ||
+          result.personMatches.length > 0 ||
+          result.contextMatches.length >= 2,
+      ),
+    title: normalizeText(title),
+    checkedFacts: results.length,
+    minimumFacts,
+    results,
+  };
+}
+
+export function assessNarrationCaptionIntegrity(script, words) {
+  const expected = narrationTokens(script);
+  const actual = narrationTokens(
+    (Array.isArray(words) ? words : [])
+      .map((entry) => entry?.word || "")
+      .join(" "),
+  );
+  if (expected.length === 0 || actual.length === 0) {
+    return { ok: false, coverage: 0, reason: "caption words are missing" };
+  }
+  const remaining = new Map();
+  for (const token of actual) {
+    remaining.set(token, (remaining.get(token) || 0) + 1);
+  }
+  let matched = 0;
+  for (const token of expected) {
+    const count = remaining.get(token) || 0;
+    if (count <= 0) continue;
+    matched += 1;
+    remaining.set(token, count - 1);
+  }
+  const coverage = matched / expected.length;
+  return {
+    ok: coverage >= 0.9,
+    coverage,
+    reason:
+      coverage >= 0.9
+        ? "caption words match the approved narration"
+        : `caption coverage ${(coverage * 100).toFixed(1)}% is below 90%`,
+  };
+}
+
 function properNounCount(value) {
   return (
     normalizeText(value).match(
@@ -229,17 +519,22 @@ function candidateSentences(items) {
   return candidates;
 }
 
-function scoredCandidates(title, items) {
+function scoredCandidates(title, items, topicContext = "") {
   return candidateSentences(items).map((text, sourceOrder) => ({
     text,
     sourceOrder,
     score: narrationFactScore(text, title),
+    topic: narrationTopicConnection(text, title, topicContext),
   }));
 }
 
-function rankedCandidates(title, items) {
-  return scoredCandidates(title, items)
-    .filter((candidate) => candidate.score >= 4)
+function rankedCandidates(title, items, topicContext = "") {
+  const minimumScore = topicContext ? 3 : 4;
+  return scoredCandidates(title, items, topicContext)
+    .filter(
+      (candidate) =>
+        candidate.score >= minimumScore && candidate.topic.connected,
+    )
     .sort(
       (left, right) =>
         right.score - left.score || left.sourceOrder - right.sourceOrder,
@@ -284,17 +579,20 @@ function dayRelevanceBonus(text, hint) {
   return bonus;
 }
 
-function pickDayFact(title, hint, items, articleText) {
+function pickDayFact(title, hint, items, articleText, topicContext = "") {
   if (!hint) return null;
   const pools = [items];
   if (articleText) pools.push(splitNarrationSentences(articleText));
   for (const pool of pools) {
-    const candidates = scoredCandidates(title, pool)
+    const candidates = scoredCandidates(title, pool, topicContext)
       .map((candidate) => ({
         ...candidate,
         day: dayRelevanceBonus(candidate.text, hint),
       }))
-      .filter((candidate) => candidate.score > -100 && candidate.day >= 7)
+      .filter(
+        (candidate) =>
+          candidate.score > -100 && candidate.day >= 7 && candidate.topic.connected,
+      )
       .sort(
         (left, right) =>
           right.score + right.day - (left.score + left.day) ||
@@ -314,7 +612,7 @@ export function selectInterestingNarrationFacts(
   title,
   items,
   articleText = null,
-  { limit = 3, dateHint = "" } = {},
+  { limit = 3, dateHint = "", topicContext = "" } = {},
 ) {
   const selected = [];
 
@@ -333,13 +631,23 @@ export function selectInterestingNarrationFacts(
     }
   };
 
-  const dayFact = pickDayFact(title, parseDateHint(dateHint), items, articleText);
+  const dayFact = pickDayFact(
+    title,
+    parseDateHint(dateHint),
+    items,
+    articleText,
+    topicContext,
+  );
   if (dayFact) selected.push(dayFact);
 
-  addRankedCandidates(rankedCandidates(title, items));
+  addRankedCandidates(rankedCandidates(title, items, topicContext));
   if (selected.length < limit && articleText) {
     addRankedCandidates(
-      rankedCandidates(title, splitNarrationSentences(articleText)),
+      rankedCandidates(
+        title,
+        splitNarrationSentences(articleText),
+        topicContext,
+      ),
     );
   }
 

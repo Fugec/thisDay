@@ -1,7 +1,8 @@
 name: Blog Post Failsafe
 
-# Runs after the blog worker's 00:05 prepare, 00:10 generate, and 00:15 enrich
-# invocations. Checks whether the complete pipeline produced a post.
+# Runs after the blog worker's 00:05 prepare, 00:10 generate, 00:15 core
+# publication, and 00:16 post-publish enrichment invocations. Checks whether
+# the complete pipeline produced a post.
 # Checks if today's post actually exists in KV. If it doesn't (the worker
 # failed), this workflow prepares the source, creates a draft, and enriches it
 # in three separate Worker invocations.
@@ -183,4 +184,21 @@ jobs:
           if [ "$POST_FOUND" != "true" ]; then
             echo "::error::post:${SLUG} still missing in KV after 10 minutes. Enrichment likely failed — check Worker logs."
             exit 1
+          fi
+
+          # ── Phase 5: Start optional enrichment after publication ─────────
+          # The verification loop above waits at least one minute after the
+          # synchronous core publication. Give timeline, figures, quiz,
+          # entities, and the evergreen card their own fresh Worker invocation.
+          # This work is optional: a transient failure must not turn an already
+          # public core article into a failed workflow. The 00:50/hourly :55
+          # scheduled passes retain the outbox and retry it safely.
+          echo "Starting post-publish enrichment for ${SLUG}..."
+          RECOVERY_HTTP_STATUS=$(curl -sS --max-time 300 -o /tmp/post-publish-enrichment.json -w "%{http_code}" \
+            -X POST "$WORKER_URL/blog/recover-post-figures?slug=${SLUG}" \
+            -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}" || true)
+          RECOVERY_BODY=$(cat /tmp/post-publish-enrichment.json 2>/dev/null || true)
+          echo "Post-publish enrichment response (HTTP ${RECOVERY_HTTP_STATUS:-000}): ${RECOVERY_BODY}"
+          if [ "$RECOVERY_HTTP_STATUS" != "200" ]; then
+            echo "::warning::Post-publish enrichment remains queued for the scheduled recovery pass."
           fi

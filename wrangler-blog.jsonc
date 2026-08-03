@@ -48,9 +48,13 @@
     // checkpointed article; twelve also covers both split-body fallbacks, one
     // malformed-chunk retry, and the two targeted repair stages.
     "ARTICLE_GENERATION_REQUEST_BUDGET": "12",
-    // One genuinely different replacement source may use up to fourteen calls;
-    // prompt variants get no new allowance and a third topic is blocked.
+    // Every genuinely different replacement source may use up to fourteen
+    // calls; prompt variants get no new allowance.
     "ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET": "14",
+    // Date-wide ceiling. The separate cap leaves one additional minimum-viable
+    // rotation after the 12 + 14 per-source allowances without letting any
+    // single replacement exceed fourteen calls.
+    "ARTICLE_GENERATION_DAILY_REQUEST_BUDGET": "34",
     // Emergency manual override retained for incidents where analytics itself
     // is unavailable. Use an ISO UTC timestamp; leave empty normally.
     "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "",

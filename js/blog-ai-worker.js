@@ -94,6 +94,12 @@ const DEFAULT_ARTICLE_GENERATION_REQUEST_BUDGET = 12;
 // forbidden (2026-07-31 fix below) — it's allowed when enough daily budget
 // remains to make attempting one worthwhile.
 const DEFAULT_ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET = 14;
+// A sequence of independently correct hard failures can legitimately consume
+// both per-source allowances before a fresh, source-ready topic is found. Keep
+// the 12/14 per-source caps intact, but permit one more minimum-viable rotation
+// inside an explicit date-wide ceiling. This is a ceiling, not an allowance
+// that any one source can borrow: every replacement still stops at fourteen.
+const DEFAULT_ARTICLE_GENERATION_DAILY_REQUEST_BUDGET = 34;
 // See the 2026-07-31 comment at the rotation-cap check itself (in
 // createArticleGenerationCheckpointer) for the incident this addresses.
 const MIN_VIABLE_ROTATION_BUDGET = 8;
@@ -427,6 +433,7 @@ const ROYAL_SUCCESSION_PATTERN =
 // (Skylab reentry 217, Branson spaceflight 199, 1982 World Cup final 268);
 // fuller source pages are fetched after selection anyway.
 const MIN_CANDIDATE_EXTRACT_CHARS = 150;
+const EVENT_FAMILY_FALLBACK_NO_FRESH_REASON = "no-eligible-fresh-family";
 // Recurring editorial themes used before article generation. These are more
 // specific than BLOG_PILLARS: two stories can both be Science & Technology
 // without both being spaceflight, and an aviation achievement belongs to the
@@ -3129,14 +3136,21 @@ function filterRecentEventFamilyRepeats(
     !event.eventFamilies.some((family) => active.has(family)),
   );
 
-  // Prefer a genuinely fresh topic before source discovery. Repeats remain a
-  // bounded fallback pool so a date with no source-ready alternative still
-  // publishes instead of failing solely for variety.
+  // Prefer a genuinely fresh topic before source discovery. A repeat is
+  // eligible only when the date has no eligible fresh family at all. It must
+  // not be reopened merely because the first few fresh candidates fail source
+  // discovery; doing that bypassed the seven-day restriction on 2026-08-03.
   if (fresh.length === 0) {
     return {
       candidates: annotated.map((event) => ({
         ...event,
         eventFamilyFallbackUsed: repeated.length > 0,
+        ...(repeated.length > 0
+          ? {
+              eventFamilyFallbackReason:
+                EVENT_FAMILY_FALLBACK_NO_FRESH_REASON,
+            }
+          : {}),
       })),
       repeated,
       suppressed: [],
@@ -3381,7 +3395,6 @@ async function chooseEventForDate(
       : "";
 
   let candidateEvents = [];
-  let suppressedFamilyCandidates = [];
   let allEvents = [];
   try {
     let eventsData =
@@ -3473,7 +3486,6 @@ async function chooseEventForDate(
         );
       }
     }
-    suppressedFamilyCandidates = familyGuard.suppressed;
     candidateEvents = familyGuard.candidates;
     const familyRankingOptions = {
       recentPillars,
@@ -3509,37 +3521,14 @@ async function chooseEventForDate(
     }
     if (candidateEvents.length > 0) {
       const originalFirst = candidateEvents[0];
-      const fallbackReserve = suppressedFamilyCandidates.length > 0 ? 2 : 0;
       let sourceReady = await selectSourceReadyCandidate(
         candidateEvents,
         fetch,
         {
           requireArticleCapacity: true,
-          candidateLimit: SOURCE_READY_EVENT_CANDIDATE_LIMIT - fallbackReserve,
+          candidateLimit: SOURCE_READY_EVENT_CANDIDATE_LIMIT,
         },
       );
-      if (!sourceReady && suppressedFamilyCandidates.length > 0) {
-        const rankedFallbacks = rankBlogEventCandidates(
-          suppressedFamilyCandidates,
-          familyRankingOptions,
-        ).map((candidate) => ({
-          ...candidate,
-          eventFamilyFallbackUsed: true,
-        }));
-        sourceReady = await selectSourceReadyCandidate(
-          rankedFallbacks,
-          fetch,
-          {
-            requireArticleCapacity: true,
-            candidateLimit: fallbackReserve,
-          },
-        );
-        if (sourceReady) {
-          console.warn(
-            `Event selector: no source-ready fresh theme was found within the bounded candidate budget; using repeated-family fallback "${sourceReady.pageTitle}" so publication can continue.`,
-          );
-        }
-      }
       if (sourceReady) {
         candidateEvents = [
           sourceReady,
@@ -3615,6 +3604,8 @@ async function chooseEventForDate(
         ? {
             eventFamilyFallbackUsed: true,
             eventFamilyFallbackFamilies: selected.eventFamilies || [],
+            eventFamilyFallbackReason:
+              selected.eventFamilyFallbackReason || "",
           }
         : {}),
     };
@@ -6397,7 +6388,10 @@ function preparedDraftSourceFamilyPolicy(selectedEvent, existingIndex, date) {
   const repeatedFamilies = eventFamilies.filter((family) =>
     activeFamilies.has(family),
   );
-  const fallbackApproved = selectedEvent?.eventFamilyFallbackUsed === true;
+  const fallbackApproved =
+    selectedEvent?.eventFamilyFallbackUsed === true &&
+    selectedEvent?.eventFamilyFallbackReason ===
+      EVENT_FAMILY_FALLBACK_NO_FRESH_REASON;
   return {
     ok: repeatedFamilies.length === 0 || fallbackApproved,
     eventFamilies,
@@ -6481,7 +6475,15 @@ async function maybePrepareBlogDraftSource(env) {
   const prepared = await loadPreparedDraftSource(env, now, { existingIndex });
   if (prepared) {
     console.log(`Blog AI: source package for ${slug} is already prepared.`);
-    return { status: "prepared", slug, eventTitle: prepared.eventTitle };
+    return {
+      status: "prepared",
+      slug,
+      eventTitle: prepared.eventTitle,
+      topicFamilies: eventFamiliesForCandidate(prepared),
+      ...(prepared.eventFamilyFallbackUsed === true
+        ? { eventFamilyFallbackReason: prepared.eventFamilyFallbackReason || "" }
+        : {}),
+    };
   }
 
   return generateAndStore(env, null, null, null, null, {
@@ -8807,6 +8809,13 @@ async function generateAndStore(
       status: "prepared",
       slug: buildSlug(now),
       eventTitle: selectedEvent.eventTitle,
+      topicFamilies: eventFamiliesForCandidate(selectedEvent),
+      ...(selectedEvent.eventFamilyFallbackUsed === true
+        ? {
+            eventFamilyFallbackReason:
+              selectedEvent.eventFamilyFallbackReason || "",
+          }
+        : {}),
     };
   }
 
@@ -16385,8 +16394,19 @@ function articleGenerationReplacementRequestBudgetLimit(env) {
 }
 
 function articleGenerationDailyRequestBudgetLimit(env) {
-  return articleGenerationRequestBudgetLimit(env) +
+  const perSourceFloor =
+    articleGenerationRequestBudgetLimit(env) +
     articleGenerationReplacementRequestBudgetLimit(env);
+  const configured = Number.parseInt(
+    String(env?.ARTICLE_GENERATION_DAILY_REQUEST_BUDGET || ""),
+    10,
+  );
+  return Number.isFinite(configured) && configured > 0
+    ? Math.max(
+        perSourceFloor,
+        Math.min(configured, DEFAULT_ARTICLE_GENERATION_DAILY_REQUEST_BUDGET),
+      )
+    : perSourceFloor;
 }
 
 function articleGenerationBudgetRetryAt(now = new Date()) {
@@ -24556,6 +24576,8 @@ export const __contentGenerationTestHooks = {
   selectSourceReadyCandidate,
   expandSelectedEventSourcePages,
   preparedDraftSourceEvent,
+  filterRecentEventFamilyRepeats,
+  preparedDraftSourceFamilyPolicy,
   auditChunkedArticleContinuity,
   isLowRiskChunkedContinuityFailure,
   repairChunkedArticleContinuity,

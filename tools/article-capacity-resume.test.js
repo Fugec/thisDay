@@ -37,6 +37,65 @@ function makeKvMock() {
   };
 }
 
+test("protected topic families cannot reopen while a fresh family exists", () => {
+  const repeatedAviation = {
+    pageTitle: "Boeing 707",
+    eventTitle: "A Boeing 707 crashes near Agadir",
+    text: "A Boeing 707 aircraft crashes near Agadir.",
+  };
+  const freshComputing = {
+    pageTitle: "TRS-80",
+    eventTitle: "Tandy announces the TRS-80 personal computer",
+    text: "Tandy announces one of the first mass-produced personal computers.",
+  };
+  const guarded = hooks.filterRecentEventFamilyRepeats(
+    [repeatedAviation, freshComputing],
+    ["aviation"],
+  );
+  assert.deepEqual(
+    guarded.candidates.map((candidate) => candidate.pageTitle),
+    ["TRS-80"],
+  );
+  assert.equal(guarded.candidates[0].eventFamilyFallbackUsed, undefined);
+  assert.deepEqual(
+    guarded.suppressed.map((candidate) => candidate.pageTitle),
+    ["Boeing 707"],
+  );
+
+  const noFresh = hooks.filterRecentEventFamilyRepeats(
+    [repeatedAviation],
+    ["aviation"],
+  );
+  assert.equal(noFresh.candidates[0].eventFamilyFallbackUsed, true);
+  assert.equal(
+    noFresh.candidates[0].eventFamilyFallbackReason,
+    "no-eligible-fresh-family",
+  );
+
+  const recentIndex = [{
+    publishedAt: "2026-07-29T09:31:07.614Z",
+    eventTitle: "Debris from MH370 discovered on Reunion Island",
+    sourcePageTitle: "Malaysia Airlines Flight 370",
+  }];
+  const legacyFallback = hooks.preparedDraftSourceFamilyPolicy(
+    { ...repeatedAviation, eventFamilyFallbackUsed: true },
+    recentIndex,
+    new Date("2026-08-03T12:00:00.000Z"),
+  );
+  assert.equal(legacyFallback.ok, false);
+
+  const provenNoFreshFallback = hooks.preparedDraftSourceFamilyPolicy(
+    {
+      ...repeatedAviation,
+      eventFamilyFallbackUsed: true,
+      eventFamilyFallbackReason: "no-eligible-fresh-family",
+    },
+    recentIndex,
+    new Date("2026-08-03T12:00:00.000Z"),
+  );
+  assert.equal(provenNoFreshFallback.ok, true);
+});
+
 test("a Groq 429 opens one durable shared circuit instead of probing all seven keys", async () => {
   __resetGroqModelCacheForTests();
   const originalFetch = globalThis.fetch;
@@ -791,6 +850,12 @@ test("article generation request budget reserves one bounded replacement topic a
   assert.equal(hooks.articleGenerationRequestBudgetLimit({}), 12);
   assert.equal(hooks.articleGenerationReplacementRequestBudgetLimit({}), 14);
   assert.equal(hooks.articleGenerationDailyRequestBudgetLimit({}), 26);
+  assert.equal(
+    hooks.articleGenerationDailyRequestBudgetLimit({
+      ARTICLE_GENERATION_DAILY_REQUEST_BUDGET: "34",
+    }),
+    34,
+  );
   assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "4" }), 4);
   assert.equal(
     hooks.articleGenerationReplacementRequestBudgetLimit({
@@ -804,6 +869,18 @@ test("article generation request budget reserves one bounded replacement topic a
       ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET: "6",
     }),
     10,
+  );
+  assert.equal(
+    hooks.articleGenerationDailyRequestBudgetLimit({
+      ARTICLE_GENERATION_DAILY_REQUEST_BUDGET: "100",
+    }),
+    34,
+  );
+  assert.equal(
+    hooks.articleGenerationDailyRequestBudgetLimit({
+      ARTICLE_GENERATION_DAILY_REQUEST_BUDGET: "5",
+    }),
+    26,
   );
   assert.equal(hooks.articleGenerationRequestBudgetLimit({ ARTICLE_GENERATION_REQUEST_BUDGET: "100" }), 12);
 });

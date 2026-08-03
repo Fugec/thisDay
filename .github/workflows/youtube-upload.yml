@@ -100,6 +100,7 @@ jobs:
           # reuploads private even if the scheduled channel uses another mode.
           YOUTUBE_PRIVACY: ${{ github.event_name == 'workflow_dispatch' && 'private' || secrets.YOUTUBE_PRIVACY }}
           HOLD_FOR_TOPIC_REVIEW: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
+          REPLACE_UPLOAD_LOCK: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'upload-private' && 'true' || 'false' }}
           ALLOW_SILENT_VIDEO: ${{ secrets.ALLOW_SILENT_VIDEO }}
           REUPLOAD_SLUGS: ${{ github.event_name == 'workflow_dispatch' && inputs.slug || secrets.REUPLOAD_SLUGS }}
           MAX_UPLOADS_PER_RUN: ${{ secrets.MAX_UPLOADS_PER_RUN }}

@@ -333,7 +333,12 @@ async function main() {
   }
 
   const uploadLockOwner = `${process.env.GITHUB_RUN_ID || "local"}:${process.pid}`;
-  const uploadLockToken = await acquireUploadLock(uploadLockOwner);
+  const uploadLockToken = await acquireUploadLock(uploadLockOwner, {
+    // GitHub's non-overlapping concurrency group proves there is no other
+    // active upload job when a manual replacement starts. This lets a manual
+    // retry replace the orphaned KV lock left by a cancelled runner.
+    replaceExisting: process.env.REPLACE_UPLOAD_LOCK === "true",
+  });
   if (!uploadLockToken) {
     console.warn("Upload already in progress — skipping this run.");
     return;

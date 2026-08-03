@@ -68,30 +68,41 @@ export async function markSocialPosted(slug, { meta, tiktok, pinterest } = {}) {
   await kvPut(TRACKER_KEY, JSON.stringify(tracker));
 }
 
+/** Returns whether a parsed upload-lock record is still inside its six-hour TTL. */
+export function isUploadLockActive(existing, now = new Date()) {
+  const claimedAt = existing?.claimedAt ? new Date(existing.claimedAt) : null;
+  return Boolean(
+    claimedAt &&
+      Number.isFinite(claimedAt.getTime()) &&
+      now.getTime() - claimedAt.getTime() < LOCK_TTL_MS,
+  );
+}
+
 /**
  * Tries to acquire a distributed upload lock stored in KV.
  * Returns a token string if the lock was acquired, or null if another run holds it.
  * The lock expires automatically after LOCK_TTL_MS (6 h) so stale locks don't block forever.
  * Note: KV has no atomic compare-and-set; the GH Actions concurrency group is the primary
  * guard against simultaneous runs — this lock is a belt-and-suspenders safeguard.
+ * Manual Actions retries may replace an existing lock because the non-overlapping workflow
+ * concurrency group proves that the prior job has ended.
  *
  * @param {string} [owner]  Identifier for the process claiming the lock (e.g. run ID).
+ * @param {{ replaceExisting?: boolean }} [options]
  * @returns {Promise<string|null>}
  */
-export async function acquireUploadLock(owner = "youtube-upload") {
+export async function acquireUploadLock(
+  owner = "youtube-upload",
+  { replaceExisting = false } = {},
+) {
   const now = new Date();
   const existingRaw = await kvGet(UPLOAD_LOCK_KEY);
 
   if (existingRaw) {
     try {
       const existing = JSON.parse(existingRaw);
-      const claimedAt = existing?.claimedAt
-        ? new Date(existing.claimedAt)
-        : null;
-      if (claimedAt && Number.isFinite(claimedAt.getTime())) {
-        if (now.getTime() - claimedAt.getTime() < LOCK_TTL_MS) {
-          return null;
-        }
+      if (!replaceExisting && isUploadLockActive(existing, now)) {
+        return null;
       }
     } catch {
       // Treat malformed lock as stale and overwrite below.

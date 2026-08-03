@@ -19,6 +19,7 @@ import {
 import { buildVideoTitle } from "./lib/titles.js";
 import { auditYoutubeVideo } from "./lib/youtube.js";
 import { buildSingleImageMotion } from "./lib/video.js";
+import { isUploadLockActive } from "./lib/tracker.js";
 
 const TITLE =
   "John F. Kennedy Jr. Dies in Plane Crash — July 16, 1999";
@@ -305,6 +306,18 @@ function testSingleImageMotionIsVisibleAndRepeated() {
   assert.match(motion.y, /cos\(2\*PI\*on\/210\)/);
 }
 
+function testCancelledUploadLockCanBeIdentified() {
+  const now = new Date("2026-08-03T18:10:00.000Z");
+  assert.equal(
+    isUploadLockActive({ claimedAt: "2026-08-03T18:09:00.000Z" }, now),
+    true,
+  );
+  assert.equal(
+    isUploadLockActive({ claimedAt: "2026-08-03T11:00:00.000Z" }, now),
+    false,
+  );
+}
+
 testCurrentMarkupExtraction();
 testInterestingFactSelection();
 testNarrationContainsFactsOnly();
@@ -316,5 +329,6 @@ testCaptionIntegrityMustMatchApprovedScript();
 testTopicAuditNeedsTwoConnectedFacts();
 testYoutubeReviewMetadataMustMatchArticle();
 testSingleImageMotionIsVisibleAndRepeated();
+testCancelledUploadLockCanBeIdentified();
 
 console.log("Video text tests passed.");

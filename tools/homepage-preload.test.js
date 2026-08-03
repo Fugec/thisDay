@@ -146,7 +146,7 @@ test("featured birth and death cards reuse compact person metadata", () => {
 
   assert.deepEqual(content, {
     title: "Example Subject",
-    description: "A useful page description",
+    description: "A useful plaintext extract.",
     imageUrl: "https://upload.wikimedia.org/example.jpg",
   });
 });

@@ -34,9 +34,12 @@ async function main() {
   if (!tracked?.youtubeId) {
     throw new Error(`No review upload is tracked for ${slug}`);
   }
+  console.log(
+    `Review tracker: youtubeId=${tracked.youtubeId}, privacy=${tracked.privacy || "unknown"}`,
+  );
   if (tracked.privacy === "public") {
-    throw new Error(
-      `${slug} is already tracked as public; refusing blind promotion`,
+    console.warn(
+      "Tracker privacy is stale/public; requiring the live YouTube private-state audit before promotion.",
     );
   }
 

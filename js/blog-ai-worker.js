@@ -9502,9 +9502,50 @@ async function generateAndStore(
       // 2026-07-31: extended to cross-section duplicate content for the same
       // reason (see isRepeatedContinuityDuplicateFailure) — it hit two
       // unrelated topics the same day and burned both allowed rotations.
-      console.warn(
-        `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" hit a structurally-incomplete or duplicate-content provider response — not blocking; the next attempt retries the same event.`,
+      //
+      // 2026-08-04 incident: "retry the same event" assumed a retry was
+      // always possible. On 4-august-2026 two structurally-incomplete
+      // failures in a row (missing eyewitnessOrChronicle array, then a
+      // truncated JSON response) consumed the entire 12-call per-source
+      // budget before ever producing a complete article. This branch never
+      // blocks, so every later run that day just re-selected the same
+      // event, hit the exhausted-budget 503 instantly, and the day was
+      // lost with no rotation — the budget only resets at the next UTC day.
+      // Check the current per-source budget here: if there is no longer
+      // enough of it left for a real attempt, retrying the same event is
+      // not actually an option today, so block/rotate instead of repeating
+      // a guaranteed failure for the rest of the day.
+      const budgetCanonicalTitle =
+        groundingSource?.pageTitle || selectedEvent?.sourcePageTitle || "";
+      const budgetSourceFingerprint = articleGenerationSourceFingerprint(
+        budgetCanonicalTitle,
+        sourceMaterial,
       );
+      const budgetJournal = await loadArticleGenerationJournal(
+        env,
+        now,
+        budgetSourceFingerprint,
+        budgetSourceFingerprint,
+      ).catch(() => null);
+      const existingBudget = budgetJournal?.requestBudget;
+      const sourceLimit = existingBudget?.rotations >= 1
+        ? articleGenerationReplacementRequestBudgetLimit(env)
+        : articleGenerationRequestBudgetLimit(env);
+      const sourceRemaining = existingBudget
+        ? sourceLimit - (Number(existingBudget.sourceUsed) || 0)
+        : sourceLimit;
+      if (sourceRemaining < MIN_VIABLE_ROTATION_BUDGET) {
+        await markGroundingBlockedEvent(env, buildSlug(now), selectedEvent, [
+          `${err.message} (only ${sourceRemaining} request(s) left in this source's budget — cannot retry the same event again today)`,
+        ]);
+        console.warn(
+          `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" hit a structurally-incomplete or duplicate-content provider response with only ${sourceRemaining} request(s) left for this source — blocking so the next run rotates to a different topic instead of repeating a guaranteed failure today.`,
+        );
+      } else {
+        console.warn(
+          `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" hit a structurally-incomplete or duplicate-content provider response — not blocking; the next attempt retries the same event.`,
+        );
+      }
     } else if (selectedEvent && !isAIProviderCapacityError(err)) {
       await markGroundingBlockedEvent(env, buildSlug(now), selectedEvent, [err.message]);
       console.warn(

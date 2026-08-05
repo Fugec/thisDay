@@ -3111,6 +3111,34 @@ async function createPersonEntityFromWikipediaRequest(env, slug, url) {
   return entity;
 }
 
+// Deterministic, zero-AI-cost keyword list for a /people/ or /history/ entity
+// page. The template previously had no <meta name="keywords"> tag at all;
+// this derives one from fields already on the entity record (its own name,
+// relatedTopics, and person birth/death years) so the tag always exists and
+// is always tied to the actual page subject.
+function entityKeywordsMeta(entity, type) {
+  const seen = new Set();
+  const terms = [];
+  const add = (value) => {
+    const trimmed = String(value || "").replace(/\s+/g, " ").trim();
+    const key = trimmed.toLowerCase();
+    if (trimmed && !seen.has(key)) {
+      seen.add(key);
+      terms.push(trimmed);
+    }
+  };
+  add(entity?.name);
+  if (type === "person") {
+    add(String(entity?.birthDate || "").match(/\d{4}/)?.[0]);
+    add(String(entity?.deathDate || "").match(/\d{4}/)?.[0]);
+  }
+  for (const topic of Array.isArray(entity?.relatedTopics) ? entity.relatedTopics : []) {
+    add(topic);
+  }
+  add(type === "person" ? "biography" : "history");
+  return terms.slice(0, 8).join(", ");
+}
+
 async function handleEntityPage(request, env, url, type, slug, ctx) {
   const historyPage = type === "event" ? getHistoryEvergreenPage(slug) : null;
   const storageSlug = historyPage?.storageSlug || slug;
@@ -3256,6 +3284,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     descriptionBase.replace(/\s+/g, " "),
     155,
   );
+  const keywords = entityKeywordsMeta(entity, type);
   const imageUrl = entity.imageUrl
     ? `${url.origin}/image-proxy?src=${encodeURIComponent(entity.imageUrl)}&w=1200&h=630&fit=cover&q=85`
     : `${url.origin}/images/logo.png`;
@@ -3325,6 +3354,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   <link rel="canonical" href="${escapeHtml(canonical)}" />
   <meta name="robots" content="${robotsMeta}" />
   <meta name="description" content="${escapeHtml(description)}" />
+  <meta name="keywords" content="${escapeHtml(keywords)}" />
   <meta property="og:title" content="${escapeHtml(title)}" />
   <meta property="og:description" content="${escapeHtml(description)}" />
   <meta property="og:type" content="${type === "person" ? "profile" : "article"}" />

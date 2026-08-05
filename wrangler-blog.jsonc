@@ -43,7 +43,14 @@
     // Leave empty unless keys are verified to belong to independent Groq
     // organizations/projects. Empty means one shared pool and disables
     // concurrent Groq article chunks, preventing parallel TPM exhaustion.
-    "GROQ_QUOTA_POOL_IDS": "",
+    // Verified independent 2026-08-05: all 7 keys answered a live request
+    // against llama-3.3-70b-versatile within minutes of that model's org
+    // reporting "Used 98746/100000" TPD for the key-1 account — the other
+    // six were untouched. Before this, an empty value meant every key
+    // shared one "groq:shared" circuit, so one account's TPD exhaustion
+    // blocked all seven keys for the rest of the day even though six had a
+    // full, unused 100k-token daily budget each.
+    "GROQ_QUOTA_POOL_IDS": "acct1,acct2,acct3,acct4,acct5,acct6,acct7",
     // Durable per-source logical AI-call ceiling. Five calls create the normal
     // checkpointed article; twelve also covers both split-body fallbacks, one
     // malformed-chunk retry, and the two targeted repair stages.

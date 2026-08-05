@@ -313,6 +313,61 @@ async function markProviderCircuit(env, provider, retryAtMs, reason) {
   });
 }
 
+const GROQ_DAILY_TOKEN_BUDGET_DEFAULT = 100_000;
+const GROQ_DAILY_RESERVE_RATIO_DEFAULT = 0.85;
+
+function groqDailyTokenBudget(env) {
+  const parsed = Number(env?.GROQ_DAILY_TOKEN_BUDGET);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : GROQ_DAILY_TOKEN_BUDGET_DEFAULT;
+}
+
+function groqDailyReserveRatio(env) {
+  const parsed = Number(env?.GROQ_DAILY_RESERVE_RATIO);
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= 1
+    ? parsed
+    : GROQ_DAILY_RESERVE_RATIO_DEFAULT;
+}
+
+function groqDailyTokenEstimateUsed(state) {
+  const used = Number(state?.groqTokenEstimate?.used);
+  return Number.isFinite(used) && used > 0 ? used : 0;
+}
+
+// 2026-08-05 incident: Groq's daily token quota (TPD) gives no proactive
+// "remaining" signal on a successful response, only a reactive 429 once it is
+// already gone — that day, 98,746/100,000 tokens were spent by 05:45 UTC,
+// entirely on FAILED topics before any article ever generated. This tracks
+// our own estimated cumulative spend (prompt + max completion per attempt,
+// an intentional overestimate so it errs toward stopping early) in the same
+// date-keyed circuit record already loaded/saved every call, so a later call
+// can stop choosing Groq once a reserve ratio of the daily budget is already
+// spent — BEFORE the account gets 429'd into a same-day lockout, not just
+// after. Shares the circuit's write queue since both write the same KV key.
+async function recordGroqTokenEstimate(env, tokens) {
+  const addTokens = Number(tokens);
+  if (!Number.isFinite(addTokens) || addTokens <= 0) return;
+  const kv = env?.BLOG_AI_KV;
+  if (!kv?.put) return;
+  const previous = _providerCircuitWriteQueues.get(kv) || Promise.resolve();
+  const write = previous.then(async () => {
+    const now = Date.now();
+    const state = await loadProviderCircuit(env, now);
+    state.groqTokenEstimate = {
+      used: groqDailyTokenEstimateUsed(state) + addTokens,
+    };
+    await kv.put(providerCircuitKey(now), JSON.stringify(state), {
+      expirationTtl: AI_PROVIDER_CIRCUIT_TTL,
+    });
+    _providerCircuitCache.set(kv, { date: utcDateKey(now), state });
+  });
+  _providerCircuitWriteQueues.set(kv, write.catch(() => {}));
+  return write.catch((err) => {
+    console.warn(`Groq daily token estimate write failed: ${err.message}`);
+  });
+}
+
 function providerCapacitySnapshotId(provider, model = "") {
   return `${provider}:${String(model || "")}`;
 }
@@ -863,6 +918,32 @@ function groqQuotaPoolIds(env) {
     .map((value) => value.replace(/[^a-z0-9._-]+/g, "-").slice(0, 48));
 }
 
+// Mirrors callAIProviders' own hasCompleteGroqPoolMap check so callers
+// outside this module (the chunked article generator) can decide whether
+// it's safe to let a single logical chunk try more than one Groq key before
+// falling through to another provider. Fail-closed like the internal check:
+// any configured key slot without an explicit label means "not proven
+// independent" even if other slots are labelled.
+export function hasIndependentGroqQuotaPools(env) {
+  const pools = groqQuotaPoolIds(env);
+  const keys = [
+    env?.GROQ_API_KEY,
+    env?.GROQ_API_KEY_2,
+    env?.GROQ_API_KEY_3,
+    env?.GROQ_API_KEY_4,
+    env?.GROQ_API_KEY_5,
+    env?.GROQ_API_KEY_6,
+    env?.GROQ_API_KEY_7,
+  ];
+  const configuredSlots = keys
+    .map((key, index) => (key ? index + 1 : null))
+    .filter((slot) => slot !== null);
+  return (
+    configuredSlots.length > 1 &&
+    configuredSlots.every((slot) => Boolean(pools[slot - 1]))
+  );
+}
+
 export function hasAnyTextAIProvider(env) {
   return Boolean(
     env?.AI ||
@@ -923,9 +1004,15 @@ function guardProviderAttempt(providerAttempts, providerAttemptLimit, failureRea
 // empty-response storm across model×key combinations (up to 5 models × 5
 // keys = 25) exhausts the whole 20-attempt budget and aborts the chain
 // before OpenRouter/NVIDIA/Workers AI ever run. 429s and 413s never get that
-// far (429 cooldowns skip the key, 413 skips the model after one attempt),
-// so ten attempts is already a deep search of failing combinations.
-const GROQ_SECTION_MAX_ATTEMPTS = 10;
+// far (429 cooldowns skip the key, 413 skips the model after one attempt).
+// 2026-08-05: lowered 10 → 4. A full article's chunked generation makes
+// roughly 8-10 separate sub-calls (facts, analysis, four body sections,
+// continuity repair, ...), each with its OWN up-to-N Groq search before
+// falling through — at 10 that is up to ~80-100 Groq attempts in the worst
+// case for a single article, which is what let a handful of failing topics
+// grind the day's 100k-token budget down before ever producing one. Four
+// attempts is still a real search across models/keys, not just one shot.
+const GROQ_SECTION_MAX_ATTEMPTS = 4;
 
 /**
  * Calls the bound Cloudflare Workers AI service directly.
@@ -1036,6 +1123,8 @@ export async function callAI(env, messages, options = {}) {
     skipWorkersAI = false,
     providerAttemptLimit = null,
     groqSectionAttemptLimit = null,
+    expectJson = false,
+    groqOnly = false,
   } = options;
   const cassette = await cassetteLookup(env, [
     "callAI",
@@ -1048,6 +1137,8 @@ export async function callAI(env, messages, options = {}) {
       providerAttemptLimit: providerAttemptLimit == null ? null : Number(providerAttemptLimit),
       groqSectionAttemptLimit:
         groqSectionAttemptLimit == null ? null : Number(groqSectionAttemptLimit),
+      expectJson: Boolean(expectJson),
+      groqOnly: Boolean(groqOnly),
     },
   ]);
   if (cassette.text) return cassette.text;
@@ -1067,6 +1158,20 @@ async function callAIProviders(
     skipWorkersAI = false,
     providerAttemptLimit: providerAttemptLimitOverride,
     groqSectionAttemptLimit: groqSectionAttemptLimitOverride,
+    // 2026-08-05: forces the underlying API's own JSON-mode constraint
+    // (supported by Groq, OpenRouter, and NVIDIA NIM — all OpenAI-compatible)
+    // instead of relying solely on prompt instructions. Opt-in only: only the
+    // chunked article sub-calls (which always request "one valid JSON object
+    // only") set this. A caller expecting plain text must never set it.
+    expectJson = false,
+    // 2026-08-05 (diagnostic): when true, stop after the Groq section
+    // instead of falling through to OpenRouter/NVIDIA/Workers AI/Anthropic.
+    // Built specifically to test the new GROQ_QUOTA_POOL_IDS multi-account
+    // isolation under a real generation load without another provider
+    // masking whether Groq itself actually rotated across accounts. Never
+    // set by any normal production call site — only a caller that explicitly
+    // wants to prove Groq-only behavior should pass this.
+    groqOnly = false,
   } = {},
 ) {
   const failureReasons = [];
@@ -1189,6 +1294,16 @@ async function callAIProviders(
         stopGroqAfterAttemptShare = true;
         break;
       }
+      const groqReserveBudget = groqDailyTokenBudget(env);
+      const groqReserveThreshold = groqReserveBudget * groqDailyReserveRatio(env);
+      const groqReserveUsed = groqDailyTokenEstimateUsed(providerCircuit);
+      if (groqReserveUsed >= groqReserveThreshold) {
+        failureReasons.push(
+          `Groq daily reserve reached (~${Math.round(groqReserveUsed)}/${groqReserveBudget} estimated tokens spent today) — preserving the remainder, skipping to the next provider`,
+        );
+        stopGroqAfterAttemptShare = true;
+        break;
+      }
       if (isProviderKeyCoolingDown("groq", key)) {
         failureReasons.push(`Groq key-${slot} temporarily skipped after rate limit for ${groqModel}`);
         continue;
@@ -1240,6 +1355,14 @@ async function callAIProviders(
           failureReasons.push(capacityDeferral.reason);
           continue;
         }
+        // Record the estimate BEFORE the request so a timeout or malformed
+        // response still counts toward the daily reserve — the same
+        // "persist before the provider call" reasoning as the per-article
+        // request budget elsewhere in this codebase.
+        providerCircuit.groqTokenEstimate = {
+          used: groqDailyTokenEstimateUsed(providerCircuit) + estimatedRequestTokens,
+        };
+        await recordGroqTokenEstimate(env, estimatedRequestTokens);
         providerAttempts += 1;
         groqSectionAttempts += 1;
         recordAiAttempt("groq", messages);
@@ -1256,6 +1379,7 @@ async function callAIProviders(
             max_tokens: groqMaxTokens,
             temperature,
             ...groqReasoningParams(groqModel),
+            ...(expectJson ? { response_format: { type: "json_object" } } : {}),
           }),
           signal: AbortSignal.timeout(timeoutMs),
         });
@@ -1298,6 +1422,9 @@ async function callAIProviders(
   if (hasSubrequestLimitFailure(failureReasons)) {
     throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
   }
+  if (groqOnly) {
+    throw new Error(`callAI failed (groqOnly diagnostic mode). ${failureReasons.join(" | ")}`);
+  }
 
   // 2. OpenRouter — free router with OpenAI-compatible chat completions.
   // Budget for the worst-case model in the server-side fallback chain: the
@@ -1338,6 +1465,7 @@ async function callAIProviders(
           // OpenRouter-normalized reasoning control: keeps gpt-oss thinking
           // out of the completion budget; ignored for non-reasoning models.
           reasoning: { effort: "low" },
+          ...(expectJson ? { response_format: { type: "json_object" } } : {}),
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -1410,6 +1538,7 @@ async function callAIProviders(
           ),
           temperature,
           ...groqReasoningParams(NVIDIA_MODEL),
+          ...(expectJson ? { response_format: { type: "json_object" } } : {}),
         }),
         signal: AbortSignal.timeout(timeoutMs),
       });

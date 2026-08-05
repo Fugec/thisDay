@@ -16,5 +16,15 @@
   ],
   "ai": {
     "binding": "AI"
+  },
+  "vars": {
+    // Mirrors wrangler-blog.jsonc's GROQ_QUOTA_POOL_IDS fix (2026-08-05):
+    // this worker only has GROQ_API_KEY (slot 1) and GROQ_API_KEY_3 (slot 3)
+    // deployed, but without labels here too they'd share one "groq:shared"
+    // circuit and defeat the per-account isolation the blog worker now has,
+    // since both workers write provider-circuit state to the same
+    // BLOG_AI_KV namespace. Labels match the blog worker's account identity
+    // for the same key slots.
+    "GROQ_QUOTA_POOL_IDS": "acct1,,acct3"
   }
 }

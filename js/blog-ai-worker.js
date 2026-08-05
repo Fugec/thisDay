@@ -38,6 +38,7 @@ import {
   aiUsageSummary,
   aiProviderRetryAt,
   isAIProviderCapacityError,
+  hasIndependentGroqQuotaPools,
 } from "./shared/ai-call.js";
 import { extractFirstSentence, truncateForMeta, splitSentences, normalizeForCompare } from "./shared/seo-text.js";
 import {
@@ -1046,10 +1047,16 @@ function didYouKnowFactsAreNearDuplicates(left, right, content = {}) {
   return shared >= 6 && ratio >= 0.55;
 }
 
+// 2026-08-05: content.contentTier === "core" allows zero Did You Know facts
+// (one of the two sections a checkpoint-assembled Core article is allowed to
+// publish without — see assembleCoreContentFromChunks). Any facts that DID
+// survive the checkpoint still get the full quality/dedup/grounding bar
+// below, just without the minimum-count floor a Full article needs.
 function auditDidYouKnowFacts(
   content,
   { requireGrounding = false, groundingVerified = false } = {},
 ) {
+  const isCoreTier = content?.contentTier === "core";
   const rawFacts = Array.isArray(content?.didYouKnowFacts)
     ? content.didYouKnowFacts
     : [];
@@ -1059,8 +1066,9 @@ function auditDidYouKnowFacts(
     .filter(Boolean);
   const facts = publishableDidYouKnowFacts(normalizedFacts, content);
   const reasons = [];
+  const minFacts = isCoreTier ? 0 : MIN_DID_YOU_KNOW_FACTS;
 
-  if (facts.length < MIN_DID_YOU_KNOW_FACTS) {
+  if (facts.length < minFacts) {
     reasons.push(
       `didYouKnowFacts must contain at least ${MIN_DID_YOU_KNOW_FACTS} distinct concrete facts (got ${facts.length} usable from ${normalizedFacts.length})`,
     );
@@ -1087,7 +1095,7 @@ function auditDidYouKnowFacts(
     }
   }
 
-  if (requireGrounding && groundingVerified !== true) {
+  if (facts.length > 0 && requireGrounding && groundingVerified !== true) {
     reasons.push("didYouKnowFacts did not pass the final source-grounding verifier");
   }
 
@@ -4166,19 +4174,37 @@ export default {
       try {
         const preferWorkersAIForArticle =
           url.searchParams.get("prefer-workers-ai") === "true";
+        // Diagnostic only — see the generateAndStore groqOnlyForArticle
+        // option above. Not used by any cron/failsafe call site.
+        const groqOnlyForArticle =
+          url.searchParams.get("groq-only") === "true";
         // Only the workflow's 20:35 UTC (day's final) scheduled run sets
         // this — see the generateAndStore lastResortRecovery option above.
         const lastResortRecovery =
           url.searchParams.get("last-resort") === "true";
-        await generateAndStore(budgetEnv, null, null, null, null, {
+        // 2026-08-05: added for the same reason /blog/publish already has
+        // it — preparing a future day's draft ahead of its own cron (here,
+        // specifically to let tomorrow's normal scheduled enrich/publish
+        // exercise a Groq-only-generated draft without any manual
+        // enrichment step forcing it live early).
+        const forceDate = url.searchParams.get("force-date") || null;
+        await generateAndStore(budgetEnv, null, null, forceDate, null, {
           lightweightPublish: true,
           enrichDraft: false,
           preferWorkersAIForArticle,
+          groqOnlyForArticle,
           lastResortRecovery,
         });
+        // Cosmetic response field only — generateAndStore above already did
+        // the authoritative date parsing (both ISO and slug forceDate
+        // formats) internally. ISO is the format every actual caller uses.
+        const reportedDate =
+          forceDate && /^\d{4}-\d{2}-\d{2}$/.test(forceDate)
+            ? new Date(`${forceDate}T12:00:00Z`)
+            : new Date();
         return jsonResponse({
           status: "ok",
-          slug: buildSlug(new Date()),
+          slug: buildSlug(reportedDate),
           message: "Blog draft generated.",
           kvBudget: publicKvWriteBudget(guarded.budget),
         });
@@ -7458,6 +7484,15 @@ const ARTICLE_BODY_FIELDS = [
 
 const MIN_REAL_ARTICLE_BODY_WORDS = 750;
 
+// 2026-08-05: floor for a Core-tier article — a shorter but still complete,
+// still fully grounded article published from whatever the checkpoint
+// journal already has when the full generation stalls out, rather than
+// blocking the day. See assembleCoreContentFromChunks. Deliberately not
+// tied to CHUNKED_BODY_PARAGRAPH_MIN_WORDS above: Core only needs whichever
+// body chunk(s) actually succeeded, not all four sections.
+const CORE_MIN_BODY_WORDS = 350;
+const CORE_MIN_QUICK_FACTS = 4;
+
 // The chunked fallback writes exactly 8 body paragraphs (2 each across the four
 // ARTICLE_BODY_FIELDS). This per-paragraph floor must be high enough that a
 // fully valid chunked body clears MIN_REAL_ARTICLE_BODY_WORDS: 8 x 110 = 880.
@@ -7975,18 +8010,68 @@ function extractJsonObjectCandidates(value) {
   return candidates;
 }
 
+// 2026-08-05 incident: a provider response cut off mid-generation (hit its
+// token ceiling, or was truncated in transit) produces JSON that never
+// balances its brackets ("Unterminated string...", "Expected ',' or ']'
+// after array element..."). Neither candidate form above can parse that —
+// there is no complete `{...}` anywhere in the text. This closes it
+// mechanically: finish an unterminated string, drop a dangling trailing
+// comma, then close every open array/object in reverse order. The result
+// may have a truncated (or entirely missing) last field, which is fine —
+// downstream validation already rejects a too-short paragraph or a missing
+// array with a SPECIFIC retry message (see callChunkedArticleAI); that is a
+// far cheaper failure to recover from than never getting parseable JSON at
+// all and burning the whole attempt on "JSON parse failed".
+function repairTruncatedJsonTail(text) {
+  const source = String(text || "");
+  let inString = false;
+  let escaped = false;
+  const stack = [];
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  if (!inString && stack.length === 0) return source;
+  let repaired = source;
+  if (inString) repaired += '"';
+  repaired = repaired.replace(/,\s*$/, "");
+  for (let i = stack.length - 1; i >= 0; i--) {
+    repaired += stack[i] === "{" ? "}" : "]";
+  }
+  return repaired;
+}
+
 function parseLargestCompleteJsonObject(value) {
   const candidates = extractJsonObjectCandidates(value)
     .sort((a, b) => b.length - a.length);
   for (const candidate of candidates) {
-    for (const source of [candidate, sanitizeJsonControlChars(candidate)]) {
+    for (const source of [
+      candidate,
+      sanitizeJsonControlChars(candidate),
+      repairTruncatedJsonTail(candidate),
+      repairTruncatedJsonTail(sanitizeJsonControlChars(candidate)),
+    ]) {
       try {
         const parsed = JSON.parse(source);
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           return { parsed, candidate };
         }
       } catch {
-        // Try the next sanitized/candidate form.
+        // Try the next sanitized/candidate/repaired form.
       }
     }
   }
@@ -8051,7 +8136,14 @@ function parseJsonObjectFromAI(value, label) {
     try {
       return JSON.parse(sanitizeJsonControlChars(json));
     } catch {
-      throw new Error(`${label}: JSON parse failed (${err.message})`);
+      // Last resort: the response was truncated mid-generation and never
+      // balances its brackets. Close it mechanically rather than failing the
+      // whole attempt outright — see repairTruncatedJsonTail.
+      try {
+        return JSON.parse(repairTruncatedJsonTail(sanitizeJsonControlChars(json)));
+      } catch {
+        throw new Error(`${label}: JSON parse failed (${err.message})`);
+      }
     }
   }
 }
@@ -8793,6 +8885,16 @@ async function generateAndStore(
     enrichDraft = true,
     prepareOnly = false,
     preferWorkersAIForArticle = false,
+    // Diagnostic only: forces generation to stop after the Groq section
+    // instead of falling through to OpenRouter/NVIDIA/Workers AI/Anthropic,
+    // so a real chunked-generation run proves the GROQ_QUOTA_POOL_IDS
+    // multi-account isolation actually rotates across keys instead of
+    // another provider masking whether it worked. Set via
+    // /blog/generate-draft?groq-only=true. Never set by any cron/failsafe
+    // call site — mutually exclusive with preferWorkersAIForArticle in
+    // practice (both would rarely be set together; groqOnlyForArticle wins
+    // since it is checked first when building articleGenerationEnv below).
+    groqOnlyForArticle = false,
     // Absolute last resort for the day's FINAL scheduled failsafe attempt
     // (2026-07-25 user decision): if the chunked fallback's continuity
     // repair still fails after its own retry, publish with the original
@@ -9018,9 +9120,11 @@ async function generateAndStore(
       }
     : null;
   const sourceMaterial = sourceMaterialForGrounding(groundingSource) || null;
-  const articleGenerationEnv = preferWorkersAIForArticle
-    ? { ...env, ARTICLE_GENERATION_PREFER_WORKERS_AI: "1" }
-    : env;
+  const articleGenerationEnv = groqOnlyForArticle
+    ? { ...env, ARTICLE_GENERATION_GROQ_ONLY: "1" }
+    : preferWorkersAIForArticle
+      ? { ...env, ARTICLE_GENERATION_PREFER_WORKERS_AI: "1" }
+      : env;
   // Daily publication always has a vetted, source-grounded evidence pack.
   // The monolithic 4,096-token path repeatedly returned only 546-841 body
   // words and then launched the chunked fallback anyway. Starting with the
@@ -9485,7 +9589,33 @@ async function generateAndStore(
     break;
   }
   } catch (err) {
-    if (
+    // 2026-08-05: try Core-tier promotion BEFORE any block/rotate decision —
+    // see assembleCoreContentFromChunks. A hard failure here means the FULL
+    // article stalled, not that nothing usable exists: the checkpoint
+    // journal already retains whatever chunks succeeded before the one that
+    // failed. Publishing a shorter, complete, still fully grounded Core
+    // article is strictly better than spending the day's now-tighter
+    // provider budget rotating to a second topic — rotation is reserved for
+    // when even Core's lowered bar cannot be met (a true total loss).
+    const coreAssembly =
+      selectedEvent && !isAIProviderCapacityError(err)
+        ? await tryAssembleCoreArticleFromCheckpoint(env, now).catch((coreErr) => ({
+            ok: false,
+            reasons: [coreErr.message],
+          }))
+        : { ok: false, reasons: ["not applicable"] };
+    if (coreAssembly.ok) {
+      console.warn(
+        `Blog AI: "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" hit a hard generation failure (${err.message}) but the checkpoint has enough for a Core article — publishing a shorter, complete article instead of blocking the day.`,
+      );
+      content = coreAssembly.content;
+      attachSelectedEventSourcePages(content, selectedEvent);
+      enforceSelectedEventDate(content, selectedEvent);
+      ensurePersonKeyTermFromSource(
+        content,
+        sourceMaterial || selectedEvent?.sourceExtract || "",
+      );
+    } else if (
       selectedEvent &&
       (isStructurallyIncompleteChunkFailure(err) ||
         isRepeatedContinuityDuplicateFailure(err))
@@ -9552,7 +9682,7 @@ async function generateAndStore(
         `Blog AI: generation self-heal — blocked "${selectedEvent.eventTitle || selectedEvent.sourcePageTitle}" for ${buildSlug(now)} after a hard content-generation failure so the next independent run selects a different event.`,
       );
     }
-    throw err;
+    if (!coreAssembly.ok) throw err;
   }
 
   if (selectedEvent) {
@@ -9916,6 +10046,42 @@ function normalizeContentMetadata(content) {
   } else if (content.twitterDescription.length > 120) {
     content.twitterDescription = truncateForMeta(content.twitterDescription, 120);
   }
+
+  // 2026-08-05: nothing upstream enforced content.keywords, so the AI
+  // omitting it (or a hand-authored draft forgetting it) silently rendered
+  // <meta name="keywords" content=""> with no fallback. Derive one from
+  // fields the publication contract already requires, so the meta tag is
+  // always populated and always topically tied to the actual article.
+  const hasKeywords = Array.isArray(content.keywords)
+    ? content.keywords.some((keyword) => String(keyword || "").trim())
+    : String(content.keywords || "").trim().length > 0;
+  if (!hasKeywords) {
+    content.keywords = deriveFallbackKeywords(content);
+  }
+}
+
+// Deterministic, zero-AI-cost keyword list built from fields the publish
+// gate already requires (eventTitle, keyTerms, location/country, year), so
+// it is always populated and always connected to the article's real subject.
+function deriveFallbackKeywords(content) {
+  const seen = new Set();
+  const terms = [];
+  const add = (value) => {
+    const trimmed = String(value || "").replace(/\s+/g, " ").trim();
+    const key = trimmed.toLowerCase();
+    if (trimmed && !seen.has(key)) {
+      seen.add(key);
+      terms.push(trimmed);
+    }
+  };
+  add(content?.eventTitle);
+  for (const term of Array.isArray(content?.keyTerms) ? content.keyTerms : []) {
+    add(term?.term);
+  }
+  add(content?.location);
+  add(content?.country);
+  if (Number.isInteger(content?.historicalYear)) add(String(content.historicalYear));
+  return terms.slice(0, 8);
 }
 
 function alignJsonLdMetadata(content) {
@@ -15088,7 +15254,13 @@ function amazonTracksNeedCoverBackfill(html) {
   });
 }
 
+// 2026-08-05: content.contentTier === "core" relaxes exactly the sections a
+// checkpoint-assembled Core article is allowed to publish without (Did You
+// Know, Our Take analysis) — see assembleCoreContentFromChunks. Quick facts,
+// body word count, grounding, and everything else stay real requirements,
+// just at a Core-appropriate floor rather than skipped.
 function assertRequiredContentBlocks(content) {
+  const isCoreTier = content?.contentTier === "core";
   const quickFacts = (Array.isArray(content.quickFacts) ? content.quickFacts : []).filter(
     (fact) =>
       fact &&
@@ -15105,16 +15277,22 @@ function assertRequiredContentBlocks(content) {
         String(item.detail || "").trim(),
     ).length;
   const missing = [];
-  if (quickFacts.length < 6) missing.push("six populated quick facts");
-  const didYouKnowAudit = auditDidYouKnowFacts(content);
-  if (!didYouKnowAudit.ok) {
-    missing.push(`four distinct did-you-know facts (${didYouKnowAudit.reasons.join("; ")})`);
+  const minQuickFacts = isCoreTier ? CORE_MIN_QUICK_FACTS : 6;
+  if (quickFacts.length < minQuickFacts) {
+    missing.push(`${minQuickFacts} populated quick facts`);
   }
-  if (analysisCount(content.analysisGood) < 3) missing.push("three positive analysis items");
-  if (analysisCount(content.analysisBad) < 3) missing.push("three critical analysis items");
+  if (!isCoreTier) {
+    const didYouKnowAudit = auditDidYouKnowFacts(content);
+    if (!didYouKnowAudit.ok) {
+      missing.push(`four distinct did-you-know facts (${didYouKnowAudit.reasons.join("; ")})`);
+    }
+    if (analysisCount(content.analysisGood) < 3) missing.push("three positive analysis items");
+    if (analysisCount(content.analysisBad) < 3) missing.push("three critical analysis items");
+  }
   const bodyWords = articleBodyWordCount(content);
-  if (bodyWords < MIN_REAL_ARTICLE_BODY_WORDS) {
-    missing.push(`${MIN_REAL_ARTICLE_BODY_WORDS}+ words of article body (got ${bodyWords})`);
+  const minBodyWords = isCoreTier ? CORE_MIN_BODY_WORDS : MIN_REAL_ARTICLE_BODY_WORDS;
+  if (bodyWords < minBodyWords) {
+    missing.push(`${minBodyWords}+ words of article body (got ${bodyWords})`);
   }
   if (missing.length > 0) {
     throw new Error(`Article content check failed: missing ${missing.join(", ")}`);
@@ -15137,8 +15315,18 @@ function visibleRawUrlsInRenderedHtml(html) {
  * entirely from local draft content is missing. These never depend on external
  * network calls so a failure means buildPostHTML broke, not a transient error.
  */
+// 2026-08-05: a Core-tier article (see assembleCoreContentFromChunks) is
+// published deliberately without Did You Know cards or Our Take analysis —
+// those are the two sections most often lost to a provider glitch, and
+// CORE_MIN_QUICK_FACTS/CORE_MIN_BODY_WORDS below are the floor the rest of
+// the article must still clear. Everything else (hero image, quick facts,
+// evidence map, no raw URLs) stays a hard requirement at the SAME bar as a
+// Full article — this never relaxes grounding or accuracy, only trims which
+// optional sections must be present. buildPostHTML embeds the tier as an
+// HTML comment since this function only ever sees the rendered string.
 function assertArticleStructure(html) {
   const source = String(html || "");
+  const isCoreTier = /<!-- content-tier:core -->/.test(source);
   const quickFactCount = countHtmlMatches(source, /<div class="ai-answer-item"><strong>[^<\s][^<]*<\/strong><span>[^<\s][^<]*<\/span><\/div>/gi);
   const didYouKnowCount = countHtmlMatches(source, /class="dyn-fact">[^<\s][^<]*<\/p>/gi);
   const analysisItemCount = countHtmlMatches(source, /<li class="mb-2"><strong>[^<:\s][^<]*:<\/strong>\s*[^<\s]/gi);
@@ -15149,24 +15337,30 @@ function assertArticleStructure(html) {
     ["featured hero image", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\bsrc="\/image-proxy\?src=/i],
     ["featured image alt text", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\balt="[^"]{5,}"/i],
     ["short answer card", /ai-answer-card/i],
-    ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
     ["source-backed evidence map", /<section class="article-evidence-map article-analysis mt-5\b/i],
     ["collapsed evidence-map disclosure", /<section class="article-evidence-map article-analysis mt-5\b[\s\S]*?<details class="analysis-disclosure mt-2\b/i],
     ["original-value module", /data-original-value-module="(?:sourced-timeline|source-comparison)"/i],
     ["evidence-map central claim", /class="evidence-map-claim"[\s\S]*?<strong>Central claim checked:<\/strong>\s*[^<\s]/i],
     ["independent evidence-map source", /data-evidence-role="independent"/i],
-    ["analysis section", /<h2 class="h3">Analysis:/i],
-    ["collapsed analysis disclosure", /<details class="analysis-disclosure\b/i],
+    ...(isCoreTier
+      ? []
+      : [
+          ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
+          ["analysis section", /<h2 class="h3">Analysis:/i],
+          ["collapsed analysis disclosure", /<details class="analysis-disclosure\b/i],
+        ]),
   ];
   const missing = checks
     .filter(([, pattern]) => !pattern.test(source))
     .map(([label]) => label);
-  if (quickFactCount < 6) missing.push("six rendered key facts");
-  if (didYouKnowCount < MIN_DID_YOU_KNOW_FACTS) {
+  if (quickFactCount < (isCoreTier ? CORE_MIN_QUICK_FACTS : 6)) {
+    missing.push(`${isCoreTier ? CORE_MIN_QUICK_FACTS : 6} rendered key facts`);
+  }
+  if (!isCoreTier && didYouKnowCount < MIN_DID_YOU_KNOW_FACTS) {
     missing.push(`${MIN_DID_YOU_KNOW_FACTS} rendered did-you-know cards`);
   }
   if (evidenceMapRowCount < 2) missing.push("two rendered evidence-map source rows");
-  if (analysisItemCount < 6) missing.push("six rendered analysis items");
+  if (!isCoreTier && analysisItemCount < 6) missing.push("six rendered analysis items");
   const visibleRawUrls = visibleRawUrlsInRenderedHtml(source);
   if (visibleRawUrls.length > 0) {
     missing.push(`no raw URLs in visible article text (found ${visibleRawUrls[0]})`);
@@ -16724,6 +16918,124 @@ async function loadArticleGenerationJournal(
   );
 }
 
+// 2026-08-05: reads the checkpoint journal's raw chunks WITHOUT the
+// fingerprint-matching loadArticleGenerationJournal applies. That matching
+// exists to decide whether cached CHUNKS are safe to reuse for a fresh
+// generation attempt (a changed prompt/grounding-feedback fingerprint means
+// "regenerate, don't trust the old chunk"). Core-article assembly is a
+// different question — "what did today's attempt(s) actually produce,
+// regardless of which fingerprint" — so a fingerprint mismatch here must
+// not hide chunks that are otherwise perfectly good.
+async function loadRawArticleGenerationChunks(env, date) {
+  if (!env?.BLOG_AI_KV?.get) return null;
+  const raw = await env.BLOG_AI_KV.get(articleGenerationJournalKey(date), {
+    type: "json",
+  }).catch(() => null);
+  let payload = raw;
+  if (typeof raw === "string") {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      payload = null;
+    }
+  }
+  if (
+    !payload ||
+    payload.slug !== buildSlug(date) ||
+    !payload.chunks ||
+    typeof payload.chunks !== "object"
+  ) {
+    return null;
+  }
+  return payload.chunks;
+}
+
+// 2026-08-05 Core-tier design: when a full generation stalls out (a chunk
+// keeps failing after its own retries), do not always throw the whole
+// attempt away. The checkpoint journal already retains whatever chunks DID
+// succeed (brief/bodyA/bodyB/facts/analysis — see
+// generateArticleContentChunkedFallback). If enough of that survives to
+// satisfy a real, complete, accurate two-part narrative, publish it as a
+// Core article instead: title/date/meta, hero image, a lowered quick-facts
+// floor, and whichever body half(s) succeeded, deliberately WITHOUT Did You
+// Know or Our Take analysis (see CORE_MIN_BODY_WORDS/CORE_MIN_QUICK_FACTS,
+// assertRequiredContentBlocks, assertArticleStructure, auditDidYouKnowFacts).
+// Grounding/date/citation/evidence-map checks downstream are completely
+// unchanged — this only decides which OPTIONAL sections may be absent, never
+// relaxes whether the content is accurate.
+function assembleCoreContentFromChunks(chunks) {
+  const reasons = [];
+  const brief = chunks?.brief;
+  if (
+    !brief ||
+    typeof brief !== "object" ||
+    !String(brief.title || "").trim() ||
+    !String(brief.eventTitle || "").trim()
+  ) {
+    reasons.push("brief chunk (title/date/meta) missing or incomplete");
+    return { ok: false, reasons };
+  }
+  const bodyA = chunks?.bodyA && typeof chunks.bodyA === "object" ? chunks.bodyA : null;
+  const bodyB = chunks?.bodyB && typeof chunks.bodyB === "object" ? chunks.bodyB : null;
+  const overviewParagraphs = Array.isArray(bodyA?.overviewParagraphs) ? bodyA.overviewParagraphs : [];
+  const eyewitnessOrChronicle = Array.isArray(bodyA?.eyewitnessOrChronicle) ? bodyA.eyewitnessOrChronicle : [];
+  const aftermathParagraphs = Array.isArray(bodyB?.aftermathParagraphs) ? bodyB.aftermathParagraphs : [];
+  const conclusionParagraphs = Array.isArray(bodyB?.conclusionParagraphs) ? bodyB.conclusionParagraphs : [];
+  const bodyWords = [
+    ...overviewParagraphs,
+    ...eyewitnessOrChronicle,
+    ...aftermathParagraphs,
+    ...conclusionParagraphs,
+  ].reduce((sum, paragraph) => sum + wordCount(paragraph), 0);
+  if (bodyWords < CORE_MIN_BODY_WORDS) {
+    reasons.push(
+      `body too thin for a core article (${bodyWords} checkpointed words, needs ${CORE_MIN_BODY_WORDS}+)`,
+    );
+    return { ok: false, reasons };
+  }
+  const facts = chunks?.facts && typeof chunks.facts === "object" ? chunks.facts : null;
+  const quickFacts = (Array.isArray(facts?.quickFacts) ? facts.quickFacts : []).filter(
+    (fact) =>
+      fact &&
+      typeof fact === "object" &&
+      String(fact.label || "").trim() &&
+      String(fact.value || "").trim(),
+  );
+  if (quickFacts.length < CORE_MIN_QUICK_FACTS) {
+    reasons.push(
+      `too few quick facts for a core article (${quickFacts.length}, needs ${CORE_MIN_QUICK_FACTS}+)`,
+    );
+    return { ok: false, reasons };
+  }
+  const didYouKnowFacts = Array.isArray(facts?.didYouKnowFacts) ? facts.didYouKnowFacts : [];
+  const analysis = chunks?.analysis && typeof chunks.analysis === "object" ? chunks.analysis : null;
+  const analysisGood = Array.isArray(analysis?.analysisGood) ? analysis.analysisGood : [];
+  const analysisBad = Array.isArray(analysis?.analysisBad) ? analysis.analysisBad : [];
+
+  const content = {
+    ...brief,
+    quickFacts,
+    didYouKnowFacts,
+    analysisGood,
+    analysisBad,
+    overviewParagraphs,
+    eyewitnessOrChronicle,
+    aftermathParagraphs,
+    conclusionParagraphs,
+    contentTier: "core",
+  };
+  delete content.sourceFacts;
+  return { ok: true, content };
+}
+
+async function tryAssembleCoreArticleFromCheckpoint(env, date) {
+  const chunks = await loadRawArticleGenerationChunks(env, date).catch(() => null);
+  if (!chunks) {
+    return { ok: false, reasons: ["no checkpointed chunks found for this date"] };
+  }
+  return assembleCoreContentFromChunks(chunks);
+}
+
 function articleGenerationRequestBudgetLimit(env) {
   const configured = Number.parseInt(
     String(env?.ARTICLE_GENERATION_REQUEST_BUDGET || ""),
@@ -16785,7 +17097,7 @@ function articleGenerationBudgetError(
   const exhaustedDailyBudget = dailyUsed >= dailyLimit;
   const remainingDaily = Math.max(0, dailyLimit - dailyUsed);
   const budgetSummary = replacementAlreadyUsed
-    ? `too little daily budget remains for another topic rotation (${remainingDaily}/${dailyLimit} left, needs ${MIN_VIABLE_ROTATION_BUDGET})`
+    ? `the day's one allowed topic rotation is already used (max 2 topics/day; ${remainingDaily}/${dailyLimit} daily budget still left unused)`
     : exhaustedDailyBudget
       ? `${dailyUsed}/${dailyLimit} daily exhausted`
       : `${sourceUsed}/${sourceLimit} exhausted for this source`;
@@ -16860,19 +17172,25 @@ function createArticleGenerationCheckpointer(
       // 2026-07-31 incident: a flat "2 rotations and no more, ever" cap
       // stranded a fully-sourced, ready candidate (START I) with 7 of the
       // day's 26 calls still unspent, because two unrelated topics happened
-      // to fail the same day. A further rotation now needs the daily budget
-      // to actually support one, not an arbitrary count of rotations already
-      // spent — MIN_VIABLE_ROTATION_BUDGET is the call count a real
-      // generation attempt used that day (brief + 4 body fields + facts +
-      // analysis + continuity repair, ~8-11 calls for the Treaty of Breda
-      // attempt), so anything less remaining isn't worth starting.
-      const remainingDailyBudget = dailyLimit - budget.dailyUsed;
+      // to fail the same day. The fix then was to scale the cap with
+      // remaining daily budget instead of an arbitrary rotation count.
+      //
+      // 2026-08-05: reverted to a hard cap — max 2 topics total (the
+      // original event plus one replacement), full stop, regardless of
+      // remaining budget. This is safe now in a way it was not on July 31:
+      // a hard content-generation failure no longer goes straight to
+      // "block and rotate" (see the generation-stage catch in
+      // generateAndStore) — it first tries to assemble a Core-tier article
+      // from whatever the checkpoint already has (assembleCoreContentFromChunks),
+      // and only falls through to blocking when even that lowered bar can't
+      // be met. That absorbs most of what used to need a second topic, so a
+      // rotation is now reserved for a genuine total loss, and burning a
+      // THIRD topic's worth of provider calls on top of that is not worth
+      // it even with budget still technically available.
       const openingAnotherRotation =
         budget.rotations >= 2 &&
         budget.sourceUsed === 0;
-      const replacementAlreadyUsed =
-        openingAnotherRotation &&
-        remainingDailyBudget < MIN_VIABLE_ROTATION_BUDGET;
+      const replacementAlreadyUsed = openingAnotherRotation;
       const sourceLimit = budget.rotations >= 1
         ? articleGenerationReplacementRequestBudgetLimit(env)
         : articleGenerationRequestBudgetLimit(env);
@@ -17077,6 +17395,12 @@ async function callChunkedArticleAI(
           cfModel: model,
           temperature: 0.15,
           providerAttemptLimit: 8,
+          expectJson: true,
+          // Diagnostic only (see /blog/generate-draft?groq-only=true): proves
+          // the GROQ_QUOTA_POOL_IDS multi-account fix works under real
+          // chunked-generation load without OpenRouter/NVIDIA/Workers AI
+          // silently masking a Groq-side failure. Never set in normal use.
+          ...(env.ARTICLE_GENERATION_GROQ_ONLY ? { groqOnly: true } : {}),
           ...(groqSectionAttemptLimit == null
             ? {}
             : { groqSectionAttemptLimit }),
@@ -17287,6 +17611,18 @@ ${retryFeedback}`;
     date,
     generationJournal,
   );
+  // 2026-08-05: circuit-blocked keys are skipped for free (no attempt spent)
+  // by callAIProviders, so once ANY key in a pool records a 429 every later
+  // chunk already rotates past it onto a fresh account at zero extra cost.
+  // The one edge case this doesn't cover: the FIRST chunk of the day to draw
+  // an already-dead-but-not-yet-circuit-recorded key still spends its whole
+  // attempt budget on that one dead key. With proven independent pools
+  // (verified live 2026-08-05 — see GROQ_QUOTA_POOL_IDS), a second attempt
+  // is worth spending since it very likely lands on a different, live
+  // account instead of the same shared-quota wall the "1" limit was
+  // originally sized to avoid. Stays 1 (unchanged) when pools aren't proven
+  // independent, matching the original reasoning exactly.
+  const groqChunkAttemptLimit = hasIndependentGroqQuotaPools(env) ? 2 : 1;
   const invokeBudgetedChunkedArticleAI = (
     callEnv,
     callModel,
@@ -17306,10 +17642,7 @@ ${retryFeedback}`;
       // Retrying inside the same invocation was the July 28 quota drain.
       maxAttempts: 1,
       onAttempt: () => generationCheckpoint.consumeRequest(label),
-      // All configured Groq keys share one organization unless an explicit
-      // quota-pool map proves otherwise. One attempt per logical chunk keeps
-      // an empty/malformed response from probing every key in the same pool.
-      groqSectionAttemptLimit: 1,
+      groqSectionAttemptLimit: groqChunkAttemptLimit,
     },
   );
   const savedChunks = generationJournal.chunks;
@@ -18284,6 +18617,7 @@ Writing rules:
       // 10 Groq attempts + 3 OpenRouter keys + NVIDIA still leaves one
       // internal Workers AI fallback while bounding the external chain.
       providerAttemptLimit: 15,
+      expectJson: true,
     },
   );
 
@@ -20485,7 +20819,10 @@ async function patchSEOMeta(html, _slug, env) {
       /<meta name="keywords" content="[^"]*?"\s*\/>/,
       `<meta name="keywords" content="${esc(improved.keywords)}" />`,
     );
-    // Replace all article:tag lines with freshly generated ones
+    // Replace all article:tag lines with freshly generated ones. Anchored on
+    // the always-present article:author line (not the article:tag lines
+    // themselves) so this still inserts tags when zero currently exist —
+    // the shape left behind by a post whose keywords were empty at publish.
     const newTags = improved.keywords
       .split(",")
       .map((k) => k.trim())
@@ -20494,8 +20831,8 @@ async function patchSEOMeta(html, _slug, env) {
       .map((k) => `<meta property="article:tag" content="${esc(k)}" />`)
       .join("\n    ");
     updatedHtml = updatedHtml.replace(
-      /(<meta property="article:tag" content="[^"]*?"\s*\/>\n?\s*)+/,
-      newTags + "\n    ",
+      /(<meta property="article:author" content="[^"]*?"\s*\/>\n\s*)(?:<meta property="article:tag" content="[^"]*?"\s*\/>\n?\s*)*/,
+      `$1${newTags}\n    `,
     );
     changed.push("keywords");
   }
@@ -23044,6 +23381,7 @@ ${currentPillars
       : "";
 
   return `<!DOCTYPE html>
+<!-- content-tier:${c.contentTier === "core" ? "core" : "full"} -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />

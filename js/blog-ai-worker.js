@@ -17617,12 +17617,15 @@ ${retryFeedback}`;
   // The one edge case this doesn't cover: the FIRST chunk of the day to draw
   // an already-dead-but-not-yet-circuit-recorded key still spends its whole
   // attempt budget on that one dead key. With proven independent pools
-  // (verified live 2026-08-05 — see GROQ_QUOTA_POOL_IDS), a second attempt
+  // (verified live 2026-08-05 — see GROQ_QUOTA_POOL_IDS), each extra attempt
   // is worth spending since it very likely lands on a different, live
   // account instead of the same shared-quota wall the "1" limit was
-  // originally sized to avoid. Stays 1 (unchanged) when pools aren't proven
-  // independent, matching the original reasoning exactly.
-  const groqChunkAttemptLimit = hasIndependentGroqQuotaPools(env) ? 2 : 1;
+  // originally sized to avoid. Raised 2 → 3 the same day once the reserve
+  // check also became per-pool (previously a single shared reserve estimate
+  // could exhaust after just one or two accounts' worth of spend). Stays 1
+  // (unchanged) when pools aren't proven independent, matching the original
+  // reasoning exactly.
+  const groqChunkAttemptLimit = hasIndependentGroqQuotaPools(env) ? 3 : 1;
   const invokeBudgetedChunkedArticleAI = (
     callEnv,
     callModel,

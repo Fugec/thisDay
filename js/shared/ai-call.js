@@ -330,8 +330,18 @@ function groqDailyReserveRatio(env) {
     : GROQ_DAILY_RESERVE_RATIO_DEFAULT;
 }
 
-function groqDailyTokenEstimateUsed(state) {
-  const used = Number(state?.groqTokenEstimate?.used);
+// 2026-08-05 (later): originally one flat number shared by every Groq key,
+// which assumed all keys drew from a single 100k TPD account. The same day's
+// GROQ_QUOTA_POOL_IDS fix proved the 7 configured keys are independent
+// accounts, each with its OWN 100k budget — so a shared reserve estimate
+// crossed 85% of ONE account's worth of tokens (helped along by that
+// morning's failed rotations) and sent every later call straight to
+// OpenRouter, even though six of the seven real accounts were still nearly
+// untouched. Reads/writes are now keyed per pool label (falls back to
+// "shared" when no independent pools are configured, so unlabelled setups
+// keep the original all-keys-share-one-estimate behavior unchanged).
+function groqDailyTokenEstimateUsed(state, pool = "shared") {
+  const used = Number(state?.groqTokenEstimate?.pools?.[pool]);
   return Number.isFinite(used) && used > 0 ? used : 0;
 }
 
@@ -342,10 +352,11 @@ function groqDailyTokenEstimateUsed(state) {
 // our own estimated cumulative spend (prompt + max completion per attempt,
 // an intentional overestimate so it errs toward stopping early) in the same
 // date-keyed circuit record already loaded/saved every call, so a later call
-// can stop choosing Groq once a reserve ratio of the daily budget is already
-// spent — BEFORE the account gets 429'd into a same-day lockout, not just
-// after. Shares the circuit's write queue since both write the same KV key.
-async function recordGroqTokenEstimate(env, tokens) {
+// can stop choosing a given pool once its reserve ratio of the daily budget
+// is already spent — BEFORE the account gets 429'd into a same-day lockout,
+// not just after. Shares the circuit's write queue since both write the same
+// KV key.
+async function recordGroqTokenEstimate(env, pool, tokens) {
   const addTokens = Number(tokens);
   if (!Number.isFinite(addTokens) || addTokens <= 0) return;
   const kv = env?.BLOG_AI_KV;
@@ -354,9 +365,9 @@ async function recordGroqTokenEstimate(env, tokens) {
   const write = previous.then(async () => {
     const now = Date.now();
     const state = await loadProviderCircuit(env, now);
-    state.groqTokenEstimate = {
-      used: groqDailyTokenEstimateUsed(state) + addTokens,
-    };
+    const pools = { ...(state.groqTokenEstimate?.pools || {}) };
+    pools[pool] = groqDailyTokenEstimateUsed(state, pool) + addTokens;
+    state.groqTokenEstimate = { pools };
     await kv.put(providerCircuitKey(now), JSON.stringify(state), {
       expirationTtl: AI_PROVIDER_CIRCUIT_TTL,
     });
@@ -1013,6 +1024,15 @@ function guardProviderAttempt(providerAttempts, providerAttemptLimit, failureRea
 // grind the day's 100k-token budget down before ever producing one. Four
 // attempts is still a real search across models/keys, not just one shot.
 const GROQ_SECTION_MAX_ATTEMPTS = 4;
+// 2026-08-05 (later): that reasoning assumed every key drew from one shared
+// 100k pool, so retrying was mostly re-hitting the same wall. With
+// GROQ_QUOTA_POOL_IDS proving 7 independent accounts, a circuit-blocked or
+// reserve-exhausted key is skipped for free (no attempt spent — see the
+// `continue` paths below), so a higher ceiling here mostly buys one real
+// attempt per genuinely different account instead of repeating the same
+// dead one. Only applies when independence is proven; unlabeled setups keep
+// the original 4.
+const GROQ_SECTION_MAX_ATTEMPTS_INDEPENDENT_POOLS = 7;
 
 /**
  * Calls the bound Cloudflare Workers AI service directly.
@@ -1198,15 +1218,18 @@ async function callAIProviders(
     Number.isFinite(parsedProviderAttemptLimit) && parsedProviderAttemptLimit > 0
       ? Math.floor(parsedProviderAttemptLimit)
       : getProviderAttemptLimit(env);
+  const groqSectionMaxAttempts = hasIndependentGroqQuotaPools(env)
+    ? GROQ_SECTION_MAX_ATTEMPTS_INDEPENDENT_POOLS
+    : GROQ_SECTION_MAX_ATTEMPTS;
   const parsedGroqSectionAttemptLimit = Number(groqSectionAttemptLimitOverride);
   const groqSectionAttemptLimit =
     Number.isFinite(parsedGroqSectionAttemptLimit) &&
     parsedGroqSectionAttemptLimit > 0
       ? Math.min(
           Math.floor(parsedGroqSectionAttemptLimit),
-          GROQ_SECTION_MAX_ATTEMPTS,
+          groqSectionMaxAttempts,
         )
-      : GROQ_SECTION_MAX_ATTEMPTS;
+      : groqSectionMaxAttempts;
   let providerAttempts = 0;
 
   // Resolve key arrays up front so model resolution can use the first available key.
@@ -1296,13 +1319,18 @@ async function callAIProviders(
       }
       const groqReserveBudget = groqDailyTokenBudget(env);
       const groqReserveThreshold = groqReserveBudget * groqDailyReserveRatio(env);
-      const groqReserveUsed = groqDailyTokenEstimateUsed(providerCircuit);
+      const groqReserveUsed = groqDailyTokenEstimateUsed(providerCircuit, pool);
       if (groqReserveUsed >= groqReserveThreshold) {
+        // Per-pool: only THIS account's reserve is spent, so try the next
+        // key/account instead of abandoning Groq entirely. With no
+        // independent pools configured every key shares the "shared" pool
+        // label, so this still behaves exactly like the old break — the
+        // very next key in the loop reads the identical exhausted estimate
+        // and continues past it too, reaching OpenRouter just as before.
         failureReasons.push(
-          `Groq daily reserve reached (~${Math.round(groqReserveUsed)}/${groqReserveBudget} estimated tokens spent today) — preserving the remainder, skipping to the next provider`,
+          `Groq pool ${pool} daily reserve reached (~${Math.round(groqReserveUsed)}/${groqReserveBudget} estimated tokens spent today) — preserving the remainder, trying the next Groq account`,
         );
-        stopGroqAfterAttemptShare = true;
-        break;
+        continue;
       }
       if (isProviderKeyCoolingDown("groq", key)) {
         failureReasons.push(`Groq key-${slot} temporarily skipped after rate limit for ${groqModel}`);
@@ -1358,11 +1386,15 @@ async function callAIProviders(
         // Record the estimate BEFORE the request so a timeout or malformed
         // response still counts toward the daily reserve — the same
         // "persist before the provider call" reasoning as the per-article
-        // request budget elsewhere in this codebase.
+        // request budget elsewhere in this codebase. Keyed by pool so one
+        // account's spend never inflates another account's reserve.
         providerCircuit.groqTokenEstimate = {
-          used: groqDailyTokenEstimateUsed(providerCircuit) + estimatedRequestTokens,
+          pools: {
+            ...(providerCircuit.groqTokenEstimate?.pools || {}),
+            [pool]: groqDailyTokenEstimateUsed(providerCircuit, pool) + estimatedRequestTokens,
+          },
         };
-        await recordGroqTokenEstimate(env, estimatedRequestTokens);
+        await recordGroqTokenEstimate(env, pool, estimatedRequestTokens);
         providerAttempts += 1;
         groqSectionAttempts += 1;
         recordAiAttempt("groq", messages);

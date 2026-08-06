@@ -91,16 +91,24 @@ const DEFAULT_ARTICLE_GENERATION_REQUEST_BUDGET = 12;
 // proved that malformed combined/split body responses can spend several calls
 // before the rest of the article is saved. Split fields are now checkpointed
 // individually below; fourteen leaves bounded headroom for the replacement
-// while the first topic stays at twelve. A third rotation is no longer flatly
-// forbidden (2026-07-31 fix below) — it's allowed when enough daily budget
-// remains to make attempting one worthwhile.
+// while the first topic stays at twelve. Up to three replacements (four
+// topics total) are allowed per day — see the rotation-cap check itself in
+// createArticleGenerationCheckpointer for the current history of that limit.
 const DEFAULT_ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET = 14;
 // A sequence of independently correct hard failures can legitimately consume
 // both per-source allowances before a fresh, source-ready topic is found. Keep
 // the 12/14 per-source caps intact, but permit one more minimum-viable rotation
 // inside an explicit date-wide ceiling. This is a ceiling, not an allowance
 // that any one source can borrow: every replacement still stops at fourteen.
-const DEFAULT_ARTICLE_GENERATION_DAILY_REQUEST_BUDGET = 34;
+// 2026-08-06: raised 34 → 54 (12 for the first topic + 14 × 3 replacements)
+// alongside the rotation cap going 2 → 4 topics/day (see the 2026-08-06
+// comment at the rotation-cap check itself). Both changes assumed a single
+// ~100k-token shared Groq pool when originally set to "stick to max 2
+// topics"; GROQ_QUOTA_POOL_IDS proved 7 independent accounts (~700k
+// effective), so two genuinely bad topics in a row (real content/grounding
+// failures, not quota exhaustion — the exact case that stranded
+// 6-august-2026) no longer needs to strand the whole day.
+const DEFAULT_ARTICLE_GENERATION_DAILY_REQUEST_BUDGET = 54;
 // See the 2026-07-31 comment at the rotation-cap check itself (in
 // createArticleGenerationCheckpointer) for the incident this addresses.
 const MIN_VIABLE_ROTATION_BUDGET = 8;
@@ -17097,7 +17105,7 @@ function articleGenerationBudgetError(
   const exhaustedDailyBudget = dailyUsed >= dailyLimit;
   const remainingDaily = Math.max(0, dailyLimit - dailyUsed);
   const budgetSummary = replacementAlreadyUsed
-    ? `the day's one allowed topic rotation is already used (max 2 topics/day; ${remainingDaily}/${dailyLimit} daily budget still left unused)`
+    ? `the day's allowed topic rotations are already used (max 4 topics/day; ${remainingDaily}/${dailyLimit} daily budget still left unused)`
     : exhaustedDailyBudget
       ? `${dailyUsed}/${dailyLimit} daily exhausted`
       : `${sourceUsed}/${sourceLimit} exhausted for this source`;
@@ -17187,8 +17195,19 @@ function createArticleGenerationCheckpointer(
       // rotation is now reserved for a genuine total loss, and burning a
       // THIRD topic's worth of provider calls on top of that is not worth
       // it even with budget still technically available.
+      //
+      // 2026-08-06: raised the hard cap 2 → 4. The "not worth it" reasoning
+      // above assumed Groq's ~100k daily budget was a single shared pool —
+      // GROQ_QUOTA_POOL_IDS proved it is 7 independent accounts instead
+      // (~700k effective), and 6-august-2026 hit exactly the failure this
+      // predicted: two topics in a row failed for genuine content reasons
+      // (a casualty-count mismatch, then unsupported-claim grounding
+      // rejections) with real Groq capacity untouched, stranding the whole
+      // day with no room to try a third, cleaner candidate. Still a hard
+      // ceiling, not unlimited — a genuinely bad day (every candidate has a
+      // real problem) stops after 4 topics rather than retrying for hours.
       const openingAnotherRotation =
-        budget.rotations >= 2 &&
+        budget.rotations >= 4 &&
         budget.sourceUsed === 0;
       const replacementAlreadyUsed = openingAnotherRotation;
       const sourceLimit = budget.rotations >= 1

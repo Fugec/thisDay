@@ -313,6 +313,14 @@ async function markProviderCircuit(env, provider, retryAtMs, reason) {
   });
 }
 
+// PER POOL, not a global total — this is one Groq account's TPD ceiling.
+// The only call site applies it inside the per-key attempt loop against
+// that key's own pool estimate (groqDailyTokenEstimateUsed(state, pool)),
+// so the true effective daily ceiling is this number times however many
+// independent pools GROQ_QUOTA_POOL_IDS actually proves — 100k for one
+// unlabelled/shared setup, ~700k across the 7 accounts currently configured
+// in wrangler-blog.jsonc, and it scales automatically if keys are added or
+// removed. Nothing in this file hardcodes an aggregate total.
 const GROQ_DAILY_TOKEN_BUDGET_DEFAULT = 100_000;
 const GROQ_DAILY_RESERVE_RATIO_DEFAULT = 0.85;
 

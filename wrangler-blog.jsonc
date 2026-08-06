@@ -58,10 +58,11 @@
     // Every genuinely different replacement source may use up to fourteen
     // calls; prompt variants get no new allowance.
     "ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET": "14",
-    // Date-wide ceiling. The separate cap leaves one additional minimum-viable
-    // rotation after the 12 + 14 per-source allowances without letting any
-    // single replacement exceed fourteen calls.
-    "ARTICLE_GENERATION_DAILY_REQUEST_BUDGET": "34",
+    // Date-wide ceiling. 12 (first topic) + 14 x 3 replacements = up to 4
+    // topics/day (raised from 34/2-topics 2026-08-06 once GROQ_QUOTA_POOL_IDS
+    // proved ~700k effective daily Groq capacity instead of one shared ~100k
+    // pool — see the rotation-cap comment in blog-ai-worker.js).
+    "ARTICLE_GENERATION_DAILY_REQUEST_BUDGET": "54",
     // Emergency manual override retained for incidents where analytics itself
     // is unavailable. Use an ISO UTC timestamp; leave empty normally.
     "BLOG_KV_BACKGROUND_WRITES_PAUSED_UNTIL": "",

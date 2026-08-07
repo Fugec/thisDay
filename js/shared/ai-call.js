@@ -1391,18 +1391,6 @@ async function callAIProviders(
           failureReasons.push(capacityDeferral.reason);
           continue;
         }
-        // Record the estimate BEFORE the request so a timeout or malformed
-        // response still counts toward the daily reserve — the same
-        // "persist before the provider call" reasoning as the per-article
-        // request budget elsewhere in this codebase. Keyed by pool so one
-        // account's spend never inflates another account's reserve.
-        providerCircuit.groqTokenEstimate = {
-          pools: {
-            ...(providerCircuit.groqTokenEstimate?.pools || {}),
-            [pool]: groqDailyTokenEstimateUsed(providerCircuit, pool) + estimatedRequestTokens,
-          },
-        };
-        await recordGroqTokenEstimate(env, pool, estimatedRequestTokens);
         providerAttempts += 1;
         groqSectionAttempts += 1;
         recordAiAttempt("groq", messages);
@@ -1427,6 +1415,34 @@ async function callAIProviders(
           captureProviderCapacity(groqProviderPool, groqModel, res);
           const data = await res.json();
           const text = (data?.choices?.[0]?.message?.content ?? "").trim();
+          // 2026-08-07: record the reserve estimate from Groq's OWN reported
+          // usage.total_tokens on a CONFIRMED successful response, not a
+          // pre-flight guess charged regardless of outcome. A live audit
+          // this same day found every account showing ~11,963/12,000 tokens
+          // free on the real per-minute header while our old pre-charge
+          // scheme claimed 85,000-97,000/100,000 "used" for the day — the old
+          // code charged the full max_tokens ceiling before every attempt,
+          // including failed ones (429s, timeouts, empty responses), so a
+          // day full of retries inflated this number far past real spend and
+          // caused Groq to be skipped for the rest of the day on a phantom
+          // shortage. Only a successful call has a known real cost; fall
+          // back to the pre-flight estimate only if Groq omits usage.
+          const realTokensUsed = Number(data?.usage?.total_tokens);
+          const tokensToRecord =
+            Number.isFinite(realTokensUsed) && realTokensUsed > 0
+              ? realTokensUsed
+              : estimatedRequestTokens;
+          // recordGroqTokenEstimate already does its own read-modify-write
+          // against the same cached circuit object (loadProviderCircuit
+          // returns the identical object reference this function holds as
+          // `providerCircuit`). A second, separate synchronous mutation of
+          // `providerCircuit.groqTokenEstimate` here — present in the
+          // pre-2026-08-07 code — silently double-counted every recorded
+          // request: the mutation lands on the SAME object the KV write then
+          // reads its "previous" value from, adding tokensToRecord twice.
+          // recordGroqTokenEstimate alone keeps both the KV record and this
+          // invocation's cache correctly in sync with exactly one addition.
+          await recordGroqTokenEstimate(env, pool, tokensToRecord);
           if (text) return text;
           console.warn(`Groq key-${slot} returned empty response for ${groqModel}`);
           failureReasons.push(`Groq key-${slot} returned empty response for ${groqModel}`);

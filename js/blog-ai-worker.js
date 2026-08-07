@@ -2559,8 +2559,17 @@ function eventNounLabel(content) {
       // trailing location. Take the leading proper-noun run up to the first
       // lowercase word (the verb). The old code grabbed the trailing capitalized
       // run instead and produced "Syria" (June 19, 2026 "What caused Syria?").
+      // 2026-08-07: the middle group must be GREEDY, not lazy. A lazy `*?`
+      // stops at the first opportunity to satisfy the trailing `\s+[a-z]`
+      // boundary — and a lowercase connector word (of/the/and/de/la) itself
+      // starts with a lowercase letter, so for "Kingdom of Iraq slaughters
+      // Assyrians" the lazy match treated "of" as the verb boundary and
+      // returned just "Kingdom" instead of "Kingdom of Iraq" (live FAQ
+      // headings read "What triggered Kingdom?"). Greedy consumes the full
+      // connector-joined proper-noun run first and only stops at the real
+      // verb, without changing any of the previously correct examples.
       const subject = raw.match(
-        /^([A-Z][\w''.-]*(?:\s+(?:[A-Z][\w''.-]*|\d{1,4}|of|the|and|de|la))*?)\s+[a-z]/,
+        /^([A-Z][\w''.-]*(?:\s+(?:[A-Z][\w''.-]*|\d{1,4}|of|the|and|de|la))*)\s+[a-z]/,
       );
       label = subject && subject[1] ? subject[1].trim() : "";
     }
@@ -8205,23 +8214,31 @@ async function fixBannedPhrases(
 
   let raw;
   try {
-    const callRepairAI = boundedProviderBudget
-      ? callPublicationGateAI
-      : callAI;
-    raw = await callRepairAI(
-      env,
-      [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      {
-        maxTokens: 3000,
-        timeoutMs: 40_000,
-        ...(boundedProviderBudget
-          ? { providerAttemptLimit: 5, groqSectionAttemptLimit: 1 }
-          : {}),
-      },
-    );
+    // Bounded recovery (2026-08-07): the account has 7 independent Groq
+    // pools with far more combined daily/per-minute headroom than a single
+    // Workers AI or OpenRouter attempt. callPublicationGateAI tried Workers
+    // AI FIRST (dead for the whole day once its 10k-neuron quota is spent)
+    // and capped Groq to 1 of 7 accounts, so a bounded repair call routinely
+    // burned its only attempts on already-exhausted providers instead of
+    // cycling to a fresh Groq account. groqOnly stays on the full 7-account
+    // pool and never touches Workers AI/OpenRouter/NVIDIA/Anthropic.
+    raw = boundedProviderBudget
+      ? await callAI(
+          env,
+          [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          { maxTokens: 3000, timeoutMs: 40_000, groqOnly: true },
+        )
+      : await callAI(
+          env,
+          [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          { maxTokens: 3000, timeoutMs: 40_000 },
+        );
   } catch (err) {
     console.warn(`fixBannedPhrases: AI call failed (${err.message}) — keeping original`);
     return content;
@@ -8315,23 +8332,26 @@ async function improveArticleQuality(
 
   let raw;
   try {
-    const callRepairAI = boundedProviderBudget
-      ? callPublicationGateAI
-      : callAI;
-    raw = await callRepairAI(
-      env,
-      [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      {
-        maxTokens: 3000,
-        timeoutMs: 50_000,
-        ...(boundedProviderBudget
-          ? { providerAttemptLimit: 5, groqSectionAttemptLimit: 1 }
-          : {}),
-      },
-    );
+    // See the matching 2026-08-07 comment in fixBannedPhrases: bounded
+    // recovery now stays on Groq's full 7-account pool instead of the old
+    // Workers-AI-first, 1-of-7-Groq-attempt callPublicationGateAI path.
+    raw = boundedProviderBudget
+      ? await callAI(
+          env,
+          [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          { maxTokens: 3000, timeoutMs: 50_000, groqOnly: true },
+        )
+      : await callAI(
+          env,
+          [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+          { maxTokens: 3000, timeoutMs: 50_000 },
+        );
   } catch (err) {
     console.warn(`improveArticleQuality: AI call failed (${err.message}) — keeping original`);
     return content;
@@ -8488,23 +8508,26 @@ async function repairRepeatedBodySections(
 
     let parsed;
     try {
-      const callRepairAI = boundedProviderBudget
-        ? callPublicationGateAI
-        : callAI;
-      const raw = await callRepairAI(
-        env,
-        [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-        {
-          maxTokens: 1800,
-          timeoutMs: 50_000,
-          ...(boundedProviderBudget
-            ? { providerAttemptLimit: 5, groqSectionAttemptLimit: 1 }
-            : {}),
-        },
-      );
+      // See the matching 2026-08-07 comment in fixBannedPhrases: bounded
+      // recovery now stays on Groq's full 7-account pool instead of the old
+      // Workers-AI-first, 1-of-7-Groq-attempt callPublicationGateAI path.
+      const raw = boundedProviderBudget
+        ? await callAI(
+            env,
+            [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userMessage },
+            ],
+            { maxTokens: 1800, timeoutMs: 50_000, groqOnly: true },
+          )
+        : await callAI(
+            env,
+            [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userMessage },
+            ],
+            { maxTokens: 1800, timeoutMs: 50_000 },
+          );
       parsed = parseJsonObjectFromAI(raw, `body repetition repair ${field}`);
     } catch (err) {
       console.warn(
@@ -10913,7 +10936,46 @@ async function enrichPublishedPost(
       // old path called markGroundingBlockedEvent here, deleting a complete
       // draft/source and exhausting the replacement-topic budget (July 29).
       // Factual/date/source-grounding failures still use the hard block below.
-      await persistBoundedRepair(repaired, "quality-residual");
+      //
+      // 2026-08-07: that removal left this branch with NO escape hatch when
+      // two full repair passes make zero real progress. Each retry is a
+      // fresh Worker invocation that reloads the identical draft from KV, so
+      // a genuinely non-convergent draft reproduced the exact same residual
+      // issue list on every subsequent cron/failsafe run indefinitely (the
+      // 7-august-2026 Simele massacre incident: 5+ separate invocations,
+      // byte-identical failures, real Groq capacity confirmed available the
+      // whole time — only resolved by hand-authoring). Persist a signature of
+      // this invocation's residual issues; if an EARLIER invocation already
+      // recorded the identical signature, two full repair passes have now
+      // proven unable to move this draft at all — block the topic so the
+      // next run rotates to a different event instead of repeating the same
+      // doomed retry forever.
+      const issueSignature = boundedIssues.slice().sort().join("|");
+      const previousSignature = String(draft?.boundedRepairIssueSignature || "");
+      const nonConvergentAttempts =
+        previousSignature && previousSignature === issueSignature
+          ? (Number(draft?.boundedRepairNonConvergentAttempts) || 0) + 1
+          : 1;
+      if (nonConvergentAttempts >= 2) {
+        await markGroundingBlockedEvent(env, slug, repaired, boundedIssues);
+        throw new Error(
+          `Bounded recovery blocked this topic after ${nonConvergentAttempts} separate invocations made zero progress on identical residual issues: ${boundedIssues.join("; ")}`,
+        );
+      }
+      await blogKvPutIfChanged(
+        env,
+        `${KV_DRAFT_PREFIX}${slug}`,
+        JSON.stringify({
+          ...draft,
+          content: repaired,
+          publishedAt,
+          boundedRepairStage: "quality-residual",
+          boundedRepairUpdatedAt: new Date().toISOString(),
+          boundedRepairIssueSignature: issueSignature,
+          boundedRepairNonConvergentAttempts: nonConvergentAttempts,
+        }),
+        { expirationTtl: 3 * 86_400 },
+      );
       throw new Error(
         `Bounded recovery retained the draft for another targeted repair pass: ${boundedIssues.join("; ")}`,
       );
@@ -11348,6 +11410,17 @@ function normalizeEntityType(type) {
 }
 
 function entityContentWordCount(entity) {
+  // 2026-08-07: post-entities:{slug} (the compact cache serve-time repair
+  // passes read, e.g. normalizeArticleHistoryDiscoveryCardHtml) never carries
+  // bodySections — compactArticleEntityMeta deliberately omits the full body
+  // to stay compact. Re-deriving eligibility from a compact entity therefore
+  // always saw 0 words here, contradicting the historyLinkEligible/
+  // historyCardQualified booleans that same function had just computed
+  // correctly against the FULL entity (2026-08-06 Erwadi fire incident,
+  // recurred 2026-08-07 on the Simele massacre entity). Prefer an explicit
+  // precomputed count when present so the compact form's cached answer
+  // survives; fall back to summing bodySections for a full entity record.
+  if (Number.isFinite(entity?.bodyWordCount)) return entity.bodyWordCount;
   return (Array.isArray(entity?.bodySections) ? entity.bodySections : [])
     .flatMap((section) =>
       Array.isArray(section?.paragraphs) ? section.paragraphs : [],
@@ -14936,6 +15009,13 @@ function compactArticleEntityMeta(entityMeta) {
             ...(entity.evergreenHistoryVersion
               ? { evergreenHistoryVersion: entity.evergreenHistoryVersion }
               : {}),
+            // See the 2026-08-07 comment on entityContentWordCount: this
+            // lets a later serve-time re-check of eligibility against the
+            // compact record alone reach the same answer as this function
+            // just did against the full entity, without storing bodySections.
+            ...(Array.isArray(entity.bodySections)
+              ? { bodyWordCount: entityContentWordCount(entity) }
+              : {}),
             ...(entity.canonicalIdentity
               ? { canonicalIdentity: entity.canonicalIdentity }
               : {}),
@@ -15770,13 +15850,16 @@ async function reviewQuizWithExpert(questions, content, env) {
 
   let raw;
   try {
-    raw = await callPublicationGateAI(
+    // 2026-08-07: same Groq-only fix as the bounded article-repair calls —
+    // callPublicationGateAI tried an already-exhausted Workers AI first and
+    // capped Groq to 2 of 7 independently-pooled accounts.
+    raw = await callAI(
       env,
       [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ],
-      { maxTokens: 2000, timeoutMs: 25_000 },
+      { maxTokens: 2000, timeoutMs: 25_000, groqOnly: true },
     );
   } catch (err) {
     console.warn(
@@ -15854,7 +15937,8 @@ async function verifyQuizGrounding(env, questions, content) {
     .join("\n")
     .slice(0, 9000);
   try {
-    const raw = await callPublicationGateAI(
+    // 2026-08-07: Groq-only, same fix as reviewQuizWithExpert above.
+    const raw = await callAI(
       env,
       [
         {
@@ -15873,7 +15957,7 @@ async function verifyQuizGrounding(env, questions, content) {
             '{"passed":true,"issues":[]} or {"passed":false,"issues":["question 4: specific issue"]}.',
         },
       ],
-      { maxTokens: 600, timeoutMs: 20_000 },
+      { maxTokens: 600, timeoutMs: 20_000, groqOnly: true },
     );
     const match = raw?.match(/\{[\s\S]*\}/);
     if (!match) return { ok: false, reasons: ["quiz grounding verifier returned no JSON"] };
@@ -15893,7 +15977,8 @@ async function repairQuizGrounding(env, questions, content, reasons) {
   const sourceMaterial = sourceMaterialForGrounding(groundingSourceFromContent(content));
   if (!sourceMaterial) return null;
   try {
-    const raw = await callPublicationGateAI(
+    // 2026-08-07: Groq-only, same fix as reviewQuizWithExpert above.
+    const raw = await callAI(
       env,
       [
         {
@@ -15910,7 +15995,7 @@ async function repairQuizGrounding(env, questions, content, reasons) {
             "Correct every issue. Each question must have four options and one 0-based answer index. Do not introduce facts absent from the source material. Return {\"questions\":[...] }.",
         },
       ],
-      { maxTokens: 1800, timeoutMs: 25_000 },
+      { maxTokens: 1800, timeoutMs: 25_000, groqOnly: true },
     );
     const match = raw?.match(/\{[\s\S]*\}/);
     if (!match) return null;
@@ -16038,7 +16123,8 @@ async function generateBlogQuiz(env, content, _slug) {
 
   let raw;
   try {
-    raw = await callPublicationGateAI(
+    // 2026-08-07: Groq-only, same fix as reviewQuizWithExpert above.
+    raw = await callAI(
       env,
       [
         {
@@ -16051,7 +16137,7 @@ async function generateBlogQuiz(env, content, _slug) {
           content: `Generate a 5-question multiple choice quiz based on this historical blog post.\n\nContext:\n${contextLines.join("\n")}\n\nRules:\n- Exactly 5 questions, no more no less\n- Each question has exactly 4 options (never fewer, never more)\n- Exactly one correct answer per question (0-based index in "answer", must be 0, 1, 2, or 3)\n- Question types must vary: include at least one each of Who, What, Why/How, When/Where\n- Questions must progress: 1 easy recall, 2 medium analysis, 2 challenging synthesis\n- Draw from ALL Fact lines — do not repeat the same topic twice\n- The authoritative source material wins over the article summary or facts if they conflict\n- Keep recognition, arrest, capture, departure, arrival, and death locations and dates distinct\n- Wrong options must be plausible but clearly incorrect; no trick questions\n- Each question must include a short "explanation" field (1-2 sentences) explaining why the answer is correct\n- All strings must be non-empty and longer than 5 characters\n- Output ONLY valid JSON, no markdown:\n{"questions":[{"q":"Question?","options":["A","B","C","D"],"answer":0,"explanation":"Why this answer is correct."}]}`,
         },
       ],
-      { maxTokens: 2200, timeoutMs: 25_000 },
+      { maxTokens: 2200, timeoutMs: 25_000, groqOnly: true },
     );
   } catch (err) {
     console.error("Blog quiz: AI call failed —", err.message);

@@ -46,7 +46,7 @@ function loadModalTimelineFocus(source, context) {
   );
   assert.ok(match, "modal timeline focus helper must be extractable");
   vm.runInNewContext(
-    `let modalSelectionRequestId=0;\n${match[1]}\nthis.setRequestId=(value)=>{modalSelectionRequestId=value;};\nthis.focus=focusModalTimelineItem;`,
+    `let modalSelectionRequestId=0;\nlet isEventDetailModalShown=true;\n${match[1]}\nthis.setRequestId=(value)=>{modalSelectionRequestId=value;};\nthis.setModalShown=(value)=>{isEventDetailModalShown=value;};\nthis.focus=focusModalTimelineItem;`,
     context,
   );
   return context;
@@ -285,6 +285,59 @@ test("Today Through Time refocuses every modal selection independently", () => {
     script,
     /addEventListener\("hide\.bs\.modal"[\s\S]*?modalSelectionRequestId \+= 1/,
   );
+  assert.match(script, /modalBodyContent\.scrollTop = top;/);
+  assert.match(
+    script,
+    /addEventListener\("shown\.bs\.modal"[\s\S]*?isEventDetailModalShown = true/,
+  );
+});
+
+test("Today Through Time waits for the completed modal transition", () => {
+  let shownHandler = null;
+  let scrollTop = 0;
+  const target = {
+    dataset: { itemAnchor: "event-late" },
+    classList: { add() {}, remove() {} },
+    getBoundingClientRect: () => ({ top: 620, height: 100 }),
+  };
+  const modalBodyContent = {
+    clientHeight: 400,
+    querySelectorAll(selector) {
+      return selector === "[data-item-anchor]" ? [target] : [];
+    },
+    getBoundingClientRect: () => ({ top: 20 }),
+    scrollTo({ top }) {
+      scrollTop = top;
+      this.scrollTop = top;
+    },
+    get scrollTop() {
+      return scrollTop;
+    },
+    set scrollTop(value) {
+      scrollTop = value;
+    },
+  };
+  const context = loadModalTimelineFocus(script, {
+    modalBodyContent,
+    document: {
+      getElementById: () => ({
+        addEventListener(name, handler) {
+          if (name === "shown.bs.modal") shownHandler = handler;
+        },
+      }),
+    },
+    requestAnimationFrame: (callback) => callback(),
+    setTimeout: (callback) => callback(),
+  });
+
+  context.setRequestId(1);
+  context.setModalShown(false);
+  context.focus("event-late", 1);
+  assert.equal(scrollTop, 0);
+  assert.equal(typeof shownHandler, "function");
+
+  shownHandler();
+  assert.ok(scrollTop > 0);
 });
 
 test("homepage and date pages derive the same stable event fragment", () => {

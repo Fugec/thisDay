@@ -1826,6 +1826,7 @@ let currentModalDay = null;
 let currentModalMonth = null;
 let currentModalPersonLinks = new Map();
 let modalSelectionRequestId = 0;
+let isEventDetailModalShown = false;
 
 const eventCategories = {
   "War & Conflict": {
@@ -2912,7 +2913,7 @@ function focusModalTimelineItem(
   selectionRequestId = modalSelectionRequestId,
 ) {
   if (!itemAnchorId) return;
-  const scrollToTarget = (behavior = "smooth") => {
+  const scrollToTarget = () => {
     if (selectionRequestId !== modalSelectionRequestId) return;
     const target = Array.from(
       modalBodyContent?.querySelectorAll("[data-item-anchor]") || [],
@@ -2932,23 +2933,25 @@ function focusModalTimelineItem(
       0,
       modalBodyContent.scrollTop + targetRect.top - bodyRect.top - centeredOffset,
     );
-    modalBodyContent.scrollTo({
-      top,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "auto"
-        : behavior,
-    });
+    // Set the actual Bootstrap modal-body scroller synchronously. Smooth
+    // scrolling can be cancelled while the modal transition or lazy media
+    // layout is still settling, leaving later selections at the old position.
+    modalBodyContent.scrollTop = top;
+    if (typeof modalBodyContent.scrollTo === "function") {
+      modalBodyContent.scrollTo({ top, behavior: "auto" });
+    }
   };
   const scheduleScroll = () => {
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         scrollToTarget();
-        setTimeout(() => scrollToTarget("auto"), 350);
+        setTimeout(scrollToTarget, 250);
+        setTimeout(scrollToTarget, 750);
       }),
     );
   };
   const modalElement = document.getElementById("eventDetailModal");
-  if (modalElement?.classList.contains("show")) {
+  if (isEventDetailModalShown) {
     scheduleScroll();
   } else {
     modalElement?.addEventListener("shown.bs.modal", scheduleScroll, {
@@ -3000,6 +3003,7 @@ async function showEventDetails(
     modalDateSummary.textContent =
       "A timeline of events, births, and deaths recorded for this date.";
   }
+  modalBodyContent.scrollTop = 0;
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
   getEventDetailModal()?.show();
@@ -3397,7 +3401,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 const eventDetailModalElement = document.getElementById("eventDetailModal");
 if (eventDetailModalElement) {
+  eventDetailModalElement.addEventListener("shown.bs.modal", function () {
+    isEventDetailModalShown = true;
+  });
   eventDetailModalElement.addEventListener("hide.bs.modal", function () {
+    isEventDetailModalShown = false;
     // Invalidate any still-loading selection so an earlier request cannot
     // overwrite the next card the visitor opens.
     modalSelectionRequestId += 1;

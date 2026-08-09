@@ -18,6 +18,13 @@ test("homepage CSP permits regional Google Analytics collection", () => {
   );
 });
 
+test("homepage CSP permits Google Ads frames", () => {
+  assert.match(
+    seoWorker,
+    /frame-src[^;]*https:\/\/pagead2\.googlesyndication\.com/,
+  );
+});
+
 test("maintenance content is served as a temporary non-cacheable response", async () => {
   const request = new Request("https://thisday.info/some-public-page/");
   let upstreamUrl = "";

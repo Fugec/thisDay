@@ -254,7 +254,7 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
   assert.match(indexHtml, /custom\.css\?v=51/);
   assert.match(indexHtml, /style\.css\?v=10/);
-  assert.match(indexHtml, /script\.js\?v=27/);
+  assert.match(indexHtml, /script\.js\?v=28/);
   assert.match(
     workerSource,
     /public, max-age=31536000, s-maxage=31536000, immutable/,

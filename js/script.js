@@ -329,6 +329,54 @@ function slugifyPersonName(value) {
     .replace(/(^-|-$)/g, "");
 }
 
+function historicalEventFocusKey(event) {
+  const year = String(event?.year ?? "").trim().toLowerCase();
+  const sourceUrl = String(
+    event?.sourceUrl || event?.pages?.[0]?.content_urls?.desktop?.page || "",
+  )
+    .trim()
+    .replace(/#.*$/, "")
+    .toLowerCase();
+  const pageTitle = String(
+    event?.wikiTitle ||
+      event?.pages?.[0]?.title ||
+      event?.pages?.[0]?.normalizedtitle ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+  const textFallback = String(
+    event?.title || event?.text || event?.description || "",
+  )
+    .trim()
+    .slice(0, 180)
+    .toLowerCase();
+  return `${year}|${sourceUrl || pageTitle || textFallback}`;
+}
+
+function resolveModalTimelineAnchor(
+  items,
+  requestedAnchorId,
+  focusedEventKey,
+) {
+  const events = (Array.isArray(items) ? items : []).filter(
+    (item) => item?.type === "event",
+  );
+  const requested = String(requestedAnchorId || "");
+  if (
+    requested &&
+    events.some((item) => historicalEventAnchorId(item) === requested)
+  ) {
+    return requested;
+  }
+  const stableKey = String(focusedEventKey || "");
+  if (!stableKey) return "";
+  const matchingEvent = events.find(
+    (item) => historicalEventFocusKey(item) === stableKey,
+  );
+  return matchingEvent ? historicalEventAnchorId(matchingEvent) : "";
+}
+
 // Converts raw Wikipedia API response into the app's internal event format
 function processRawWikipediaData(data) {
   const processedEvents = [];
@@ -1624,6 +1672,7 @@ async function populateTodayThroughTime() {
     selected.forEach((event) => {
       const title = String(event.title || event.description || "Historical event").trim();
       const anchorId = historicalEventAnchorId(event);
+      const focusedEventKey = historicalEventFocusKey(event);
       const item = document.createElement("li");
       item.className = "today-through-time-item";
 
@@ -1698,7 +1747,14 @@ async function populateTodayThroughTime() {
         clickEvent.stopPropagation();
         lastActiveCard = card;
         currentActiveFilter = "all";
-        void showEventDetails(day, month, today.getFullYear(), data, anchorId);
+        void showEventDetails(
+          day,
+          month,
+          today.getFullYear(),
+          data,
+          anchorId,
+          focusedEventKey,
+        );
       });
       item.appendChild(card);
       track.appendChild(item);
@@ -2852,20 +2908,33 @@ function renderFilteredItems(itemsToRender) {
 
 function focusModalTimelineItem(itemAnchorId) {
   if (!itemAnchorId) return;
-  const target = Array.from(
-    modalBodyContent?.querySelectorAll("[data-item-anchor]") || [],
-  ).find((item) => item.dataset.itemAnchor === itemAnchorId);
-  if (!target) return;
-  target.classList.add("modal-tl-item-targeted");
-  target.scrollIntoView({
-    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      ? "auto"
-      : "smooth",
-    block: "center",
-  });
+  const scrollToTarget = () => {
+    const target = Array.from(
+      modalBodyContent?.querySelectorAll("[data-item-anchor]") || [],
+    ).find((item) => item.dataset.itemAnchor === itemAnchorId);
+    if (!target || !modalBodyContent) return;
+    target.classList.add("modal-tl-item-targeted");
+    const bodyRect = modalBodyContent.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const centeredOffset = Math.max(
+      16,
+      (modalBodyContent.clientHeight - targetRect.height) / 2,
+    );
+    const top = Math.max(
+      0,
+      modalBodyContent.scrollTop + targetRect.top - bodyRect.top - centeredOffset,
+    );
+    modalBodyContent.scrollTo({
+      top,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+    });
+  };
+  requestAnimationFrame(() => requestAnimationFrame(scrollToTarget));
 }
 
-function applyFilter() {
+function applyFilter({ scrollToFirst = true } = {}) {
   const listToFilter = currentDayAllItems;
   const filteredItems = listToFilter.filter((item) => {
     if (currentActiveFilter === "all") {
@@ -2878,6 +2947,7 @@ function applyFilter() {
   renderFilteredItems(filteredItems);
 
   // Scroll slowly to the first event after filtering
+  if (!scrollToFirst) return;
   setTimeout(() => {
     const eventsListDiv = document.getElementById("modal-events-list");
     if (eventsListDiv) {
@@ -2896,6 +2966,7 @@ async function showEventDetails(
   year,
   preFetchedStructuredEvents = null,
   focusedItemAnchorId = "",
+  focusedEventKey = "",
 ) {
   currentModalDay = day;
   currentModalMonth = month;
@@ -2946,6 +3017,11 @@ async function showEventDetails(
       const yearB = parseInt(b.year, 10) || 0;
       return yearA - yearB;
     });
+    const resolvedFocusedItemAnchorId = resolveModalTimelineAnchor(
+      currentDayAllItems,
+      focusedItemAnchorId,
+      focusedEventKey,
+    );
     const allAvailableCategories = new Set(["All"]);
     currentDayAllItems.forEach((item) => {
       item.categories.forEach((cat) => allAvailableCategories.add(cat));
@@ -3050,9 +3126,9 @@ async function showEventDetails(
         applyFilter();
       });
     });
-    applyFilter();
-    if (focusedItemAnchorId) {
-      requestAnimationFrame(() => focusModalTimelineItem(focusedItemAnchorId));
+    applyFilter({ scrollToFirst: !resolvedFocusedItemAnchorId });
+    if (resolvedFocusedItemAnchorId) {
+      focusModalTimelineItem(resolvedFocusedItemAnchorId);
     }
     fetchAndApplyCommentary(month, day);
 

@@ -23,6 +23,23 @@ function loadEventAnchor(source) {
   return context.anchor;
 }
 
+function loadTimelineFocusHelpers(source) {
+  const anchorMatch = source.match(
+    /(function historicalEventAnchorId[\s\S]*?\n})\n\nfunction historicalPersonAnchorId/,
+  );
+  const helperMatch = source.match(
+    /(function historicalEventFocusKey[\s\S]*?\n}\n\nfunction resolveModalTimelineAnchor[\s\S]*?\n})\n\n\/\/ Converts/,
+  );
+  assert.ok(anchorMatch, "event anchor helper must be extractable");
+  assert.ok(helperMatch, "modal focus helpers must be extractable");
+  const context = {};
+  vm.runInNewContext(
+    `${anchorMatch[1]}\n${helperMatch[1]}\nthis.anchor = historicalEventAnchorId;\nthis.focusKey = historicalEventFocusKey;\nthis.resolve = resolveModalTimelineAnchor;`,
+    context,
+  );
+  return context;
+}
+
 test("hero uses Today Through Time in the former highlights position", () => {
   assert.match(indexHtml, /<div class="hero-inner">/);
   assert.match(indexHtml, /Events, birthdays and milestones for any date — sourced from\s+Wikipedia\./);
@@ -114,7 +131,7 @@ test("hero timeline reuses preloaded daily data and receives Worker SSR", () => 
   );
   assert.match(
     script,
-    /showEventDetails\(day, month, today\.getFullYear\(\), data, anchorId\)/,
+    /showEventDetails\(\s*day,\s*month,\s*today\.getFullYear\(\),\s*data,\s*anchorId,\s*focusedEventKey/,
   );
   assert.match(
     seoWorker,
@@ -152,6 +169,33 @@ test("hero timeline reuses preloaded daily data and receives Worker SSR", () => 
     seoWorker,
     /\.major-event-source:hover,\.major-event-source:focus-visible\{text-decoration:none\}/,
   );
+});
+
+test("Today Through Time resolves compact records and owns the modal scroll", () => {
+  const { anchor, focusKey, resolve } = loadTimelineFocusHelpers(script);
+  const sourceUrl = "https://en.wikipedia.org/wiki/Continuation_War";
+  const compact = {
+    type: "event",
+    year: 1944,
+    description: "World War II: Continuation War: The Vyborg operation begins…",
+    sourceUrl,
+  };
+  const complete = {
+    ...compact,
+    description:
+      "World War II: Continuation War: The Vyborg operation begins with a longer complete historical description.",
+  };
+  assert.notEqual(anchor(compact), anchor(complete));
+  assert.equal(
+    resolve([complete], anchor(compact), focusKey(compact)),
+    anchor(complete),
+  );
+  assert.match(
+    script,
+    /applyFilter\(\{ scrollToFirst: !resolvedFocusedItemAnchorId \}\)/,
+  );
+  assert.match(script, /if \(!scrollToFirst\) return;[\s\S]*?setTimeout/);
+  assert.match(script, /modalBodyContent\.scrollTo\(\{[\s\S]*?top,/);
 });
 
 test("homepage and date pages derive the same stable event fragment", () => {

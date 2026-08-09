@@ -2808,14 +2808,10 @@ function renderFilteredItems(itemsToRender) {
                         <div class="modal-tl-media">
                             <img src="${escHtml(modalImageUrl)}"
                                 ${modalImageSrcset ? `srcset="${escHtml(modalImageSrcset)}" sizes="160px"` : ""}
-                                alt="${escHtml(imageAlt.substring(0, 80))}" width="160" height="120" loading="lazy" decoding="async" onerror="this.parentElement.classList.add('modal-tl-media-blank'); this.remove()">
+                                alt="${escHtml(imageAlt.substring(0, 80))}" width="160" height="120" loading="lazy" decoding="async" onerror="this.parentElement.remove()">
                         </div>
                         `
-      : `
-                        <div class="modal-tl-media modal-tl-media-blank" aria-hidden="true">
-                            <i class="bi bi-calendar-event"></i>
-                        </div>
-                        `;
+      : "";
 
     htmlContent += `
             <article class="modal-tl-item event-item${event.thumbnailUrl ? " event-item-has-thumb" : ""}" role="listitem" data-ckey="${`${escHtml(event.year)}:${escHtml((event.description || "").substring(0, 30))}`}" data-item-anchor="${escHtml(itemAnchorId)}">
@@ -3097,8 +3093,8 @@ async function showEventDetails(
             <div class="born-died-person">
               ${
                 p.thumbnailUrl
-                  ? `<img src="${getOptimizedImageUrl(p.thumbnailUrl, 72, 80)}" srcset="${getResponsiveImageSrcset(p.thumbnailUrl, [36, 72], 80)}" sizes="36px" alt="${p.title || ""}" class="born-died-thumb" width="36" height="36" loading="lazy" decoding="async" onerror="this.style.display='none'">`
-                  : `<div class="born-died-thumb-placeholder"></div>`
+                  ? `<img src="${getOptimizedImageUrl(p.thumbnailUrl, 72, 80)}" srcset="${getResponsiveImageSrcset(p.thumbnailUrl, [36, 72], 80)}" sizes="36px" alt="${p.title || ""}" class="born-died-thumb" width="36" height="36" loading="lazy" decoding="async" onerror="this.remove()">`
+                  : ""
               }
               <div class="born-died-info">
                 <a href="${p.sourceUrl || "#"}" target="_blank" rel="noopener" class="born-died-name">${p.title || p.description?.substring(0, 40) || ""}</a>

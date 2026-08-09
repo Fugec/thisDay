@@ -64,6 +64,13 @@ test("people, modal, and compact born/died images have explicit dimensions", () 
   assert.match(script, /width="36" height="36" loading="lazy" decoding="async"/);
 });
 
+test("calendar modal omits missing or failed event, birth, and death images", () => {
+  assert.doesNotMatch(script, /modal-tl-media modal-tl-media-blank/);
+  assert.doesNotMatch(script, /born-died-thumb-placeholder/);
+  assert.match(script, /onerror="this\.parentElement\.remove\(\)"/);
+  assert.match(script, /class="born-died-thumb"[^>]*onerror="this\.remove\(\)"/);
+});
+
 test("carousel eagerly loads only its first responsive image", () => {
   assert.match(script, /getResponsiveImageSrcset\(\s*event\.sourceImageUrl/);
   assert.match(script, /srcset="\$\{responsiveSrcset\}" sizes="100vw"/);
@@ -72,11 +79,11 @@ test("carousel eagerly loads only its first responsive image", () => {
 });
 
 test("homepage static asset versions are current", () => {
-  assert.match(indexHtml, /js\/script\.js\?v=26/);
+  assert.match(indexHtml, /js\/script\.js\?v=27/);
   assert.match(indexHtml, /custom\.css\?v=51/);
   assert.match(indexHtml, /style\.css\?v=10/);
-  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v35"/);
-  assert.match(serviceWorker, /"\/js\/script\.js\?v=26"/);
+  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v36"/);
+  assert.match(serviceWorker, /"\/js\/script\.js\?v=27"/);
   assert.match(serviceWorker, /"\/css\/custom\.css\?v=51"/);
   assert.match(serviceWorker, /"\/css\/style\.css\?v=10"/);
   assert.match(seoWorker, /custom\.css\?v=51/);

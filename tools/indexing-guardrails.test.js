@@ -9,6 +9,14 @@ import { __indexabilityTestHooks as hooks } from "../js/seo-worker.js";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const serviceWorker = readFileSync(join(root, "sw.js"), "utf8");
 const homepage = readFileSync(join(root, "index.html"), "utf8");
+const seoWorker = readFileSync(join(root, "js/seo-worker.js"), "utf8");
+
+test("homepage CSP permits regional Google Analytics collection", () => {
+  assert.match(
+    seoWorker,
+    /connect-src[\s\S]*?https:\/\/analytics\.google\.com https:\/\/\*\.analytics\.google\.com https:\/\/\*\.google-analytics\.com/,
+  );
+});
 
 test("maintenance content is served as a temporary non-cacheable response", async () => {
   const request = new Request("https://thisday.info/some-public-page/");

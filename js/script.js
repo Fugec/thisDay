@@ -287,6 +287,28 @@ function historicalEventAnchorId(event) {
   return `event-${year}-${label}-${(hash >>> 0).toString(36)}`;
 }
 
+function historicalPersonAnchorId(person, type = person?.type) {
+  const kind = type === "death" || type === "died" ? "death" : "birth";
+  const rawYear = String(person?.year ?? "").trim();
+  const year =
+    rawYear
+      .replace(/^-/, "bc-")
+      .replace(/[^a-z0-9-]+/gi, "-")
+      .replace(/(^-|-$)/g, "") || "unknown";
+  const name = String(
+    person?.description ||
+      person?.text ||
+      person?.title ||
+      person?.wikiTitle ||
+      person?.name ||
+      "",
+  )
+    .split(",")[0]
+    .trim();
+  const normalizedName = slugifyPersonName(name) || "historical-person";
+  return `person-${kind}-${year}-${normalizedName.slice(0, 64).replace(/-+$/g, "")}`;
+}
+
 function pickRandomDailyHighlights(
   events,
   count = 3,
@@ -1299,6 +1321,29 @@ function localPersonHref(person, articlePeopleBySlug = new Map(), fallbackHref =
   return `/people/${slug}/`;
 }
 
+let homepagePersonIndexPromise = null;
+let modalPersonLinksPromise = null;
+
+function fetchHomepagePersonIndex() {
+  if (!homepagePersonIndexPromise) {
+    homepagePersonIndexPromise = fetch("/people/index.json")
+      .then((response) => (response.ok ? response.json() : []))
+      .then((people) => (Array.isArray(people) ? people : []))
+      .catch(() => []);
+  }
+  return homepagePersonIndexPromise;
+}
+
+function fetchModalPersonLinks() {
+  if (!modalPersonLinksPromise) {
+    modalPersonLinksPromise = fetch("/people/index.json?scope=links")
+      .then((response) => (response.ok ? response.json() : []))
+      .then((people) => (Array.isArray(people) ? people : []))
+      .catch(() => []);
+  }
+  return modalPersonLinksPromise;
+}
+
 async function populatePeopleStrip() {
   const track = document.getElementById("peopleTrack");
   const skeleton = document.getElementById("peopleSkeleton");
@@ -1314,7 +1359,7 @@ async function populatePeopleStrip() {
   try {
     const results = await Promise.allSettled([
       fetchWikipediaEvents(month, day),
-      fetch("/people/index.json").then((r) => (r.ok ? r.json() : [])),
+      fetchHomepagePersonIndex(),
     ]);
     if (results[0].status === "fulfilled") data = results[0].value || data;
     if (results[1].status === "fulfilled" && Array.isArray(results[1].value)) {
@@ -1563,11 +1608,234 @@ async function populateTodayEventCard() {
   }
 }
 
+function formatTodayThroughTimeYear(value) {
+  const year = Number.parseInt(String(value ?? ""), 10);
+  if (Number.isFinite(year) && year < 0) return `${Math.abs(year)} BC`;
+  return String(value || "—");
+}
+
+function updateTodayThroughTimeControls(viewport, previous, next) {
+  if (!viewport || !previous || !next) return;
+  const maxScroll = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+  previous.disabled = viewport.scrollLeft <= 2;
+  next.disabled = viewport.scrollLeft >= maxScroll - 2;
+}
+
+function selectTodayThroughTimeEvents(items, limit = 8) {
+  const events = (Array.isArray(items) ? items : []).filter((event) =>
+    Boolean(event && String(event.title || event.description || "").trim()),
+  );
+  const illustrated = events
+    .map((event, sourceIndex) => ({
+      event,
+      sourceIndex,
+      year: Number.parseInt(String(event?.year ?? ""), 10),
+    }))
+    .filter(({ event }) => Boolean(event.thumbnailUrl))
+    .sort(
+      (left, right) =>
+        (Number.isFinite(left.year) ? left.year : Number.POSITIVE_INFINITY) -
+          (Number.isFinite(right.year) ? right.year : Number.POSITIVE_INFINITY) ||
+        left.sourceIndex - right.sourceIndex,
+    );
+  const selected = [];
+  const seen = new Set();
+  const add = (event) => {
+    if (!event || selected.length >= limit || seen.has(event)) return;
+    selected.push(event);
+    seen.add(event);
+  };
+  const illustratedLimit = Math.min(limit, illustrated.length);
+  if (illustratedLimit === 1) {
+    add(illustrated[0].event);
+  } else if (illustratedLimit > 1) {
+    for (let index = 0; index < illustratedLimit; index += 1) {
+      const sourceIndex = Math.round(
+        (index * (illustrated.length - 1)) / (illustratedLimit - 1),
+      );
+      add(illustrated[sourceIndex].event);
+    }
+  }
+  events.forEach(add);
+  return selected.sort((left, right) => {
+    const leftYear = Number.parseInt(String(left?.year ?? ""), 10);
+    const rightYear = Number.parseInt(String(right?.year ?? ""), 10);
+    return (
+      (Number.isFinite(leftYear) ? leftYear : Number.POSITIVE_INFINITY) -
+      (Number.isFinite(rightYear) ? rightYear : Number.POSITIVE_INFINITY)
+    );
+  });
+}
+
+async function populateTodayThroughTime() {
+  const track = document.getElementById("todaysEventsGrid");
+  const viewport = document.getElementById("todayThroughTimeViewport");
+  const previous = document.getElementById("todayThroughTimePrev");
+  const next = document.getElementById("todayThroughTimeNext");
+  const count = document.getElementById("todayThroughTimeCount");
+  const viewAll = document.getElementById("todayThroughTimeAll");
+  if (!track || !viewport || !previous || !next) return;
+
+  const today = new Date();
+  const month = today.getMonth() + 1;
+  const day = today.getDate();
+  const monthSlug = monthNames[month - 1].toLowerCase();
+  const datePageHref = `/events/${monthSlug}/${day}/`;
+
+  try {
+    const data = await fetchWikipediaEvents(month, day);
+    const events = Array.isArray(data?.events) ? data.events : [];
+    const selected = selectTodayThroughTimeEvents(events, 8);
+
+    track.replaceChildren();
+    if (!selected.length) {
+      const empty = document.createElement("li");
+      empty.className = "today-through-time-status";
+      empty.textContent = "Today's timeline is temporarily unavailable.";
+      track.appendChild(empty);
+      previous.hidden = true;
+      next.hidden = true;
+      return;
+    }
+
+    selected.forEach((event) => {
+      const title = String(event.title || event.description || "Historical event").trim();
+      const summary = String(event.pageDescription || event.pageExtract || "").trim();
+      const anchorId = historicalEventAnchorId(event);
+      const item = document.createElement("li");
+      item.className = "today-through-time-item";
+
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "today-through-time-card";
+      card.setAttribute("aria-haspopup", "dialog");
+      card.setAttribute("aria-controls", "eventDetailModal");
+      card.setAttribute("aria-expanded", "false");
+      card.setAttribute(
+        "aria-label",
+        `Open details for ${formatTodayThroughTimeYear(event.year)}: ${title}`,
+      );
+
+      const media = document.createElement("span");
+      media.className = "today-through-time-media";
+      if (event.thumbnailUrl) {
+        const image = document.createElement("img");
+        image.src = getOptimizedImageUrl(event.thumbnailUrl, 640, 80);
+        image.srcset = getResponsiveImageSrcset(
+          event.thumbnailUrl,
+          [320, 640, 960],
+          80,
+        );
+        image.sizes = "(max-width: 700px) 82vw, 340px";
+        image.alt = title.substring(0, 100);
+        image.width = 640;
+        image.height = 400;
+        image.loading = "lazy";
+        image.decoding = "async";
+        image.addEventListener("error", () => {
+          media.classList.add("today-through-time-media-empty");
+          image.remove();
+        });
+        media.appendChild(image);
+      } else {
+        media.classList.add("today-through-time-media-empty");
+        const icon = document.createElement("i");
+        icon.className = "bi bi-calendar-event";
+        icon.setAttribute("aria-hidden", "true");
+        media.appendChild(icon);
+      }
+
+      const body = document.createElement("span");
+      body.className = "today-through-time-card-body";
+      const year = document.createElement("span");
+      year.className = "today-through-time-year";
+      year.textContent = formatTodayThroughTimeYear(event.year);
+      const heading = document.createElement("span");
+      heading.className = "today-through-time-card-title";
+      heading.textContent = title;
+      body.append(year, heading);
+      if (summary && summary.toLowerCase() !== title.toLowerCase()) {
+        const description = document.createElement("span");
+        description.className = "today-through-time-card-description";
+        description.textContent = summary;
+        body.appendChild(description);
+      }
+      const action = document.createElement("span");
+      action.className = "today-through-time-card-action";
+      action.innerHTML = 'Open details <i class="bi bi-arrow-up-right" aria-hidden="true"></i>';
+      body.appendChild(action);
+      card.append(media, body);
+      card.addEventListener("click", () => {
+        if (!eventDetailModal) {
+          window.location.assign(`${datePageHref}#${anchorId}`);
+          return;
+        }
+        lastActiveCard = card;
+        currentActiveFilter = "all";
+        showEventDetails(day, month, today.getFullYear(), data, anchorId);
+      });
+      item.appendChild(card);
+      track.appendChild(item);
+    });
+
+    const totalEvents = Number(data?.counts?.events) || events.length;
+    if (count) {
+      count.textContent = `${totalEvents} event${totalEvents === 1 ? "" : "s"} recorded on this date`;
+    }
+    if (viewAll) {
+      viewAll.href = datePageHref;
+      viewAll.innerHTML = `View all ${totalEvents} events <i class="bi bi-arrow-right" aria-hidden="true"></i>`;
+    }
+
+    const scroll = (direction) => {
+      viewport.scrollBy({
+        left: direction * Math.max(280, Math.floor(viewport.clientWidth * 0.85)),
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
+    };
+    previous.addEventListener("click", () => scroll(-1));
+    next.addEventListener("click", () => scroll(1));
+    viewport.addEventListener(
+      "scroll",
+      () => updateTodayThroughTimeControls(viewport, previous, next),
+      { passive: true },
+    );
+    viewport.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        scroll(event.key === "ArrowLeft" ? -1 : 1);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        viewport.scrollTo({ left: 0, behavior: "smooth" });
+      } else if (event.key === "End") {
+        event.preventDefault();
+        viewport.scrollTo({ left: viewport.scrollWidth, behavior: "smooth" });
+      }
+    });
+    window.addEventListener(
+      "resize",
+      () => updateTodayThroughTimeControls(viewport, previous, next),
+      { passive: true },
+    );
+    requestAnimationFrame(() =>
+      updateTodayThroughTimeControls(viewport, previous, next),
+    );
+  } catch (error) {
+    track.innerHTML =
+      '<li class="today-through-time-status">Today\'s timeline failed to load. Please try again.</li>';
+    previous.hidden = true;
+    next.hidden = true;
+  }
+}
+
 let currentDayAllItems = [];
 let currentDayEventsData = null;
 let currentActiveFilter = "all";
 let currentModalDay = null;
 let currentModalMonth = null;
+let currentModalPersonLinks = new Map();
 
 const eventCategories = {
   "War & Conflict": {
@@ -2278,39 +2546,6 @@ const categoryEmojis = {
   Miscellaneous: "📌",
 };
 
-function showCopyToast(message = "Copied to clipboard!") {
-  const existing = document.getElementById("thisDayCopyToast");
-  if (existing) existing.remove();
-  const toast = document.createElement("div");
-  toast.id = "thisDayCopyToast";
-  toast.textContent = message;
-  toast.style.cssText =
-    "position:fixed;bottom:28px;left:50%;transform:translateX(-50%);" +
-    "background:#222;color:#fff;padding:9px 20px;border-radius:20px;" +
-    "font-size:0.85rem;z-index:10000;opacity:1;transition:opacity 0.4s;" +
-    "box-shadow:0 4px 12px rgba(0,0,0,0.3);pointer-events:none;";
-  document.body.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    setTimeout(() => toast.remove(), 420);
-  }, 2000);
-}
-
-function handleShareEvent(description, year, sourceUrl) {
-  const text = `${year} — ${description}`;
-  const url = sourceUrl || "https://thisday.info";
-  if (navigator.share) {
-    navigator
-      .share({ title: "This Day in History", text, url })
-      .catch(() => {});
-    return;
-  }
-  navigator.clipboard
-    .writeText(`${text}\n${url}`)
-    .then(() => showCopyToast("Copied to clipboard!"))
-    .catch(() => showCopyToast("Could not copy — try sharing manually"));
-}
-
 function trackDayVisit(month, day) {
   const key = `${month}-${day}`;
   try {
@@ -2321,6 +2556,23 @@ function trackDayVisit(month, day) {
   } catch {
     return 1;
   }
+}
+
+function modalItemReadMoreHref(item) {
+  const monthSlug = monthNames[currentModalMonth - 1]?.toLowerCase();
+  if (!monthSlug || !currentModalDay) return item?.sourceUrl || "#";
+  if (item?.type === "event") {
+    return `/events/${monthSlug}/${currentModalDay}/#${historicalEventAnchorId(item)}`;
+  }
+
+  const slug = item?.slug || slugifyPersonName(item?.wikiTitle || item?.title || "");
+  const localProfile = slug ? currentModalPersonLinks.get(slug) : null;
+  if (localProfile) return localProfile;
+  const route = item?.type === "death" ? "died" : "born";
+  return `/${route}/${monthSlug}/${currentModalDay}/#${historicalPersonAnchorId(
+    item,
+    item?.type,
+  )}`;
 }
 
 function matchesCategory(text, categoryRules) {
@@ -2607,6 +2859,11 @@ function renderFilteredItems(itemsToRender) {
     }
     const extractText = String(event.pageExtract || "").trim();
     const imageAlt = titleText || event.title || "Historical event";
+    const itemAnchorId =
+      event.type === "event"
+        ? historicalEventAnchorId(event)
+        : historicalPersonAnchorId(event, event.type);
+    const readMoreHref = modalItemReadMoreHref(event);
     const modalImageUrl = event.thumbnailUrl
       ? getOptimizedImageUrl(event.thumbnailUrl, 320, 80)
       : "";
@@ -2628,7 +2885,7 @@ function renderFilteredItems(itemsToRender) {
                         `;
 
     htmlContent += `
-            <article class="modal-tl-item event-item${event.thumbnailUrl ? " event-item-has-thumb" : ""}" role="listitem" data-ckey="${`${escHtml(event.year)}:${escHtml((event.description || "").substring(0, 30))}`}">
+            <article class="modal-tl-item event-item${event.thumbnailUrl ? " event-item-has-thumb" : ""}" role="listitem" data-ckey="${`${escHtml(event.year)}:${escHtml((event.description || "").substring(0, 30))}`}" data-item-anchor="${escHtml(itemAnchorId)}">
                 <div class="modal-tl-marker">
                   <span class="event-year-text">${escHtml(event.year)}</span>
                 </div>
@@ -2652,20 +2909,9 @@ function renderFilteredItems(itemsToRender) {
                         }
                         ${event.commentary ? `<p class="mb-2 fst-italic event-commentary"><i class="bi bi-chat-quote me-1 event-commentary-icon"></i><span class="commentary-text">${escHtml(event.commentary)}</span></p>` : ""}
                         <div class="event-actions modal-tl-actions">
-                          ${
-                            event.sourceUrl
-                              ? `<a href="${escHtml(event.sourceUrl)}" class="event-action-btn event-action-read btn btn-contrast btn-sm"
-                                 target="_blank" rel="noopener noreferrer">
-                                   Read More
-                                 </a>`
-                              : ""
-                          }
-                          <button class="event-action-btn event-action-share share-copy-btn btn btn-contrast btn-sm"
-                            data-desc="${escHtml(event.description || "")}"
-                            data-year="${escHtml(event.year)}"
-                            data-url="${escHtml(event.sourceUrl || "")}">
-                            Share
-                          </button>
+                          <a href="${escHtml(readMoreHref)}" class="event-action-btn event-action-read btn btn-contrast btn-sm">
+                            Read More
+                          </a>
                         </div>
                     </div>
                 </div>
@@ -2673,11 +2919,20 @@ function renderFilteredItems(itemsToRender) {
   });
   htmlContent += `</div>`;
   eventsListDiv.innerHTML = htmlContent;
+}
 
-  eventsListDiv.querySelectorAll(".share-copy-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      handleShareEvent(btn.dataset.desc, btn.dataset.year, btn.dataset.url);
-    });
+function focusModalTimelineItem(itemAnchorId) {
+  if (!itemAnchorId) return;
+  const target = Array.from(
+    modalBodyContent?.querySelectorAll("[data-item-anchor]") || [],
+  ).find((item) => item.dataset.itemAnchor === itemAnchorId);
+  if (!target) return;
+  target.classList.add("modal-tl-item-targeted");
+  target.scrollIntoView({
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth",
+    block: "center",
   });
 }
 
@@ -2711,6 +2966,7 @@ async function showEventDetails(
   month,
   year,
   preFetchedStructuredEvents = null,
+  focusedItemAnchorId = "",
 ) {
   currentModalDay = day;
   currentModalMonth = month;
@@ -2722,6 +2978,9 @@ async function showEventDetails(
   }
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
+  eventDetailModal?.show();
+  lastActiveCard?.setAttribute("aria-expanded", "true");
+  const personLinksPromise = fetchModalPersonLinks();
   let structuredEvents = preFetchedStructuredEvents;
   try {
     if (
@@ -2735,6 +2994,15 @@ async function showEventDetails(
         requireFull: true,
       });
     }
+    const personIndex = await personLinksPromise;
+    currentModalPersonLinks = new Map(
+      personIndex
+        .filter(
+          (person) =>
+            person?.slug && (person?.url || person?.indexable !== false),
+        )
+        .map((person) => [person.slug, person.url || `/people/${person.slug}/`]),
+    );
     currentDayEventsData = structuredEvents;
     currentDayAllItems = [
       ...(structuredEvents.events || []),
@@ -2854,6 +3122,9 @@ async function showEventDetails(
       });
     });
     applyFilter();
+    if (focusedItemAnchorId) {
+      requestAnimationFrame(() => focusModalTimelineItem(focusedItemAnchorId));
+    }
     fetchAndApplyCommentary(month, day);
 
     // Born / Died accordion wiring
@@ -2932,14 +3203,16 @@ async function showEventDetails(
       showEventDetails(day, month, year, null);
     });
   }
-  eventDetailModal.show();
-  lastActiveCard?.setAttribute("aria-expanded", "true");
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     if (!calendarGrid) return;
-    await Promise.all([populateHeroHighlights(), renderCalendar()]);
+    await Promise.all([
+      populateHeroHighlights(),
+      populateTodayThroughTime(),
+      renderCalendar(),
+    ]);
   } catch (error) {
     console.error("Error initializing application:", error);
     if (calendarGrid) {
@@ -3100,8 +3373,10 @@ if (eventDetailModalElement) {
     });
   eventDetailModalElement.addEventListener("hidden.bs.modal", function () {
     currentActiveFilter = "all";
-    lastActiveCard?.setAttribute("aria-expanded", "false");
+    const returnTarget = lastActiveCard;
+    returnTarget?.setAttribute("aria-expanded", "false");
     lastActiveCard = null;
+    returnTarget?.focus({ preventScroll: true });
   });
 }
 

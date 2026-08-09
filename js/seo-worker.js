@@ -261,13 +261,36 @@ function selectHomepagePreloadEvents(items, limit = HOMEPAGE_PRELOAD_EVENT_LIMIT
     selected.push(item);
     seen.add(item);
   };
-  // Keep enough illustrated entries for the eight-card homepage event grid
-  // and its three-card carousel, then preserve source order for the remainder
-  // of the compact preview. This avoids a second full-events homepage request.
-  valid
-    .filter((item) => item?.pages?.[0]?.thumbnail?.source)
-    .slice(0, 8)
-    .forEach(add);
+  // The homepage rail is meant to travel through the date, not cluster around
+  // its most recent decades. Pick evenly spaced illustrated events across the
+  // complete chronology, then preserve source order for the compact fallback
+  // rows. The first eight entries can render the rail without another request.
+  const illustrated = valid
+    .map((item, sourceIndex) => ({
+      item,
+      sourceIndex,
+      year: Number.parseInt(String(item?.year ?? ""), 10),
+    }))
+    .filter((entry) => entry.item?.pages?.[0]?.thumbnail?.source)
+    .sort(
+      (left, right) =>
+        (Number.isFinite(left.year) ? left.year : Number.POSITIVE_INFINITY) -
+          (Number.isFinite(right.year) ? right.year : Number.POSITIVE_INFINITY) ||
+        left.sourceIndex - right.sourceIndex,
+    );
+  const illustratedLimit = Math.min(8, Math.max(0, limit));
+  if (illustrated.length <= illustratedLimit) {
+    illustrated.forEach(({ item }) => add(item));
+  } else if (illustratedLimit === 1) {
+    add(illustrated[0].item);
+  } else {
+    for (let index = 0; index < illustratedLimit; index += 1) {
+      const sourceIndex = Math.round(
+        (index * (illustrated.length - 1)) / (illustratedLimit - 1),
+      );
+      add(illustrated[sourceIndex].item);
+    }
+  }
   valid.forEach(add);
   return selected;
 }
@@ -321,6 +344,26 @@ function historicalEventAnchorId(event) {
   const label =
     normalizedText.slice(0, 48).replace(/-+$/g, "") || "historical-event";
   return `event-${year}-${label}-${(hash >>> 0).toString(36)}`;
+}
+
+function historicalPersonAnchorId(person, type = person?.type) {
+  const kind = type === "death" || type === "died" ? "death" : "birth";
+  const rawYear = String(person?.year ?? "").trim();
+  const year =
+    rawYear
+      .replace(/^-/, "bc-")
+      .replace(/[^a-z0-9-]+/gi, "-")
+      .replace(/(^-|-$)/g, "") || "unknown";
+  const rawText = String(person?.text || person?.description || person?.title || "");
+  const name = rawText.split(",")[0].trim();
+  const normalizedName = name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || "historical-person";
+  return `person-${kind}-${year}-${normalizedName.slice(0, 64).replace(/-+$/g, "")}`;
 }
 
 function pickRandomHomepageHighlights(events, count = 3, randomFn = Math.random) {
@@ -1871,22 +1914,36 @@ ${footerYearScript()}
   });
 }
 
-async function handlePeopleIndexJson(env) {
+async function handlePeopleIndexJson(env, url = null) {
   const raw = await env.BLOG_AI_KV?.get("entity-index-v1").catch(() => null);
   const index = parseStoredEntityIndex(raw);
-  const people = index
-    .filter((entry) => entry?.type === "person" && entry.indexable && entry.slug && entry.name)
-    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
-    .slice(0, 12)
-    .map((person) => ({
+  const linksOnly = url?.searchParams?.get("scope") === "links";
+  const eligible = index
+    .filter(
+      (entry) =>
+        entry?.type === "person" &&
+        entry.indexable &&
+        entry.slug &&
+        entry.name,
+    )
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+  const people = (linksOnly ? eligible : eligible.slice(0, 12)).map(
+    (person) => ({
       name: person.name,
       slug: person.slug,
       url: person.url || `/people/${person.slug}/`,
-      imageUrl: person.imageUrl || "",
-      summary: person.summary || "",
-      relatedCount: Array.isArray(person.relatedPosts) ? person.relatedPosts.length : 0,
-      updatedAt: person.updatedAt || "",
-    }));
+      ...(linksOnly
+        ? {}
+        : {
+            imageUrl: person.imageUrl || "",
+            summary: person.summary || "",
+            relatedCount: Array.isArray(person.relatedPosts)
+              ? person.relatedPosts.length
+              : 0,
+            updatedAt: person.updatedAt || "",
+          }),
+    }),
+  );
   return new Response(JSON.stringify(people), {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
@@ -5302,6 +5359,7 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
 .article-hero-pill-row{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:1rem}
 .article-hero-pill{display:inline-flex;align-items:center;justify-content:center;padding:7px 14px;border:1px solid rgba(255,255,255,.3);border-radius:999px;background:rgba(255,255,255,.12);color:#fff!important;font-size:13px;font-weight:400;letter-spacing:.01em;text-decoration:none}
 .article-hero-pill-featured{background:rgba(27,58,45,.85);border-color:rgba(255,255,255,.35);color:#fff!important}
+[id^="event-"],[id^="person-birth-"],[id^="person-death-"]{scroll-margin-top:90px}
 @media(max-width:767px){.article-hero-wrap{left:50%;transform:translateX(-50%);width:100vw;height:100svh;border-radius:0;margin:.75rem 0 1.5rem;justify-content:center}.article-hero-title{font-size:1.7rem}}
 .commentary{border-left:4px solid var(--btn-bg);padding:10px 14px;background:rgba(0,0,0,.07);border-radius:0 8px 8px 0;font-style:italic;color:var(--text-muted);margin:18px 0}
 
@@ -5461,6 +5519,43 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
   );
 }
 
+function buildPersonAnchorNavigationScript(type) {
+  const kind = type === "death" || type === "died" ? "death" : "birth";
+  const eraItem = kind === "death" ? "deaths" : "births";
+  return `<script id="person-anchor-navigation">(function(){
+var historicalPersonAnchorId=${historicalPersonAnchorId.toString()};
+var kind=${JSON.stringify(kind)};
+var eraItem=${JSON.stringify(eraItem)};
+function titleParts(value){var match=String(value||'').trim().match(/^(-?\\d+)\\s*(?:—|&mdash;|-)\\s*(.+)$/);return match?{year:match[1],name:match[2].trim()}:null;}
+function assignPersonAnchors(){
+document.querySelectorAll('.tl-item[data-era-item="'+eraItem+'"]').forEach(function(item){
+if(item.id&&item.id.indexOf('person-'+kind+'-')===0)return;
+var title=item.querySelector('.tl-card-title');var year=item.getAttribute('data-year')||'';
+if(title&&title.textContent)item.id=historicalPersonAnchorId({year:year,text:title.textContent.trim()},kind);
+});
+var featured=document.querySelector('.article-hero-wrap');
+var heading=featured&&featured.querySelector('.article-hero-title');
+if(!featured){var boxes=document.querySelectorAll('main > .card-box');for(var index=0;index<boxes.length;index+=1){var candidate=boxes[index].querySelector('h2');if(titleParts(candidate&&candidate.textContent)){featured=boxes[index];heading=candidate;break;}}}
+var parts=titleParts(heading&&heading.textContent);if(featured&&parts&&!featured.id)featured.id=historicalPersonAnchorId({year:parts.year,text:parts.name},kind);
+}
+function revealPersonAnchor(){assignPersonAnchors();var id='';try{id=decodeURIComponent(location.hash.slice(1));}catch(_){id=location.hash.slice(1);}if(id.indexOf('person-'+kind+'-')!==0)return;var target=document.getElementById(id);if(!target)target=document.getElementById('major-'+eraItem+'-heading')||document.querySelector('main h1')||document.querySelector('main');if(!target)return;target.style.display='';requestAnimationFrame(function(){target.scrollIntoView({block:'center'});});}
+revealPersonAnchor();if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',revealPersonAnchor,{once:true});window.addEventListener('hashchange',revealPersonAnchor);
+})();</script>`;
+}
+
+function ensurePersonAnchorNavigationHtml(html, type) {
+  const source = String(html || "");
+  if (!source) return source;
+  const navigationScript = buildPersonAnchorNavigationScript(type);
+  if (source.includes('id="person-anchor-navigation"')) {
+    return source.replace(
+      /<script id="person-anchor-navigation">[\s\S]*?<\/script>/,
+      navigationScript,
+    );
+  }
+  return source.replace("</body>", `${navigationScript}</body>`);
+}
+
 function getSharedPageScripts({ pageType = "page", pageSlug = "" } = {}) {
   const includeBootstrapJs = ![
     "events-date",
@@ -5470,6 +5565,12 @@ function getSharedPageScripts({ pageType = "page", pageSlug = "" } = {}) {
   const bootstrapScript = includeBootstrapJs
     ? '<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>'
     : "";
+  const personAnchorScript =
+    pageType === "born-date"
+      ? buildPersonAnchorNavigationScript("birth")
+      : pageType === "died-date"
+        ? buildPersonAnchorNavigationScript("death")
+        : "";
   return `<script async src="https://www.googletagmanager.com/gtag/js?id=G-WXEZ3868VN"></script>
 <script>
 window.dataLayer = window.dataLayer || [];
@@ -5530,6 +5631,7 @@ setTimeout(initAds,1200);
 <script>(function(){var bar=document.getElementById('read-progress');if(!bar)return;document.addEventListener('scroll',function(){var doc=document.documentElement;var total=doc.scrollHeight-doc.clientHeight;var pct=total>0?Math.round((doc.scrollTop/total)*100):0;bar.style.width=pct+'%';bar.setAttribute('aria-valuenow',pct);},{passive:true});})();</script>
 <div id="supportPopup"><div class="support-popup-content"><button class="support-close-btn">&times;</button><h4 style="font-size:1rem;margin-bottom:8px">History runs on facts, and this project runs on coffee!</h4><p style="font-size:.9rem;margin-bottom:14px">Your support is incredibly helpful and genuinely appreciated.</p><a href="https://buymeacoffee.com/fugec?new=1" target="_blank" rel="noopener" style="display:inline-block;padding:8px 18px;background:var(--btn-bg);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:.9rem">Support with a coffee ☕</a></div></div>
 <script>(function(){var p=document.getElementById('supportPopup');var c=p&&p.querySelector('.support-close-btn');if(!p||!c)return;try{var _t=localStorage.getItem('supportPopupClosed');if(_t&&Date.now()-Number(_t)<86400000)return;}catch(e){}var shown=false;var ready=false;var past70=false;function show(){if(shown)return;shown=true;p.classList.add('show');}setTimeout(function(){ready=true;if(past70)show();},60000);setTimeout(function(){show();},90000);window.addEventListener('scroll',function(){var s=window.scrollY+window.innerHeight;var t=document.documentElement.scrollHeight;if(s/t>=0.7){past70=true;if(ready)show();}},{passive:true});c.addEventListener('click',function(){p.classList.remove('show');try{localStorage.setItem('supportPopupClosed',String(Date.now()));}catch(e){}});})();</script>
+${personAnchorScript}
 ${marqueeScript()}`;
 }
 
@@ -5933,6 +6035,9 @@ function normalizeDatePageCleanLayoutHtml(
     expandDateTimelineHtml(source, routeType),
   );
   source = ensureEraChipPressedStateHtml(source);
+  if (routeType === "born" || routeType === "died") {
+    source = ensurePersonAnchorNavigationHtml(source, routeType);
+  }
 
   const markerPatterns = routeType === "born"
     ? [
@@ -7024,6 +7129,9 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const displayedBirths = selectDatePersonProfiles(births, featured);
   const othersB = displayedBirths.filter((b) => b !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
+  const featuredAnchorId = featured
+    ? historicalPersonAnchorId(featured, "birth")
+    : "";
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featRemainder = featured ? featured.text.substring(featured.text.indexOf(",") + 1).trim() : "";
   const didYouKnowFacts = personDidYouKnowFacts(
@@ -7159,6 +7267,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       ? escapeHtml(b.text.slice(b.text.indexOf(",") + 1).trim())
       : "";
     const year = escapeHtml(String(b.year));
+    const personAnchorId = historicalPersonAnchorId(b, "birth");
     const imgLink = profileUrl || w;
     const imgHtml = th
       ? imgLink
@@ -7179,7 +7288,7 @@ function generateBornHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       actionsHtml: actionBtn,
       hasImage: Boolean(th),
     });
-    return `<div class="tl-item" data-year="${parseInt(b.year, 10) || 0}" data-era-item="births">${card}</div>`;
+    return `<div id="${escapeHtml(personAnchorId)}" class="tl-item" data-year="${parseInt(b.year, 10) || 0}" data-era-item="births">${card}</div>`;
   };
 
   const birthsHtml = othersB.map(renderBornTlItem).join("");
@@ -7250,7 +7359,7 @@ ${siteNav()}
   ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
   ${featured || othersB.length > 0 ? `
-  ${featImg && featured ? `<div class="article-hero-wrap">
+  ${featImg && featured ? `<div id="${escapeHtml(featuredAnchorId)}" class="article-hero-wrap">
     <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="article-hero-img" loading="eager"/>
     <div class="article-hero-overlay"></div>
     <div class="article-hero-content">
@@ -7268,7 +7377,7 @@ ${siteNav()}
       </div>
     </div>
   </div>` : ""}
-  <div class="card-box" style="padding:0;overflow:hidden">
+  <div${featured && !featImg ? ` id="${escapeHtml(featuredAnchorId)}"` : ""} class="card-box" style="padding:0;overflow:hidden">
     <div style="padding:20px 24px">
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
@@ -7322,6 +7431,9 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
   const displayedDeaths = selectDatePersonProfiles(deaths, featured);
   const othersD = displayedDeaths.filter((d) => d !== featured);
   const featName = featured ? escapeHtml(featured.text.split(",")[0]) : "";
+  const featuredAnchorId = featured
+    ? historicalPersonAnchorId(featured, "death")
+    : "";
   const featImg = featured?.pages?.[0]?.originalimage?.source || featured?.pages?.[0]?.thumbnail?.source || null;
   const featRemainder = featured ? featured.text.substring(featured.text.indexOf(",") + 1).trim() : "";
   const didYouKnowFacts = personDidYouKnowFacts(
@@ -7454,6 +7566,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       ? escapeHtml(d.text.slice(d.text.indexOf(",") + 1).trim())
       : "";
     const year = escapeHtml(String(d.year));
+    const personAnchorId = historicalPersonAnchorId(d, "death");
     const imgLink = profileUrl || w;
     const imgHtml = th
       ? imgLink
@@ -7475,7 +7588,7 @@ function generateDiedHTML(siteUrl, monthName, day, eventsData, relatedBlogEntry 
       actionsHtml: actionBtn,
       hasImage: Boolean(th),
     });
-    return `<div class="tl-item" data-year="${parseInt(d.year, 10) || 0}" data-era-item="deaths">${card}</div>`;
+    return `<div id="${escapeHtml(personAnchorId)}" class="tl-item" data-year="${parseInt(d.year, 10) || 0}" data-era-item="deaths">${card}</div>`;
   };
 
   const deathsHtml = othersD.map(renderDiedTlItem).join("");
@@ -7545,7 +7658,7 @@ ${siteNav()}
   ${featImg ? "" : `<p class="text-muted mb-2" style="font-size:15px">${escapeHtml(introLine)}</p>
   <p class="text-muted mb-4" style="font-size:.82rem">By <a href="/about/" rel="author" style="color:inherit">thisDay.info Editorial Team</a> &middot; <time datetime="${MM}-${DD}">${escapeHtml(mDisplay)} ${day}</time> &mdash; <a href="https://www.wikipedia.org" target="_blank" rel="noopener noreferrer">Wikipedia</a></p>`}
   ${featured || othersD.length > 0 ? `
-  ${featImg && featured ? `<div class="article-hero-wrap">
+  ${featImg && featured ? `<div id="${escapeHtml(featuredAnchorId)}" class="article-hero-wrap">
     <img src="/image-proxy?src=${encodeURIComponent(featImg)}&w=800&q=85" srcset="/image-proxy?src=${encodeURIComponent(featImg)}&w=400 400w, /image-proxy?src=${encodeURIComponent(featImg)}&w=800 800w" sizes="(max-width:640px) 100vw, 800px" alt="${featName}" class="article-hero-img" loading="eager"/>
     <div class="article-hero-overlay"></div>
     <div class="article-hero-content">
@@ -7562,7 +7675,7 @@ ${siteNav()}
       </div>
     </div>
   </div>` : ""}
-  <div class="card-box" style="padding:0;overflow:hidden">
+  <div${featured && !featImg ? ` id="${escapeHtml(featuredAnchorId)}"` : ""} class="card-box" style="padding:0;overflow:hidden">
     <div style="padding:20px 24px">
     ${featured ? `
     ${!featImg ? `<h2 style="margin-top:0">${escapeHtml(String(featured.year))} — ${featName}</h2>` : ""}
@@ -8958,7 +9071,7 @@ async function handleFetchRequest(request, env, ctx) {
   }
 
   if (url.pathname === "/people/index.json") {
-    return handlePeopleIndexJson(env);
+    return handlePeopleIndexJson(env, url);
   }
 
   const personEntityMatch = url.pathname.match(/^\/people\/([a-z0-9-]+)\/?$/);
@@ -9973,7 +10086,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=47>; rel=preload; as=style",
+      "</css/custom.css?v=48>; rel=preload; as=style",
     ].join(", "),
   );
 
@@ -11249,6 +11362,9 @@ export const __datePageEngagementTestHooks = {
   buildQuizHookCard,
   buildRelatedQuestionsBlock,
   historicalEventAnchorId,
+  historicalPersonAnchorId,
+  buildPersonAnchorNavigationScript,
+  ensurePersonAnchorNavigationHtml,
   buildEventAnchorNavigationScript,
   ensureEventAnchorNavigationHtml,
   normalizeCachedDatePageControlsHtml,
@@ -11317,11 +11433,13 @@ export const __homepagePerformanceTestHooks = {
   compactHomepagePreloadPage,
   compactHomepagePreloadItem,
   homepageFeaturedPersonContent,
+  selectHomepagePreloadEvents,
   buildHomepagePreloadPayload,
   serializeInlineJson,
   buildHomepageBlogCards,
   buildHomepageDiscoveryLinks,
   loadHomepageEditorialContent,
+  handlePeopleIndexJson,
 };
 
 export const __indexabilityTestHooks = {

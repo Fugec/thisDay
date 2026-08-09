@@ -107,7 +107,7 @@ test("homepage blog cards are real internal links before JavaScript runs", () =>
   assert.match(indexHtml, /dataset\.ssrReady === "true"/);
 });
 
-test("homepage article and event grids use four columns and eight cards", () => {
+test("homepage article grid uses four columns and the event rail stays horizontal", () => {
   const posts = Array.from({ length: 10 }, (_, index) => ({
     slug: `${30 - index}-july-2026`,
     title: `Sourced history story ${index + 1}`,
@@ -124,7 +124,23 @@ test("homepage article and event grids use four columns and eight cards", () => 
   );
   assert.match(
     customCss,
-    /#todaysEventsSection \.blog-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/s,
+    /\.today-through-time-track\s*\{[^}]*display:\s*flex;/s,
+  );
+  assert.match(
+    customCss,
+    /\.today-through-time-card\s*\{[^}]*border-radius:\s*var\(--radius\);[^}]*font-family:\s*inherit;[^}]*box-shadow:\s*none;/s,
+  );
+  assert.match(
+    customCss,
+    /\.today-through-time-card-action\s*\{[^}]*border:\s*1\.5px solid var\(--btn-bg\);[^}]*border-radius:\s*var\(--radius\);/s,
+  );
+  assert.match(
+    customCss,
+    /\.today-through-time-nav\s*\{[^}]*width:\s*34px;[^}]*height:\s*34px;[^}]*border-radius:\s*999px;/s,
+  );
+  assert.doesNotMatch(
+    customCss,
+    /\.today-through-time-card:hover[\s\S]{0,220}transform:\s*(?:translateY|scale)/,
   );
   assert.match(
     styleCss,
@@ -135,7 +151,7 @@ test("homepage article and event grids use four columns and eight cards", () => 
     /\.blog-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s,
   );
   assert.match(indexHtml, /posts\.slice\(0, 8\)/);
-  assert.match(indexHtml, /withImages\.slice\(0, 8\)/);
+  assert.match(clientSource, /selectTodayThroughTimeEvents\(events, 8\)/);
 });
 
 test("Featured Today includes four desktop cards and becomes one mobile slider", () => {
@@ -228,9 +244,9 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=47/);
+  assert.match(indexHtml, /custom\.css\?v=48/);
   assert.match(indexHtml, /style\.css\?v=10/);
-  assert.match(indexHtml, /script\.js\?v=23/);
+  assert.match(indexHtml, /script\.js\?v=24/);
   assert.match(
     workerSource,
     /public, max-age=31536000, s-maxage=31536000, immutable/,
@@ -246,7 +262,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=47"),
+      new Request("https://thisday.info/css/custom.css?v=48"),
       {},
       { waitUntil() {} },
     );
@@ -257,4 +273,35 @@ test("versioned asset responses use the immutable production header", async () =
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("modal person links include every existing profile without expanding the homepage index", async () => {
+  const entries = Array.from({ length: 14 }, (_, index) => ({
+    type: "person",
+    indexable: index !== 13,
+    name: `Historical Person ${index + 1}`,
+    slug: `historical-person-${index + 1}`,
+    url: `/people/historical-person-${index + 1}/`,
+    imageUrl: `https://upload.wikimedia.org/person-${index + 1}.jpg`,
+    summary: `Profile ${index + 1}`,
+    updatedAt: new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
+  }));
+  const env = {
+    BLOG_AI_KV: { get: async () => JSON.stringify(entries) },
+  };
+  const homepage = await hooks.handlePeopleIndexJson(
+    env,
+    new URL("https://thisday.info/people/index.json"),
+  );
+  const links = await hooks.handlePeopleIndexJson(
+    env,
+    new URL("https://thisday.info/people/index.json?scope=links"),
+  );
+  const homepagePeople = await homepage.json();
+  const linkedPeople = await links.json();
+
+  assert.equal(homepagePeople.length, 12);
+  assert.equal(linkedPeople.length, 13);
+  assert.ok(homepagePeople[0].imageUrl);
+  assert.deepEqual(Object.keys(linkedPeople[0]).sort(), ["name", "slug", "url"]);
 });

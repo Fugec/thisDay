@@ -866,8 +866,245 @@ body[data-page="v2"] > .people-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-#todaysEventsSection .blog-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+/* Today Through Time: a user-controlled chronological rail. */
+.today-through-time {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 1.5rem var(--gutter-x);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-alt);
+}
+.today-through-time-viewport {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 0.25rem;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(27, 58, 45, 0.3) transparent;
+}
+.today-through-time-viewport:focus-visible {
+  outline: 3px solid rgba(157, 196, 58, 0.6);
+  outline-offset: 4px;
+}
+.today-through-time-viewport::-webkit-scrollbar {
+  height: 6px;
+}
+.today-through-time-viewport::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(27, 58, 45, 0.3);
+}
+.today-through-time-track {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 1rem;
+  min-width: min-content;
+  margin: 0;
+  padding: 1.35rem 0.25rem 0.8rem;
+  list-style: none;
+}
+.today-through-time-track::before {
+  content: "";
+  position: absolute;
+  top: 0.62rem;
+  right: 0.25rem;
+  left: 0.25rem;
+  height: 2px;
+  background: var(--border);
+}
+.today-through-time-item {
+  position: relative;
+  flex: 0 0 clamp(280px, 28vw, 360px);
+  scroll-snap-align: start;
+}
+.today-through-time-item::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: -1.13rem;
+  left: 1.35rem;
+  width: 12px;
+  height: 12px;
+  border: 3px solid var(--bg-alt);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--btn-bg);
+}
+.today-through-time-card {
+  width: 100%;
+  height: 100%;
+  min-height: 390px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    background 0.15s,
+    border-color 0.18s ease;
+}
+.today-through-time-card:hover,
+.today-through-time-card:focus-visible {
+  background: var(--bg-alt);
+  border-color: var(--btn-bg);
+  box-shadow: none;
+}
+.today-through-time-card:focus-visible {
+  outline: 3px solid rgba(157, 196, 58, 0.65);
+  outline-offset: 2px;
+}
+.today-through-time-media {
+  display: flex;
+  width: 100%;
+  aspect-ratio: 8 / 5;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  background: #e7eee5;
+  color: var(--btn-bg);
+  font-size: 2rem;
+}
+.today-through-time-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+}
+.today-through-time-media-empty {
+  background: linear-gradient(135deg, #edf3e9, #dce8d8);
+}
+.today-through-time-card-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 185px;
+  padding: 1.2rem 1.25rem 1.3rem;
+}
+.today-through-time-year {
+  margin-bottom: 0.45rem;
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.today-through-time-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+.today-through-time-card-description {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 0.55rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.today-through-time-card-action {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.4rem;
+  margin-top: auto;
+  padding: 0.35rem 0.85rem;
+  border: 1.5px solid var(--btn-bg);
+  border-radius: var(--radius);
+  color: var(--btn-bg);
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.today-through-time-card:hover .today-through-time-card-action,
+.today-through-time-card:focus-visible .today-through-time-card-action {
+  background: var(--btn-bg);
+  color: #fff;
+}
+.today-through-time-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--btn-bg);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.today-through-time-nav:hover:not(:disabled),
+.today-through-time-nav:focus-visible:not(:disabled) {
+  border-color: var(--btn-bg);
+  background: var(--bg-alt);
+  color: var(--btn-bg);
+}
+.today-through-time-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.today-through-time-footer {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: 0.35rem;
+}
+.today-through-time-footer p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+.today-through-time-status {
+  min-width: min(560px, 80vw);
+  padding: 2rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+@media (max-width: 700px) {
+  .today-through-time {
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: var(--gutter-x);
+  }
+  .today-through-time-nav {
+    display: none;
+  }
+  .today-through-time-item {
+    flex-basis: min(82vw, 330px);
+  }
+  .today-through-time-card {
+    min-height: 370px;
+  }
+  .today-through-time-footer {
+    grid-column: 1;
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 .blog-cta-col {
   background: var(--btn-bg);
@@ -1594,6 +1831,10 @@ main.container {
 .modal-tl-card:hover {
   box-shadow: var(--shadow);
 }
+.modal-tl-item-targeted .modal-tl-card {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(157, 196, 58, 0.24);
+}
 .modal-tl-media {
   width: 100%;
   height: 200px;
@@ -2130,14 +2371,12 @@ main.container {
   background: var(--btn-hover);
 }
 
-/* Share and WhatsApp buttons - gray style */
-.event-action-btn.event-action-share,
+/* WhatsApp buttons - gray style */
 .event-action-btn.event-action-wa {
   border-color: var(--text-muted);
   color: var(--text-muted);
 }
 
-.event-action-btn.event-action-share:hover,
 .event-action-btn.event-action-wa:hover {
   background: var(--text-muted);
   color: #fff;

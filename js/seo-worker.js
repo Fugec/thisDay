@@ -1029,6 +1029,46 @@ async function getBlogIndexEntries(env) {
   return Array.isArray(index) ? index : [];
 }
 
+async function getPublishedDateBlogEntries(env, monthName, day) {
+  if (!env?.BLOG_AI_KV) return [];
+  try {
+    const now = Date.now();
+    if (
+      !getPublishedDateBlogEntries.cachedIndex ||
+      getPublishedDateBlogEntries.cachedBinding !== env.BLOG_AI_KV ||
+      now >= getPublishedDateBlogEntries.cacheExpiresAt
+    ) {
+      getPublishedDateBlogEntries.cachedIndex = await getBlogIndexEntries(env);
+      getPublishedDateBlogEntries.cachedBinding = env.BLOG_AI_KV;
+      getPublishedDateBlogEntries.cacheExpiresAt = now + 5 * 60 * 1000;
+    }
+    const routeKey = dateRouteKey(monthName, day);
+    const seenSlugs = new Set();
+    const candidates = getPublishedDateBlogEntries.cachedIndex.filter((entry) => {
+      const slug = String(entry?.slug || "").trim();
+      if (
+        !slug ||
+        seenSlugs.has(slug) ||
+        !safeBlogStoryUrl(entry) ||
+        blogEntryDateRouteKey(entry) !== routeKey
+      ) {
+        return false;
+      }
+      seenSlugs.add(slug);
+      return true;
+    });
+    const verified = await Promise.all(
+      candidates.map((entry) => verifyPublishedDateBlogEntry(env, entry)),
+    );
+    return verified.filter(Boolean);
+  } catch (_) {
+    return [];
+  }
+}
+getPublishedDateBlogEntries.cachedIndex = null;
+getPublishedDateBlogEntries.cachedBinding = null;
+getPublishedDateBlogEntries.cacheExpiresAt = 0;
+
 function slugifyArchiveLabel(value) {
   return String(value || "")
     .toLowerCase()
@@ -5497,11 +5537,50 @@ a{color:var(--lc)}a:hover{text-decoration:underline}
   );
 }
 
+const ANCHOR_SAFE_SCROLL_SCRIPT = `
+function bottomOverlayInset(){
+var viewportHeight=window.innerHeight||(document.documentElement&&document.documentElement.clientHeight)||0;
+var viewportWidth=window.innerWidth||(document.documentElement&&document.documentElement.clientWidth)||0;
+if(!viewportHeight||typeof window.getComputedStyle!=='function')return 0;
+var candidates=document.querySelectorAll('body > *,body > * > *,ins.adsbygoogle,iframe[src*="googlesyndication"]');
+var inset=0;
+for(var index=0;index<candidates.length;index+=1){
+var node=candidates[index],depth=0;
+while(node&&node!==document.body&&depth<6){
+var style=window.getComputedStyle(node);var rect=node.getBoundingClientRect();
+var visible=style.display!=='none'&&style.visibility!=='hidden'&&parseFloat(style.opacity||'1')!==0;
+var anchored=(style.position==='fixed'||style.position==='sticky')&&rect.height>0&&rect.width>=viewportWidth*.35&&rect.top>0&&rect.top<viewportHeight&&rect.bottom>=viewportHeight-4;
+if(visible&&anchored){inset=Math.max(inset,viewportHeight-Math.max(0,rect.top));break;}
+node=node.parentElement;depth+=1;
+}
+}
+return Math.min(inset,viewportHeight*.45);
+}
+function settleAnchorTarget(target){
+var viewportHeight=window.innerHeight||(document.documentElement&&document.documentElement.clientHeight)||0;
+if(!target||!viewportHeight||typeof window.scrollBy!=='function')return;
+var rect=target.getBoundingClientRect();
+if(rect.bottom<=0||rect.top>=viewportHeight)return;
+var bottomInset=Math.min(viewportHeight*.45,Math.max(120,bottomOverlayInset()));
+var safeTop=24,safeBottom=viewportHeight-bottomInset-24,delta=0;
+if(rect.bottom>safeBottom)delta=rect.bottom-safeBottom;
+if(rect.top-delta<safeTop)delta=rect.top-safeTop;
+if(Math.abs(delta)>1)window.scrollBy({top:delta,left:0,behavior:'auto'});
+}
+function scrollAnchorTarget(target){
+requestAnimationFrame(function(){
+target.scrollIntoView({block:'center'});
+requestAnimationFrame(function(){settleAnchorTarget(target);});
+if(typeof setTimeout==='function')setTimeout(function(){settleAnchorTarget(target);},1200);
+});
+}`;
+
 function buildPersonAnchorNavigationScript(type) {
   const kind = type === "death" || type === "died" ? "death" : "birth";
   const eraItem = kind === "death" ? "deaths" : "births";
   return `<script id="person-anchor-navigation">(function(){
 var historicalPersonAnchorId=${historicalPersonAnchorId.toString()};
+${ANCHOR_SAFE_SCROLL_SCRIPT}
 var kind=${JSON.stringify(kind)};
 var eraItem=${JSON.stringify(eraItem)};
 function titleParts(value){var match=String(value||'').trim().match(/^(-?\\d+)\\s*(?:—|&mdash;|-)\\s*(.+)$/);return match?{year:match[1],name:match[2].trim()}:null;}
@@ -5516,7 +5595,7 @@ var heading=featured&&featured.querySelector('.article-hero-title');
 if(!featured){var boxes=document.querySelectorAll('main > .card-box');for(var index=0;index<boxes.length;index+=1){var candidate=boxes[index].querySelector('h2');if(titleParts(candidate&&candidate.textContent)){featured=boxes[index];heading=candidate;break;}}}
 var parts=titleParts(heading&&heading.textContent);if(featured&&parts&&!featured.id)featured.id=historicalPersonAnchorId({year:parts.year,text:parts.name},kind);
 }
-function revealPersonAnchor(){assignPersonAnchors();var id='';try{id=decodeURIComponent(location.hash.slice(1));}catch(_){id=location.hash.slice(1);}if(id.indexOf('person-'+kind+'-')!==0)return;var target=document.getElementById(id);if(!target)target=document.getElementById('major-'+eraItem+'-heading')||document.querySelector('main h1')||document.querySelector('main');if(!target)return;target.style.display='';requestAnimationFrame(function(){target.scrollIntoView({block:'center'});});}
+function revealPersonAnchor(){assignPersonAnchors();var id='';try{id=decodeURIComponent(location.hash.slice(1));}catch(_){id=location.hash.slice(1);}if(id.indexOf('person-'+kind+'-')!==0)return;var target=document.getElementById(id);if(!target)target=document.getElementById('major-'+eraItem+'-heading')||document.querySelector('main h1')||document.querySelector('main');if(!target)return;target.style.display='';scrollAnchorTarget(target);}
 revealPersonAnchor();if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',revealPersonAnchor,{once:true});window.addEventListener('hashchange',revealPersonAnchor);
 })();</script>`;
 }
@@ -6269,6 +6348,9 @@ function generateEventsDateHTML(
   const renderTimelineItem = (e) => {
     const w = e.pages?.[0]?.content_urls?.desktop?.page || "";
     const th = e.pages?.[0]?.thumbnail?.source || "";
+    const storyUrl = typeof safeBlogStoryUrl === "function"
+      ? safeBlogStoryUrl(eventStoryLinks.get(e))
+      : "";
     const yearStr = escapeHtml(String(e.year));
     const eventAnchorId = historicalEventAnchorId(e);
     const fullText = e.text;
@@ -6280,13 +6362,18 @@ function generateEventsDateHTML(
       e.pages?.[0]?.title || e.pages?.[0]?.normalizedtitle || fullText,
     );
     const imgHtml = th
-      ? w
-        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" tabindex="-1"><img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
+      ? storyUrl || w
+        ? `<a href="${escapeHtml(storyUrl || w)}"${storyUrl ? "" : ' target="_blank" rel="noopener noreferrer"'} tabindex="-1"><img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.closest('a').outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'"></a>`
         : `<img src="${escapeHtml(th)}" alt="${imgAlt}" class="tl-card-img" loading="lazy" decoding="async" onerror="this.outerHTML='<div class=\\'tl-card-img-blank\\'><i class=\\'bi bi-image-alt\\'></i></div>'">`
       : "";
-    const actionsHtml = w
-      ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn tl-btn">Wikipedia source</a>`
-      : "";
+    const actionsHtml = [
+      storyUrl
+        ? `<a href="${escapeHtml(storyUrl)}" class="site-btn site-btn-primary tl-btn">Read our story</a>`
+        : "",
+      w
+        ? `<a href="${escapeHtml(w)}" target="_blank" rel="noopener noreferrer" class="site-btn tl-btn">Wikipedia source</a>`
+        : "",
+    ].filter(Boolean).join("");
     const card = buildDateCardShell({
       year: yearStr,
       title: titleText,
@@ -6418,6 +6505,99 @@ ${buildEventAnchorNavigationScript()}
 ${siteFooter("yr")}
 ${getSharedPageScripts({ pageType: "events-date", pageSlug: `${monthName}-${day}` })}
 </body></html>`;
+}
+
+function ensureCachedEventStoryLinksHtml(
+  html,
+  { events = [], stories = [] } = {},
+) {
+  let source = String(html || "");
+  if (!source || !events.length || !stories.length) return source;
+  const matches = matchHistoricalEventsToBlogStories(events, stories);
+
+  for (const [event, story] of matches) {
+    const storyUrl = safeBlogStoryUrl(story);
+    if (!storyUrl) continue;
+    const escapedStoryUrl = escapeHtml(storyUrl);
+    const storyButton = `<a href="${escapedStoryUrl}" class="site-btn site-btn-primary tl-btn">Read our story</a>`;
+    const anchorId = historicalEventAnchorId(event);
+    const anchorPosition = source.indexOf(`id="${escapeHtml(anchorId)}"`);
+    if (anchorPosition < 0) continue;
+
+    const itemStart = source.lastIndexOf("<div", anchorPosition);
+    const itemOpeningEnd = source.indexOf(">", anchorPosition);
+    const itemOpening = itemOpeningEnd >= 0
+      ? source.slice(itemStart, itemOpeningEnd + 1)
+      : "";
+    if (/class="[^"]*\btl-item\b/.test(itemOpening)) {
+      const nextItem = source.indexOf('<div id="event-', anchorPosition + 1);
+      const itemEnd = nextItem >= 0
+        ? nextItem
+        : Math.min(source.length, itemStart + 20_000);
+      let itemHtml = source.slice(itemStart, itemEnd);
+      if (!itemHtml.includes(`href="${escapedStoryUrl}"`)) {
+        itemHtml = itemHtml.replace(
+          /<a href="[^"]+" target="_blank" rel="noopener noreferrer" tabindex="-1">(?=<img\b)/,
+          `<a href="${escapedStoryUrl}" tabindex="-1">`,
+        );
+        if (itemHtml.includes('<div class="tl-card-actions">')) {
+          itemHtml = itemHtml.replace(
+            '<div class="tl-card-actions">',
+            `<div class="tl-card-actions">${storyButton}`,
+          );
+        } else {
+          itemHtml = itemHtml.replace(
+            /(\n  <\/div>\n<\/div><\/div>)/,
+            `\n    <div class="tl-card-actions">${storyButton}</div>$1`,
+          );
+        }
+        source = `${source.slice(0, itemStart)}${itemHtml}${source.slice(itemEnd)}`;
+      }
+      continue;
+    }
+
+    const featuredCardStart = source.indexOf(
+      '<div class="card-box" style="padding:0;overflow:hidden">',
+      itemStart,
+    );
+    if (featuredCardStart < 0) continue;
+    const featuredEnd = source.indexOf('<div class="tl-wrap">', featuredCardStart);
+    const featureLimit = featuredEnd >= 0 ? featuredEnd : featuredCardStart + 30_000;
+    const featuredHtml = source.slice(featuredCardStart, featureLimit);
+    if (featuredHtml.includes(`href="${escapedStoryUrl}"`)) continue;
+    const adPosition = source.indexOf(
+      '<div class="ad-unit-container my-4"',
+      featuredCardStart,
+    );
+    const insertPosition =
+      adPosition >= 0 && adPosition < featureLimit
+        ? adPosition
+        : source.indexOf('<hr style="border:none;border-top:', featuredCardStart);
+    if (insertPosition >= 0 && insertPosition < featureLimit) {
+      source = `${source.slice(0, insertPosition)}<div class="tl-card-actions">${storyButton}</div>\n    ${source.slice(insertPosition)}`;
+    }
+  }
+  return source;
+}
+
+async function ensurePublishedEventStoryLinksHtml(
+  html,
+  env,
+  monthName,
+  day,
+) {
+  const stories = await getPublishedDateBlogEntries(env, monthName, day);
+  if (!stories.length || !env?.EVENTS_KV) return String(html || "");
+  const monthNum = MONTH_NUM_MAP[String(monthName || "").toLowerCase()];
+  if (!monthNum) return String(html || "");
+  const key = `events-data:${String(monthNum).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const eventsData = await env.EVENTS_KV.get(key, { type: "json" }).catch(
+    () => null,
+  );
+  return ensureCachedEventStoryLinksHtml(html, {
+    events: Array.isArray(eventsData?.events) ? eventsData.events : [],
+    stories,
+  });
 }
 
 function serveEventsDateSitemap(siteUrl) {
@@ -6652,6 +6832,7 @@ function buildDateBottomNavigationForRoute(
 function buildEventAnchorNavigationScript() {
   return `<script id="event-anchor-navigation">(function(){
 var historicalEventAnchorId=${historicalEventAnchorId.toString()};
+${ANCHOR_SAFE_SCROLL_SCRIPT}
 function assignEventAnchors(){
 var schemas=document.querySelectorAll('script[type="application/ld+json"]');
 for(var schemaIndex=0;schemaIndex<schemas.length;schemaIndex+=1){
@@ -6716,7 +6897,7 @@ var moreWrap=target.closest('#events-more');
 var moreBtn=document.getElementById('events-more-btn');
 if(moreWrap){moreWrap.style.display='block';if(moreBtn)moreBtn.style.display='none';}
 target.style.display='';
-requestAnimationFrame(function(){target.scrollIntoView({block:'center'});});
+scrollAnchorTarget(target);
 }
 revealEventAnchor();
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',revealEventAnchor,{once:true});
@@ -8410,9 +8591,18 @@ async function handleEventsDatePage(request, env, ctx, url) {
     if (env.EVENTS_KV && !bypassCache) {
       const cached = await env.EVENTS_KV.get(kvKey);
       if (cached) {
+        const cachedWithStoryLinks = await ensurePublishedEventStoryLinksHtml(
+          cached,
+          env,
+          monthName,
+          day,
+        );
         const normalizedControls = normalizeDatePageCleanLayoutHtml(
           ensureEventAnchorNavigationHtml(
-            normalizeCachedDatePageControlsHtml(cached, { monthName, day }),
+            normalizeCachedDatePageControlsHtml(cachedWithStoryLinks, {
+              monthName,
+              day,
+            }),
           ),
           { type: "events", monthName, day },
         );
@@ -8546,13 +8736,11 @@ async function handleEventsDatePage(request, env, ctx, url) {
   }
 
   const siteUrl = "https://thisday.info";
-  const blogIndex = await getBlogIndexEntries(env);
+  const blogIndex = await getPublishedDateBlogEntries(env, monthName, day);
   const indexedBlogEntry =
     buildPublishedDateRouteMap(blogIndex).get(dateRouteKey(monthName, day)) ||
     null;
-  const relatedBlogEntry = indexedBlogEntry
-    ? await verifyPublishedDateBlogEntry(env, indexedBlogEntry)
-    : null;
+  const relatedBlogEntry = indexedBlogEntry || null;
   const generatedHtml = generateEventsDateHTML(
     monthName,
     day,
@@ -8563,7 +8751,7 @@ async function handleEventsDatePage(request, env, ctx, url) {
     null,
     relatedBlogEntry,
     null,
-    relatedBlogEntry ? [relatedBlogEntry] : [],
+    blogIndex,
   );
   const html = normalizeDatePageCleanLayoutHtml(generatedHtml, {
     type: "events",
@@ -11316,6 +11504,12 @@ export default {
           const day = Number(cachedDateRoute[3]);
           let datePageHtml = await cached.text();
           if (pageType === "events") {
+            datePageHtml = await ensurePublishedEventStoryLinksHtml(
+              datePageHtml,
+              env,
+              monthName,
+              day,
+            );
             datePageHtml = ensureEventAnchorNavigationHtml(
               normalizeCachedDatePageControlsHtml(datePageHtml, {
                 monthName,
@@ -11386,6 +11580,9 @@ export const __datePageEngagementTestHooks = {
   ensureCachedPersonDateDidYouKnowHtml,
   expandDateTimelineHtml,
   ensureTimelineCardActionWrappersHtml,
+  ensureCachedEventStoryLinksHtml,
+  ensurePublishedEventStoryLinksHtml,
+  getPublishedDateBlogEntries,
   normalizeDatePageCleanLayoutHtml,
   buildDateBottomNavigationForRoute,
   authorizedDatePageCacheBypass,

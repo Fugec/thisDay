@@ -60,11 +60,11 @@ test("cached date pages receive the same control classes without a KV rewrite", 
   );
   assert.match(
     seoWorker,
-    /const normalizedControls = normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /const normalizedControls = normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cachedWithStoryLinks, \{\s*monthName,\s*day,\s*\}\),\s*\)/,
   );
   assert.match(
     seoWorker,
-    /const kvKey = `gen-post-v55-[\s\S]*?const normalizedControls = normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /const kvKey = `gen-post-v57-[\s\S]*?const cachedWithStoryLinks = await ensurePublishedEventStoryLinksHtml\([\s\S]*?const normalizedControls = normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cachedWithStoryLinks, \{\s*monthName,\s*day,\s*\}\),\s*\)/,
   );
   assert.match(seoWorker, /navigationBlock\.match\(\/<a\\b/);
   assert.match(seoWorker, /link\.includes\(className\)/);
@@ -243,6 +243,22 @@ test("event fragments reveal hidden chronology cards before scrolling", () => {
   );
   assert.match(
     seoWorker,
+    /Math\.max\(120,bottomOverlayInset\(\)\)/,
+  );
+  assert.match(
+    seoWorker,
+    /setTimeout\(function\(\)\{settleAnchorTarget\(target\);\},1200\)/,
+  );
+  assert.match(
+    seoWorker,
+    /function revealEventAnchor\(\)[\s\S]*?scrollAnchorTarget\(target\)/,
+  );
+  assert.match(
+    seoWorker,
+    /function revealPersonAnchor\(\)[\s\S]*?scrollAnchorTarget\(target\)/,
+  );
+  assert.match(
+    seoWorker,
     /var candidatePrefix=historicalEventAnchorId\(\{year:year,description:candidateText\}\)\.replace\(\/-\[a-z0-9\]\+\$\/,'-'\)/,
   );
   assert.match(
@@ -255,11 +271,11 @@ test("event fragments reveal hidden chronology cards before scrolling", () => {
   );
   assert.match(
     seoWorker,
-    /normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cached, \{ monthName, day \}\),\s*\)/,
+    /normalizeDatePageCleanLayoutHtml\(\s*ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(cachedWithStoryLinks, \{\s*monthName,\s*day,\s*\}\),\s*\)/,
   );
   assert.match(
     seoWorker,
-    /if \(pageType === "events"\) \{\s*datePageHtml = ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(datePageHtml, \{\s*monthName,\s*day,\s*\}\),\s*\)/,
+    /if \(pageType === "events"\) \{\s*datePageHtml = await ensurePublishedEventStoryLinksHtml\([\s\S]*?datePageHtml = ensureEventAnchorNavigationHtml\(\s*normalizeCachedDatePageControlsHtml\(datePageHtml, \{\s*monthName,\s*day,\s*\}\),\s*\)/,
   );
 });
 
@@ -275,6 +291,14 @@ test("legacy cards with an added page description still resolve the homepage fra
   const moreWrap = { style: { display: "none" } };
   const moreButton = { style: { display: "" } };
   let scrollOptions = null;
+  let scrollDelta = 0;
+  const pageBody = {};
+  const bottomAd = {
+    parentElement: pageBody,
+    getBoundingClientRect() {
+      return { top: 700, bottom: 800, height: 100, width: 1000 };
+    },
+  };
   const item = {
     id: "",
     style: { display: "none" },
@@ -293,11 +317,17 @@ test("legacy cards with an added page description still resolve the homepage fra
     scrollIntoView(options) {
       scrollOptions = options;
     },
+    getBoundingClientRect() {
+      return { top: 200, bottom: 720, height: 520, width: 500 };
+    },
   };
   const document = {
     readyState: "complete",
+    body: pageBody,
+    documentElement: { clientHeight: 800, clientWidth: 1200 },
     querySelectorAll(selector) {
       if (selector === ".tl-item") return [item];
+      if (selector.startsWith("body >")) return [bottomAd];
       return [];
     },
     getElementById(id) {
@@ -321,7 +351,22 @@ test("legacy cards with an added page description still resolve the homepage fra
     requestAnimationFrame(callback) {
       callback();
     },
-    window: { addEventListener() {} },
+    window: {
+      innerHeight: 800,
+      innerWidth: 1200,
+      addEventListener() {},
+      getComputedStyle() {
+        return {
+          display: "block",
+          visibility: "visible",
+          opacity: "1",
+          position: "fixed",
+        };
+      },
+      scrollBy(options) {
+        scrollDelta += options.top;
+      },
+    },
   });
 
   assert.equal(item.id, requestedId);
@@ -329,4 +374,5 @@ test("legacy cards with an added page description still resolve the homepage fra
   assert.equal(moreWrap.style.display, "block");
   assert.equal(moreButton.style.display, "none");
   assert.equal(scrollOptions?.block, "center");
+  assert.equal(scrollDelta, 64);
 });

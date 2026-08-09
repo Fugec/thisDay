@@ -480,7 +480,8 @@ test("Groq token headroom defers the next oversized request before it is sent", 
       kv.puts.filter((entry) =>
         entry.key.startsWith("ai-provider-circuit-v1:")
       ).length,
-      1,
+      2,
+      "one successful-call token estimate and one preflight deferral share the durable circuit record",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -630,7 +631,14 @@ test("a blocked Groq pool does not hide a separately declared pool", async () =>
       "pool-b-ok",
     );
     assert.deepEqual(usedKeys, ["pool-a-key", "pool-b-key"]);
-    assert.equal(kv.puts.length, 1);
+    assert.equal(
+      kv.puts.length,
+      2,
+      "the blocked-pool circuit and the successful independent pool's token estimate are both durable",
+    );
+    const finalCircuit = JSON.parse(kv.puts.at(-1).value);
+    assert.ok(finalCircuit.providers["groq:organization-a"]);
+    assert.ok(finalCircuit.groqTokenEstimate.pools["organization-b"] > 0);
   } finally {
     globalThis.fetch = originalFetch;
     __resetGroqModelCacheForTests();
@@ -753,12 +761,13 @@ test("a split conclusion uses a compact one-paragraph output contract", async ()
   assert.equal(result.conclusionParagraphs.length, 1);
 });
 
-test("article generation request budget reserves one bounded replacement topic and resets on a new UTC day", async () => {
+test("article generation request budget enforces per-source and date-wide ceilings and resets on a new UTC day", async () => {
   const kv = makeKvMock();
   const env = {
     BLOG_AI_KV: kv,
     ARTICLE_GENERATION_REQUEST_BUDGET: "2",
     ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET: "3",
+    ARTICLE_GENERATION_DAILY_REQUEST_BUDGET: "5",
   };
   const date = new Date();
   const fingerprint = hooks.articleGenerationSourceFingerprint(
@@ -856,9 +865,9 @@ test("article generation request budget reserves one bounded replacement topic a
       .consumeRequest("third brief"),
     (error) =>
       error?.code === "AI_CAPACITY_UNAVAILABLE" &&
-      /too little daily budget remains for another topic rotation/.test(error.message),
+      /5\/5 daily exhausted/.test(error.message),
   );
-  assert.equal(kv.puts.length, 5, "a third topic cannot reopen the date-wide allowance");
+  assert.equal(kv.puts.length, 5, "an exhausted date cannot reopen the allowance on another topic");
 
   resumed.requestBudget.date = "2000-01-01";
   await hooks.createArticleGenerationCheckpointer(env, date, resumed)
@@ -869,7 +878,7 @@ test("article generation request budget reserves one bounded replacement topic a
 
   assert.equal(hooks.articleGenerationRequestBudgetLimit({}), 12);
   assert.equal(hooks.articleGenerationReplacementRequestBudgetLimit({}), 14);
-  assert.equal(hooks.articleGenerationDailyRequestBudgetLimit({}), 26);
+  assert.equal(hooks.articleGenerationDailyRequestBudgetLimit({}), 54);
   assert.equal(
     hooks.articleGenerationDailyRequestBudgetLimit({
       ARTICLE_GENERATION_DAILY_REQUEST_BUDGET: "34",
@@ -894,7 +903,7 @@ test("article generation request budget reserves one bounded replacement topic a
     hooks.articleGenerationDailyRequestBudgetLimit({
       ARTICLE_GENERATION_DAILY_REQUEST_BUDGET: "100",
     }),
-    34,
+    54,
   );
   assert.equal(
     hooks.articleGenerationDailyRequestBudgetLimit({
@@ -1298,6 +1307,13 @@ test("bounded recovery strengthens short core modules from retained sources", ()
   const content = {
     sourcePageTitle: source.pageTitle,
     eventTitle: "El Paso Walmart shooting occurs",
+    keyTerms: [
+      {
+        term: "Patrick Crusius",
+        type: "person",
+        wikiUrl: "https://en.wikipedia.org/wiki/2019_El_Paso_shooting",
+      },
+    ],
     didYouKnowFacts: [
       "Patrick Crusius drove 650 miles to El Paso before the August 3, 2019 attack.",
       "The Federal Bureau of Investigation treated the shooting as domestic terrorism.",
@@ -1549,7 +1565,7 @@ test("undersized chunked body selects only the shortest field for targeted repai
   assert.equal(hooks.chunkedArticleBodyCapacityRepairFields(body).length, 0);
 });
 
-test("failsafe permits one recovery attempt and has a non-overlapping concurrency lock", () => {
+test("failsafe resumes retained enrichment outboxes and retries only transient recovery failures", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/blog-failsafe.yml", import.meta.url),
     "utf8",
@@ -1567,6 +1583,22 @@ test("failsafe permits one recovery attempt and has a non-overlapping concurrenc
     workflow,
     /\/blog\/recover-post-figures\?slug=\$\{SLUG\}/,
     "a failsafe publication must start optional enrichment after its one-minute verification wait",
+  );
+  assert.match(workflow, /if \[ "\$STATUS" = "200" \]; then[\s\S]*"\$DRAFT_URL"/);
+  assert.match(workflow, /for RECOVERY_ATTEMPT in 1 2 3/);
+  assert.match(
+    workflow,
+    /\.finalized\.complete == true and \.finalized\.outboxCleared == true/,
+  );
+  assert.match(workflow, /if \[ "\$RECOVERY_HTTP_STATUS" = "429" \]; then/);
+  assert.match(
+    workflow,
+    /"\$RECOVERY_HTTP_STATUS" != "503"[\s\S]*"\$RECOVERY_HTTP_STATUS" != "000"/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /if \[ "\$RECOVERY_HTTP_STATUS" = "200" \]; then\s*break/,
+    "HTTP 200 alone must not conceal an incomplete outbox",
   );
 });
 

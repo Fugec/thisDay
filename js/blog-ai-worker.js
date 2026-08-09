@@ -1134,11 +1134,62 @@ function publishableDidYouKnowFacts(facts, content = null) {
   const concreteFacts = (Array.isArray(facts) ? facts : [])
     .filter((fact) => typeof fact === "string")
     .map(normalizeArticleDidYouKnowFact)
-    .filter((fact) => fact && hasHardFact(fact));
+    .filter(
+      (fact) =>
+        fact &&
+        hasHardFact(fact) &&
+        !didYouKnowFactHasSourceBoilerplate(fact),
+    );
   return distinctDidYouKnowFacts(concreteFacts, content).slice(
     0,
     MAX_DID_YOU_KNOW_FACTS,
   );
+}
+
+// Source extracts occasionally contain navigation/help copy that is factual
+// enough to pass the normal hard-fact gate. It must never become a public
+// curiosity card merely because it is adjacent to an event sentence.
+const DID_YOU_KNOW_SOURCE_BOILERPLATE_RE =
+  /\b(?:for more information,?\s+(?:please\s+)?see|please\s+see\s+the\s+(?:full|complete)\s+(?:notice|article|entry)|full\s+notice|jump\s+to\s+(?:navigation|content)|table\s+of\s+contents|this\s+(?:page|article)\s+is\s+no\s+longer\s+(?:maintained|updated))\b/i;
+
+function didYouKnowFactHasSourceBoilerplate(fact) {
+  return DID_YOU_KNOW_SOURCE_BOILERPLATE_RE.test(plainText(fact));
+}
+
+const DID_YOU_KNOW_GENERIC_EVENT_TOKENS = new Set([
+  "began", "begins", "ended", "ends", "event", "government", "historic",
+  "historical", "history", "kingdom", "national", "opened", "opens",
+  "signed", "signing", "signs", "states", "united",
+]);
+
+function didYouKnowEventAnchorTokens(content = {}) {
+  const primaryIdentity =
+    content?.sourcePageTitle || content?.eventTitle || content?.title || "";
+  const personTerms = (Array.isArray(content?.keyTerms) ? content.keyTerms : [])
+    .filter((term) => term?.type === "person")
+    .map((term) => term?.term)
+    .filter(Boolean);
+  return semanticDuplicateTokens(
+    [primaryIdentity, ...personTerms].join(" "),
+    DID_YOU_KNOW_GENERIC_EVENT_TOKENS,
+  );
+}
+
+function didYouKnowFactIsEventRelevant(fact, content = null) {
+  if (!content || typeof content !== "object") return true;
+  const anchors = didYouKnowEventAnchorTokens(content);
+  if (!anchors.size) return true;
+  const factText = plainText(fact);
+  const year = String(
+    content.historicalYear ||
+      (String(content.historicalDate || "").match(/\b\d{3,4}\b/) || [""])[0],
+  );
+  if (year && new RegExp(`\\b${year}\\b`).test(factText)) return true;
+  const factTokens = semanticDuplicateTokens(factText);
+  for (const token of anchors) {
+    if (factTokens.has(token)) return true;
+  }
+  return false;
 }
 
 // A facts provider can return fluent but content-free Did You Know cards even
@@ -1158,6 +1209,12 @@ function sourceDerivedDidYouKnowFacts(sourceMaterial, content = {}) {
     // Remove that display label so the public card begins with the evidence,
     // while retaining the complete source sentences byte-for-byte otherwise.
     const separator = section.indexOf(": ");
+    const sourceLabel = separator >= 3 && separator <= 180
+      ? section.slice(0, separator).trim()
+      : "";
+    const sourceLabelMatchesEvent = Boolean(
+      sourceLabel && didYouKnowFactIsEventRelevant(sourceLabel, content),
+    );
     const body = separator >= 3 && separator <= 180
       ? section.slice(separator + 2).trim()
       : section;
@@ -1188,6 +1245,9 @@ function sourceDerivedDidYouKnowFacts(sourceMaterial, content = {}) {
         words >= 35 &&
         words <= 90 &&
         hasHardFact(candidate) &&
+        !didYouKnowFactHasSourceBoilerplate(candidate) &&
+        (sourceLabelMatchesEvent ||
+          didYouKnowFactIsEventRelevant(candidate, content)) &&
         !/\b(?:https?:\/\/|www\.)/i.test(candidate) &&
         hasCompleteEnding
       ) {
@@ -4498,13 +4558,15 @@ export default {
       }
       try {
         const result = await recoverPublishedPostEnrichment(guarded.env, recoverSlug);
-        const evergreen = result.found
+        const evergreen = result.found && !result.complete
           ? await recoverPendingEvergreenHistory(guarded.env, {
               preferPostSlug: recoverSlug,
               requirePostSlug: true,
             })
           : { selected: 0, promoted: 0, deferred: 0 };
-        const finalized = result.found
+        const finalized = result.outboxCleared
+          ? result
+          : result.found
           ? await maybeFinalizePostPublishEnrichment(guarded.env, recoverSlug)
           : { found: false, complete: false };
         return jsonResponse({
@@ -4525,6 +4587,7 @@ export default {
             complete: finalized.complete === true,
             evergreenReady: finalized.evergreenReady === true,
             notified: finalized.notified === true,
+            outboxCleared: finalized.outboxCleared === true,
           },
         });
       } catch (err) {
@@ -7569,11 +7632,20 @@ function buildFallbackEditorialNote(content) {
   const event = content.eventTitle || content.title || "this event";
   const date = content.historicalDate || "its day";
   const location = content.location ? ` at ${content.location}` : "";
-  const fact = (content.quickFacts || [])
-    .map((item) => item?.value)
-    .find((value) => typeof value === "string" && value.trim().length > 20);
+  const quickFacts = (Array.isArray(content.quickFacts) ? content.quickFacts : [])
+    .filter(
+      (item) =>
+        typeof item?.value === "string" &&
+        item.value.trim().length > 20 &&
+        normalizeForCompare(item.value) !== normalizeForCompare(event),
+    );
+  const fact =
+    quickFacts.find(
+      (item) => !/^(?:event|date|location)$/i.test(String(item?.label || "")),
+    )?.value || quickFacts[0]?.value;
+  const normalizedFact = String(fact || "").replace(/\s+/g, " ").trim();
   const factSentence = fact
-    ? `The detail that stays with us is this: ${fact.replace(/\s+/g, " ").trim()}`
+    ? `The detail that stays with us is this: ${normalizedFact}${/[.!?]["')\]]?$/.test(normalizedFact) ? "" : "."}`
     : `The detail that stays with us is how much public meaning gathered around one recorded event.`;
 
   return (
@@ -10545,20 +10617,46 @@ async function postPublishEnrichmentStatus(env, slug, draft = null) {
   };
 }
 
-async function maybeFinalizePostPublishEnrichment(env, slug) {
+async function maybeFinalizePostPublishEnrichment(
+  env,
+  slug,
+  { draft: suppliedDraft = null, status: suppliedStatus = null } = {},
+) {
   const key = postPublishEnrichmentKey(slug);
-  const raw = await env.BLOG_AI_KV.get(key).catch(() => null);
-  if (!raw) return { found: false, complete: false, notified: false };
-  let draft;
-  try {
-    draft = JSON.parse(raw);
-  } catch {
-    return { found: false, complete: false, notified: false };
+  const raw = suppliedDraft
+    ? null
+    : await env.BLOG_AI_KV.get(key).catch(() => null);
+  if (!suppliedDraft && !raw) {
+    return {
+      found: false,
+      complete: false,
+      notified: false,
+      outboxCleared: true,
+    };
+  }
+  let draft = suppliedDraft;
+  if (!draft) {
+    try {
+      draft = JSON.parse(raw);
+    } catch {
+      return {
+        found: false,
+        complete: false,
+        notified: false,
+        outboxCleared: false,
+      };
+    }
   }
   if (!draft?.postPublished || !draft?.content) {
-    return { found: false, complete: false, notified: false };
+    return {
+      found: false,
+      complete: false,
+      notified: false,
+      outboxCleared: false,
+    };
   }
-  const status = await postPublishEnrichmentStatus(env, slug, draft);
+  const status = suppliedStatus ||
+    await postPublishEnrichmentStatus(env, slug, draft);
   const createdAt = Date.parse(
     draft.postPublishEnrichment?.createdAt ||
       draft.publishedAt ||
@@ -10571,6 +10669,7 @@ async function maybeFinalizePostPublishEnrichment(env, slug) {
     draft.postPublishEnrichment?.notifiedAt,
   );
   let notified = alreadyNotified;
+  let outboxCleared = false;
   if ((status.complete || deadlineReached) && !alreadyNotified) {
     await runPostPublishExtras(env, slug, draft.content, {
       scheduleEnrichment: false,
@@ -10579,7 +10678,14 @@ async function maybeFinalizePostPublishEnrichment(env, slug) {
     notified = true;
   }
   if (status.complete && notified) {
-    await env.BLOG_AI_KV.delete(key).catch(() => {});
+    try {
+      await env.BLOG_AI_KV.delete(key);
+      outboxCleared = true;
+    } catch (err) {
+      console.warn(
+        `Blog: completed post-publish outbox cleanup remains pending for ${slug} — ${err.message}`,
+      );
+    }
   } else if (notified && !alreadyNotified) {
     await blogKvPutIfChanged(
       env,
@@ -10593,6 +10699,7 @@ async function maybeFinalizePostPublishEnrichment(env, slug) {
     ...status,
     deadlineReached,
     notified,
+    outboxCleared,
   };
 }
 
@@ -11423,6 +11530,20 @@ async function recoverPublishedPostEnrichment(env, slug) {
     slug,
     draft,
   );
+  // Completion is stronger than the retry throttle. A retained outbox may be
+  // older than 30 minutes because its final delete failed or because the
+  // scheduled recovery finished after a previous caller returned. Do not
+  // rerun image, quiz, and entity enrichment once every durable target is
+  // already present; finalize and clear the outbox immediately.
+  if (preRecoveryStatus.complete) {
+    return {
+      found: true,
+      ...(await maybeFinalizePostPublishEnrichment(env, slug, {
+        draft,
+        status: preRecoveryStatus,
+      })),
+    };
+  }
   if (
     Number.isFinite(lastAttemptAt) &&
     Date.now() - lastAttemptAt < POST_PUBLISH_NOTIFICATION_DEADLINE_MS &&
@@ -11430,7 +11551,10 @@ async function recoverPublishedPostEnrichment(env, slug) {
   ) {
     return {
       found: true,
-      ...(await maybeFinalizePostPublishEnrichment(env, slug)),
+      ...(await maybeFinalizePostPublishEnrichment(env, slug, {
+        draft,
+        status: preRecoveryStatus,
+      })),
     };
   }
 
@@ -17378,6 +17502,14 @@ function articleGenerationDailyRequestBudgetLimit(env) {
   const perSourceFloor =
     articleGenerationRequestBudgetLimit(env) +
     articleGenerationReplacementRequestBudgetLimit(env);
+  const hasPerSourceOverride = [
+    env?.ARTICLE_GENERATION_REQUEST_BUDGET,
+    env?.ARTICLE_GENERATION_REPLACEMENT_REQUEST_BUDGET,
+  ].some(
+    (value) =>
+      Number.isFinite(Number.parseInt(String(value || ""), 10)) &&
+      Number.parseInt(String(value || ""), 10) > 0,
+  );
   const configured = Number.parseInt(
     String(env?.ARTICLE_GENERATION_DAILY_REQUEST_BUDGET || ""),
     10,
@@ -17387,7 +17519,9 @@ function articleGenerationDailyRequestBudgetLimit(env) {
         perSourceFloor,
         Math.min(configured, DEFAULT_ARTICLE_GENERATION_DAILY_REQUEST_BUDGET),
       )
-    : perSourceFloor;
+    : hasPerSourceOverride
+      ? perSourceFloor
+      : DEFAULT_ARTICLE_GENERATION_DAILY_REQUEST_BUDGET;
 }
 
 function articleGenerationBudgetRetryAt(now = new Date()) {
@@ -25874,6 +26008,11 @@ export const __contentGenerationTestHooks = {
   evidenceMapRowsFromContent,
   validateEvidenceMapForPublish,
   auditDidYouKnowFacts,
+  publishableDidYouKnowFacts,
+  sourceDerivedDidYouKnowFacts,
+  didYouKnowFactHasSourceBoilerplate,
+  didYouKnowFactIsEventRelevant,
+  buildFallbackEditorialNote,
   assertRequiredContentBlocks,
   assertArticleStructure,
   scanBannedPhrases,

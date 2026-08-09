@@ -14,8 +14,10 @@ name: Blog Post Failsafe
 # Each write-capable Worker endpoint performs an account-wide KV analytics
 # preflight. HTTP 429 means the publication reserve is exhausted until the
 # 00:00 UTC reset. HTTP 503 means every usable AI provider is cooling down or
-# exhausted. Both responses stop THIS run immediately, but neither is treated
-# as final: the Worker's KV-backed provider-capacity circuit and per-chunk
+# exhausted. Both responses stop a core publication phase immediately; the
+# optional post-publish pass retries only a transient 503/transport failure.
+# Neither is treated as final across scheduled runs: the Worker's KV-backed
+# provider-capacity circuit and per-chunk
 # generation checkpoint (js/shared/ai-call.js, js/blog-ai-worker.js) make a
 # later invocation cheap and safe to retry automatically —
 # it re-checks the circuit before spending a subrequest on a still-limited
@@ -33,9 +35,9 @@ on:
   schedule:
     # Repeated automatic attempts across the day so a multi-hour provider
     # outage still recovers without a human re-running the workflow. Every
-    # run first checks whether today's post already exists and exits
-    # immediately if so (Phase 1), so the later entries are free no-ops on a
-    # normal day.
+    # run first checks whether today's post already exists. A normal completed
+    # day is a free no-op; a public post with a retained enrichment outbox gets
+    # a bounded cleanup/recovery attempt instead of being skipped forever.
     - cron: "35 0 * * *"  # 00:35 UTC — 30 min after blog worker cron at 00:05
     - cron: "35 2 * * *"  # 02:35 UTC
     - cron: "35 5 * * *"  # 05:35 UTC
@@ -55,7 +57,8 @@ jobs:
     runs-on: ubuntu-latest
     # One prepare, one checkpointed generation, and one synchronous enrichment
     # invocation. Later scheduled runs resume only missing chunks and share the
-    # Worker's durable per-article request budget.
+    # Worker's durable per-article request budget. Optional post-publish work
+    # may retry a transient Worker resource-limit response up to three times.
     timeout-minutes: 90
 
     steps:
@@ -87,6 +90,42 @@ jobs:
           # Both endpoints still require PUBLISH_SECRET.
           WORKER_URL="https://thisday-blog-ai-worker.kapetanovic-armin.workers.dev"
 
+          recover_post_publish_enrichment() {
+            echo "Starting post-publish enrichment for ${SLUG}..."
+            for RECOVERY_ATTEMPT in 1 2 3; do
+              RECOVERY_HTTP_STATUS=$(curl -sS --max-time 300 -o /tmp/post-publish-enrichment.json -w "%{http_code}" \
+                -X POST "$WORKER_URL/blog/recover-post-figures?slug=${SLUG}" \
+                -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}" || true)
+              RECOVERY_BODY=$(cat /tmp/post-publish-enrichment.json 2>/dev/null || true)
+              echo "Post-publish enrichment attempt ${RECOVERY_ATTEMPT}/3 (HTTP ${RECOVERY_HTTP_STATUS:-000}): ${RECOVERY_BODY}"
+
+              if [ "$RECOVERY_HTTP_STATUS" = "200" ]; then
+                if printf '%s' "$RECOVERY_BODY" | jq -e \
+                  '.finalized.complete == true and .finalized.outboxCleared == true' \
+                  >/dev/null 2>&1; then
+                  echo "Post-publish enrichment is complete and its outbox was cleared."
+                  return 0
+                fi
+                echo "Post-publish endpoint returned HTTP 200, but durable completion or outbox cleanup is still pending."
+                return 1
+              fi
+
+              if [ "$RECOVERY_HTTP_STATUS" = "429" ]; then
+                echo "Cloudflare KV write budget blocked optional enrichment until the UTC reset; no same-run retry."
+                return 1
+              fi
+              if [ "$RECOVERY_HTTP_STATUS" != "503" ] && [ -n "$RECOVERY_HTTP_STATUS" ] && [ "$RECOVERY_HTTP_STATUS" != "000" ]; then
+                echo "Post-publish enrichment returned a non-transient HTTP ${RECOVERY_HTTP_STATUS}; no same-run retry."
+                return 1
+              fi
+              if [ "$RECOVERY_ATTEMPT" != "3" ]; then
+                echo "Transient Worker failure; retrying post-publish enrichment in 30s..."
+                sleep 30
+              fi
+            done
+            return 1
+          }
+
           # ── Phase 1: Check if post already exists ────────────────────────
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
@@ -94,8 +133,25 @@ jobs:
           echo "KV status for post:${SLUG} → HTTP $STATUS"
 
           if [ "$STATUS" = "200" ]; then
-            echo "Post for ${SLUG} already exists — nothing to do."
+            DRAFT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.CF_API_TOKEN }}" \
+              "$DRAFT_URL")
+            echo "Post for ${SLUG} exists; KV status for its enrichment outbox → HTTP $DRAFT_STATUS"
+            if [ "$DRAFT_STATUS" = "200" ]; then
+              if ! recover_post_publish_enrichment; then
+                echo "::warning::The public article remains available, but optional enrichment or outbox cleanup is still queued."
+              fi
+            elif [ "$DRAFT_STATUS" = "404" ]; then
+              echo "Post for ${SLUG} is public and has no retained enrichment outbox — nothing to do."
+            else
+              echo "::error::Could not determine enrichment-outbox state (HTTP $DRAFT_STATUS)."
+              exit 1
+            fi
             exit 0
+          fi
+          if [ "$STATUS" != "404" ]; then
+            echo "::error::Could not determine whether post:${SLUG} exists (HTTP $STATUS)."
+            exit 1
           fi
 
           # ── Phase 2: Ensure one lightweight draft exists ────────────────
@@ -104,7 +160,7 @@ jobs:
             "$DRAFT_URL")
           echo "KV status for draft:${SLUG} → HTTP $DRAFT_STATUS"
 
-          if [ "$DRAFT_STATUS" != "200" ]; then
+          if [ "$DRAFT_STATUS" = "404" ]; then
             echo "Draft for ${SLUG} is missing — preparing its source in a dedicated invocation..."
             PREPARE_RESULT=$(curl -s -w "\nHTTP_STATUS:%{http_code}" \
               -X POST "$WORKER_URL/blog/prepare-draft" \
@@ -138,6 +194,9 @@ jobs:
               fi
               exit 1
             fi
+          elif [ "$DRAFT_STATUS" != "200" ]; then
+            echo "::error::Could not determine whether draft:${SLUG} exists (HTTP $DRAFT_STATUS)."
+            exit 1
           fi
 
           # ── Phase 3: Enrich/publish in one fresh invocation ──────────────
@@ -192,13 +251,12 @@ jobs:
           # entities, and the evergreen card their own fresh Worker invocation.
           # This work is optional: a transient failure must not turn an already
           # public core article into a failed workflow. The 00:50/hourly :55
-          # scheduled passes retain the outbox and retry it safely.
-          echo "Starting post-publish enrichment for ${SLUG}..."
-          RECOVERY_HTTP_STATUS=$(curl -sS --max-time 300 -o /tmp/post-publish-enrichment.json -w "%{http_code}" \
-            -X POST "$WORKER_URL/blog/recover-post-figures?slug=${SLUG}" \
-            -H "Authorization: Bearer ${{ secrets.PUBLISH_SECRET }}" || true)
-          RECOVERY_BODY=$(cat /tmp/post-publish-enrichment.json 2>/dev/null || true)
-          echo "Post-publish enrichment response (HTTP ${RECOVERY_HTTP_STATUS:-000}): ${RECOVERY_BODY}"
-          if [ "$RECOVERY_HTTP_STATUS" != "200" ]; then
+          # scheduled passes retain the outbox and remain the final backstop.
+          #
+          # 2026-08-09: retry only transient resource-limit/transport failures.
+          # A 429 is a durable KV-budget stop, authentication and other 4xx/5xx
+          # responses need intervention, and HTTP 200 is accepted only when the
+          # JSON confirms both enrichment completion and outbox deletion.
+          if ! recover_post_publish_enrichment; then
             echo "::warning::Post-publish enrichment remains queued for the scheduled recovery pass."
           fi

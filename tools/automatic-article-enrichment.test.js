@@ -342,6 +342,147 @@ test("outbox completion waits for every asynchronous target", async () => {
   assert.equal(pending.quizReady, false);
 });
 
+test("an already-complete retained outbox is cleared without rerunning enrichment", async () => {
+  const slug = "20-july-2026";
+  const quiz = {
+    questions: Array.from({ length: 5 }, (_, index) => ({
+      q: `Which sourced development belongs to step ${index + 1}?`,
+      options: ["First", "Second", "Third", "Fourth"],
+      answer: index % 4,
+      explanation: "The supplied evidence identifies this development.",
+    })),
+  };
+  const draft = {
+    content: { timeline: timeline(5) },
+    publishedAt: "2026-07-20T00:15:00.000Z",
+    postPublished: true,
+    postPublishEnrichment: {
+      createdAt: "2026-07-20T00:15:00.000Z",
+      entitiesAttemptedAt: "2026-07-20T00:50:00.000Z",
+      notifiedAt: "2026-07-20T00:55:00.000Z",
+    },
+  };
+  const store = new Map([
+    [`draft:${slug}`, JSON.stringify(draft)],
+    [
+      `post:${slug}`,
+      '<article><figure style="float:right;margin:0"></figure>' +
+        '<figure style="float:left;margin:0"></figure>' +
+        '<a data-history-entity-link="1" href="/history/example/"></a></article>',
+    ],
+    [`quiz-v3:blog:${slug}`, JSON.stringify(quiz)],
+    [`post-entities:${slug}`, "[]"],
+    ["index", JSON.stringify([{ slug }])],
+  ]);
+  let deletes = 0;
+  let puts = 0;
+  const env = {
+    BLOG_AI_KV: {
+      async get(key) {
+        return store.get(key) ?? null;
+      },
+      async delete(key) {
+        deletes += 1;
+        store.delete(key);
+      },
+      async put() {
+        puts += 1;
+      },
+    },
+  };
+
+  const result = await hooks.recoverPublishedPostEnrichment(env, slug);
+  assert.equal(result.complete, true);
+  assert.equal(result.outboxCleared, true);
+  assert.equal(deletes, 1);
+  assert.equal(puts, 0, "complete recovery must not rewrite images, quizzes, entities, or posts");
+  assert.equal(store.has(`draft:${slug}`), false);
+});
+
+test("completed outbox cleanup failures remain observable and retryable", async () => {
+  const slug = "20-july-2026";
+  const quiz = {
+    questions: Array.from({ length: 5 }, (_, index) => ({
+      q: `Which sourced development belongs to step ${index + 1}?`,
+      options: ["First", "Second", "Third", "Fourth"],
+      answer: index % 4,
+      explanation: "The supplied evidence identifies this development.",
+    })),
+  };
+  const draft = {
+    content: { timeline: timeline(5) },
+    publishedAt: "2026-07-20T00:15:00.000Z",
+    postPublished: true,
+    postPublishEnrichment: {
+      createdAt: "2026-07-20T00:15:00.000Z",
+      entitiesAttemptedAt: "2026-07-20T00:50:00.000Z",
+      notifiedAt: "2026-07-20T00:55:00.000Z",
+    },
+  };
+  const store = new Map([
+    [`draft:${slug}`, JSON.stringify(draft)],
+    [
+      `post:${slug}`,
+      '<article><figure style="float:right;margin:0"></figure>' +
+        '<figure style="float:left;margin:0"></figure>' +
+        '<a data-history-entity-link="1" href="/history/example/"></a></article>',
+    ],
+    [`quiz-v3:blog:${slug}`, JSON.stringify(quiz)],
+    [`post-entities:${slug}`, "[]"],
+  ]);
+  const env = {
+    BLOG_AI_KV: {
+      async get(key) {
+        return store.get(key) ?? null;
+      },
+      async delete() {
+        throw new Error("temporary KV delete failure");
+      },
+    },
+  };
+
+  const result = await hooks.maybeFinalizePostPublishEnrichment(env, slug);
+  assert.equal(result.complete, true);
+  assert.equal(result.notified, true);
+  assert.equal(result.outboxCleared, false);
+  assert.equal(store.has(`draft:${slug}`), true);
+});
+
+test("Did You Know safeguards remove source boilerplate and off-topic context", () => {
+  const content = {
+    eventTitle: "The Webster-Ashburton Treaty Is Signed",
+    sourcePageTitle: "Webster-Ashburton Treaty",
+    historicalDate: "August 9, 1842",
+  };
+  const facts = hooks.sourceDerivedDidYouKnowFacts(
+    [
+      "Webster-Ashburton Treaty: On August 9, 1842, Secretary of State Daniel Webster and British diplomat Alexander Baring signed the Webster-Ashburton Treaty. The agreement settled several disputed boundary sections between the United States and British North America after formal negotiations.",
+      "Webster-Ashburton Treaty notice: For more information, please see the full notice. The notice records Daniel Webster and Alexander Baring as the diplomats involved in the 1842 negotiations, while the surrounding page includes navigation and archival access instructions for readers.",
+      "Rocky Mountains: The Rocky Mountains extend more than 3,000 miles across western North America and include many distinct ranges in the United States and Canada. Their geography, elevation, wildlife, and continental drainage patterns developed across a vast region over millions of years.",
+    ].join("\n\n"),
+    content,
+  );
+
+  assert.equal(facts.length, 1);
+  assert.match(facts[0], /Daniel Webster/);
+  assert.doesNotMatch(facts.join(" "), /full notice|Rocky Mountains/i);
+});
+
+test("fallback editorial notes prefer substantive facts and preserve sentence boundaries", () => {
+  const note = hooks.buildFallbackEditorialNote({
+    eventTitle: "The Webster-Ashburton Treaty Is Signed",
+    historicalDate: "August 9, 1842",
+    quickFacts: [
+      { label: "Event", value: "The Webster-Ashburton Treaty Is Signed" },
+      { label: "Outcome", value: "The agreement settled several disputed sections of the international boundary" },
+    ],
+  });
+
+  assert.match(note, /settled several disputed sections/);
+  assert.match(note, /international boundary\. That is where/);
+  assert.doesNotMatch(note, /Treaty Is Signed That is where/);
+});
+
 test("an attempted timestamp cannot suppress recovery before the primary event entity is persisted", async () => {
   const paragraph = Array.from(
     { length: 710 },

@@ -588,7 +588,7 @@ body[data-page="v2"] > .people-strip {
   padding: 40px var(--gutter-x);
   background: var(--bg);
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.9fr);
+  grid-template-columns: minmax(0, 0.7fr) minmax(360px, 0.7fr);
   grid-template-areas:
     "eyebrow highlights"
     "title highlights"

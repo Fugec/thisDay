@@ -75,6 +75,10 @@ test("desktop and mobile layouts place the timeline in the hero's right column",
   assert.doesNotMatch(css, /\.hero-inner \{[^}]*border-top:/);
   assert.match(
     css,
+    /\.hero-inner \{[^}]*grid-template-columns: minmax\(0, 0\.7fr\) minmax\(360px, 0\.7fr\);/,
+  );
+  assert.match(
+    css,
     /grid-template-areas:\s*"eyebrow highlights"\s*"title highlights"\s*"description highlights"\s*"actions highlights";/,
   );
   assert.doesNotMatch(indexHtml, /class="hero-meta"/);

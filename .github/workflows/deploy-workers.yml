@@ -60,6 +60,7 @@ jobs:
             tools/automatic-article-enrichment.test.js \
             tools/evergreen-history-pipeline.test.js \
             tools/homepage-blog-order.test.js \
+            tools/homepage-hero.test.js \
             tools/homepage-preload.test.js \
             tools/homepage-responsive-images.test.js \
             tools/homepage-seo-performance.test.js \

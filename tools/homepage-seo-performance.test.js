@@ -128,11 +128,19 @@ test("homepage article grid uses four columns and the event rail stays horizonta
   );
   assert.match(
     customCss,
-    /\.today-through-time-card\s*\{[^}]*border-radius:\s*var\(--radius\);[^}]*font-family:\s*inherit;[^}]*box-shadow:\s*none;/s,
+    /\.hero-highlight\.today-through-time-card\s*\{[^}]*border-radius:\s*10px;[^}]*font-family:\s*inherit;[^}]*box-shadow:\s*none;/s,
   );
   assert.match(
     customCss,
-    /\.today-through-time-card-action\s*\{[^}]*border:\s*1\.5px solid var\(--btn-bg\);[^}]*border-radius:\s*var\(--radius\);/s,
+    /\.today-through-time \.tl-card-body\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*padding:\s*14px 16px;/s,
+  );
+  assert.match(
+    customCss,
+    /\.today-through-time \.tl-card-img\s*\{[^}]*object-fit:\s*cover;[^}]*object-position:\s*center top;/s,
+  );
+  assert.match(
+    customCss,
+    /\.today-through-time-item\s*\{[^}]*flex:\s*0 0 calc\(66\.6667% - 0\.5rem\);/s,
   );
   assert.match(
     customCss,
@@ -244,9 +252,9 @@ test("partial homepage data is upgraded before the complete day modal renders", 
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=48/);
+  assert.match(indexHtml, /custom\.css\?v=50/);
   assert.match(indexHtml, /style\.css\?v=10/);
-  assert.match(indexHtml, /script\.js\?v=24/);
+  assert.match(indexHtml, /script\.js\?v=26/);
   assert.match(
     workerSource,
     /public, max-age=31536000, s-maxage=31536000, immutable/,
@@ -262,7 +270,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=48"),
+      new Request("https://thisday.info/css/custom.css?v=50"),
       {},
       { waitUntil() {} },
     );

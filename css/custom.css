@@ -866,84 +866,146 @@ body[data-page="v2"] > .people-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-/* Today Through Time: a user-controlled chronological rail. */
-.today-through-time {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+/* Today Through Time: compact hero rail using the existing highlight style. */
+.today-through-time-header {
+  display: flex;
   align-items: center;
-  gap: 0.85rem;
-  padding: 1.5rem var(--gutter-x);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-alt);
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid #e3eadc;
+}
+.today-through-time-header h2 {
+  min-width: 0;
+}
+.today-through-time-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-right: 0.75rem;
 }
 .today-through-time-viewport {
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
-  scroll-padding-inline: 0.25rem;
+  scroll-padding-inline: 1rem;
   overscroll-behavior-inline: contain;
   -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(27, 58, 45, 0.3) transparent;
+  scrollbar-width: none;
 }
 .today-through-time-viewport:focus-visible {
   outline: 3px solid rgba(157, 196, 58, 0.6);
-  outline-offset: 4px;
+  outline-offset: -3px;
 }
 .today-through-time-viewport::-webkit-scrollbar {
-  height: 6px;
-}
-.today-through-time-viewport::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(27, 58, 45, 0.3);
+  display: none;
 }
 .today-through-time-track {
-  position: relative;
   display: flex;
   align-items: stretch;
-  gap: 1rem;
-  min-width: min-content;
+  gap: 0.75rem;
+  width: 100%;
   margin: 0;
-  padding: 1.35rem 0.25rem 0.8rem;
+  padding: 0.85rem 1rem;
   list-style: none;
 }
-.today-through-time-track::before {
-  content: "";
-  position: absolute;
-  top: 0.62rem;
-  right: 0.25rem;
-  left: 0.25rem;
-  height: 2px;
-  background: var(--border);
-}
 .today-through-time-item {
-  position: relative;
-  flex: 0 0 clamp(280px, 28vw, 360px);
+  flex: 0 0 calc(66.6667% - 0.5rem);
+  min-width: 0;
   scroll-snap-align: start;
 }
-.today-through-time-item::before {
-  content: "";
+.today-through-time .tl-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  transition: box-shadow 0.15s;
+}
+.today-through-time .tl-card-badge {
   position: absolute;
   z-index: 2;
-  top: -1.13rem;
-  left: 1.35rem;
-  width: 12px;
-  height: 12px;
-  border: 3px solid var(--bg-alt);
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 1px var(--btn-bg);
+  top: 10px;
+  left: 10px;
+  display: inline-block;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--btn-bg);
+  color: #fff;
+  font-family: Georgia, serif;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: normal;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
 }
-.today-through-time-card {
+.today-through-time .tl-card-img,
+.today-through-time .tl-card-img-blank {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+}
+.today-through-time .tl-card-img {
+  object-fit: cover;
+  object-position: center top;
+  filter: none;
+}
+.today-through-time .tl-card-img-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-muted);
+  font-size: 2rem;
+}
+.today-through-time .tl-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 118px;
+  padding: 14px 16px;
+}
+.today-through-time .tl-card-noimg .tl-card-body {
+  padding-top: 34px;
+}
+.today-through-time .tl-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-bottom: 4px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.today-through-time .tl-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+.hero-highlight.today-through-time-card {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   width: 100%;
   height: 100%;
-  min-height: 390px;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 10px;
   background: var(--bg);
   color: var(--text);
   font-family: inherit;
@@ -963,84 +1025,6 @@ body[data-page="v2"] > .people-strip {
 .today-through-time-card:focus-visible {
   outline: 3px solid rgba(157, 196, 58, 0.65);
   outline-offset: 2px;
-}
-.today-through-time-media {
-  display: flex;
-  width: 100%;
-  aspect-ratio: 8 / 5;
-  overflow: hidden;
-  align-items: center;
-  justify-content: center;
-  background: #e7eee5;
-  color: var(--btn-bg);
-  font-size: 2rem;
-}
-.today-through-time-media img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center top;
-}
-.today-through-time-media-empty {
-  background: linear-gradient(135deg, #edf3e9, #dce8d8);
-}
-.today-through-time-card-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 185px;
-  padding: 1.2rem 1.25rem 1.3rem;
-}
-.today-through-time-year {
-  margin-bottom: 0.45rem;
-  color: var(--accent);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.today-through-time-card-title {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--text);
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-}
-.today-through-time-card-description {
-  display: -webkit-box;
-  overflow: hidden;
-  margin-top: 0.55rem;
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  line-height: 1.55;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-}
-.today-through-time-card-action {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 0.4rem;
-  margin-top: auto;
-  padding: 0.35rem 0.85rem;
-  border: 1.5px solid var(--btn-bg);
-  border-radius: var(--radius);
-  color: var(--btn-bg);
-  font-size: 0.78rem;
-  font-weight: 600;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-.today-through-time-card:hover .today-through-time-card-action,
-.today-through-time-card:focus-visible .today-through-time-card-action {
-  background: var(--btn-bg);
-  color: #fff;
 }
 .today-through-time-nav {
   display: inline-flex;
@@ -1068,42 +1052,37 @@ body[data-page="v2"] > .people-strip {
   cursor: default;
 }
 .today-through-time-footer {
-  grid-column: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding-top: 0.35rem;
+  padding: 0.65rem 1rem 0.75rem;
+  border-top: 1px solid #e3eadc;
 }
 .today-through-time-footer p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 0.84rem;
+  font-size: 13px !important;
+}
+.today-through-time-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--btn-bg);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
 }
 .today-through-time-status {
-  min-width: min(560px, 80vw);
-  padding: 2rem;
+  flex: 0 0 100%;
+  padding: 1.5rem 1rem;
   color: var(--text-muted);
   text-align: center;
 }
 @media (max-width: 700px) {
-  .today-through-time {
-    grid-template-columns: minmax(0, 1fr);
-    padding-inline: var(--gutter-x);
-  }
-  .today-through-time-nav {
-    display: none;
-  }
-  .today-through-time-item {
-    flex-basis: min(82vw, 330px);
-  }
-  .today-through-time-card {
-    min-height: 370px;
-  }
-  .today-through-time-footer {
-    grid-column: 1;
-    align-items: flex-start;
-    flex-direction: column;
+  .today-through-time-track {
+    padding-inline: 0.85rem;
   }
 }
 .blog-cta-col {
@@ -2193,9 +2172,6 @@ main.container {
     text-align: left;
     border-radius: 11px;
     box-shadow: none;
-  }
-  .hero-highlights h2 {
-    display: none;
   }
   .hero-highlights-list {
     min-height: 198px;

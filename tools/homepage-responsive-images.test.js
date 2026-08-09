@@ -14,9 +14,16 @@ test("homepage image helper builds width-descriptor proxy candidates", () => {
   assert.match(script, /function getResponsiveImageSrcset\(/);
   assert.match(script, /getOptimizedImageUrl\(url, width, quality\)/);
   assert.match(indexHtml, /getResponsiveImageSrcset\(img, \[320, 600, 960\]\)/);
+  assert.match(script, /media\.className = "tl-card-img"/);
   assert.match(
     script,
     /getResponsiveImageSrcset\(\s*event\.thumbnailUrl,\s*\[320, 640, 960\],\s*80,?\s*\)/,
+  );
+  assert.match(script, /body\.className = "tl-card-body"/);
+  assert.match(script, /card\.append\(year, media, body\)/);
+  assert.match(
+    seoWorker,
+    /class="tl-card-img" width="640" height="640" loading="lazy" decoding="async"/,
   );
 });
 
@@ -65,13 +72,13 @@ test("carousel eagerly loads only its first responsive image", () => {
 });
 
 test("homepage static asset versions are current", () => {
-  assert.match(indexHtml, /js\/script\.js\?v=24/);
-  assert.match(indexHtml, /custom\.css\?v=48/);
+  assert.match(indexHtml, /js\/script\.js\?v=26/);
+  assert.match(indexHtml, /custom\.css\?v=50/);
   assert.match(indexHtml, /style\.css\?v=10/);
-  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v32"/);
-  assert.match(serviceWorker, /"\/js\/script\.js\?v=24"/);
-  assert.match(serviceWorker, /"\/css\/custom\.css\?v=48"/);
+  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v34"/);
+  assert.match(serviceWorker, /"\/js\/script\.js\?v=26"/);
+  assert.match(serviceWorker, /"\/css\/custom\.css\?v=50"/);
   assert.match(serviceWorker, /"\/css\/style\.css\?v=10"/);
-  assert.match(seoWorker, /custom\.css\?v=48/);
+  assert.match(seoWorker, /custom\.css\?v=50/);
   assert.match(seoWorker, /width="480" height="360" loading="lazy" decoding="async"/);
 });

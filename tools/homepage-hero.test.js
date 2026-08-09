@@ -10,22 +10,9 @@ const css = readFileSync(join(root, "css/custom.css"), "utf8");
 const script = readFileSync(join(root, "js/script.js"), "utf8");
 const seoWorker = readFileSync(join(root, "js/seo-worker.js"), "utf8");
 
-function loadClientPicker() {
-  const match = script.match(
-    /(function pickRandomDailyHighlights[\s\S]*?\n})\n\nasync function populateHeroHighlights/,
-  );
-  assert.ok(match, "client highlight picker must be extractable");
-  const context = {};
-  vm.runInNewContext(
-    `${match[1]}\nthis.pick = pickRandomDailyHighlights;`,
-    context,
-  );
-  return context.pick;
-}
-
 function loadEventAnchor(source) {
   const match = source.match(
-    /(function historicalEventAnchorId[\s\S]*?\n})\n\nfunction pickRandom/,
+    /(function historicalEventAnchorId[\s\S]*?\n})\n\nfunction historicalPersonAnchorId/,
   );
   assert.ok(match, "event anchor helper must be extractable");
   const context = {};
@@ -36,17 +23,24 @@ function loadEventAnchor(source) {
   return context.anchor;
 }
 
-test("hero uses the supplied desktop/mobile content structure", () => {
+test("hero uses Today Through Time in the former highlights position", () => {
   assert.match(indexHtml, /<div class="hero-inner">/);
   assert.match(indexHtml, /Events, birthdays and milestones for any date — sourced from\s+Wikipedia\./);
-  assert.match(indexHtml, /id="heroHighlightsTitle">Today's Highlights<\/h2>/);
+  assert.match(indexHtml, /class="hero-highlights today-through-time"/);
+  assert.match(indexHtml, /id="todayThroughTimeTitle">Today Through Time<\/h2>/);
   assert.match(
     indexHtml,
-    /id="heroHighlightsList"[\s\S]*?aria-live="polite"\s*><\/div>/,
+    /id="todayThroughTimeViewport"[\s\S]*?id="todaysEventsGrid"/,
   );
+  assert.doesNotMatch(indexHtml, /id="heroHighlightsList"/);
+  assert.equal((indexHtml.match(/id="todaysEventsSection"/g) || []).length, 1);
   assert.doesNotMatch(indexHtml, /Loading today's history/);
   assert.doesNotMatch(indexHtml, /hero-highlight is-placeholder/);
-  assert.match(indexHtml, /id="heroEventsLabel">[^<]+<\/span>/);
+  assert.match(indexHtml, /id="heroEventsLabel">Today's Events<\/span>/);
+  assert.match(
+    indexHtml,
+    /eventsLabel\.textContent = "Today's Events"/,
+  );
   assert.match(indexHtml, /Today's Quiz/);
   assert.match(indexHtml, /<a href="\/blog\/" class="btn" id="heroQuizBtn">/);
   assert.doesNotMatch(indexHtml, /hero-secondary/);
@@ -71,7 +65,7 @@ test("hero uses Lora without loading or applying Meddon", () => {
   assert.doesNotMatch(indexHtml, /family=Meddon/);
 });
 
-test("desktop and mobile layouts place highlights in the requested order", () => {
+test("desktop and mobile layouts place the timeline in the hero's right column", () => {
   assert.match(css, /\.hero \{[\s\S]*?padding: 0;/);
   assert.doesNotMatch(css, /\.hero \{[^}]*box-shadow:/);
   assert.match(
@@ -90,64 +84,53 @@ test("desktop and mobile layouts place highlights in the requested order", () =>
     /@media \(max-width: 768px\)[\s\S]*?grid-template-areas:\s*"eyebrow"\s*"title"\s*"description"\s*"highlights"\s*"actions"/,
   );
   assert.match(css, /\.hero-actions \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/);
-  assert.match(css, /\.hero-highlights h2 \{\s*display: none;/);
+  assert.doesNotMatch(css, /\.hero-highlights h2 \{\s*display: none;/);
+  assert.match(
+    css,
+    /\.today-through-time-item\s*\{[^}]*flex:\s*0 0 calc\(66\.6667% - 0\.5rem\);/s,
+  );
 });
 
-test("client picker returns three distinct events without mutating input", () => {
-  const pick = loadClientPicker();
-  const events = [
-    { year: 1918, title: "Event A" },
-    { year: 1955, title: "Event B" },
-    { year: 1975, title: "Event C" },
-    { year: 2001, title: "Event D" },
-    { year: 1955, title: "Event B" },
-  ];
-  const original = JSON.stringify(events);
-  const randomValues = [0.9, 0.2, 0.7, 0.4];
-  const selected = pick(events, 3, () => randomValues.shift() ?? 0);
-
-  assert.equal(selected.length, 3);
-  assert.equal(
-    new Set(selected.map((event) => `${event.year}|${event.title}`)).size,
-    3,
-  );
-  assert.equal(JSON.stringify(events), original);
-});
-
-test("highlights reuse preloaded daily data and receive Worker SSR", () => {
-  assert.match(
-    script,
-    /fetchWikipediaEvents\(\s*today\.getMonth\(\) \+ 1,\s*today\.getDate\(\),\s*\)/,
-  );
-  assert.match(script, /pickRandomDailyHighlights\(eventsData\?\.events, 3\)/);
-  assert.match(
-    script,
-    /list\.dataset\.heroHighlightsReady === "true"/,
-  );
+test("hero timeline reuses preloaded daily data and receives Worker SSR", () => {
+  assert.match(script, /const month = today\.getMonth\(\) \+ 1;/);
+  assert.match(script, /const day = today\.getDate\(\);/);
+  assert.match(script, /fetchWikipediaEvents\(month, day\)/);
+  assert.match(script, /selectTodayThroughTimeEvents\(events, 8\)/);
+  assert.match(script, /card\.setAttribute\("data-bs-toggle", "modal"\)/);
+  assert.match(script, /card\.setAttribute\("data-bs-target", "#eventDetailModal"\)/);
+  assert.match(script, /clickEvent\.stopPropagation\(\);/);
   assert.match(
     seoWorker,
-    /pickRandomHomepageHighlights\(\s*eventsData\?\.events,\s*3,\s*\)/,
+    /selectHomepagePreloadEvents\(\s*eventsData\?\.events,\s*HOMEPAGE_PRELOAD_EVENT_LIMIT,\s*\)/,
   );
-  assert.match(seoWorker, /\.on\("#heroHighlightsList"/);
+  assert.match(seoWorker, /\.on\("#todaysEventsGrid"/);
   assert.match(
     seoWorker,
-    /data-hero-highlights-ready", "true"/,
+    /data-today-through-time-ssr", "true"/,
   );
   assert.match(
     script,
-    /document\.createElement\("a"\)[\s\S]*?row\.href = `\$\{todayEventsPath\}#\$\{historicalEventAnchorId\(event\)\}`/,
+    /showEventDetails\(day, month, today\.getFullYear\(\), data, anchorId\)/,
   );
   assert.match(
     seoWorker,
-    /<a href="\$\{homepageEventsPath\}#\$\{historicalEventAnchorId\(event\)\}" class="hero-highlight" role="listitem">/,
+    /class="hero-highlight tl-card\$\{timelineImageUrl \? "" : " tl-card-noimg"\} today-through-time-card"/,
   );
   assert.match(
     script,
-    /readMore\.className = "major-event-source";[\s\S]*?readMore\.append\("Read More"\);[\s\S]*?readMoreIcon\.className = "bi bi-box-arrow-up-right";[\s\S]*?copy\.append\(text, readMore\)/,
+    /body\.className = "tl-card-body";[\s\S]*?action\.className = "major-event-source";[\s\S]*?Open details/,
   );
   assert.match(
     seoWorker,
-    /<span class="hero-highlight-copy">[\s\S]*?<span class="major-event-source">Read More<i class="bi bi-box-arrow-up-right" aria-hidden="true"><\/i><\/span>/,
+    /<span class="tl-card-body">[\s\S]*?<span class="tl-card-actions"><span class="major-event-source">Open details/,
+  );
+  assert.match(
+    script,
+    /media\.className = "tl-card-img";[\s\S]*?body\.append\(heading, actions\);[\s\S]*?card\.append\(year, media, body\)/,
+  );
+  assert.match(
+    seoWorker,
+    /timelineMediaHtml[\s\S]*?class="tl-card-img" width="640" height="640" loading="lazy" decoding="async"/,
   );
   assert.match(
     css,

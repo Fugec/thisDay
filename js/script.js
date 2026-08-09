@@ -7,9 +7,19 @@ const currentMonthYearDisplay = document.getElementById("currentMonthYear");
 const modalDate = document.getElementById("modalDate");
 const modalDateSummary = document.getElementById("modalDateSummary");
 const modalBodyContent = document.getElementById("modalBodyContent");
-const eventDetailModal = document.getElementById("eventDetailModal")
-  ? new bootstrap.Modal(document.getElementById("eventDetailModal"))
-  : null;
+let eventDetailModal = null;
+
+function getEventDetailModal() {
+  if (eventDetailModal) return eventDetailModal;
+  const modalElement = document.getElementById("eventDetailModal");
+  const Modal = window.bootstrap?.Modal;
+  if (!modalElement || !Modal) return null;
+  eventDetailModal =
+    typeof Modal.getOrCreateInstance === "function"
+      ? Modal.getOrCreateInstance(modalElement)
+      : new Modal(modalElement);
+  return eventDetailModal;
+}
 const loadingIndicator = document.getElementById("loadingIndicator");
 
 // Elements for carousel
@@ -307,93 +317,6 @@ function historicalPersonAnchorId(person, type = person?.type) {
     .trim();
   const normalizedName = slugifyPersonName(name) || "historical-person";
   return `person-${kind}-${year}-${normalizedName.slice(0, 64).replace(/-+$/g, "")}`;
-}
-
-function pickRandomDailyHighlights(
-  events,
-  count = 3,
-  randomFn = Math.random,
-) {
-  const seen = new Set();
-  const pool = (Array.isArray(events) ? events : []).filter((event) => {
-    const text = String(event?.title || event?.description || "").trim();
-    const key = `${String(event?.year || "")}|${text}`.toLowerCase();
-    if (!text || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  for (let index = pool.length - 1; index > 0; index -= 1) {
-    const randomValue = Number(randomFn());
-    const safeRandom = Number.isFinite(randomValue)
-      ? Math.min(Math.max(randomValue, 0), 0.999999999)
-      : 0;
-    const swapIndex = Math.floor(safeRandom * (index + 1));
-    [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
-  }
-
-  return pool.slice(0, Math.max(0, count));
-}
-
-async function populateHeroHighlights() {
-  const list = document.getElementById("heroHighlightsList");
-  if (!list || list.dataset.heroHighlightsReady === "true") return;
-
-  const today = new Date();
-  const todayEventsPath = `/events/${today
-    .toLocaleString("en-US", { month: "long" })
-    .toLowerCase()}/${today.getDate()}/`;
-  const eventsData = await fetchWikipediaEvents(
-    today.getMonth() + 1,
-    today.getDate(),
-  );
-  const selected = pickRandomDailyHighlights(eventsData?.events, 3);
-
-  if (!selected.length) {
-    list.innerHTML = "";
-    const empty = document.createElement("div");
-    empty.className = "hero-highlight";
-    empty.setAttribute("role", "listitem");
-    empty.textContent = "Today's historical highlights are temporarily unavailable.";
-    list.appendChild(empty);
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  selected.forEach((event) => {
-    const row = document.createElement("a");
-    row.className = "hero-highlight";
-    row.setAttribute("role", "listitem");
-    row.href = `${todayEventsPath}#${historicalEventAnchorId(event)}`;
-
-    const year = document.createElement("span");
-    year.className = "hero-highlight-year";
-    year.textContent = String(event.year || "—");
-
-    const text = document.createElement("span");
-    text.className = "hero-highlight-text";
-    text.textContent = String(
-      event.title || event.description || "Historical event",
-    ).trim();
-
-    const readMore = document.createElement("span");
-    readMore.className = "major-event-source";
-    readMore.append("Read More");
-    const readMoreIcon = document.createElement("i");
-    readMoreIcon.className = "bi bi-box-arrow-up-right";
-    readMoreIcon.setAttribute("aria-hidden", "true");
-    readMore.appendChild(readMoreIcon);
-
-    const copy = document.createElement("span");
-    copy.className = "hero-highlight-copy";
-    copy.append(text, readMore);
-
-    row.append(year, copy);
-    fragment.appendChild(row);
-  });
-
-  list.replaceChildren(fragment);
-  list.dataset.heroHighlightsReady = "true";
 }
 
 function slugifyPersonName(value) {
@@ -1700,79 +1623,82 @@ async function populateTodayThroughTime() {
 
     selected.forEach((event) => {
       const title = String(event.title || event.description || "Historical event").trim();
-      const summary = String(event.pageDescription || event.pageExtract || "").trim();
       const anchorId = historicalEventAnchorId(event);
       const item = document.createElement("li");
       item.className = "today-through-time-item";
 
       const card = document.createElement("button");
       card.type = "button";
-      card.className = "today-through-time-card";
+      card.className = "hero-highlight tl-card today-through-time-card";
       card.setAttribute("aria-haspopup", "dialog");
       card.setAttribute("aria-controls", "eventDetailModal");
       card.setAttribute("aria-expanded", "false");
+      card.setAttribute("data-bs-toggle", "modal");
+      card.setAttribute("data-bs-target", "#eventDetailModal");
       card.setAttribute(
         "aria-label",
         `Open details for ${formatTodayThroughTimeYear(event.year)}: ${title}`,
       );
 
-      const media = document.createElement("span");
-      media.className = "today-through-time-media";
+      const body = document.createElement("span");
+      body.className = "tl-card-body";
+      const year = document.createElement("span");
+      year.className = "tl-card-badge event-years-ago";
+      year.textContent = formatTodayThroughTimeYear(event.year);
+      const heading = document.createElement("span");
+      heading.className = "tl-card-title";
+      heading.textContent = title;
+      let media;
       if (event.thumbnailUrl) {
-        const image = document.createElement("img");
-        image.src = getOptimizedImageUrl(event.thumbnailUrl, 640, 80);
-        image.srcset = getResponsiveImageSrcset(
+        media = document.createElement("img");
+        media.className = "tl-card-img";
+        media.src = getOptimizedImageUrl(event.thumbnailUrl, 640, 80);
+        media.srcset = getResponsiveImageSrcset(
           event.thumbnailUrl,
           [320, 640, 960],
           80,
         );
-        image.sizes = "(max-width: 700px) 82vw, 340px";
-        image.alt = title.substring(0, 100);
-        image.width = 640;
-        image.height = 400;
-        image.loading = "lazy";
-        image.decoding = "async";
-        image.addEventListener("error", () => {
-          media.classList.add("today-through-time-media-empty");
-          image.remove();
+        media.sizes = "(max-width: 768px) 62vw, 28vw";
+        media.alt = title;
+        media.width = 640;
+        media.height = 640;
+        media.loading = "lazy";
+        media.decoding = "async";
+        media.addEventListener("error", () => {
+          const fallback = document.createElement("span");
+          fallback.className = "tl-card-img-blank";
+          fallback.setAttribute("aria-hidden", "true");
+          fallback.innerHTML = '<i class="bi bi-image-alt"></i>';
+          media.replaceWith(fallback);
         });
-        media.appendChild(image);
       } else {
-        media.classList.add("today-through-time-media-empty");
-        const icon = document.createElement("i");
-        icon.className = "bi bi-calendar-event";
-        icon.setAttribute("aria-hidden", "true");
-        media.appendChild(icon);
+        card.classList.add("tl-card-noimg");
+        media = document.createElement("span");
+        media.className = "tl-card-img-blank";
+        media.setAttribute("aria-hidden", "true");
+        media.innerHTML = '<i class="bi bi-image-alt"></i>';
       }
-
-      const body = document.createElement("span");
-      body.className = "today-through-time-card-body";
-      const year = document.createElement("span");
-      year.className = "today-through-time-year";
-      year.textContent = formatTodayThroughTimeYear(event.year);
-      const heading = document.createElement("span");
-      heading.className = "today-through-time-card-title";
-      heading.textContent = title;
-      body.append(year, heading);
-      if (summary && summary.toLowerCase() !== title.toLowerCase()) {
-        const description = document.createElement("span");
-        description.className = "today-through-time-card-description";
-        description.textContent = summary;
-        body.appendChild(description);
-      }
+      const actions = document.createElement("span");
+      actions.className = "tl-card-actions";
       const action = document.createElement("span");
-      action.className = "today-through-time-card-action";
+      action.className = "major-event-source";
       action.innerHTML = 'Open details <i class="bi bi-arrow-up-right" aria-hidden="true"></i>';
-      body.appendChild(action);
-      card.append(media, body);
-      card.addEventListener("click", () => {
-        if (!eventDetailModal) {
+      actions.appendChild(action);
+      body.append(heading, actions);
+      card.append(year, media, body);
+      card.addEventListener("click", (clickEvent) => {
+        if (!getEventDetailModal()) {
+          clickEvent.preventDefault();
           window.location.assign(`${datePageHref}#${anchorId}`);
           return;
         }
+        // This card opens the modal after preparing its focused content. Stop
+        // Bootstrap's delegated data-api handler from toggling the same modal
+        // a second time after this listener bubbles to the document.
+        clickEvent.stopPropagation();
         lastActiveCard = card;
         currentActiveFilter = "all";
-        showEventDetails(day, month, today.getFullYear(), data, anchorId);
+        void showEventDetails(day, month, today.getFullYear(), data, anchorId);
       });
       item.appendChild(card);
       track.appendChild(item);
@@ -1788,8 +1714,15 @@ async function populateTodayThroughTime() {
     }
 
     const scroll = (direction) => {
+      const firstItem = track.querySelector(".today-through-time-item");
+      const cardStep =
+        (firstItem instanceof HTMLElement ? firstItem.offsetWidth : 0) + 12;
       viewport.scrollBy({
-        left: direction * Math.max(280, Math.floor(viewport.clientWidth * 0.85)),
+        left:
+          direction *
+          (cardStep > 12
+            ? cardStep
+            : Math.max(180, Math.floor(viewport.clientWidth * 0.6667))),
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
           ? "auto"
           : "smooth",
@@ -2978,7 +2911,7 @@ async function showEventDetails(
   }
   modalBodyContent.innerHTML =
     "<div class='text-center'><div class='spinner-border' role='status'></div><p>Loading events...</p></div>";
-  eventDetailModal?.show();
+  getEventDetailModal()?.show();
   lastActiveCard?.setAttribute("aria-expanded", "true");
   const personLinksPromise = fetchModalPersonLinks();
   let structuredEvents = preFetchedStructuredEvents;
@@ -3209,7 +3142,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     if (!calendarGrid) return;
     await Promise.all([
-      populateHeroHighlights(),
       populateTodayThroughTime(),
       renderCalendar(),
     ]);
@@ -3368,7 +3300,7 @@ if (eventDetailModalElement) {
     .querySelector(".btn-close")
     .addEventListener("click", (e) => {
       e.currentTarget.blur(); // move focus before Bootstrap sets aria-hidden
-      eventDetailModal.hide();
+      getEventDetailModal()?.hide();
       currentActiveFilter = "all";
     });
   eventDetailModalElement.addEventListener("hidden.bs.modal", function () {

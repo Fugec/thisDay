@@ -366,28 +366,6 @@ function historicalPersonAnchorId(person, type = person?.type) {
   return `person-${kind}-${year}-${normalizedName.slice(0, 64).replace(/-+$/g, "")}`;
 }
 
-function pickRandomHomepageHighlights(events, count = 3, randomFn = Math.random) {
-  const seen = new Set();
-  const pool = (Array.isArray(events) ? events : []).filter((event) => {
-    const text = String(event?.text || "").trim();
-    const key = `${String(event?.year ?? "")}|${text}`.toLowerCase();
-    if (!text || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
-  for (let index = pool.length - 1; index > 0; index -= 1) {
-    const randomValue = Number(randomFn());
-    const safeRandom = Number.isFinite(randomValue)
-      ? Math.min(Math.max(randomValue, 0), 0.999999999)
-      : 0;
-    const swapIndex = Math.floor(safeRandom * (index + 1));
-    [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
-  }
-
-  return pool.slice(0, Math.max(0, count));
-}
-
 const HISTORY_EVERGREEN_PAGES = Object.freeze({
   "spanish-civil-war-1936": {
     storageSlug: "spanish-civil-war-erupts",
@@ -9445,21 +9423,44 @@ async function handleFetchRequest(request, env, ctx) {
   const homepageFeaturedDeath = homepageFeaturedPersonContent(
     selectHomepagePreloadPeople(eventsData?.deaths, 1)[0],
   );
-  const homepageHighlightsHtml = pickRandomHomepageHighlights(
+  const homepageTimelineEvents = selectHomepagePreloadEvents(
     eventsData?.events,
-    3,
-  )
+    HOMEPAGE_PRELOAD_EVENT_LIMIT,
+  ).slice(0, 8);
+  const homepageTimelineHtml = homepageTimelineEvents
     .map(
-      (event) =>
-        `<a href="${homepageEventsPath}#${historicalEventAnchorId(event)}" class="hero-highlight" role="listitem">` +
-        `<span class="hero-highlight-year">${escapeHtml(String(event.year ?? "—"))}</span>` +
-        `<span class="hero-highlight-copy">` +
-        `<span class="hero-highlight-text">${escapeHtml(String(event.text || ""))}</span>` +
-        `<span class="major-event-source">Read More<i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></span>` +
-        `</span>` +
-        `</a>`,
+      (event) => {
+        const numericYear = Number.parseInt(String(event.year ?? ""), 10);
+        const yearLabel =
+          Number.isFinite(numericYear) && numericYear < 0
+            ? `${Math.abs(numericYear)} BC`
+            : String(event.year ?? "—");
+        const timelineImageUrl = String(
+          event.pages?.[0]?.thumbnail?.source || "",
+        ).trim();
+        const timelineImageAlt = String(
+          event.pages?.[0]?.title || event.text || "Historical event",
+        ).slice(0, 120);
+        const timelineMediaHtml = timelineImageUrl
+          ? `<img src="/img?src=${encodeURIComponent(timelineImageUrl)}&w=640&q=80" srcset="/img?src=${encodeURIComponent(timelineImageUrl)}&w=320&q=80 320w, /img?src=${encodeURIComponent(timelineImageUrl)}&w=640&q=80 640w, /img?src=${encodeURIComponent(timelineImageUrl)}&w=960&q=80 960w" sizes="(max-width: 768px) 62vw, 28vw" alt="${escapeHtml(timelineImageAlt)}" class="tl-card-img" width="640" height="640" loading="lazy" decoding="async">`
+          : `<span class="tl-card-img-blank" aria-hidden="true"><i class="bi bi-image-alt"></i></span>`;
+        return (
+          `<li class="today-through-time-item">` +
+          `<a href="${homepageEventsPath}#${historicalEventAnchorId(event)}" class="hero-highlight tl-card${timelineImageUrl ? "" : " tl-card-noimg"} today-through-time-card">` +
+          `<span class="tl-card-badge event-years-ago">${escapeHtml(yearLabel)}</span>` +
+          timelineMediaHtml +
+          `<span class="tl-card-body">` +
+          `<span class="tl-card-title">${escapeHtml(String(event.text || ""))}</span>` +
+          `<span class="tl-card-actions"><span class="major-event-source">Open details<i class="bi bi-arrow-up-right" aria-hidden="true"></i></span></span>` +
+          `</span>` +
+          `</a></li>`
+        );
+      },
     )
     .join("");
+  const homepageEventCount = Array.isArray(eventsData?.events)
+    ? eventsData.events.length
+    : homepageTimelineEvents.length;
   // Fetch the original index.html from the origin server
   const originalResponse = await fetch(url.origin, request);
   let contentType = originalResponse.headers.get("content-type") || "";
@@ -9673,12 +9674,24 @@ async function handleFetchRequest(request, env, ctx) {
         element.setAttribute("href", homepageDiedPath);
       },
     })
-    .on("#heroHighlightsList", {
+    .on("#todaysEventsGrid", {
       element(element) {
-        if (homepageHighlightsHtml) {
-          element.setAttribute("data-hero-highlights-ready", "true");
-          element.setInnerContent(homepageHighlightsHtml, { html: true });
+        if (homepageTimelineHtml) {
+          element.setAttribute("data-today-through-time-ssr", "true");
+          element.setInnerContent(homepageTimelineHtml, { html: true });
         }
+      },
+    })
+    .on("#todayThroughTimeCount", {
+      element(element) {
+        element.setInnerContent(
+          `${homepageEventCount} event${homepageEventCount === 1 ? "" : "s"} recorded on this date`,
+        );
+      },
+    })
+    .on("#todayThroughTimeAll", {
+      element(element) {
+        element.setAttribute("href", homepageEventsPath);
       },
     });
 
@@ -10086,7 +10099,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=48>; rel=preload; as=style",
+      "</css/custom.css?v=50>; rel=preload; as=style",
     ].join(", "),
   );
 

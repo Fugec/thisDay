@@ -1825,6 +1825,7 @@ let currentActiveFilter = "all";
 let currentModalDay = null;
 let currentModalMonth = null;
 let currentModalPersonLinks = new Map();
+let modalSelectionRequestId = 0;
 
 const eventCategories = {
   "War & Conflict": {
@@ -2906,13 +2907,20 @@ function renderFilteredItems(itemsToRender) {
   eventsListDiv.innerHTML = htmlContent;
 }
 
-function focusModalTimelineItem(itemAnchorId) {
+function focusModalTimelineItem(
+  itemAnchorId,
+  selectionRequestId = modalSelectionRequestId,
+) {
   if (!itemAnchorId) return;
-  const scrollToTarget = () => {
+  const scrollToTarget = (behavior = "smooth") => {
+    if (selectionRequestId !== modalSelectionRequestId) return;
     const target = Array.from(
       modalBodyContent?.querySelectorAll("[data-item-anchor]") || [],
     ).find((item) => item.dataset.itemAnchor === itemAnchorId);
     if (!target || !modalBodyContent) return;
+    modalBodyContent
+      .querySelectorAll(".modal-tl-item-targeted")
+      .forEach((item) => item.classList.remove("modal-tl-item-targeted"));
     target.classList.add("modal-tl-item-targeted");
     const bodyRect = modalBodyContent.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
@@ -2928,10 +2936,25 @@ function focusModalTimelineItem(itemAnchorId) {
       top,
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
         ? "auto"
-        : "smooth",
+        : behavior,
     });
   };
-  requestAnimationFrame(() => requestAnimationFrame(scrollToTarget));
+  const scheduleScroll = () => {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        scrollToTarget();
+        setTimeout(() => scrollToTarget("auto"), 350);
+      }),
+    );
+  };
+  const modalElement = document.getElementById("eventDetailModal");
+  if (modalElement?.classList.contains("show")) {
+    scheduleScroll();
+  } else {
+    modalElement?.addEventListener("shown.bs.modal", scheduleScroll, {
+      once: true,
+    });
+  }
 }
 
 function applyFilter({ scrollToFirst = true } = {}) {
@@ -2968,6 +2991,7 @@ async function showEventDetails(
   focusedItemAnchorId = "",
   focusedEventKey = "",
 ) {
+  const selectionRequestId = ++modalSelectionRequestId;
   currentModalDay = day;
   currentModalMonth = month;
   const daysExplored = trackDayVisit(month, day);
@@ -2995,6 +3019,7 @@ async function showEventDetails(
       });
     }
     const personIndex = await personLinksPromise;
+    if (selectionRequestId !== modalSelectionRequestId) return;
     currentModalPersonLinks = new Map(
       personIndex
         .filter(
@@ -3128,7 +3153,10 @@ async function showEventDetails(
     });
     applyFilter({ scrollToFirst: !resolvedFocusedItemAnchorId });
     if (resolvedFocusedItemAnchorId) {
-      focusModalTimelineItem(resolvedFocusedItemAnchorId);
+      focusModalTimelineItem(
+        resolvedFocusedItemAnchorId,
+        selectionRequestId,
+      );
     }
     fetchAndApplyCommentary(month, day);
 
@@ -3194,6 +3222,7 @@ async function showEventDetails(
       });
     });
   } catch (error) {
+    if (selectionRequestId !== modalSelectionRequestId) return;
     console.error("Error loading event details:", error);
     modalBodyContent.innerHTML = `
       <div class="alert alert-danger" role="alert">
@@ -3368,6 +3397,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 const eventDetailModalElement = document.getElementById("eventDetailModal");
 if (eventDetailModalElement) {
+  eventDetailModalElement.addEventListener("hide.bs.modal", function () {
+    // Invalidate any still-loading selection so an earlier request cannot
+    // overwrite the next card the visitor opens.
+    modalSelectionRequestId += 1;
+  });
   eventDetailModalElement
     .querySelector(".btn-close")
     .addEventListener("click", (e) => {

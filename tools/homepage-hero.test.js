@@ -40,6 +40,18 @@ function loadTimelineFocusHelpers(source) {
   return context;
 }
 
+function loadModalTimelineFocus(source, context) {
+  const match = source.match(
+    /(function focusModalTimelineItem[\s\S]*?\n})\n\nfunction applyFilter/,
+  );
+  assert.ok(match, "modal timeline focus helper must be extractable");
+  vm.runInNewContext(
+    `let modalSelectionRequestId=0;\n${match[1]}\nthis.setRequestId=(value)=>{modalSelectionRequestId=value;};\nthis.focus=focusModalTimelineItem;`,
+    context,
+  );
+  return context;
+}
+
 test("hero uses Today Through Time in the former highlights position", () => {
   assert.match(indexHtml, /<div class="hero-inner">/);
   assert.match(indexHtml, /Events, birthdays and milestones for any date — sourced from\s+Wikipedia\./);
@@ -196,6 +208,83 @@ test("Today Through Time resolves compact records and owns the modal scroll", ()
   );
   assert.match(script, /if \(!scrollToFirst\) return;[\s\S]*?setTimeout/);
   assert.match(script, /modalBodyContent\.scrollTo\(\{[\s\S]*?top,/);
+});
+
+test("Today Through Time refocuses every modal selection independently", () => {
+  const targeted = new Set();
+  const scrollTops = [];
+  const makeTarget = (anchor, top) => ({
+    dataset: { itemAnchor: anchor },
+    classList: {
+      add(name) {
+        if (name === "modal-tl-item-targeted") targeted.add(anchor);
+      },
+      remove(name) {
+        if (name === "modal-tl-item-targeted") targeted.delete(anchor);
+      },
+    },
+    getBoundingClientRect() {
+      return { top, height: 100 };
+    },
+  });
+  const first = makeTarget("event-first", 120);
+  const second = makeTarget("event-second", 620);
+  const modalBodyContent = {
+    clientHeight: 400,
+    scrollTop: 0,
+    querySelectorAll(selector) {
+      if (selector === "[data-item-anchor]") return [first, second];
+      if (selector === ".modal-tl-item-targeted") {
+        return [first, second].filter((item) =>
+          targeted.has(item.dataset.itemAnchor),
+        );
+      }
+      return [];
+    },
+    getBoundingClientRect() {
+      return { top: 20 };
+    },
+    scrollTo({ top }) {
+      this.scrollTop = top;
+      scrollTops.push(top);
+    },
+  };
+  const modalElement = {
+    classList: { contains: (name) => name === "show" },
+    addEventListener() {},
+  };
+  const context = loadModalTimelineFocus(script, {
+    modalBodyContent,
+    document: {
+      getElementById: () => modalElement,
+    },
+    requestAnimationFrame: (callback) => callback(),
+    setTimeout: (callback) => callback(),
+    window: {
+      matchMedia: () => ({ matches: false }),
+    },
+  });
+
+  context.setRequestId(1);
+  context.focus("event-first", 1);
+  context.setRequestId(2);
+  context.focus("event-second", 2);
+
+  assert.ok(scrollTops.length >= 4);
+  assert.deepEqual([...targeted], ["event-second"]);
+  assert.ok(scrollTops.at(-1) > scrollTops[0]);
+  assert.match(
+    script,
+    /const selectionRequestId = \+\+modalSelectionRequestId;/,
+  );
+  assert.match(
+    script,
+    /if \(selectionRequestId !== modalSelectionRequestId\) return;/,
+  );
+  assert.match(
+    script,
+    /addEventListener\("hide\.bs\.modal"[\s\S]*?modalSelectionRequestId \+= 1/,
+  );
 });
 
 test("homepage and date pages derive the same stable event fragment", () => {

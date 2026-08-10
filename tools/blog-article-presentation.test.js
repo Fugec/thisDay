@@ -435,7 +435,7 @@ test("the quiz float trigger uses the Did You Know slider in every template copy
   assert.match(blogHooks.TDQ_FLOAT_TRIGGER_JS, /requestAnimationFrame/);
 });
 
-test("analysis is event-labelled and collapsed behind a native disclosure", () => {
+test("analysis is event-labelled and open by default in a native disclosure", () => {
   const analysisItems = (prefix) => Array.from({ length: 3 }, (_, index) => ({
     title: `${prefix} ${index + 1}`,
     detail:
@@ -500,7 +500,7 @@ test("analysis is event-labelled and collapsed behind a native disclosure", () =
     /<li class="breadcrumb-item active" aria-current="page">Spanish Civil War Begins<\/li>/,
   );
   assert.match(html, /<h2 class="h3">Analysis: Spanish Civil War<\/h2>/);
-  assert.match(html, /<details class="analysis-disclosure mt-2">/);
+  assert.match(html, /<details class="analysis-disclosure mt-2" open>/);
   assert.match(
     html,
     /<summary class="analysis-disclosure-summary">What the evidence supports and leaves unresolved<\/summary>/,
@@ -549,7 +549,7 @@ test("future articles render the verified evidence comparison without inline spa
     /<section class="article-evidence-map article-analysis mt-5" data-original-value-module="source-comparison"/,
   );
   assert.doesNotMatch(html, /<section class="article-evidence-map[^>]*\bstyle=/);
-  assert.match(html, /<details class="analysis-disclosure mt-2">/);
+  assert.match(html, /<details class="analysis-disclosure mt-2" open>/);
   assert.match(html, /<summary class="analysis-disclosure-summary">/);
   assert.match(
     html,

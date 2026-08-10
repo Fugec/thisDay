@@ -1879,7 +1879,7 @@ function buildEvidenceMapBlock(content) {
 
   return `<section class="article-evidence-map article-analysis mt-5" data-original-value-module="source-comparison" aria-labelledby="evidence-map-heading">
             <h2 class="h3" id="evidence-map-heading">Evidence Map: How We Checked the Central Claim</h2>
-            <details class="analysis-disclosure mt-2">
+            <details class="analysis-disclosure mt-2" open>
               <summary class="analysis-disclosure-summary">What the sources verify and how they were used</summary>
               <div class="analysis-disclosure-body evidence-map-content">
               <p class="evidence-map-intro">This comparison separates the event page selected for the account from the independently verified page used to corroborate it.</p>
@@ -1924,7 +1924,7 @@ function normalizeArticleEvidenceMapDisclosureHtml(body) {
       .replace(/\saria-labelledby="[^"]*"/gi, "");
     return `<section class="article-evidence-map article-analysis mt-5"${cleanAttributes} aria-labelledby="${headingId}">
             <h2 class="h3" id="${headingId}">${heading}</h2>
-            <details class="analysis-disclosure mt-2">
+            <details class="analysis-disclosure mt-2" open>
               <summary class="analysis-disclosure-summary">What the sources verify and how they were used</summary>
               <div class="analysis-disclosure-body evidence-map-content">
                 ${content.trim()}
@@ -1955,7 +1955,16 @@ function normalizeArticleEvidenceMapDisclosureHtml(body) {
       return canonicalShell(attributes, heading[1], heading[2], content);
     },
   );
-  return normalized;
+  // Keep both the Analysis and Evidence Map disclosures expanded by default,
+  // including already-stored articles normalized at response time. Readers
+  // can still collapse either section with the native details control.
+  return normalized.replace(
+    /<details\b([^>]*\bclass="[^"]*\banalysis-disclosure\b[^"]*"[^>]*)>/gi,
+    (details, attributes) =>
+      /(?:^|\s)open(?:\s|=|$)/i.test(attributes)
+        ? details
+        : `<details${attributes} open>`,
+  );
 }
 
 function buildAuthorityLinksBlock(content, _pillars = []) {
@@ -15807,7 +15816,7 @@ function assertArticleStructure(html) {
     ["featured image alt text", /<figure\b[^>]*class="[^"]*\barticle-hero-fig\b[^"]*"[\s\S]*?<img\b[^>]*\balt="[^"]{5,}"/i],
     ["short answer card", /ai-answer-card/i],
     ["source-backed evidence map", /<section class="article-evidence-map article-analysis mt-5\b/i],
-    ["collapsed evidence-map disclosure", /<section class="article-evidence-map article-analysis mt-5\b[\s\S]*?<details class="analysis-disclosure mt-2\b/i],
+    ["open evidence-map disclosure", /<section class="article-evidence-map article-analysis mt-5\b[\s\S]*?<details class="analysis-disclosure mt-2" open\b/i],
     ["original-value module", /data-original-value-module="(?:sourced-timeline|source-comparison)"/i],
     ["evidence-map central claim", /class="evidence-map-claim"[\s\S]*?<strong>Central claim checked:<\/strong>\s*[^<\s]/i],
     ["independent evidence-map source", /data-evidence-role="independent"/i],
@@ -15816,7 +15825,7 @@ function assertArticleStructure(html) {
       : [
           ["did you know section", /<h2 class="h3">Did You Know\?<\/h2>/i],
           ["analysis section", /<h2 class="h3">Analysis:/i],
-          ["collapsed analysis disclosure", /<details class="analysis-disclosure\b/i],
+          ["open analysis disclosure", /<h2 class="h3">Analysis:[\s\S]*?<details class="analysis-disclosure mt-2" open\b/i],
         ]),
   ];
   const missing = checks
@@ -24572,7 +24581,7 @@ ${conclusionParas}
             analysisGoodItems || analysisBadItems
               ? `<section class="article-analysis mt-5" style="margin-top:2rem!important">
             <h2 class="h3">${esc(analysisHeading)}</h2>
-            <details class="analysis-disclosure mt-2">
+            <details class="analysis-disclosure mt-2" open>
               <summary class="analysis-disclosure-summary">What the evidence supports and leaves unresolved</summary>
               <div class="analysis-disclosure-body">
                 <div class="row g-3 mt-1">

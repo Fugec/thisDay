@@ -1,18 +1,18 @@
 // thisDay. Service Worker
 // Caches static assets for instant repeat visits and basic offline support.
 
-const CACHE_NAME = "thisday-v39";
+const CACHE_NAME = "thisday-v42";
 const CACHE_VERSION_KEY = "thisday-sw-version";
 
 // Static assets to cache on install (shell of the app)
 const STATIC_ASSETS = [
   "/manifest.json",
-  "/js/script.js?v=30",
+  "/js/script.js?v=31",
   "/js/chatbot.js?v=5",
   "/js/shared/static-layout.js",
   "/js/shared/layout.js",
-  "/css/custom.css?v=51",
-  "/css/style.css?v=10",
+  "/css/custom.css?v=53",
+  "/css/style.css?v=11",
   "/images/favicon.ico",
   "/images/favicon-32x32.png",
   "/images/favicon-16x16.png",

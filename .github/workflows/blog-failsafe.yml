@@ -212,6 +212,10 @@ jobs:
               echo "::error::AI capacity deferred during enrichment; the retained draft will be resumed after reset."
             elif [ "$HTTP_STATUS" = "429" ]; then
               echo "::error::Cloudflare KV write budget blocked enrichment until the UTC reset."
+            elif [ "$HTTP_STATUS" = "409" ] && printf '%s' "$BODY" | jq -e '.status == "event-rotated"' >/dev/null 2>&1; then
+              echo "::error::The draft repeated the same grounding residual and was rotated. The next scheduled run will prepare a different topic."
+            elif [ "$HTTP_STATUS" = "409" ] && printf '%s' "$BODY" | jq -e '.status == "grounding-residual"' >/dev/null 2>&1; then
+              echo "::error::The draft was retained for one later grounding-repair attempt; an identical second residual will rotate the topic."
             elif echo "$BODY" | grep -q "Bounded recovery rejected"; then
               echo "::error::The bounded publication gate rejected this topic. The next scheduled run may select another topic without a same-run regeneration."
             else

@@ -1,6 +1,5 @@
 {
-  // Blog Post Worker — publishes a new blog post every day
-  // using Cloudflare Workers AI (free, no external API key needed).
+  // Blog Post Worker — publishes a new blog post every day using Groq.
   //
   // Deploy:  npx wrangler deploy --config wrangler-blog.jsonc
   // Dev:     npx wrangler dev --config wrangler-blog.jsonc
@@ -39,6 +38,11 @@
     "KV_OPTIONAL_WRITE_STOP": "850",
     "KV_CONTENT_START_STOP": "950",
     "KV_ENRICHMENT_STOP": "980",
+    // All article-writing, factual-grounding, repair, quiz, and optional
+    // enrichment AI calls use Groq. Source, Wikimedia, and image fetches are
+    // unchanged. A Groq capacity failure retains resumable work for a later
+    // cron; it never falls through to another AI provider.
+    "ARTICLE_AI_PROVIDER_MODE": "groq-only",
     // Comma-separated quota-pool labels aligned with GROQ_API_KEY(_2.._7).
     // Leave empty unless keys are verified to belong to independent Groq
     // organizations/projects. Empty means one shared pool and disables
@@ -124,12 +128,6 @@
       "preview_id": "7e94191271854d90ae9f7a0cc13555d5",
     },
   ],
-
-  // Cloudflare Workers AI — free tier, no external key required.
-  "ai": {
-    "binding": "AI",
-    "remote": true,
-  },
 
   // Secrets (set via `wrangler secret put <NAME> --config wrangler-blog.jsonc`):
   //   CLOUDFLARE_ANALYTICS_READ — preferred least-privilege Account Analytics

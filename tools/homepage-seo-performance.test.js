@@ -14,6 +14,7 @@ const customCss = readFileSync(join(root, "css/custom.css"), "utf8");
 const styleCss = readFileSync(join(root, "css/style.css"), "utf8");
 const clientSource = readFileSync(join(root, "js/script.js"), "utf8");
 const workerSource = readFileSync(join(root, "js/seo-worker.js"), "utf8");
+const blogWorkerSource = readFileSync(join(root, "js/blog-ai-worker.js"), "utf8");
 
 test("homepage fallback metadata is stable, complete, and indexable", () => {
   assert.match(
@@ -152,7 +153,7 @@ test("homepage article grid uses four columns and the event rail stays horizonta
   );
   assert.match(
     styleCss,
-    /\[data-page="v2"\] \.blog-grid:not\(\.video-grid\)\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\) !important;/s,
+    /\[data-page="v2"\] \.blog-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\) !important;/s,
   );
   assert.doesNotMatch(
     styleCss,
@@ -251,10 +252,88 @@ test("partial homepage data is upgraded before the complete day modal renders", 
   assert.match(clientSource, /if \(raw\.partial !== true\) saveCacheToLocalStorage\(eventCache\)/);
 });
 
+test("homepage videos use two four-card desktop rows without a duplicate cookie banner", () => {
+  const posts = Array.from({ length: 9 }, (_, index) => ({
+    slug: `video-${index + 1}`,
+    title: `Video ${index + 1}`,
+    description: `Description ${index + 1}`,
+  }));
+  const videos = Object.fromEntries(
+    posts.map((post, index) => [
+      post.slug,
+      {
+        youtubeId: `videoid${String(index + 1).padStart(3, "0")}`,
+        uploadedAt: new Date(Date.UTC(2026, 7, index + 1)).toISOString(),
+        privacy: "public",
+      },
+    ]),
+  );
+  const cards = hooks.buildHomepageVideoCards(posts, videos);
+
+  assert.equal((cards.match(/class="blog-card video-card"/g) || []).length, 8);
+  assert.match(indexHtml, /videos\.slice\(0, 8\)\.forEach/);
+  assert.match(
+    customCss,
+    /\.video-section \.blog-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);/s,
+  );
+  assert.match(
+    customCss,
+    /\.video-card-thumb\s*\{[^}]*aspect-ratio:\s*1 \/ 1;/s,
+  );
+  assert.match(
+    blogWorkerSource,
+    /path === "\/blog\/videos\.json"[\s\S]*?\.slice\(0, 8\)/,
+  );
+  assert.doesNotMatch(indexHtml, /cookieBanner|acceptCookies|cookieBannerAccepted/);
+  assert.doesNotMatch(customCss, /\.cookie-banner/);
+  assert.doesNotMatch(styleCss, /\.cookie-banner/);
+});
+
+test("homepage edge release closes a lagging static-origin deployment", () => {
+  const custom = hooks.normalizeHomepageStaticAsset(
+    "/css/custom.css",
+    ".video-card-thumb{height:240px}.cookie-banner{display:flex}",
+  );
+  assert.match(custom, /thisday-homepage-edge-v53/);
+  assert.match(custom, /repeat\(4, minmax\(0, 1fr\)\) !important/);
+  assert.match(custom, /#cookieBanner,[\s\S]*display: none !important/);
+
+  const browserScript = hooks.normalizeHomepageStaticAsset(
+    "/js/script.js",
+    `function pickTeaserSentence(){\n${hooks.HOMEPAGE_LEGACY_INITIAL_BOUNDARY}\n}`,
+  );
+  assert.match(browserScript, /isSingleMiddleInitial/);
+  assert.match(browserScript, /John|sentenceStarter/);
+
+  const serviceWorker = hooks.normalizeHomepageStaticAsset(
+    "/sw.js",
+    'const CACHE_NAME = "thisday-v39";\n"/js/script.js?v=30"\n"/css/custom.css?v=51"\n"/css/style.css?v=10"',
+  );
+  assert.match(serviceWorker, /thisday-v42/);
+  assert.match(serviceWorker, /script\.js\?v=31/);
+  assert.match(serviceWorker, /custom\.css\?v=53/);
+  assert.match(serviceWorker, /style\.css\?v=11/);
+
+  assert.equal(
+    hooks.isHomepageEdgeAssetRequest(
+      new URL("https://thisday.info/js/script.js?v=31"),
+    ),
+    true,
+  );
+  assert.equal(
+    hooks.isHomepageEdgeAssetRequest(
+      new URL("https://thisday.info/js/script.js?v=30"),
+    ),
+    false,
+  );
+  assert.match(workerSource, /\.on\("#cookieBanner"[\s\S]*?display:none!important/);
+  assert.match(workerSource, /\.on\("noscript"[\s\S]*?style\.css\?v=/);
+});
+
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=51/);
-  assert.match(indexHtml, /style\.css\?v=10/);
-  assert.match(indexHtml, /script\.js\?v=30/);
+  assert.match(indexHtml, /custom\.css\?v=53/);
+  assert.match(indexHtml, /style\.css\?v=11/);
+  assert.match(indexHtml, /script\.js\?v=31/);
   assert.match(
     workerSource,
     /public, max-age=31536000, s-maxage=31536000, immutable/,
@@ -270,7 +349,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=51"),
+      new Request("https://thisday.info/css/custom.css?v=53"),
       {},
       { waitUntil() {} },
     );

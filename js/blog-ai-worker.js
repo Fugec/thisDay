@@ -1,8 +1,8 @@
 /**
  * Cloudflare Worker — Blog Post Generator
  *
- * Runs on a cron trigger (daily at 00:05 UTC) and publishes a new blog post
- * every day using Cloudflare Workers AI (free, no external API key).
+ * Runs on a cron trigger and publishes a new blog post every day using the
+ * configured text-AI provider policy (production is pinned to Groq).
  * Posts are stored in Cloudflare KV and served at:
  *   /blog/                → listing of all published posts
  *   /blog/[slug]/         → individual post page
@@ -10,7 +10,7 @@
  * Manual trigger (for testing):
  *   POST /blog/publish     → immediately publishes today's post
  *
- * Required bindings: BLOG_AI_KV (KV namespace), AI (Workers AI)
+ * Required bindings: BLOG_AI_KV (KV namespace) and Groq API-key secrets.
  */
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,7 @@ import {
   aiUsageSummary,
   aiProviderRetryAt,
   isAIProviderCapacityError,
+  isGroqOnlyProviderMode,
   hasIndependentGroqQuotaPools,
 } from "./shared/ai-call.js";
 import { extractFirstSentence, truncateForMeta, splitSentences, normalizeForCompare } from "./shared/seo-text.js";
@@ -133,6 +134,18 @@ async function callPublicationGateAI(env, messages, options = {}) {
     groqSectionAttemptLimit = 2,
     ...callOptions
   } = options;
+  // Production can pin the entire article pipeline to Groq. The final
+  // factual-grounding gate must obey the same policy instead of entering via
+  // Workers AI first. Leave the Groq section uncapped here so all explicitly
+  // independent quota pools remain available to this correctness gate.
+  if (isGroqOnlyProviderMode(env)) {
+    return callAI(env, messages, {
+      ...callOptions,
+      groqOnly: true,
+      skipWorkersAI: true,
+      providerAttemptLimit,
+    });
+  }
   // Local-test guard: the Workers AI 10k-neurons/day pool is ACCOUNT-wide,
   // shared with production. AI_GATE_PREFER_EXTERNAL=1 (dev var only, never a
   // deployed secret) routes gates through the external chain first so local
@@ -4460,6 +4473,19 @@ export default {
           if (isAIProviderCapacityError(err)) {
             return aiCapacityDeferredResponse(err, { slug });
           }
+          if (err?.groundingRecovery) {
+            const verifierDeferred =
+              err.code === "BOUNDED_GROUNDING_VERIFIER_DEFERRED";
+            return jsonResponse(
+              {
+                ...err.groundingRecovery,
+                message: err.message,
+                kvBudget: publicKvWriteBudget(guarded.budget),
+              },
+              verifierDeferred ? 503 : 409,
+              verifierDeferred ? { "Retry-After": "300" } : {},
+            );
+          }
           return jsonResponse({ status: "error", slug, message: err.message }, 500);
         }
       }
@@ -4969,7 +4995,7 @@ export default {
       const videos = Object.entries(yt)
         .filter(([, v]) => v.youtubeId && v.privacy !== "private")
         .sort(([, a], [, b]) => new Date(b.uploadedAt) - new Date(a.uploadedAt))
-        .slice(0, 6)
+        .slice(0, 8)
         .map(([slug, v]) => {
           const post = indexBySlug[slug] ?? {};
           return {
@@ -8360,6 +8386,9 @@ function parseJsonObjectFromAI(value, label) {
 // nothing on a normal day), but fall back to the full provider chain for
 // this one call instead of silently giving up when the whole pool is down.
 async function callBoundedRepairAI(env, messages, options, label) {
+  if (isGroqOnlyProviderMode(env)) {
+    return callAI(env, messages, { ...options, groqOnly: true, skipWorkersAI: true });
+  }
   try {
     return await callAI(env, messages, { ...options, groqOnly: true });
   } catch (err) {
@@ -11431,6 +11460,24 @@ async function enrichPublishedPost(
     if (!finalGrounding.ok) {
       if (boundedRecovery) {
         const retainedContent = finalGrounding.content || enriched;
+        const retryState = boundedGroundingRetryState(
+          draft,
+          finalGrounding.reasons,
+        );
+        if (retryState.shouldRotate) {
+          await markGroundingBlockedEvent(
+            env,
+            slug,
+            retainedContent,
+            finalGrounding.reasons,
+          );
+          throw boundedGroundingRecoveryError(
+            slug,
+            finalGrounding.reasons,
+            retryState,
+            true,
+          );
+        }
         await blogKvPutIfChanged(
           env,
           `${KV_DRAFT_PREFIX}${slug}`,
@@ -11440,12 +11487,20 @@ async function enrichPublishedPost(
             publishedAt,
             boundedRepairStage: "final-grounding-residual",
             boundedRepairUpdatedAt: new Date().toISOString(),
-            boundedGroundingReasons: finalGrounding.reasons.slice(0, 5),
+            // Transport failures do not erase a prior substantive residual.
+            // Retain enough normalized evidence for legacy drafts with more
+            // than five findings to participate in semantic-overlap matching.
+            boundedGroundingReasons: retryState.retainedReasons,
+            boundedGroundingSignature: retryState.signature,
+            boundedGroundingAttempts: retryState.attempts,
           }),
           { expirationTtl: 3 * 86_400 },
         );
-        throw new Error(
-          `Bounded recovery retained the draft after final source-grounding failed — ${finalGrounding.reasons.join("; ")}`,
+        throw boundedGroundingRecoveryError(
+          slug,
+          finalGrounding.reasons,
+          retryState,
+          false,
         );
       }
       await markGroundingBlockedEvent(env, slug, enriched, finalGrounding.reasons);
@@ -20038,7 +20093,11 @@ function groundingProperAnchors(value) {
   return anchors;
 }
 
-function groundingClaimHasSourceSupport(claim, sourceSentence) {
+function groundingClaimHasSourceSupport(
+  claim,
+  sourceSentence,
+  { requireNamedAnchor = true } = {},
+) {
   const claimTokens = groundingSupportTokens(claim);
   const sourceTokens = groundingSupportTokens(sourceSentence);
   const shared = tokenMatches(claimTokens, sourceTokens);
@@ -20047,7 +20106,7 @@ function groundingClaimHasSourceSupport(claim, sourceSentence) {
   const minimumShared = claimTokens.size >= 5 ? 2 : 1;
   return (
     shared.length >= minimumShared &&
-    (anchors.size === 0 || sharedAnchors.length > 0)
+    (!requireNamedAnchor || anchors.size === 0 || sharedAnchors.length > 0)
   );
 }
 
@@ -20056,6 +20115,40 @@ function groundingClaimNumbers(value) {
     String(value || "").matchAll(/\b\d[\d,]*(?:\.\d+)?\b/g),
     (match) => match[0].replace(/,/g, ""),
   );
+}
+
+function stripGroundingCalendarDates(value) {
+  // Calendar dates are not casualty totals. A sentence such as "on August
+  // 16, 34 miners were killed and 78 were injured" must compare 34/78 with
+  // the source, not require the source's supporting sentence to repeat the
+  // day as a numeric token. The exact casualty totals remain mandatory.
+  const months =
+    "january|february|march|april|may|june|july|august|september|october|november|december";
+  return String(value || "")
+    .replace(/\b\d{4}-\d{1,2}-\d{1,2}\b/g, " ")
+    .replace(
+      new RegExp(`\\b(?:${months})\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b`, "gi"),
+      " ",
+    )
+    .replace(
+      new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${months})(?:\\s+\\d{4})?\\b`, "gi"),
+      " ",
+    )
+    // A bare four-digit number is not automatically a year: disasters and
+    // conflicts can have four-digit death tolls. Remove a standalone year
+    // only in explicit year grammar or at the start of a sentence after a
+    // temporal preposition. Explicit month/day forms were already removed
+    // above. This preserves "1,500 people were killed" while still ignoring
+    // "In 2012, police killed 34 miners" as a date-plus-toll claim.
+    .replace(/\b(?:the\s+year|year\s+of)\s+(?:1[0-9]{3}|2[0-9]{3})\b/gi, " ")
+    .replace(
+      /(^|[.!?]\s+)(?:in|by|during|since|around|circa)\s+(?:the\s+year\s+)?(?:1[0-9]{3}|2[0-9]{3})\b/gi,
+      "$1 ",
+    );
+}
+
+function groundingDirectCasualtyNumbers(value) {
+  return groundingClaimNumbers(stripGroundingCalendarDates(value));
 }
 
 function groundingDirectCasualtyOutcomeHasSupport(claim, sourceEvidence) {
@@ -20074,16 +20167,26 @@ function groundingDirectCasualtyOutcomeHasSupport(claim, sourceEvidence) {
 
   // Exact numbers are part of a casualty claim's identity. Do not let a
   // semantically similar sentence support different dates or tolls.
-  const sourceNumbers = new Set(groundingClaimNumbers(sourceEvidence));
+  const sourceNumbers = new Set(groundingDirectCasualtyNumbers(sourceEvidence));
   if (
-    groundingClaimNumbers(claim).some((number) => !sourceNumbers.has(number))
+    groundingDirectCasualtyNumbers(claim).some(
+      (number) => !sourceNumbers.has(number),
+    )
   ) {
     return false;
   }
-  return groundingClaimHasSourceSupport(claim, sourceEvidence);
+  return groundingClaimHasSourceSupport(
+    stripGroundingCalendarDates(claim),
+    stripGroundingCalendarDates(sourceEvidence),
+    { requireNamedAnchor: false },
+  );
 }
 
-function unsupportedGroundingClaims(content, sourceMaterial) {
+function unsupportedGroundingClaims(
+  content,
+  sourceMaterial,
+  { limit = 8 } = {},
+) {
   const sourceSentences = splitSentences(sourceMaterial).filter(Boolean);
   if (sourceSentences.length === 0) return [];
   const adjacentSourceWindows = sourceSentences.map((sentence, index) =>
@@ -20119,14 +20222,25 @@ function unsupportedGroundingClaims(content, sourceMaterial) {
         const key = `${rule.label}|${normalizeForCompare(sentence)}`;
         if (seen.has(key)) continue;
         seen.add(key);
+        const isNumberedCasualtyCausalClaim =
+          rule.label === "causal claim" &&
+          groundingDirectCasualtyNumbers(sentence).length > 0 &&
+          GROUNDING_DIRECT_CASUALTY_OUTCOME_RULES.some((outcomeRule) => {
+            outcomeRule.claim.lastIndex = 0;
+            return outcomeRule.claim.test(sentence);
+          });
         const supported = sourceSentences.some((sourceSentence) => {
           rule.support.lastIndex = 0;
-          return (
-            rule.support.test(sourceSentence) &&
-            groundingClaimHasSourceSupport(sentence, sourceSentence)
-          );
+          if (!rule.support.test(sourceSentence)) return false;
+          if (isNumberedCasualtyCausalClaim) {
+            return groundingDirectCasualtyOutcomeHasSupport(
+              sentence,
+              sourceSentence,
+            );
+          }
+          return groundingClaimHasSourceSupport(sentence, sourceSentence);
         }) || (
-          rule.label === "causal claim" &&
+          isNumberedCasualtyCausalClaim &&
           adjacentSourceWindows.some((sourceEvidence) =>
             groundingDirectCasualtyOutcomeHasSupport(sentence, sourceEvidence),
           )
@@ -20141,7 +20255,11 @@ function unsupportedGroundingClaims(content, sourceMaterial) {
       }
     }
   }
-  return findings.slice(0, 8);
+  const boundedLimit = Math.max(
+    1,
+    Math.min(64, Number.parseInt(String(limit), 10) || 8),
+  );
+  return findings.slice(0, boundedLimit);
 }
 
 /**
@@ -20314,6 +20432,163 @@ const KV_BLOCKED_EVENT_PREFIX = "blocked-event:";
 // Transport-level verifier failures (provider down, garbled JSON) are not
 // article defects; a content repair would be pointless churn.
 const GROUNDING_VERIFIER_TRANSPORT_PATTERN = /final grounding verifier/;
+const BOUNDED_GROUNDING_IDENTICAL_ATTEMPT_LIMIT = 2;
+const BOUNDED_GROUNDING_REASON_RETENTION_LIMIT = 16;
+
+const GROUNDING_FAILURE_CATEGORY_PATTERNS = [
+  ["casualty-number", /casualt|death toll|\b(?:killed|dead|deaths?|injured)\b|invented number/i],
+  ["causality", /caus|led to|result|trigger|prompt|consequence|outcome|prevent|enable|forc|compel/i],
+  ["attribution", /attribut|assign|ordered|carried out|perpetrator|responsib|actor|target/i],
+  ["relationship", /relationship|family|familial|marital|spouse|parent|child|successor|predecessor/i],
+  ["date", /\bdate\b|\byear\b|chronolog|calendar/i],
+  ["location", /location|place|country|city|province|region/i],
+  ["citation", /document|quotation|quote|report|publication|source/i],
+  ["identity", /identity|conflat|wrong person|wrong name/i],
+];
+
+function groundingFailureProfile(reasons) {
+  const keys = new Set();
+  const fields = new Set();
+  const categories = new Set();
+  for (const reason of Array.isArray(reasons) ? reasons : []) {
+    const raw = String(reason || "").replace(/\s+/g, " ").trim();
+    if (!raw || GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(raw)) continue;
+    const category =
+      GROUNDING_FAILURE_CATEGORY_PATTERNS.find(([, pattern]) => pattern.test(raw))?.[0] ||
+      "factual-contradiction";
+    const explicitField = raw.match(
+      /\b(overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs|didYouKnowFacts|quickFacts|analysisGood|analysisBad|curiosityTitle|description|ogDescription|twitterDescription|jsonLdDescription|editorialNote)(\[\d+\])?(?:\.([A-Za-z]+))?/i,
+    );
+    const didYouKnowIndex = raw.match(
+      /\bdid you know(?:\s+(?:fact|card))?(?:\s+(?:at\s+)?index)?\s*#?(\d+)/i,
+    );
+    const field = explicitField
+      ? `${explicitField[1].toLowerCase()}${explicitField[2] || ""}${explicitField[3] ? `.${explicitField[3].toLowerCase()}` : ""}`
+      : didYouKnowIndex
+        ? `didyouknowfacts[${didYouKnowIndex[1]}]`
+        : "article";
+    categories.add(category);
+    fields.add(field);
+    keys.add(`${category}|${field}`);
+  }
+  return { keys, fields, categories };
+}
+
+function groundingFailureProfilesOverlap(previous, current) {
+  const coverage = (left, right) => {
+    if (left.size === 0 || right.size === 0) {
+      return { smaller: 0, larger: 0 };
+    }
+    let shared = 0;
+    for (const value of left) {
+      if (right.has(value)) shared += 1;
+    }
+    return {
+      smaller: shared / Math.min(left.size, right.size),
+      larger: shared / Math.max(left.size, right.size),
+    };
+  };
+  const keyCoverage = coverage(previous.keys, current.keys);
+  const fieldCoverage = coverage(previous.fields, current.fields);
+  const categoryCoverage = coverage(previous.categories, current.categories);
+  return (
+    (keyCoverage.smaller >= 0.6 && keyCoverage.larger >= 0.5) ||
+    (
+      fieldCoverage.smaller >= 0.6 &&
+      fieldCoverage.larger >= 0.5 &&
+      categoryCoverage.smaller >= 0.6 &&
+      categoryCoverage.larger >= 0.5
+    )
+  );
+}
+
+function groundingFailureSignature(reasons) {
+  const normalized = [...groundingFailureProfile(reasons).keys]
+    .sort()
+    .join("\n");
+  if (!normalized) return "";
+  let hash = 2166136261;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash ^= normalized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}-${normalized.length}`;
+}
+
+function boundedGroundingRetryState(draft, reasons) {
+  const substantiveReasons = (Array.isArray(reasons) ? reasons : []).filter(
+    (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
+  );
+  const previousReasons = Array.isArray(draft?.boundedGroundingReasons)
+    ? draft.boundedGroundingReasons
+    : [];
+  const storedPreviousSignature = String(draft?.boundedGroundingSignature || "");
+  const previousSignature =
+    storedPreviousSignature || groundingFailureSignature(previousReasons);
+  const previousAttempts = Math.max(
+    0,
+    Number.parseInt(String(draft?.boundedGroundingAttempts || ""), 10) ||
+      (previousSignature ? 1 : 0),
+  );
+  if (substantiveReasons.length === 0) {
+    return {
+      signature: previousSignature,
+      attempts: previousAttempts,
+      shouldRotate: false,
+      transportDeferred: true,
+      retainedReasons: previousReasons.slice(
+        0,
+        BOUNDED_GROUNDING_REASON_RETENTION_LIMIT,
+      ),
+    };
+  }
+
+  const signature = groundingFailureSignature(substantiveReasons);
+  // Legacy retained drafts already carry boundedGroundingReasons. Treat that
+  // as one completed attempt so deploying this guard can immediately escape
+  // an existing identical-error loop instead of requiring two more failures.
+  const semanticallyRepeated =
+    previousSignature === signature ||
+    groundingFailureProfilesOverlap(
+      groundingFailureProfile(previousReasons),
+      groundingFailureProfile(substantiveReasons),
+    );
+  const attempts = semanticallyRepeated
+    ? previousAttempts + 1
+    : 1;
+  return {
+    signature,
+    attempts,
+    shouldRotate: attempts >= BOUNDED_GROUNDING_IDENTICAL_ATTEMPT_LIMIT,
+    transportDeferred: false,
+    retainedReasons: substantiveReasons.slice(
+      0,
+      BOUNDED_GROUNDING_REASON_RETENTION_LIMIT,
+    ),
+  };
+}
+
+function boundedGroundingRecoveryError(slug, reasons, retryState, rotated) {
+  const status = rotated ? "event-rotated" : "grounding-residual";
+  const message = rotated
+    ? `Bounded recovery rotated the event after ${retryState.attempts} identical final source-grounding failures — ${reasons.join("; ")}`
+    : `Bounded recovery retained the draft after final source-grounding failed — ${reasons.join("; ")}`;
+  const error = new Error(message);
+  error.code = rotated
+    ? "BOUNDED_GROUNDING_EVENT_ROTATED"
+    : retryState.transportDeferred
+      ? "BOUNDED_GROUNDING_VERIFIER_DEFERRED"
+      : "BOUNDED_GROUNDING_RESIDUAL";
+  error.groundingRecovery = {
+    status,
+    slug,
+    rotated,
+    attempts: retryState.attempts,
+    signature: retryState.signature,
+    reasons: (Array.isArray(reasons) ? reasons : []).slice(0, 5),
+  };
+  return error;
+}
 
 const GROUNDING_REPAIRABLE_STRING_FIELDS = [
   "curiosityTitle",
@@ -20474,7 +20749,11 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
   let working = content;
   const repairedFieldPaths = [];
   for (let pass = 0; pass < 8; pass += 1) {
-    const findings = unsupportedGroundingClaims(working, sourceMaterial);
+    const findings = unsupportedGroundingClaims(
+      working,
+      sourceMaterial,
+      { limit: 64 },
+    );
     if (findings.length === 0) break;
     let repaired = false;
 
@@ -20609,7 +20888,7 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
           if (targetSentence) {
             const trimmedSentence = targetSentence
               .replace(
-                /,\s*(?:(?:which|and)\s+)?(?:it\s+)?(?:lead(?:s|ing)?\s+to|led\s+to|prompt(?:ed|s|ing)?|result(?:ed|s|ing)?\s+in|trigger(?:ed|s|ing)?)\b[\s\S]*$/i,
+                /,\s*(?:(?:which|and)\s+)?(?:(?:the|this|that)\s+(?:action|confrontation|decision|event|incident|situation)\s+|it\s+)?(?:(?:directly|eventually|ultimately)\s+)?(?:lead(?:s|ing)?\s+to|led\s+to|prompt(?:ed|s|ing)?|result(?:ed|s|ing)?\s+in|trigger(?:ed|s|ing)?)\b[\s\S]*$/i,
                 ".",
               )
               .replace(/\s+\./g, ".")
@@ -20639,6 +20918,7 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
                 );
               }
             }
+
           }
         }
       }
@@ -20721,10 +21001,61 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
         }
       }
 
+      // Final zero-token fallback for a risky sentence that cannot be safely
+      // trimmed in place. Removing an unsupported sentence is safer than
+      // repeatedly asking a model to paraphrase it. This applies only to
+      // substantive body paragraphs and analysis details that remain above
+      // their established word floors after removal.
+      if (
+        !candidate &&
+        [
+          "causal claim",
+          "coercive outcome",
+          "enabling outcome",
+          "order attribution",
+          "perpetrator attribution",
+          "preventive outcome",
+        ].includes(finding.label)
+      ) {
+        const fullText = getContentFieldByPath(working, finding.field);
+        if (typeof fullText === "string") {
+          const targetSentence = splitSentences(fullText).find(
+            (sentence) => sentence.slice(0, 240) === finding.sentence,
+          );
+          if (targetSentence) {
+            const remainingText = fullText
+              .replace(targetSentence, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+            const rootField = finding.field.split(/[.[\]]/)[0];
+            const minimumRemainingWords =
+              /^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(
+                finding.field,
+              )
+                ? 60
+                : ARTICLE_BODY_FIELDS.includes(rootField)
+                  ? CHUNKED_BODY_PARAGRAPH_MIN_WORDS
+                  : null;
+            if (
+              minimumRemainingWords !== null &&
+              wordCount(remainingText) >= minimumRemainingWords
+            ) {
+              candidate = JSON.parse(JSON.stringify(working));
+              setContentFieldByPath(
+                candidate,
+                finding.field,
+                remainingText,
+              );
+            }
+          }
+        }
+      }
+
       if (!candidate) continue;
       const candidateFindings = unsupportedGroundingClaims(
         candidate,
         sourceMaterial,
+        { limit: 64 },
       );
       if (candidateFindings.length >= findings.length) continue;
       working = candidate;
@@ -25983,7 +26314,10 @@ export const __contentGenerationTestHooks = {
   upsertEntitiesForContent,
   filterGroundingIssues,
   verifyArticleGrounding,
+  groundingDirectCasualtyNumbers,
   mechanicallyRemoveOptionalUnsupportedClaims,
+  groundingFailureSignature,
+  boundedGroundingRetryState,
   normalizeContentMetadata,
   validateContentSemanticsForPublish,
   validateContentDateForPublish,

@@ -1042,6 +1042,12 @@ const GROQ_SECTION_MAX_ATTEMPTS = 4;
 // the original 4.
 const GROQ_SECTION_MAX_ATTEMPTS_INDEPENDENT_POOLS = 7;
 
+export function isGroqOnlyProviderMode(env) {
+  return String(env?.ARTICLE_AI_PROVIDER_MODE || "")
+    .trim()
+    .toLowerCase() === "groq-only";
+}
+
 /**
  * Calls the bound Cloudflare Workers AI service directly.
  *
@@ -1085,6 +1091,17 @@ async function callWorkersAIDirectUncached(
  * With AI_CASSETTE unset (production) this is a passthrough.
  */
 export async function callWorkersAIDirect(env, messages, options = {}) {
+  // The blog Worker can enforce one provider policy for every article AI
+  // operation, including legacy callers that intentionally entered through
+  // the Workers-AI-direct helper. Route those calls into the normal Groq
+  // pool before consulting the Workers AI circuit or binding.
+  if (isGroqOnlyProviderMode(env)) {
+    return callAI(env, messages, {
+      ...options,
+      groqOnly: true,
+      skipWorkersAI: true,
+    });
+  }
   const now = Date.now();
   // A warm isolate may have observed an empty circuit before another isolate
   // recorded an account-wide limit, so refresh at every public entry point.
@@ -1154,6 +1171,7 @@ export async function callAI(env, messages, options = {}) {
     expectJson = false,
     groqOnly = false,
   } = options;
+  const effectiveGroqOnly = Boolean(groqOnly || isGroqOnlyProviderMode(env));
   const cassette = await cassetteLookup(env, [
     "callAI",
     messages,
@@ -1166,11 +1184,14 @@ export async function callAI(env, messages, options = {}) {
       groqSectionAttemptLimit:
         groqSectionAttemptLimit == null ? null : Number(groqSectionAttemptLimit),
       expectJson: Boolean(expectJson),
-      groqOnly: Boolean(groqOnly),
+      groqOnly: effectiveGroqOnly,
     },
   ]);
   if (cassette.text) return cassette.text;
-  const text = await callAIProviders(env, messages, options);
+  const text = await callAIProviders(env, messages, {
+    ...options,
+    groqOnly: effectiveGroqOnly,
+  });
   await cassetteStore(env, cassette.key, text);
   return text;
 }
@@ -1305,6 +1326,14 @@ async function callAIProviders(
   if (groqKeys.length === 0) {
     failureReasons.push("No Groq API keys configured");
   }
+  // A Groq-only provider outage is not evidence that an article topic is
+  // invalid. Track transient/provider failures separately from deterministic
+  // request-shape failures so timeouts, 5xx responses, empty responses,
+  // temporarily busy keys, and missing configuration defer the SAME retained
+  // article, while a prompt that is genuinely too large can still reach the
+  // caller's structural recovery path.
+  let groqRetryableFailureObserved = groqKeys.length === 0;
+  let groqRequestShapeFailureObserved = false;
   let stopGroqAfterSubrequestLimit = false;
   let stopGroqAfterAttemptShare = false;
   let groqSectionAttempts = 0;
@@ -1313,12 +1342,14 @@ async function callAIProviders(
       const groqProviderPool = `groq:${pool}`;
       const groqPoolBlockedUntil = circuitBlockedUntil(groqProviderPool);
       if (groqPoolBlockedUntil) {
+        groqRetryableFailureObserved = true;
         failureReasons.push(
           `Groq pool ${pool} capacity circuit open until ${new Date(groqPoolBlockedUntil).toISOString()} (${providerCircuitReason(providerCircuit, groqProviderPool) || "rate limited"})`,
         );
         continue;
       }
       if (groqSectionAttempts >= groqSectionAttemptLimit) {
+        groqRetryableFailureObserved = true;
         failureReasons.push(
           `Groq section stopped after ${groqSectionAttemptLimit} attempts to preserve fallback budget`,
         );
@@ -1329,6 +1360,7 @@ async function callAIProviders(
       const groqReserveThreshold = groqReserveBudget * groqDailyReserveRatio(env);
       const groqReserveUsed = groqDailyTokenEstimateUsed(providerCircuit, pool);
       if (groqReserveUsed >= groqReserveThreshold) {
+        groqRetryableFailureObserved = true;
         // Per-pool: only THIS account's reserve is spent, so try the next
         // key/account instead of abandoning Groq entirely. With no
         // independent pools configured every key shares the "shared" pool
@@ -1341,16 +1373,19 @@ async function callAIProviders(
         continue;
       }
       if (isProviderKeyCoolingDown("groq", key)) {
+        groqRetryableFailureObserved = true;
         failureReasons.push(`Groq key-${slot} temporarily skipped after rate limit for ${groqModel}`);
         continue;
       }
       if (isProviderKeyInFlight("groq", key)) {
+        groqRetryableFailureObserved = true;
         failureReasons.push(
           `Groq key-${slot} is already serving another independent article chunk`,
         );
         continue;
       }
       if (isProviderPoolInFlight("groq", pool)) {
+        groqRetryableFailureObserved = true;
         failureReasons.push(
           `Groq pool ${pool} is already serving another independent article chunk`,
         );
@@ -1365,6 +1400,7 @@ async function callAIProviders(
           messages,
         );
         if (groqMaxTokens == null) {
+          groqRequestShapeFailureObserved = true;
           failureReasons.push(`Groq ${groqModel} skipped: prompt too large for configured token budget`);
           break;
         }
@@ -1376,6 +1412,7 @@ async function callAIProviders(
           estimatedRequestTokens,
         );
         if (capacityDeferral) {
+          groqRetryableFailureObserved = true;
           capacityRetryTimes.push(capacityDeferral.retryAt);
           await markProviderCircuit(
             env,
@@ -1444,10 +1481,17 @@ async function callAIProviders(
           // invocation's cache correctly in sync with exactly one addition.
           await recordGroqTokenEstimate(env, pool, tokensToRecord);
           if (text) return text;
+          groqRetryableFailureObserved = true;
           console.warn(`Groq key-${slot} returned empty response for ${groqModel}`);
           failureReasons.push(`Groq key-${slot} returned empty response for ${groqModel}`);
         }
         const errBody = await res.text().catch(() => "");
+        const requestTooLarge = isRequestTooLargeResponse(res.status, errBody);
+        if (requestTooLarge) {
+          groqRequestShapeFailureObserved = true;
+        } else {
+          groqRetryableFailureObserved = true;
+        }
         if (res.status === 429) {
           markProviderKeyRateLimited("groq", key, res);
           const retryAt = providerRetryAtFromResponse(res, errBody);
@@ -1461,8 +1505,9 @@ async function callAIProviders(
         }
         console.warn(`Groq key-${slot} ${groqModel} error ${res.status}: ${errBody.slice(0, 120)}`);
         failureReasons.push(`Groq key-${slot} ${groqModel} error ${res.status}: ${errBody.slice(0, 120)}`);
-        if (isRequestTooLargeResponse(res.status, errBody)) break;
+        if (requestTooLarge) break;
       } catch (err) {
+        groqRetryableFailureObserved = true;
         console.warn(`Groq key-${slot} ${groqModel} request failed (${err.message})`);
         failureReasons.push(`Groq key-${slot} ${groqModel} request failed: ${err.message}`);
         if (isSubrequestLimitError(err)) {
@@ -1475,11 +1520,29 @@ async function callAIProviders(
     }
     if (stopGroqAfterSubrequestLimit || stopGroqAfterAttemptShare) break;
   }
+  if (groqOnly) {
+    const explicitRetryAt = capacityRetryTimes
+      .filter((value) => Number.isFinite(value) && value > Date.now())
+      .sort((a, b) => a - b)[0] || 0;
+    const message =
+      `callAI failed (groqOnly diagnostic mode / provider policy; provider fallback disabled). ${failureReasons.join(" | ")}`;
+    // When every attempted route failed for a deterministic request-size
+    // reason, preserve the plain error so chunking/source-capacity recovery
+    // can reduce the request. Any provider/transient failure makes the whole
+    // result a deferral; content self-heal must never burn a topic rotation on
+    // an unavailable provider.
+    if (explicitRetryAt || groqRetryableFailureObserved || !groqRequestShapeFailureObserved) {
+      const retryAt = explicitRetryAt ||
+        (Date.now() + _DEFAULT_PROVIDER_TIMEOUT_COOLDOWN_MS);
+      throw capacityError(
+        `AI provider capacity unavailable until ${new Date(retryAt).toISOString()}. ${message}`,
+        retryAt,
+      );
+    }
+    throw new Error(message);
+  }
   if (hasSubrequestLimitFailure(failureReasons)) {
     throw new Error(`callAI failed. ${failureReasons.join(" | ")}`);
-  }
-  if (groqOnly) {
-    throw new Error(`callAI failed (groqOnly diagnostic mode). ${failureReasons.join(" | ")}`);
   }
 
   // 2. OpenRouter — free router with OpenAI-compatible chat completions.

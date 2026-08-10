@@ -608,17 +608,67 @@ function pickTeaserSentence(text) {
     const before = clean.slice(0, punctIndex).trimEnd();
 
     if (punct === ".") {
-      const lastToken = (before.split(/\s+/).pop() || "")
+      const tokens = before.split(/\s+/);
+      const lastToken = (tokens.pop() || "")
         .replace(/^[('"“]+/, "")
         .replace(/[)"'”]+$/, "");
       const tokenKey = lastToken.replace(/\.+$/, "").toLowerCase();
       if (abbreviations.has(tokenKey)) continue;
+
+      // Initials and dotted acronyms are not sentence boundaries. Without
+      // this guard, today's homepage hydration reduced "P. T. Barnum..." to
+      // "P." and could similarly stop after "U.S.". For a single initial,
+      // require either another following initial or a preceding initial so a
+      // normal sentence ending such as "Plan A. The next..." still splits.
+      const previousToken = (tokens.pop() || "")
+        .replace(/^[('"“]+/, "")
+        .replace(/[)"'”]+$/, "");
+      const after = clean.slice(boundaryRe.lastIndex).trimStart();
+      const isDottedAcronym = /^(?:[A-Z]\.)+[A-Z]$/.test(lastToken);
+      const isInitial = /^[A-Z]$/.test(lastToken);
+      const followsInitial = /^[A-Z]\.$/.test(previousToken);
+      const precedesInitial = /^[A-Z]\.\s/.test(`${after} `);
+      const nextWord = after.match(/^([A-Z][A-Za-z'’.-]{1,})\b/)?.[1] || "";
+      const sentenceStarter = new Set([
+        "A", "An", "But", "He", "Her", "His", "However", "I", "It",
+        "Its", "She", "That", "The", "Their", "Then", "These", "They",
+        "This", "Those", "We", "When", "While", "You",
+      ]).has(nextWord);
+      const nonNamePrefix = new Set([
+        "Appendix", "Class", "Figure", "Grade", "Option", "Part", "Phase",
+        "Plan", "Section", "Step", "Table", "Version",
+      ]).has(previousToken);
+      const isSingleMiddleInitial =
+        isInitial &&
+        /^[A-Z][A-Za-z'’.-]{1,}$/.test(previousToken) &&
+        Boolean(nextWord) &&
+        !sentenceStarter &&
+        !nonNamePrefix;
+      if (
+        isDottedAcronym ||
+        (isInitial && (followsInitial || precedesInitial)) ||
+        isSingleMiddleInitial
+      ) {
+        continue;
+      }
     }
 
     return before + punct;
   }
 
   return clean;
+}
+
+function historicalEventDisplayTitle(event) {
+  // Prefer the full description over a previously cached derived title. Old
+  // localStorage entries may still contain the broken one-token value ("P."),
+  // while their description retains the complete event sentence.
+  const source = String(
+    event?.description || event?.text || event?.title || "",
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  return pickTeaserSentence(source) || source || "Historical event";
 }
 
 // Helper function to render a single carousel item
@@ -1670,7 +1720,7 @@ async function populateTodayThroughTime() {
     }
 
     selected.forEach((event) => {
-      const title = String(event.title || event.description || "Historical event").trim();
+      const title = historicalEventDisplayTitle(event);
       const anchorId = historicalEventAnchorId(event);
       const focusedEventKey = historicalEventFocusKey(event);
       const item = document.createElement("li");
@@ -2835,7 +2885,7 @@ function renderFilteredItems(itemsToRender) {
         event.pageDescription ||
         (commaIndex > 0 ? fullDescription.slice(commaIndex + 1).trim() : "");
     } else {
-      titleText = titleText || pickTeaserSentence(fullDescription) || fullDescription;
+      titleText = historicalEventDisplayTitle(event);
       supportingText = fullDescription.trim();
       if (
         titleText &&

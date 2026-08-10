@@ -40,6 +40,19 @@ function loadTimelineFocusHelpers(source) {
   return context;
 }
 
+function loadHistoricalEventTitleHelpers(source) {
+  const match = source.match(
+    /(function pickTeaserSentence[\s\S]*?\n}\n\nfunction historicalEventDisplayTitle[\s\S]*?\n})\n\n\/\/ Helper function to render/,
+  );
+  assert.ok(match, "historical event title helpers must be extractable");
+  const context = {};
+  vm.runInNewContext(
+    `${match[1]}\nthis.pick = pickTeaserSentence;\nthis.display = historicalEventDisplayTitle;`,
+    context,
+  );
+  return context;
+}
+
 function loadModalTimelineFocus(source, context) {
   const match = source.match(
     /(function focusModalTimelineItem[\s\S]*?\n})\n\nfunction applyFilter/,
@@ -180,6 +193,43 @@ test("hero timeline reuses preloaded daily data and receives Worker SSR", () => 
   assert.match(
     seoWorker,
     /\.major-event-source:hover,\.major-event-source:focus-visible\{text-decoration:none\}/,
+  );
+});
+
+test("Today Through Time keeps initials and dotted acronyms in card titles", () => {
+  const { pick, display } = loadHistoricalEventTitleHelpers(script);
+  const barnum =
+    "P. T. Barnum begins his career as a showman and circus entrepreneur.";
+  const civilLiberties =
+    "U.S. President Ronald Reagan signs the Civil Liberties Act of 1988.";
+
+  assert.equal(pick(barnum), barnum);
+  assert.equal(pick(civilLiberties), civilLiberties);
+  assert.equal(
+    pick("John F. Kennedy is elected president of the United States."),
+    "John F. Kennedy is elected president of the United States.",
+  );
+  assert.equal(
+    pick("George W. Bush signs the legislation into law."),
+    "George W. Bush signs the legislation into law.",
+  );
+  assert.equal(
+    pick("Plan A. The next step begins."),
+    "Plan A.",
+    "a normal sentence ending in a capital letter must still split",
+  );
+  assert.equal(
+    display({ title: "P.", description: barnum }),
+    barnum,
+    "a stale broken cached title must be rebuilt from the complete description",
+  );
+  assert.match(
+    script,
+    /const title = historicalEventDisplayTitle\(event\);/,
+  );
+  assert.match(
+    script,
+    /titleText = historicalEventDisplayTitle\(event\);/,
   );
 });
 

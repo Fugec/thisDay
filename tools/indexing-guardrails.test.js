@@ -70,7 +70,7 @@ test("maintenance fallback remains a no-store 503 when its asset is unavailable"
 });
 
 test("service worker cannot preserve redirected or noindex HTML", () => {
-  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v39"/);
+  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v42"/);
   const assets = serviceWorker.match(/const STATIC_ASSETS = \[([\s\S]*?)\];/)?.[1] || "";
   assert.doesNotMatch(assets, /^\s*["']\/["']/m);
   assert.doesNotMatch(assets, /["']\/index\.html["']/);

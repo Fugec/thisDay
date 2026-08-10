@@ -1755,7 +1755,7 @@ function buildHomepageVideoCards(index, yt) {
   return Object.entries(yt)
     .filter(([, video]) => video?.youtubeId && video.privacy !== "private")
     .sort(([, a], [, b]) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0))
-    .slice(0, 6)
+    .slice(0, 8)
     .map(([slug, video]) => {
       const post = indexBySlug[slug] || {};
       const title = post.title || slug;
@@ -1777,6 +1777,153 @@ function buildHomepageVideoCards(index, yt) {
       </a>`;
     })
     .join("");
+}
+
+const HOMEPAGE_EDGE_ASSET_VERSIONS = Object.freeze({
+  customCss: "53",
+  styleCss: "11",
+  script: "31",
+});
+
+const HOMEPAGE_EDGE_CUSTOM_CSS_PATCH = `
+/* thisday-homepage-edge-v53 */
+.video-section .blog-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+.video-card-thumb {
+  height: auto !important;
+  aspect-ratio: 1 / 1;
+}
+#cookieBanner,
+.cookie-banner {
+  display: none !important;
+}
+`;
+
+const HOMEPAGE_EDGE_STYLE_CSS_PATCH = `
+/* thisday-homepage-edge-style-v11 */
+[data-page="v2"] .blog-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+#cookieBanner,
+.cookie-banner {
+  display: none !important;
+}
+`;
+
+const HOMEPAGE_LEGACY_INITIAL_BOUNDARY = `    if (punct === ".") {
+      const lastToken = (before.split(/\\s+/).pop() || "")
+        .replace(/^[('"“]+/, "")
+        .replace(/[)"'”]+$/, "");
+      const tokenKey = lastToken.replace(/\\.+$/, "").toLowerCase();
+      if (abbreviations.has(tokenKey)) continue;
+    }`;
+
+const HOMEPAGE_FIXED_INITIAL_BOUNDARY = `    if (punct === ".") {
+      const tokens = before.split(/\\s+/);
+      const lastToken = (tokens.pop() || "")
+        .replace(/^[('"“]+/, "")
+        .replace(/[)"'”]+$/, "");
+      const tokenKey = lastToken.replace(/\\.+$/, "").toLowerCase();
+      if (abbreviations.has(tokenKey)) continue;
+
+      const previousToken = (tokens.pop() || "")
+        .replace(/^[('"“]+/, "")
+        .replace(/[)"'”]+$/, "");
+      const after = clean.slice(boundaryRe.lastIndex).trimStart();
+      const isDottedAcronym = /^(?:[A-Z]\\.)+[A-Z]$/.test(lastToken);
+      const isInitial = /^[A-Z]$/.test(lastToken);
+      const followsInitial = /^[A-Z]\\.$/.test(previousToken);
+      const precedesInitial = /^[A-Z]\\.\\s/.test(\`\${after} \`);
+      const nextWord = after.match(/^([A-Z][A-Za-z'’.-]{1,})\\b/)?.[1] || "";
+      const sentenceStarter = new Set([
+        "A", "An", "But", "He", "Her", "His", "However", "I", "It",
+        "Its", "She", "That", "The", "Their", "Then", "These", "They",
+        "This", "Those", "We", "When", "While", "You",
+      ]).has(nextWord);
+      const nonNamePrefix = new Set([
+        "Appendix", "Class", "Figure", "Grade", "Option", "Part", "Phase",
+        "Plan", "Section", "Step", "Table", "Version",
+      ]).has(previousToken);
+      const isSingleMiddleInitial =
+        isInitial &&
+        /^[A-Z][A-Za-z'’.-]{1,}$/.test(previousToken) &&
+        Boolean(nextWord) &&
+        !sentenceStarter &&
+        !nonNamePrefix;
+      if (
+        isDottedAcronym ||
+        (isInitial && (followsInitial || precedesInitial)) ||
+        isSingleMiddleInitial
+      ) {
+        continue;
+      }
+    }`;
+
+function normalizeHomepageStaticAsset(pathname, source) {
+  const body = String(source || "");
+  if (pathname === "/css/custom.css") {
+    return body.includes("thisday-homepage-edge-v53")
+      ? body
+      : `${body}\n${HOMEPAGE_EDGE_CUSTOM_CSS_PATCH}`;
+  }
+  if (pathname === "/css/style.css") {
+    return body.includes("thisday-homepage-edge-style-v11")
+      ? body
+      : `${body}\n${HOMEPAGE_EDGE_STYLE_CSS_PATCH}`;
+  }
+  if (pathname === "/js/script.js") {
+    if (body.includes("isSingleMiddleInitial")) return body;
+    return body.replace(
+      HOMEPAGE_LEGACY_INITIAL_BOUNDARY,
+      HOMEPAGE_FIXED_INITIAL_BOUNDARY,
+    );
+  }
+  if (pathname === "/sw.js") {
+    return body
+      .replace(/const CACHE_NAME = "thisday-v39";/, 'const CACHE_NAME = "thisday-v42";')
+      .replaceAll("/js/script.js?v=30", "/js/script.js?v=31")
+      .replaceAll("/css/custom.css?v=51", "/css/custom.css?v=53")
+      .replaceAll("/css/style.css?v=10", "/css/style.css?v=11");
+  }
+  return body;
+}
+
+function isHomepageEdgeAssetRequest(url) {
+  const expectedVersion = {
+    "/css/custom.css": HOMEPAGE_EDGE_ASSET_VERSIONS.customCss,
+    "/css/style.css": HOMEPAGE_EDGE_ASSET_VERSIONS.styleCss,
+    "/js/script.js": HOMEPAGE_EDGE_ASSET_VERSIONS.script,
+  }[url.pathname];
+  return url.pathname === "/sw.js" ||
+    (expectedVersion && url.searchParams.get("v") === expectedVersion);
+}
+
+async function serveHomepageEdgeAsset(request, url) {
+  const upstream = await fetch(request);
+  if (!upstream.ok) return upstream;
+  const body = normalizeHomepageStaticAsset(
+    url.pathname,
+    await upstream.text(),
+  );
+  const headers = new Headers(upstream.headers);
+  headers.delete("Content-Length");
+  headers.delete("ETag");
+  headers.delete("Last-Modified");
+  headers.set("Vary", "Accept-Encoding");
+  if (url.pathname !== "/sw.js") {
+    headers.set(
+      "Cache-Control",
+      "public, max-age=31536000, s-maxage=31536000, immutable",
+    );
+  } else {
+    headers.set("Cache-Control", "no-cache");
+  }
+  return new Response(request.method === "HEAD" ? null : body, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers,
+  });
 }
 
 async function loadHomepageEditorialContent(env) {
@@ -9406,6 +9553,18 @@ async function handleFetchRequest(request, env, ctx) {
     return fresh;
   }
 
+  // The static origin can lag a Worker deployment because Cloudflare Pages is
+  // released through a separate Git push. Serve the exact versioned homepage
+  // assets through the Worker so a reliability/UI hotfix is complete even
+  // while Pages still has the preceding files. Unversioned and unrelated
+  // assets continue to pass through unchanged.
+  if (
+    (request.method === "GET" || request.method === "HEAD") &&
+    isHomepageEdgeAssetRequest(url)
+  ) {
+    return serveHomepageEdgeAsset(request, url);
+  }
+
   // Only handle requests for the root path or /index.html
   // Pass through all other requests (e.g., for JS, CSS, images) directly to the origin
   if (
@@ -9733,6 +9892,50 @@ async function handleFetchRequest(request, env, ctx) {
     .on("meta[property='og:image:height']", {
       element(element) {
         element.setAttribute("content", "630");
+      },
+    })
+    .on("link[href]", {
+      element(element) {
+        const href = String(element.getAttribute("href") || "");
+        if (/css\/custom\.css(?:\?|$)/.test(href)) {
+          element.setAttribute(
+            "href",
+            `css/custom.css?v=${HOMEPAGE_EDGE_ASSET_VERSIONS.customCss}`,
+          );
+        } else if (/css\/style\.css(?:\?|$)/.test(href)) {
+          element.setAttribute(
+            "href",
+            `css/style.css?v=${HOMEPAGE_EDGE_ASSET_VERSIONS.styleCss}`,
+          );
+        }
+      },
+    })
+    .on("script[src]", {
+      element(element) {
+        const src = String(element.getAttribute("src") || "");
+        if (/js\/script\.js(?:\?|$)/.test(src)) {
+          element.setAttribute(
+            "src",
+            `js/script.js?v=${HOMEPAGE_EDGE_ASSET_VERSIONS.script}`,
+          );
+        }
+      },
+    })
+    .on("noscript", {
+      element(element) {
+        element.setInnerContent(
+          `<link rel="stylesheet" href="css/style.css?v=${HOMEPAGE_EDGE_ASSET_VERSIONS.styleCss}">`,
+          { html: true },
+        );
+      },
+    })
+    .on("#cookieBanner", {
+      element(element) {
+        // Keep the legacy node inert so its old inline setup code can still
+        // resolve it without throwing, but it can never become visible.
+        element.setAttribute("hidden", "");
+        element.setAttribute("aria-hidden", "true");
+        element.setAttribute("style", "display:none!important");
       },
     })
     .on("#videoGrid", {
@@ -10287,7 +10490,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=51>; rel=preload; as=style",
+      "</css/custom.css?v=53>; rel=preload; as=style",
     ].join(", "),
   );
 
@@ -11640,6 +11843,8 @@ export const __homepagePerformanceTestHooks = {
   HOMEPAGE_PRELOAD_VERSION,
   HOMEPAGE_TITLE,
   HOMEPAGE_DESCRIPTION,
+  HOMEPAGE_EDGE_ASSET_VERSIONS,
+  HOMEPAGE_LEGACY_INITIAL_BOUNDARY,
   compactHomepagePreloadPage,
   compactHomepagePreloadItem,
   homepageFeaturedPersonContent,
@@ -11647,8 +11852,11 @@ export const __homepagePerformanceTestHooks = {
   buildHomepagePreloadPayload,
   serializeInlineJson,
   buildHomepageBlogCards,
+  buildHomepageVideoCards,
   buildHomepageDiscoveryLinks,
   loadHomepageEditorialContent,
+  normalizeHomepageStaticAsset,
+  isHomepageEdgeAssetRequest,
   handlePeopleIndexJson,
 };
 

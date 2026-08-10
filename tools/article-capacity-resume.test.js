@@ -645,6 +645,92 @@ test("a blocked Groq pool does not hide a separately declared pool", async () =>
   }
 });
 
+test("Groq-only timeout storms defer the retained topic instead of consuming a rotation", async () => {
+  __resetGroqModelCacheForTests();
+  const originalFetch = globalThis.fetch;
+  let groqCalls = 0;
+  let openRouterCalls = 0;
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.endsWith("/v1/models")) {
+      return new Response(JSON.stringify({
+        data: [{ id: "llama-3.3-70b-versatile", active: true }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (value.includes("api.groq.com/openai/v1/chat/completions")) {
+      groqCalls += 1;
+      throw new Error("Groq request timed out");
+    }
+    if (value.includes("openrouter.ai")) {
+      openRouterCalls += 1;
+      return new Response("unexpected", { status: 200 });
+    }
+    throw new Error(`unexpected fetch: ${value}`);
+  };
+  try {
+    let failure;
+    try {
+      await callAI(
+        {
+          ARTICLE_AI_PROVIDER_MODE: "groq-only",
+          GROQ_API_KEY: `timeout-${Date.now()}`,
+          OPENROUTER_API_KEY: "must-not-run",
+        },
+        [{ role: "user", content: "retain this factual article" }],
+        { providerAttemptLimit: 1 },
+      );
+    } catch (error) {
+      failure = error;
+    }
+    assert.ok(failure);
+    assert.equal(isAIProviderCapacityError(failure), true);
+    assert.ok(aiProviderRetryAt(failure));
+    assert.equal(groqCalls, 1);
+    assert.equal(openRouterCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Groq-only request-size failures remain structural errors", async () => {
+  __resetGroqModelCacheForTests();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.endsWith("/v1/models")) {
+      return new Response(JSON.stringify({
+        data: [{ id: "llama-3.3-70b-versatile", active: true }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (value.includes("api.groq.com/openai/v1/chat/completions")) {
+      return new Response('{"error":{"message":"request too large for model"}}', {
+        status: 413,
+      });
+    }
+    throw new Error(`unexpected fetch: ${value}`);
+  };
+  try {
+    let failure;
+    try {
+      await callAI(
+        {
+          ARTICLE_AI_PROVIDER_MODE: "groq-only",
+          GROQ_API_KEY: `oversize-${Date.now()}`,
+        },
+        [{ role: "user", content: "oversized request" }],
+        { providerAttemptLimit: 1 },
+      );
+    } catch (error) {
+      failure = error;
+    }
+    assert.ok(failure);
+    assert.equal(isAIProviderCapacityError(failure), false);
+    assert.match(failure.message, /request too large/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("validated article chunks survive a later provider failure and source changes invalidate them", async () => {
   const kv = makeKvMock();
   const env = { BLOG_AI_KV: kv };
@@ -1085,6 +1171,29 @@ test("optional unsupported claims are removed locally without weakening groundin
     "The cause of the disappearance remains unknown.",
   );
   assert.equal(hooks.verifyArticleGrounding(mh370Repaired.content, mh370Source).ok, true);
+
+  const longInstitutionalTail = {
+    ...mh370Content,
+    conclusionParagraphs: [
+      "Investigators documented the disappearance, the southern Indian Ocean search area, and debris found on Reunion Island. " +
+      "The retained evidence distinguishes confirmed wreckage from hypotheses about the aircraft's final path. " +
+      "The cause of the disappearance remains unknown, with the Malaysian government and ICAO working to determine the cause and to improve aviation safety. " +
+      "Search records identify the agencies, dates, and locations involved without claiming that a final explanation has been established. " +
+      "Those documented limits remain essential when separating the known evidence from later interpretation.",
+    ],
+  };
+  const tailRepaired = hooks.mechanicallyRemoveOptionalUnsupportedClaims(
+    longInstitutionalTail,
+    mh370Source,
+  );
+  assert.match(
+    tailRepaired.content.conclusionParagraphs[0],
+    /The cause of the disappearance remains unknown\./,
+  );
+  assert.doesNotMatch(
+    tailRepaired.content.conclusionParagraphs[0],
+    /ICAO working|improve aviation safety/i,
+  );
 });
 
 test("a source-attribution tail cannot strand the Treaty of Greenville article", () => {
@@ -1272,6 +1381,161 @@ test("an unsupported trailing causal clause is removed without thinning the body
     repaired.content.aftermathParagraphs[0].split(/\s+/).length >= 110,
   );
   assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
+});
+
+test("bounded grounding removes Marikana-style causal tails while retaining substantive analysis", () => {
+  const source = {
+    pageTitle: "Marikana massacre",
+    text: "The strike at Marikana began on August 10, 2012.",
+    sourceExtract:
+      "Thirty-four miners were killed after police opened fire. At least 78 people were injured in the confrontation. Failed attempts were made to negotiate a peaceful resolution.",
+  };
+  const content = {
+    title: "Marikana Massacre Begins — August 10, 2012",
+    eventTitle: "Marikana massacre begins",
+    analysisBad: [{
+      title: "Violent Confrontation",
+      detail:
+        "The Marikana dispute involved striking mineworkers, the South African Police Service, and the mine operator. " +
+        "The situation escalated, resulting in the deaths of 34 miners and the injury of 78 others. " +
+        "The supplied record describes failed attempts by the parties to negotiate a peaceful resolution before the shooting. " +
+        "It identifies the strike, the police response, the people killed, and the people injured as separate documented facts. " +
+        "The violent confrontation highlights the limitations of the approaches taken by the parties, which ultimately led to the loss of life and injury to many mineworkers. " +
+        "Those details can be evaluated from the retained evidence without assigning an unsupported motive or broader policy outcome.",
+    }],
+  };
+
+  const before = hooks.verifyArticleGrounding(content, source);
+  assert.equal(before.ok, false);
+  assert.match(before.reasons.join(" "), /unsupported causal claim/);
+
+  const repaired = hooks.mechanicallyRemoveOptionalUnsupportedClaims(
+    content,
+    source,
+  );
+  assert.deepEqual(repaired.repairedFieldPaths, [
+    "analysisBad[0].detail",
+    "analysisBad[0].detail",
+  ]);
+  assert.doesNotMatch(
+    repaired.content.analysisBad[0].detail,
+    /which ultimately led/i,
+  );
+  assert.ok(repaired.content.analysisBad[0].detail.split(/\s+/).length >= 60);
+  assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
+});
+
+test("casualty grounding preserves four-digit tolls while ignoring explicit calendar dates", () => {
+  assert.deepEqual(
+    [...hooks.groundingDirectCasualtyNumbers("In 1910, 1,500 people were killed on 12 May.")],
+    ["1500"],
+  );
+  assert.deepEqual(
+    [...hooks.groundingDirectCasualtyNumbers("On 12 May, 34 people were killed.")],
+    ["34"],
+  );
+  const source = {
+    pageTitle: "Documented disaster",
+    text: "The documented disaster occurred on 12 May 1910.",
+    sourceExtract:
+      "The initial collapse killed 36 workers. A later official accounting reported that the disaster resulted in the deaths of 2,000 people and injured 34 others.",
+  };
+  const contradiction = hooks.verifyArticleGrounding({
+    title: "Documented Disaster — May 12, 1910",
+    eventTitle: "Documented disaster",
+    overviewParagraphs: [
+      "The initial collapse killed 36 workers. The disaster later resulted in the deaths of 1,500 people and injured 34 others.",
+    ],
+  }, source);
+  assert.equal(contradiction.ok, false);
+  assert.match(contradiction.reasons.join(" "), /unsupported causal claim|casualty number contradiction/i);
+
+  const dateAndToll = hooks.verifyArticleGrounding({
+    title: "Documented Disaster — May 12, 1910",
+    eventTitle: "Documented disaster",
+    overviewParagraphs: [
+      "On 12 May, the documented disaster resulted in the deaths of 34 people.",
+    ],
+  }, {
+    pageTitle: "Documented disaster",
+    text: "The documented disaster occurred in May.",
+    sourceExtract: "The disaster killed 34 people.",
+  });
+  assert.equal(dateAndToll.ok, true, dateAndToll.reasons.join("; "));
+});
+
+test("bounded grounding rotates after the second identical substantive residual", () => {
+  const reasons = [
+    'unsupported causal claim in analysisBad[0].detail: "The dispute led to deaths."',
+  ];
+  const first = hooks.boundedGroundingRetryState({}, reasons);
+  assert.equal(first.attempts, 1);
+  assert.equal(first.shouldRotate, false);
+  assert.ok(first.signature);
+
+  const second = hooks.boundedGroundingRetryState({
+    boundedGroundingSignature: first.signature,
+    boundedGroundingAttempts: first.attempts,
+  }, reasons);
+  assert.equal(second.attempts, 2);
+  assert.equal(second.shouldRotate, true);
+
+  const legacySecond = hooks.boundedGroundingRetryState({
+    boundedGroundingReasons: reasons,
+  }, reasons);
+  assert.equal(legacySecond.attempts, 2);
+  assert.equal(legacySecond.shouldRotate, true);
+
+  const changed = hooks.boundedGroundingRetryState({
+    boundedGroundingSignature: first.signature,
+    boundedGroundingAttempts: 1,
+  }, ["unsupported preventive outcome in conclusionParagraphs[0]"]);
+  assert.equal(changed.attempts, 1);
+  assert.equal(changed.shouldRotate, false);
+
+  const transport = hooks.boundedGroundingRetryState({
+    boundedGroundingSignature: first.signature,
+    boundedGroundingAttempts: 9,
+    boundedGroundingReasons: reasons,
+  }, ["final grounding verifier unavailable: provider timeout"]);
+  assert.equal(transport.transportDeferred, true);
+  assert.equal(transport.shouldRotate, false);
+  assert.equal(transport.signature, first.signature);
+  assert.equal(transport.attempts, 9);
+  assert.deepEqual(transport.retainedReasons, reasons);
+
+  const shiftingFirstReasons = [
+    'unsupported causal claim in analysisBad[0].detail: "The confrontation caused a national reform."',
+    'unsupported attribution in conclusionParagraphs[0]: "Officials ordered the later inquiry."',
+    'unsupported relationship in didYouKnowFacts[0]: "The two leaders were relatives."',
+    'unsupported causal claim in analysisGood[1].detail: "The strike triggered legislation."',
+    'unsupported location claim in overviewParagraphs[0]: "The meeting occurred in Pretoria."',
+    'unsupported document claim in didYouKnowFacts[3]: "A report established responsibility."',
+  ];
+  const shiftingFirst = hooks.boundedGroundingRetryState({}, shiftingFirstReasons);
+  const shiftingSecond = hooks.boundedGroundingRetryState({
+    boundedGroundingSignature: shiftingFirst.signature,
+    boundedGroundingAttempts: 1,
+    // Simulate a legacy retained draft that stored only the first five of six.
+    boundedGroundingReasons: shiftingFirstReasons.slice(0, 5),
+  }, [
+    'The article says national reform resulted from the confrontation in analysisBad[0].detail.',
+    'The conclusionParagraphs[0] wrongly assigns the inquiry order to officials.',
+    'didYouKnowFacts[0] states an unsupported family relationship.',
+    'analysisGood[1].detail claims the strike led to a new law.',
+    'overviewParagraphs[0] gives Pretoria as the location without support.',
+    'didYouKnowFacts[4] introduces a different unsupported quotation.',
+  ]);
+  assert.equal(shiftingSecond.attempts, 2);
+  assert.equal(shiftingSecond.shouldRotate, true);
+  assert.equal(shiftingSecond.retainedReasons.length, 6);
+
+  const partlyDifferent = hooks.boundedGroundingRetryState({
+    boundedGroundingAttempts: 1,
+    boundedGroundingReasons: [shiftingFirstReasons[0]],
+  }, shiftingFirstReasons);
+  assert.equal(partlyDifferent.attempts, 1);
+  assert.equal(partlyDifferent.shouldRotate, false);
 });
 
 test("bounded recovery strengthens short core modules from retained sources", () => {

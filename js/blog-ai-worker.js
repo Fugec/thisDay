@@ -136,14 +136,16 @@ async function callPublicationGateAI(env, messages, options = {}) {
   } = options;
   // Production can pin the entire article pipeline to Groq. The final
   // factual-grounding gate must obey the same policy instead of entering via
-  // Workers AI first. Leave the Groq section uncapped here so all explicitly
-  // independent quota pools remain available to this correctness gate.
+  // Workers AI first. Callers may still bound the Groq section explicitly;
+  // the final verifier does so because it owns a separate retry that rotates
+  // to the next independent account.
   if (isGroqOnlyProviderMode(env)) {
     return callAI(env, messages, {
       ...callOptions,
       groqOnly: true,
       skipWorkersAI: true,
       providerAttemptLimit,
+      groqSectionAttemptLimit,
     });
   }
   // Local-test guard: the Workers AI 10k-neurons/day pool is ACCOUNT-wide,
@@ -11137,162 +11139,38 @@ async function enrichPublishedPost(
     ];
     if (boundedIssues.length === 0) {
       console.log(
-        `Blog: bounded recovery core for ${slug} is already clean; skipping provider repair passes.`,
+        `Blog: bounded recovery core for ${slug} is already clean; skipping the provider repair pass.`,
+      );
+    } else if (draft.boundedStyleRepairAttempted === true) {
+      console.log(
+        `Blog: bounded recovery already spent its durable style-repair pass for ${slug}; continuing with mechanical cleanup and hard grounding.`,
       );
     } else {
-    repaired = await repairRepeatedBodySections(
-      env,
-      repaired,
-      groundingSource,
-      {
-        boundedProviderBudget: true,
-        onProgress: persistBoundedRepair,
-      },
-    );
-    const bannedViolations = scanBannedPhrases(repaired);
-    if (bannedViolations.length > 0) {
-      const bannedRepaired = await fixBannedPhrases(
-        env,
-        repaired,
-        bannedViolations,
-        groundingSource,
-        { boundedProviderBudget: true },
-      );
-      if (bannedRepaired !== repaired) {
-        repaired = bannedRepaired;
-        await persistBoundedRepair(repaired, "banned-phrases-pass-1");
-      }
-    }
-    const preRepairIssues = [
-      ...scanArticleQuality(repaired),
-      ...scanIntraPageDuplication(repaired),
-    ];
-    if (preRepairIssues.length > 0) {
+      // A bounded request gets one combined style call, ever, for this draft.
+      // The former three rounds could issue many whole-article/body-field
+      // calls and caused Cloudflare 1102 before the hard grounding gate. Feed
+      // every current style issue to one repair, checkpoint the attempt even
+      // when the provider returns the original, then rely on zero-token
+      // cleanup plus factual grounding. Later recovery invocations must not
+      // spend the same optional budget again.
+      draft.boundedStyleRepairAttempted = true;
+      await persistBoundedRepair(repaired, "bounded-style-pass-started");
       const qualityRepaired = await improveArticleQuality(
         env,
         repaired,
-        preRepairIssues.slice(0, 18),
+        boundedIssues.slice(0, 18),
         groundingSource,
         { boundedProviderBudget: true },
       );
       if (qualityRepaired !== repaired) {
         repaired = qualityRepaired;
-        await persistBoundedRepair(repaired, "quality-pass-1");
-      }
-    }
-    boundedIssues = [
-      ...scanBannedPhrases(repaired),
-      ...scanArticleQuality(repaired),
-      ...scanIntraPageDuplication(repaired),
-    ];
-    if (boundedIssues.length > 0) {
-      // One repair pass often leaves a small residual (a banned phrase the
-      // quality repair reintroduced, one still-thin paragraph). Give the
-      // draft a second, smaller repair attempt before giving up on the whole
-      // topic (2026-07-22: Godfrey of Bouillon was blocked after exactly one
-      // pass on a fixable residual banned-phrase + source-anchor set).
-      repaired = await repairRepeatedBodySections(
-        env,
-        repaired,
-        groundingSource,
-        {
-          boundedProviderBudget: true,
-          onProgress: persistBoundedRepair,
-        },
-      );
-      const secondBannedViolations = scanBannedPhrases(repaired);
-      if (secondBannedViolations.length > 0) {
-        const secondBannedRepair = await fixBannedPhrases(
-          env,
-          repaired,
-          secondBannedViolations,
-          groundingSource,
-          { boundedProviderBudget: true },
-        );
-        if (secondBannedRepair !== repaired) {
-          repaired = secondBannedRepair;
-          await persistBoundedRepair(repaired, "banned-phrases-pass-2");
-        }
-      }
-      const secondQualityIssues = [
-        ...scanArticleQuality(repaired),
-        ...scanIntraPageDuplication(repaired),
-      ];
-      if (secondQualityIssues.length > 0) {
-        const secondQualityRepair = await improveArticleQuality(
-          env,
-          repaired,
-          secondQualityIssues.slice(0, 18),
-          groundingSource,
-          { boundedProviderBudget: true },
-        );
-        if (secondQualityRepair !== repaired) {
-          repaired = secondQualityRepair;
-          await persistBoundedRepair(repaired, "quality-pass-2");
-        }
+        await persistBoundedRepair(repaired, "bounded-style-pass-1");
       }
       boundedIssues = [
         ...scanBannedPhrases(repaired),
         ...scanArticleQuality(repaired),
         ...scanIntraPageDuplication(repaired),
       ];
-      if (boundedIssues.length > 0) {
-        // 2026-08-08: a third pass, same shape as the second. Live evidence
-        // the same day (8-august-2026, Hawaii wildfires) showed two passes
-        // routinely bring a draft from ~26 issues down to 3-5 small residuals
-        // (one banned phrase, one duplicate sentence, a couple of semantic-
-        // repetition warnings) that are individually easy fixes. This gives
-        // the draft one more shot at converging inside the same call, at the
-        // cost of at most 3 more AI calls (repairRepeatedBodySections +
-        // fixBannedPhrases + improveArticleQuality) and only when the first
-        // two passes left a real residual.
-        repaired = await repairRepeatedBodySections(
-          env,
-          repaired,
-          groundingSource,
-          {
-            boundedProviderBudget: true,
-            onProgress: persistBoundedRepair,
-          },
-        );
-        const thirdBannedViolations = scanBannedPhrases(repaired);
-        if (thirdBannedViolations.length > 0) {
-          const thirdBannedRepair = await fixBannedPhrases(
-            env,
-            repaired,
-            thirdBannedViolations,
-            groundingSource,
-            { boundedProviderBudget: true },
-          );
-          if (thirdBannedRepair !== repaired) {
-            repaired = thirdBannedRepair;
-            await persistBoundedRepair(repaired, "banned-phrases-pass-3");
-          }
-        }
-        const thirdQualityIssues = [
-          ...scanArticleQuality(repaired),
-          ...scanIntraPageDuplication(repaired),
-        ];
-        if (thirdQualityIssues.length > 0) {
-          const thirdQualityRepair = await improveArticleQuality(
-            env,
-            repaired,
-            thirdQualityIssues.slice(0, 18),
-            groundingSource,
-            { boundedProviderBudget: true },
-          );
-          if (thirdQualityRepair !== repaired) {
-            repaired = thirdQualityRepair;
-            await persistBoundedRepair(repaired, "quality-pass-3");
-          }
-        }
-        boundedIssues = [
-          ...scanBannedPhrases(repaired),
-          ...scanArticleQuality(repaired),
-          ...scanIntraPageDuplication(repaired),
-        ];
-      }
-    }
     }
     // 2026-08-08: removed the residual-count block-and-delete branch that
     // used to sit here. Quality-scan issues (banned phrases, semantic
@@ -11308,9 +11186,9 @@ async function enrichPublishedPost(
     // 3-item residual — one weak phrase and a conclusion that legitimately
     // synthesizes facts already stated earlier — and each block deleted a
     // structurally sound draft and burned one of only 4 daily topic
-    // rotations on a pure style disagreement). Up to three repair passes
-    // already ran above; whatever residual remains after that publishes with
-    // a warning instead of being retried, blocked, or deleted. An EXACT
+    // rotations on a pure style disagreement). One durable repair pass runs
+    // above; whatever residual remains publishes with a warning instead of
+    // being retried, blocked, or deleted. An EXACT
     // duplicate sentence is the one residual shape that's visibly obvious to
     // a reader, so it gets one more, mechanical (zero-token) cleanup pass
     // right before publish — see mechanicallyDedupeExactSentences.
@@ -11465,13 +11343,20 @@ async function enrichPublishedPost(
   let didYouKnowGroundingVerified = false;
   if (groundingSource) {
     await chk("pre-final-grounding");
-    const finalGrounding = await verifyFinalGroundingWithRepair(env, enriched, groundingSource, slug);
+    const finalGrounding = await verifyFinalGroundingWithRepair(
+      env,
+      enriched,
+      groundingSource,
+      slug,
+      boundedRecovery ? { maxRepairAttempts: 1 } : {},
+    );
     if (!finalGrounding.ok) {
       if (boundedRecovery) {
         const retainedContent = finalGrounding.content || enriched;
         const retryState = boundedGroundingRetryState(
           draft,
           finalGrounding.reasons,
+          retainedContent,
         );
         if (retryState.shouldRotate) {
           await markGroundingBlockedEvent(
@@ -11512,7 +11397,33 @@ async function enrichPublishedPost(
           false,
         );
       }
-      await markGroundingBlockedEvent(env, slug, enriched, finalGrounding.reasons);
+      const retainedContent = finalGrounding.content || enriched;
+      const coreGroundingReasons = (finalGrounding.reasons || []).filter(
+        (reason) => groundingReasonIsCore(reason, retainedContent),
+      );
+      if (coreGroundingReasons.length === 0) {
+        await blogKvPutIfChanged(
+          env,
+          `${KV_DRAFT_PREFIX}${slug}`,
+          JSON.stringify({
+            ...draft,
+            content: retainedContent,
+            publishedAt,
+            groundingRepairStage: "optional-claim-residual",
+            groundingRepairUpdatedAt: new Date().toISOString(),
+          }),
+          { expirationTtl: 3 * 86_400 },
+        );
+        throw new Error(
+          `Refusing to publish ${slug}: optional unsupported prose was retained for claim-bank pruning — ${finalGrounding.reasons.join("; ")}`,
+        );
+      }
+      await markGroundingBlockedEvent(
+        env,
+        slug,
+        retainedContent,
+        coreGroundingReasons,
+      );
       throw new Error(
         `Refusing to publish ${slug}: final source-grounding check failed — ${finalGrounding.reasons.join("; ")}`,
       );
@@ -20396,7 +20307,21 @@ async function verifyFinalArticleGrounding(env, content, source) {
               '{"passed":true,"issues":[]} or {"passed":false,"issues":["specific contradiction the article states"]}.',
           },
         ],
-        { maxTokens: 700, timeoutMs: 25_000 },
+        {
+          maxTokens: 700,
+          timeoutMs: 25_000,
+          // The final grader already has one transport/parse retry above.
+          // Let each attempt use one independently-pooled Groq account, then
+          // rotate on the retry, instead of fanning one grading request out
+          // across all seven accounts. The August 11 production recovery hit
+          // Worker error 1102 after seven provider subrequests even though the
+          // deterministic gate and draft were clean. Two bounded attempts
+          // preserve fail-closed verification while keeping this late-stage
+          // request comfortably inside the Worker resource envelope.
+          providerAttemptLimit: 1,
+          groqSectionAttemptLimit: 1,
+          expectJson: true,
+        },
       );
     } catch (err) {
       lastReason = `final grounding verifier unavailable: ${err.message}`;
@@ -20524,16 +20449,24 @@ function groundingFailureSignature(reasons) {
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}-${normalized.length}`;
 }
 
-function boundedGroundingRetryState(draft, reasons) {
+function boundedGroundingRetryState(draft, reasons, content = null) {
   const substantiveReasons = (Array.isArray(reasons) ? reasons : []).filter(
     (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
   );
   const previousReasons = Array.isArray(draft?.boundedGroundingReasons)
     ? draft.boundedGroundingReasons
     : [];
-  const storedPreviousSignature = String(draft?.boundedGroundingSignature || "");
+  const rotatableReasons = substantiveReasons.filter((reason) =>
+    groundingReasonIsCore(reason, content),
+  );
+  const previousRotatableReasons = previousReasons.filter((reason) =>
+    groundingReasonIsCore(reason, content),
+  );
+  const storedPreviousSignature = previousRotatableReasons.length > 0
+    ? String(draft?.boundedGroundingSignature || "")
+    : "";
   const previousSignature =
-    storedPreviousSignature || groundingFailureSignature(previousReasons);
+    storedPreviousSignature || groundingFailureSignature(previousRotatableReasons);
   const previousAttempts = Math.max(
     0,
     Number.parseInt(String(draft?.boundedGroundingAttempts || ""), 10) ||
@@ -20552,15 +20485,33 @@ function boundedGroundingRetryState(draft, reasons) {
     };
   }
 
-  const signature = groundingFailureSignature(substantiveReasons);
+  // Unsupported optional prose is retained for the deterministic claim-bank
+  // repair on the next fresh invocation. It must never consume another topic:
+  // only a contradiction in the locked event/date/identity/toll core can
+  // participate in the repeated-residual rotation counter.
+  if (rotatableReasons.length === 0) {
+    return {
+      signature: "",
+      attempts: 0,
+      shouldRotate: false,
+      transportDeferred: false,
+      optionalClaimDeferred: true,
+      retainedReasons: substantiveReasons.slice(
+        0,
+        BOUNDED_GROUNDING_REASON_RETENTION_LIMIT,
+      ),
+    };
+  }
+
+  const signature = groundingFailureSignature(rotatableReasons);
   // Legacy retained drafts already carry boundedGroundingReasons. Treat that
   // as one completed attempt so deploying this guard can immediately escape
   // an existing identical-error loop instead of requiring two more failures.
   const semanticallyRepeated =
     previousSignature === signature ||
     groundingFailureProfilesOverlap(
-      groundingFailureProfile(previousReasons),
-      groundingFailureProfile(substantiveReasons),
+      groundingFailureProfile(previousRotatableReasons),
+      groundingFailureProfile(rotatableReasons),
     );
   const attempts = semanticallyRepeated
     ? previousAttempts + 1
@@ -20681,6 +20632,323 @@ function setContentFieldByPath(content, path, value) {
   const last = segments[segments.length - 1];
   node[/^\d+$/.test(last) ? Number(last) : last] = value;
   return true;
+}
+
+const GROUNDED_REFILL_CLAIM_LIMIT = 4;
+const GROUNDED_CLAIM_BANK_LIMIT = 16;
+
+function groundedClaimCategory(value) {
+  const text = String(value || "");
+  if (/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b|\b\d{4}\b/i.test(text)) {
+    return "date";
+  }
+  if (/\b(?:killed|died|dead|deaths?|fatalit|injur|wound|arrest|convict|sentenc|casualt)\b/i.test(text)) {
+    return "documented-outcome";
+  }
+  if (/\b(?:court|government|army|police|committee|congress|parliament|department|bureau|university|company|organization|organisation)\b/i.test(text)) {
+    return "institutional-record";
+  }
+  if (/\b(?:after|before|later|subsequent|following|eventually|meanwhile)\b/i.test(text)) {
+    return "chronology";
+  }
+  if (/\b[A-Z][A-Za-z'’.-]{2,}\s+[A-Z][A-Za-z'’.-]{2,}\b/.test(text)) {
+    return "named-participant";
+  }
+  return "event-detail";
+}
+
+function normalizeGroundedClaimForVisibleText(value) {
+  const text = String(value || "")
+    .replace(/(\d)\s*[–—-]\s*(\d)/g, "$1 to $2")
+    .replace(/([A-Za-z])[-]([A-Za-z])/g, "$1 $2")
+    .replace(/[–—]/g, ",")
+    .replace(/\s+-\s+/g, ", ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "";
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
+// Build facts dynamically from the retained evidence pack. The categories are
+// fixed, but the facts are never hardcoded: every claim is a complete source
+// sentence. Repair code can therefore remove an unsupported inference and use
+// three or four unused atomic claims to keep the field substantial without
+// asking a model to invent a replacement.
+function buildGroundedClaimBank(source, { limit = GROUNDED_CLAIM_BANK_LIMIT } = {}) {
+  const sourceMaterial = sourceMaterialForGrounding(source);
+  if (!sourceMaterial) return [];
+  const bank = [];
+  const seen = new Set();
+  for (const section of sourceMaterial.split(/\n\s*\n/)) {
+    const separator = section.indexOf(": ");
+    const body = separator >= 0 ? section.slice(separator + 2) : section;
+    for (const rawSentence of splitSentences(body, 40)) {
+      const text = normalizeGroundedClaimForVisibleText(rawSentence);
+      const words = wordCount(text);
+      const key = normalizeForCompare(text);
+      if (
+        !key ||
+        seen.has(key) ||
+        words < 8 ||
+        words > 55 ||
+        /(?:https?:\/\/|www\.)/i.test(text) ||
+        /(?:\.\.\.|…)$/.test(text) ||
+        /^(?:it|this|that|these|those|they|he|she|its|their|his|her)\b/i.test(text)
+      ) {
+        continue;
+      }
+      seen.add(key);
+      bank.push({
+        id: `source-claim-${bank.length + 1}`,
+        category: groundedClaimCategory(text),
+        text,
+      });
+      if (bank.length >= Math.max(1, Number(limit) || GROUNDED_CLAIM_BANK_LIMIT)) {
+        return bank;
+      }
+    }
+  }
+  return bank;
+}
+
+function repairableGroundingClaimEntries(content) {
+  const entries = [];
+  for (const field of [
+    ...GROUNDING_REPAIRABLE_STRING_FIELDS,
+    ...GROUNDING_REPAIRABLE_ARRAY_FIELDS,
+  ]) {
+    if (content?.[field] !== undefined) {
+      collectGroundingClaimEntries(content[field], field, entries);
+    }
+  }
+  return entries;
+}
+
+function normalizedGroundingFieldPath(rawPath) {
+  const rootMap = new Map(
+    [...GROUNDING_REPAIRABLE_STRING_FIELDS, ...GROUNDING_REPAIRABLE_ARRAY_FIELDS]
+      .map((field) => [field.toLowerCase(), field]),
+  );
+  const match = String(rawPath || "").match(
+    /^([A-Za-z]+)(\[\d+\])?(?:\.([A-Za-z]+))?$/,
+  );
+  if (!match) return "";
+  const root = rootMap.get(match[1].toLowerCase());
+  if (!root) return "";
+  return `${root}${match[2] || ""}${match[3] ? `.${match[3]}` : ""}`;
+}
+
+function quotedGroundingReasonText(reason) {
+  const raw = String(reason || "");
+  const match = raw.match(/["“]([^"”]{12,})["”]/) || raw.match(/'([^']{12,})'/);
+  return match ? match[1].replace(/\s+/g, " ").trim() : "";
+}
+
+function groundingReasonFieldPath(reason, content) {
+  const raw = String(reason || "");
+  const explicit = raw.match(
+    /\b(overviewParagraphs|eyewitnessOrChronicle|aftermathParagraphs|conclusionParagraphs|didYouKnowFacts|quickFacts|analysisGood|analysisBad|curiosityTitle|description|ogDescription|twitterDescription|jsonLdDescription|editorialNote)(\[\d+\])?(?:\.([A-Za-z]+))?/i,
+  );
+  let explicitPath = explicit
+    ? normalizedGroundingFieldPath(
+        `${explicit[1]}${explicit[2] || ""}${explicit[3] ? `.${explicit[3]}` : ""}`,
+      )
+    : "";
+  if (explicitPath && typeof getContentFieldByPath(content, explicitPath) !== "string") {
+    if (/^(?:analysisGood|analysisBad)\[\d+\]$/.test(explicitPath)) {
+      explicitPath += ".detail";
+    } else if (/^quickFacts\[\d+\]$/.test(explicitPath)) {
+      explicitPath += ".value";
+    }
+  }
+
+  const quoted = quotedGroundingReasonText(reason);
+  const entries = repairableGroundingClaimEntries(content);
+  if (quoted) {
+    const normalizedQuote = normalizeForCompare(quoted);
+    const exact = entries.find(({ text }) => {
+      const normalizedText = normalizeForCompare(text);
+      return normalizedText.includes(normalizedQuote) || normalizedQuote.includes(normalizedText);
+    });
+    if (exact) return exact.field;
+
+    const quoteTokens = groundingSupportTokens(quoted);
+    let best = null;
+    for (const entry of entries) {
+      const entryTokens = groundingSupportTokens(entry.text);
+      const shared = tokenMatches(quoteTokens, entryTokens).length;
+      const denominator = Math.max(1, Math.min(quoteTokens.size, entryTokens.size));
+      const score = shared / denominator;
+      if (score >= 0.6 && (!best || score > best.score)) best = { ...entry, score };
+    }
+    if (best) return best.field;
+  }
+  return explicitPath;
+}
+
+function groundingReasonIsCore(reason, content = null) {
+  const raw = String(reason || "").replace(/\s+/g, " ").trim();
+  if (!raw || GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(raw)) return false;
+  if (/\b(?:subject mismatch|casualty number contradiction|insufficient (?:source|evidence)|wrong (?:event|date|year|identity|person|place|location)|conflat(?:e|ed|ion)|invented (?:casualty|death toll|number))\b/i.test(raw)) {
+    return true;
+  }
+  if (
+    /\b(?:eventTitle|historicalDate|historicalYear|historicalDateISO|headline|central event)\b/i.test(raw) ||
+    /\bin\s+(?:title|location|country)\s*:/i.test(raw) ||
+    /\b(?:location|country)\s+(?:field|value)\b/i.test(raw)
+  ) {
+    return true;
+  }
+  if (groundingReasonFieldPath(raw, content || {})) return false;
+  // A clearly identified optional claim remains repairable even when an AI
+  // grader omitted the JSON field path. Unknown contradictions fail closed.
+  if (
+    /\b(?:unsupported|not (?:directly )?supported)\b/i.test(raw) &&
+    /\b(?:caus|outcome|prevent|enable|forc|compel|attribut|responsib|relationship|succession|order|perpetrator)\b/i.test(raw) &&
+    quotedGroundingReasonText(raw)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function groundingRefillMinimumWords(path) {
+  const root = String(path || "").split(/[.[\]]/)[0];
+  if (ARTICLE_BODY_FIELDS.includes(root)) return CHUNKED_BODY_PARAGRAPH_MIN_WORDS;
+  if (/^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(path)) return 60;
+  if (/^didYouKnowFacts\[\d+\]$/.test(path)) return 35;
+  if (path === "editorialNote") return 80;
+  return 0;
+}
+
+function groundedClaimAlreadyUsed(claim, content, excludedPath) {
+  const claimKey = normalizeForCompare(claim.text);
+  const claimTokens = groundingSupportTokens(claim.text);
+  return repairableGroundingClaimEntries(content).some((entry) => {
+    if (entry.field === excludedPath) return false;
+    const entryKey = normalizeForCompare(entry.text);
+    if (entryKey.includes(claimKey) || claimKey.includes(entryKey)) return true;
+    const shared = tokenMatches(claimTokens, groundingSupportTokens(entry.text)).length;
+    return claimTokens.size >= 4 && shared / claimTokens.size >= 0.75;
+  });
+}
+
+function selectGroundedRefillClaims(bank, content, path, maximum = GROUNDED_REFILL_CLAIM_LIMIT) {
+  const unused = bank.filter((claim) => !groundedClaimAlreadyUsed(claim, content, path));
+  const ordered = [];
+  const categories = new Set();
+  for (const claim of unused) {
+    if (categories.has(claim.category)) continue;
+    ordered.push(claim);
+    categories.add(claim.category);
+    if (ordered.length >= maximum) return ordered;
+  }
+  for (const claim of unused) {
+    if (ordered.includes(claim)) continue;
+    ordered.push(claim);
+    if (ordered.length >= maximum) break;
+  }
+  return ordered;
+}
+
+function groundingReasonTargetSentence(fullText, reason) {
+  const sentences = splitSentences(fullText);
+  const quoted = quotedGroundingReasonText(reason);
+  if (quoted) {
+    const normalizedQuote = normalizeForCompare(quoted);
+    const exact = sentences.find((sentence) => {
+      const normalizedSentence = normalizeForCompare(sentence);
+      return normalizedSentence.includes(normalizedQuote) || normalizedQuote.includes(normalizedSentence);
+    });
+    if (exact) return exact;
+  }
+  const profile = groundingFailureProfile([reason]);
+  const category = [...profile.categories][0];
+  const pattern = category === "causality"
+    ? /\b(?:caus|led to|result|trigger|prompt|prevent|enable|forc|compel)/i
+    : category === "attribution"
+      ? /\b(?:ordered|carried out|perpetrator|responsib|execut|kill|murder)/i
+      : category === "relationship"
+        ? /\b(?:relationship|family|marri|spouse|parent|child|successor|predecessor)/i
+        : null;
+  return pattern ? sentences.find((sentence) => pattern.test(sentence)) || "" : "";
+}
+
+function replaceUnsupportedClaimWithGroundedClaims(content, path, reason, claimBank) {
+  const fullText = getContentFieldByPath(content, path);
+  if (typeof fullText !== "string" || !fullText.trim()) return null;
+  const root = path.split(/[.[\]]/)[0];
+  if (!MECHANICALLY_REPAIRABLE_GROUNDING_FIELDS.has(root)) return null;
+  if (path === "curiosityTitle") return null;
+
+  const claims = selectGroundedRefillClaims(claimBank, content, path);
+  if (claims.length === 0) return null;
+  const candidate = JSON.parse(JSON.stringify(content));
+
+  if (/^(?:analysisGood|analysisBad)\[\d+\]\.title$/.test(path)) {
+    setContentFieldByPath(
+      candidate,
+      path,
+      path.startsWith("analysisGood")
+        ? "Source Documented Strength"
+        : "Source Documented Limitation",
+    );
+    return candidate;
+  }
+  if (/^quickFacts\[\d+\]\.value$/.test(path)) {
+    const compactClaim = claims.find((claim) => claim.text.length <= 140);
+    if (!compactClaim) return null;
+    setContentFieldByPath(candidate, path, compactClaim.text.replace(/[.!?]$/, ""));
+    return candidate;
+  }
+  if (["description", "ogDescription", "twitterDescription", "jsonLdDescription"].includes(path)) {
+    const maxChars = path === "description" ? 155 : path === "ogDescription" ? 130 : path === "twitterDescription" ? 120 : 180;
+    setContentFieldByPath(candidate, path, truncateForMeta(claims[0].text, maxChars));
+    return candidate;
+  }
+
+  const targetSentence = groundingReasonTargetSentence(fullText, reason);
+  let replacement = targetSentence
+    ? fullText.replace(targetSentence, " ").replace(/\s+/g, " ").trim()
+    : "";
+  const minimumWords = groundingRefillMinimumWords(path);
+  for (const claim of claims.slice(0, GROUNDED_REFILL_CLAIM_LIMIT)) {
+    if (wordCount(replacement) >= minimumWords && replacement) break;
+    replacement = `${replacement}${replacement ? " " : ""}${claim.text}`.trim();
+  }
+  if (!replacement || (minimumWords > 0 && wordCount(replacement) < minimumWords)) {
+    return null;
+  }
+  if (/^didYouKnowFacts\[\d+\]$/.test(path) && wordCount(replacement) > 65) {
+    replacement = claims.slice(0, 2).map((claim) => claim.text).join(" ");
+    if (wordCount(replacement) < minimumWords || wordCount(replacement) > 65) return null;
+  }
+  setContentFieldByPath(candidate, path, replacement);
+  return candidate;
+}
+
+function mechanicallyRepairGroundingReasons(content, reasons, source) {
+  const claimBank = buildGroundedClaimBank(source);
+  if (claimBank.length < 3) {
+    return { content, repairedFieldPaths: [], claimCount: claimBank.length };
+  }
+  let working = content;
+  const repairedFieldPaths = [];
+  for (const reason of (Array.isArray(reasons) ? reasons : []).slice(0, 8)) {
+    if (groundingReasonIsCore(reason, working)) continue;
+    const path = groundingReasonFieldPath(reason, working);
+    if (!path) continue;
+    const candidate = replaceUnsupportedClaimWithGroundedClaims(
+      working,
+      path,
+      reason,
+      claimBank,
+    );
+    if (!candidate || !verifyArticleGrounding(candidate, source).ok) continue;
+    working = candidate;
+    repairedFieldPaths.push(path);
+  }
+  return { content: working, repairedFieldPaths, claimCount: claimBank.length };
 }
 
 // Zero-token, deterministic pre-repair. Tried before any AI repair call; a
@@ -21081,6 +21349,20 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
 
 async function repairGroundingContradictions(env, content, reasons, source, callAIImpl = callAI) {
   if (!Array.isArray(reasons) || reasons.length === 0) return content;
+  const claimBankRepair = mechanicallyRepairGroundingReasons(
+    content,
+    reasons,
+    source,
+  );
+  if (claimBankRepair.repairedFieldPaths.length > 0) {
+    content = claimBankRepair.content;
+    console.log(
+      `Grounding repair replaced unsupported prose from a ${claimBankRepair.claimCount}-claim source bank without an AI call (${claimBankRepair.repairedFieldPaths.join(", ")}).`,
+    );
+    const remaining = verifyArticleGrounding(content, source);
+    if (remaining.ok) return content;
+    reasons = remaining.reasons;
+  }
   const mechanical = mechanicallyRemoveOptionalUnsupportedClaims(
     content,
     source,
@@ -21177,14 +21459,51 @@ async function repairGroundingContradictions(env, content, reasons, source, call
 async function verifyFinalGroundingWithRepair(env, content, source, slug, deps = {}) {
   const verify = deps.verify || verifyFinalArticleGrounding;
   const repair = deps.repair || repairGroundingContradictions;
+  const maxRepairAttempts = Math.max(
+    0,
+    Math.min(2, Number.parseInt(deps.maxRepairAttempts, 10) || 2),
+  );
 
   const first = await verify(env, content, source);
   if (first.ok) return { ok: true, reasons: [], content };
+  let lastResult = first;
 
   let contradictions = (first.reasons || []).filter(
     (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
   );
   if (contradictions.length === 0) return { ...first, content };
+
+  // The final AI grader can identify a real unsupported inference that the
+  // narrower deterministic patterns do not recognize. Remove that exact
+  // optional sentence first, then refill the field from up to four unused
+  // atomic claims in the retained evidence pack. The full verifier runs again
+  // below; no grounding rule is waived.
+  const claimBankRepair = mechanicallyRepairGroundingReasons(
+    content,
+    contradictions,
+    source,
+  );
+  if (claimBankRepair.repairedFieldPaths.length > 0) {
+    const afterClaimBankRepair = await verify(
+      env,
+      claimBankRepair.content,
+      source,
+    );
+    if (afterClaimBankRepair.ok) {
+      console.log(
+        `Final grounding: dynamic ${claimBankRepair.claimCount}-claim source bank resolved ${slug} without a generation repair (${claimBankRepair.repairedFieldPaths.join(", ")}).`,
+      );
+      return { ok: true, reasons: [], content: claimBankRepair.content };
+    }
+    lastResult = afterClaimBankRepair;
+    content = claimBankRepair.content;
+    contradictions = (afterClaimBankRepair.reasons || []).filter(
+      (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
+    );
+    if (contradictions.length === 0) {
+      return { ...afterClaimBankRepair, content };
+    }
+  }
 
   // Mechanical pass first: zero tokens, and resolves the single most common
   // false-positive shape (a bare "order" reference) without ever reaching the
@@ -21198,6 +21517,7 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
       );
       return { ok: true, reasons: [], content: mechanical.content };
     }
+    lastResult = afterMechanical;
     content = mechanical.content;
     contradictions = (afterMechanical.reasons || []).filter(
       (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
@@ -21225,16 +21545,15 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
   // never replace the persisted content, only a verified-passing one may.
   let workingContent = content;
   let workingReasons = contradictions;
-  let lastResult = first;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= maxRepairAttempts; attempt += 1) {
     console.warn(
-      `Final grounding failed for ${slug}; attempting source-bound repair pass ${attempt}/2: ${workingReasons.join("; ").slice(0, 400)}`,
+      `Final grounding failed for ${slug}; attempting source-bound repair pass ${attempt}/${maxRepairAttempts}: ${workingReasons.join("; ").slice(0, 400)}`,
     );
     let repaired;
     try {
       repaired = await repair(env, workingContent, workingReasons, source);
     } catch (err) {
-      console.warn(`Final-grounding repair pass ${attempt}/2 failed for ${slug}: ${err.message}`);
+      console.warn(`Final-grounding repair pass ${attempt}/${maxRepairAttempts} failed for ${slug}: ${err.message}`);
       return { ...lastResult, content };
     }
     if (!repaired || repaired === workingContent) {
@@ -21243,7 +21562,7 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
 
     const reverified = await verify(env, repaired, source);
     if (reverified.ok) {
-      console.log(`Final grounding repair succeeded for ${slug} on pass ${attempt}/2.`);
+      console.log(`Final grounding repair succeeded for ${slug} on pass ${attempt}/${maxRepairAttempts}.`);
       return { ok: true, reasons: [], content: repaired };
     }
     workingContent = repaired;
@@ -26324,6 +26643,10 @@ export const __contentGenerationTestHooks = {
   filterGroundingIssues,
   verifyArticleGrounding,
   groundingDirectCasualtyNumbers,
+  buildGroundedClaimBank,
+  groundingReasonFieldPath,
+  groundingReasonIsCore,
+  mechanicallyRepairGroundingReasons,
   mechanicallyRemoveOptionalUnsupportedClaims,
   groundingFailureSignature,
   boundedGroundingRetryState,

@@ -13,8 +13,9 @@ name: Blog Post Failsafe
 #
 # Each write-capable Worker endpoint performs an account-wide KV analytics
 # preflight. HTTP 429 means the publication reserve is exhausted until the
-# 00:00 UTC reset. HTTP 503 means every usable AI provider is cooling down or
-# exhausted. Both responses stop a core publication phase immediately; the
+# 00:00 UTC reset. HTTP 503 can mean either provider capacity or a Worker
+# resource limit, so the response body is classified before reporting it.
+# Both responses stop a core publication phase immediately; the
 # optional post-publish pass retries only a transient 503/transport failure.
 # Neither is treated as final across scheduled runs: the Worker's KV-backed
 # provider-capacity circuit and per-chunk
@@ -70,6 +71,10 @@ jobs:
           YEAR=$(date -u +%Y)
           SLUG="${DAY}-${MONTH}-${YEAR}"
           echo "Today's expected slug: post:${SLUG}"
+
+          is_worker_resource_error() {
+            printf '%s' "$1" | grep -Eqi 'error code:[[:space:]]*1102|exceededResources|exceeded (CPU|resource)|Worker exceeded (CPU|resource)'
+          }
 
           # Absolute last resort (2026-07-25 user decision): only on the
           # day's FINAL scheduled attempt does a continuity-repair failure
@@ -185,7 +190,9 @@ jobs:
             DRAFT_HTTP_STATUS=$(echo "$DRAFT_RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
             echo "Draft response (HTTP $DRAFT_HTTP_STATUS): $DRAFT_BODY"
             if [ "$DRAFT_HTTP_STATUS" != "200" ]; then
-              if [ "$DRAFT_HTTP_STATUS" = "503" ]; then
+              if [ "$DRAFT_HTTP_STATUS" = "503" ] && is_worker_resource_error "$DRAFT_BODY"; then
+                echo "::error::Worker CPU/resource limit stopped draft generation. Retained checkpoints remain available to the next invocation."
+              elif [ "$DRAFT_HTTP_STATUS" = "503" ]; then
                 echo "::error::AI capacity deferred. Validated chunks and the request budget remain checkpointed for the next scheduled run."
               elif [ "$DRAFT_HTTP_STATUS" = "429" ]; then
                 echo "::error::Cloudflare KV write budget blocked generation until the UTC reset."
@@ -208,14 +215,16 @@ jobs:
           HTTP_STATUS=$(echo "$RESULT" | tail -n 1 | sed 's/HTTP_STATUS://')
           echo "Blog worker response (HTTP $HTTP_STATUS): $BODY"
           if [ "$HTTP_STATUS" != "200" ]; then
-            if [ "$HTTP_STATUS" = "503" ]; then
+            if [ "$HTTP_STATUS" = "503" ] && is_worker_resource_error "$BODY"; then
+              echo "::error::Worker CPU/resource limit stopped bounded enrichment; the retained draft will resume without repeating its durable style pass."
+            elif [ "$HTTP_STATUS" = "503" ]; then
               echo "::error::AI capacity deferred during enrichment; the retained draft will be resumed after reset."
             elif [ "$HTTP_STATUS" = "429" ]; then
               echo "::error::Cloudflare KV write budget blocked enrichment until the UTC reset."
             elif [ "$HTTP_STATUS" = "409" ] && printf '%s' "$BODY" | jq -e '.status == "event-rotated"' >/dev/null 2>&1; then
               echo "::error::The draft repeated the same grounding residual and was rotated. The next scheduled run will prepare a different topic."
             elif [ "$HTTP_STATUS" = "409" ] && printf '%s' "$BODY" | jq -e '.status == "grounding-residual"' >/dev/null 2>&1; then
-              echo "::error::The draft was retained for one later grounding-repair attempt; an identical second residual will rotate the topic."
+              echo "::error::The draft was retained for another grounding pass. Optional unsupported prose will be pruned from source claims; only a repeated core contradiction can rotate the topic."
             elif echo "$BODY" | grep -q "Bounded recovery rejected"; then
               echo "::error::The bounded publication gate rejected this topic. The next scheduled run may select another topic without a same-run regeneration."
             else

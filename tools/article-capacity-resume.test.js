@@ -1464,11 +1464,68 @@ test("casualty grounding preserves four-digit tolls while ignoring explicit cale
   assert.equal(dateAndToll.ok, true, dateAndToll.reasons.join("; "));
 });
 
-test("bounded grounding rotates after the second identical substantive residual", () => {
-  const reasons = [
+test("dynamic source claims replace unsupported optional prose without weakening grounding", () => {
+  const source = {
+    pageTitle: "Russell Hill subway accident",
+    text:
+      "The Russell Hill subway accident occurred in Toronto on August 11, 1995.",
+    sourceExtract:
+      "The Russell Hill subway accident involved two trains on Line 1 in Toronto. The collision happened between St. Clair West and Dupont stations on August 11, 1995. Toronto emergency crews entered the tunnel and removed passengers from the damaged cars. The official record lists three passenger deaths and thirty injured people. The inquiry examined signalling, operating procedures, and the actions of the train crews. The Toronto Transit Commission later published the inquiry findings in its retained record.",
+  };
+  const bank = hooks.buildGroundedClaimBank(source);
+  assert.ok(bank.length >= 4, `expected at least four source claims, got ${bank.length}`);
+  assert.ok(new Set(bank.map((claim) => claim.category)).size >= 2);
+
+  const unsupported =
+    "The inquiry prevented another subway disaster and guaranteed safer service.";
+  const content = {
+    title: "Russell Hill subway accident — August 11, 1995",
+    eventTitle: "Russell Hill subway accident",
+    analysisBad: [{
+      title: "Documented Limits",
+      detail:
+        "The retained record identifies the collision site, the date, and the agencies that responded. It also separates confirmed casualties from later inquiry material, giving readers a clear boundary between the immediate event and the investigation that followed. " +
+        unsupported,
+    }],
+  };
+  const reason =
+    `unsupported preventive outcome in analysisBad[0].detail: "${unsupported}"`;
+  const repaired = hooks.mechanicallyRepairGroundingReasons(
+    content,
+    [reason],
+    source,
+  );
+  assert.deepEqual(repaired.repairedFieldPaths, ["analysisBad[0].detail"]);
+  assert.doesNotMatch(repaired.content.analysisBad[0].detail, /prevented another|guaranteed safer/i);
+  assert.ok(
+    repaired.content.analysisBad[0].detail.split(/\s+/).length >= 60,
+    "source claims must refill the analysis word floor",
+  );
+  const grounding = hooks.verifyArticleGrounding(repaired.content, source);
+  assert.equal(grounding.ok, true, grounding.reasons.join("; "));
+});
+
+test("bounded grounding rotates only repeated core contradictions", () => {
+  const optionalReasons = [
     'unsupported causal claim in analysisBad[0].detail: "The dispute led to deaths."',
   ];
-  const first = hooks.boundedGroundingRetryState({}, reasons);
+  const optionalFirst = hooks.boundedGroundingRetryState({}, optionalReasons);
+  assert.equal(optionalFirst.attempts, 0);
+  assert.equal(optionalFirst.shouldRotate, false);
+  assert.equal(optionalFirst.optionalClaimDeferred, true);
+  assert.equal(optionalFirst.signature, "");
+
+  const optionalSecond = hooks.boundedGroundingRetryState({
+    boundedGroundingReasons: optionalReasons,
+    boundedGroundingAttempts: 9,
+  }, optionalReasons);
+  assert.equal(optionalSecond.attempts, 0);
+  assert.equal(optionalSecond.shouldRotate, false);
+
+  const coreReasons = [
+    "casualty number contradiction: article says 41 but source says 36",
+  ];
+  const first = hooks.boundedGroundingRetryState({}, coreReasons);
   assert.equal(first.attempts, 1);
   assert.equal(first.shouldRotate, false);
   assert.ok(first.signature);
@@ -1476,13 +1533,14 @@ test("bounded grounding rotates after the second identical substantive residual"
   const second = hooks.boundedGroundingRetryState({
     boundedGroundingSignature: first.signature,
     boundedGroundingAttempts: first.attempts,
-  }, reasons);
+    boundedGroundingReasons: coreReasons,
+  }, coreReasons);
   assert.equal(second.attempts, 2);
   assert.equal(second.shouldRotate, true);
 
   const legacySecond = hooks.boundedGroundingRetryState({
-    boundedGroundingReasons: reasons,
-  }, reasons);
+    boundedGroundingReasons: coreReasons,
+  }, coreReasons);
   assert.equal(legacySecond.attempts, 2);
   assert.equal(legacySecond.shouldRotate, true);
 
@@ -1490,26 +1548,26 @@ test("bounded grounding rotates after the second identical substantive residual"
     boundedGroundingSignature: first.signature,
     boundedGroundingAttempts: 1,
   }, ["unsupported preventive outcome in conclusionParagraphs[0]"]);
-  assert.equal(changed.attempts, 1);
+  assert.equal(changed.attempts, 0);
   assert.equal(changed.shouldRotate, false);
 
   const transport = hooks.boundedGroundingRetryState({
     boundedGroundingSignature: first.signature,
     boundedGroundingAttempts: 9,
-    boundedGroundingReasons: reasons,
+    boundedGroundingReasons: coreReasons,
   }, ["final grounding verifier unavailable: provider timeout"]);
   assert.equal(transport.transportDeferred, true);
   assert.equal(transport.shouldRotate, false);
   assert.equal(transport.signature, first.signature);
   assert.equal(transport.attempts, 9);
-  assert.deepEqual(transport.retainedReasons, reasons);
+  assert.deepEqual(transport.retainedReasons, coreReasons);
 
   const shiftingFirstReasons = [
     'unsupported causal claim in analysisBad[0].detail: "The confrontation caused a national reform."',
     'unsupported attribution in conclusionParagraphs[0]: "Officials ordered the later inquiry."',
     'unsupported relationship in didYouKnowFacts[0]: "The two leaders were relatives."',
     'unsupported causal claim in analysisGood[1].detail: "The strike triggered legislation."',
-    'unsupported location claim in overviewParagraphs[0]: "The meeting occurred in Pretoria."',
+    'wrong location: article says Pretoria but source says Cape Town.',
     'unsupported document claim in didYouKnowFacts[3]: "A report established responsibility."',
   ];
   const shiftingFirst = hooks.boundedGroundingRetryState({}, shiftingFirstReasons);
@@ -1523,7 +1581,7 @@ test("bounded grounding rotates after the second identical substantive residual"
     'The conclusionParagraphs[0] wrongly assigns the inquiry order to officials.',
     'didYouKnowFacts[0] states an unsupported family relationship.',
     'analysisGood[1].detail claims the strike led to a new law.',
-    'overviewParagraphs[0] gives Pretoria as the location without support.',
+    'wrong location: article gives Pretoria but source gives Cape Town.',
     'didYouKnowFacts[4] introduces a different unsupported quotation.',
   ]);
   assert.equal(shiftingSecond.attempts, 2);
@@ -1829,6 +1887,31 @@ test("undersized chunked body selects only the shortest field for targeted repai
   assert.equal(hooks.chunkedArticleBodyCapacityRepairFields(body).length, 0);
 });
 
+test("bounded enrichment checkpoints one optional style attempt before calling a provider", () => {
+  const worker = readFileSync(
+    new URL("../js/blog-ai-worker.js", import.meta.url),
+    "utf8",
+  );
+  const enrichStart = worker.indexOf("async function enrichPublishedPost");
+  const boundedStart = worker.indexOf("if (boundedRecovery) {", enrichStart);
+  const boundedEnd = worker.indexOf(
+    'await chk("bounded-preflight-passed")',
+    boundedStart,
+  );
+  const boundedBody = worker.slice(boundedStart, boundedEnd);
+  assert.equal((boundedBody.match(/improveArticleQuality\(/g) || []).length, 1);
+  assert.doesNotMatch(boundedBody, /repairRepeatedBodySections\(|fixBannedPhrases\(/);
+  const markerIndex = boundedBody.indexOf(
+    'persistBoundedRepair(repaired, "bounded-style-pass-started")',
+  );
+  const providerIndex = boundedBody.indexOf("await improveArticleQuality(");
+  assert.ok(
+    markerIndex >= 0 && providerIndex > markerIndex,
+    "the durable marker must be written before the optional provider call can hit a Worker limit",
+  );
+  assert.match(boundedBody, /draft\.boundedStyleRepairAttempted === true/);
+});
+
 test("failsafe resumes retained enrichment outboxes and retries only transient recovery failures", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/blog-failsafe.yml", import.meta.url),
@@ -1850,6 +1933,10 @@ test("failsafe resumes retained enrichment outboxes and retries only transient r
   );
   assert.match(workflow, /if \[ "\$STATUS" = "200" \]; then[\s\S]*"\$DRAFT_URL"/);
   assert.match(workflow, /for RECOVERY_ATTEMPT in 1 2 3/);
+  assert.match(workflow, /is_worker_resource_error\(\)/);
+  assert.match(workflow, /error code:\[\[:space:\]\]\*1102/);
+  assert.match(workflow, /Worker CPU\/resource limit stopped bounded enrichment/);
+  assert.match(workflow, /only a repeated core contradiction can rotate the topic/);
   assert.match(
     workflow,
     /\.finalized\.complete == true and \.finalized\.outboxCleared == true/,

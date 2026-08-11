@@ -64,9 +64,24 @@ test("server discovery links cover the daily cluster, adjacent dates, and topic 
 
 test("homepage discovery reuses date-view tabs with every link visible", () => {
   assert.match(indexHtml, /class="date-view-tabs homepage-discovery-links"/);
+  const calendarIndex = indexHtml.indexOf('class="calendar-section"');
+  const faqIndex = indexHtml.indexOf('class="faq-section"');
+  const discoveryIndex = indexHtml.indexOf('class="homepage-discovery"');
+  const footerIndex = indexHtml.indexOf('class="footer"');
+  assert.ok(discoveryIndex > calendarIndex);
+  assert.ok(discoveryIndex > faqIndex);
+  assert.ok(discoveryIndex < footerIndex);
   assert.match(
     customCss,
-    /\.homepage-discovery\s*\{[^}]*padding:\s*1\.5rem var\(--gutter-x\) 0;/s,
+    /\.homepage-discovery\s*\{[^}]*padding:\s*2\.5rem var\(--gutter-x\);[^}]*border-top:\s*1px solid var\(--border\);/s,
+  );
+  assert.match(
+    customCss,
+    /\.homepage-discovery \.homepage-section-title\s*\{[^}]*padding:\s*0 0 1\.25rem;/s,
+  );
+  assert.match(
+    customCss,
+    /@media \(max-width:\s*768px\)[\s\S]*?\.homepage-discovery\s*\{[^}]*padding:\s*2rem var\(--gutter-x\);/s,
   );
   assert.match(
     customCss,
@@ -294,9 +309,10 @@ test("homepage edge release closes a lagging static-origin deployment", () => {
     "/css/custom.css",
     ".video-card-thumb{height:240px}.cookie-banner{display:flex}",
   );
-  assert.match(custom, /thisday-homepage-edge-v53/);
+  assert.match(custom, /thisday-homepage-edge-v54/);
   assert.match(custom, /repeat\(4, minmax\(0, 1fr\)\) !important/);
   assert.match(custom, /#cookieBanner,[\s\S]*display: none !important/);
+  assert.match(custom, /\.homepage-discovery[\s\S]*padding: 2\.5rem/);
 
   const browserScript = hooks.normalizeHomepageStaticAsset(
     "/js/script.js",
@@ -309,9 +325,9 @@ test("homepage edge release closes a lagging static-origin deployment", () => {
     "/sw.js",
     'const CACHE_NAME = "thisday-v39";\n"/js/script.js?v=30"\n"/css/custom.css?v=51"\n"/css/style.css?v=10"',
   );
-  assert.match(serviceWorker, /thisday-v42/);
+  assert.match(serviceWorker, /thisday-v43/);
   assert.match(serviceWorker, /script\.js\?v=31/);
-  assert.match(serviceWorker, /custom\.css\?v=53/);
+  assert.match(serviceWorker, /custom\.css\?v=54/);
   assert.match(serviceWorker, /style\.css\?v=11/);
 
   assert.equal(
@@ -331,7 +347,7 @@ test("homepage edge release closes a lagging static-origin deployment", () => {
 });
 
 test("versioned first-party CSS and JavaScript receive immutable caching", () => {
-  assert.match(indexHtml, /custom\.css\?v=53/);
+  assert.match(indexHtml, /custom\.css\?v=54/);
   assert.match(indexHtml, /style\.css\?v=11/);
   assert.match(indexHtml, /script\.js\?v=31/);
   assert.match(
@@ -349,7 +365,7 @@ test("versioned asset responses use the immutable production header", async () =
     });
   try {
     const response = await historyHooks.handleFetchRequest(
-      new Request("https://thisday.info/css/custom.css?v=53"),
+      new Request("https://thisday.info/css/custom.css?v=54"),
       {},
       { waitUntil() {} },
     );

@@ -1780,13 +1780,13 @@ function buildHomepageVideoCards(index, yt) {
 }
 
 const HOMEPAGE_EDGE_ASSET_VERSIONS = Object.freeze({
-  customCss: "53",
+  customCss: "54",
   styleCss: "11",
   script: "31",
 });
 
 const HOMEPAGE_EDGE_CUSTOM_CSS_PATCH = `
-/* thisday-homepage-edge-v53 */
+/* thisday-homepage-edge-v54 */
 .video-section .blog-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
 }
@@ -1797,6 +1797,21 @@ const HOMEPAGE_EDGE_CUSTOM_CSS_PATCH = `
 #cookieBanner,
 .cookie-banner {
   display: none !important;
+}
+.homepage-discovery {
+  padding: 2.5rem var(--gutter-x) !important;
+  border-top: 1px solid var(--border);
+}
+.homepage-discovery .homepage-section-title {
+  padding: 0 0 1.25rem !important;
+}
+@media (max-width: 768px) {
+  .homepage-discovery {
+    padding: 2rem var(--gutter-x) !important;
+  }
+  .homepage-discovery .homepage-section-title {
+    padding-bottom: 1rem !important;
+  }
 }
 `;
 
@@ -1863,7 +1878,7 @@ const HOMEPAGE_FIXED_INITIAL_BOUNDARY = `    if (punct === ".") {
 function normalizeHomepageStaticAsset(pathname, source) {
   const body = String(source || "");
   if (pathname === "/css/custom.css") {
-    return body.includes("thisday-homepage-edge-v53")
+    return body.includes("thisday-homepage-edge-v54")
       ? body
       : `${body}\n${HOMEPAGE_EDGE_CUSTOM_CSS_PATCH}`;
   }
@@ -1881,9 +1896,13 @@ function normalizeHomepageStaticAsset(pathname, source) {
   }
   if (pathname === "/sw.js") {
     return body
-      .replace(/const CACHE_NAME = "thisday-v39";/, 'const CACHE_NAME = "thisday-v42";')
+      .replace(
+        /const CACHE_NAME = "thisday-v(?:39|42)";/,
+        'const CACHE_NAME = "thisday-v43";',
+      )
       .replaceAll("/js/script.js?v=30", "/js/script.js?v=31")
-      .replaceAll("/css/custom.css?v=51", "/css/custom.css?v=53")
+      .replaceAll("/css/custom.css?v=51", "/css/custom.css?v=54")
+      .replaceAll("/css/custom.css?v=53", "/css/custom.css?v=54")
       .replaceAll("/css/style.css?v=10", "/css/style.css?v=11");
   }
   return body;
@@ -10541,7 +10560,7 @@ async function handleFetchRequest(request, env, ctx) {
       "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
       "<https://cdn.jsdelivr.net>; rel=preconnect; crossorigin",
       "<https://api.wikimedia.org>; rel=dns-prefetch",
-      "</css/custom.css?v=53>; rel=preload; as=style",
+      "</css/custom.css?v=54>; rel=preload; as=style",
     ].join(", "),
   );
 

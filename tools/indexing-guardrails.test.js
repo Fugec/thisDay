@@ -59,7 +59,7 @@ test("security wrapper preserves deliberate CSP, versioned preloads, and non-HTM
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Content-Security-Policy": "default-src 'self'",
-        Link: "</css/custom.css?v=53>; rel=preload; as=style",
+        Link: "</css/custom.css?v=54>; rel=preload; as=style",
       },
     }),
   );
@@ -69,7 +69,7 @@ test("security wrapper preserves deliberate CSP, versioned preloads, and non-HTM
   );
   assert.equal(
     versioned.headers.get("link"),
-    "</css/custom.css?v=53>; rel=preload; as=style",
+    "</css/custom.css?v=54>; rel=preload; as=style",
   );
 
   const json = new Response("{}", {
@@ -124,7 +124,7 @@ test("maintenance fallback remains a no-store 503 when its asset is unavailable"
 });
 
 test("service worker cannot preserve redirected or noindex HTML", () => {
-  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v42"/);
+  assert.match(serviceWorker, /const CACHE_NAME = "thisday-v43"/);
   const assets = serviceWorker.match(/const STATIC_ASSETS = \[([\s\S]*?)\];/)?.[1] || "";
   assert.doesNotMatch(assets, /^\s*["']\/["']/m);
   assert.doesNotMatch(assets, /["']\/index\.html["']/);

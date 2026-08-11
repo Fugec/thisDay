@@ -2387,12 +2387,12 @@ article.p-4.rounded.border.shadow-sm {
 }
 
 .homepage-discovery {
-  padding: 1.5rem var(--gutter-x) 0;
+  padding: 2.5rem var(--gutter-x);
+  border-top: 1px solid var(--border);
 }
 
 .homepage-discovery .homepage-section-title {
-  padding-left: 0;
-  padding-right: 0;
+  padding: 0 0 1.25rem;
 }
 
 /* Shared date-view tab component used by date pages and homepage discovery. */
@@ -2451,6 +2451,16 @@ article.p-4.rounded.border.shadow-sm {
   justify-content: center;
   text-align: center;
   white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .homepage-discovery {
+    padding: 2rem var(--gutter-x);
+  }
+
+  .homepage-discovery .homepage-section-title {
+    padding-bottom: 1rem;
+  }
 }
 
 @media (min-width: 768px) {

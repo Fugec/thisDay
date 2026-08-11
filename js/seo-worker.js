@@ -9044,6 +9044,73 @@ async function serveMaintenanceResponse(request, fetchImpl = fetch) {
   });
 }
 
+// Public HTML can leave this Worker through several early route handlers
+// (people/entity pages, date pages, archive hubs) as well as through the
+// homepage transformation below. Keep the security contract at the outer
+// response boundary so cache hits and every renderer receive the same headers.
+const PUBLIC_HTML_CSP =
+  `default-src 'none'; ` +
+  `connect-src 'self' https://api.wikimedia.org https://en.wikipedia.org https://cdn.jsdelivr.net ` +
+  `https://www.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://*.google-analytics.com https://www.google.com https://www.google.ba https://www.gstatic.com ` +
+  `https://www.googleadservices.com https://pagead2.googlesyndication.com ` +
+  `https://*.adtrafficquality.google https://*.doubleclick.net ` +
+  `https://www.googletagmanager.com https://fundingchoicesmessages.google.com https://openlibrary.org; ` +
+  `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://fundingchoicesmessages.google.com https://static.cloudflareinsights.com https://*.adtrafficquality.google 'unsafe-inline'; ` +
+  `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
+  `img-src 'self' data: https://upload.wikimedia.org https://covers.openlibrary.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com https://img.youtube.com https://*.adtrafficquality.google https://*.doubleclick.net; ` +
+  `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
+  `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://fundingchoicesmessages.google.com https://*.adtrafficquality.google; ` +
+  `manifest-src 'self'; ` +
+  `base-uri 'self'; ` +
+  `frame-ancestors 'none'; ` +
+  `object-src 'none';`;
+
+const UNVERSIONED_CUSTOM_CSS_PRELOAD =
+  /^<\/css\/custom\.css>\s*;\s*rel=preload\s*;\s*as=style$/i;
+
+function applyPublicHtmlSecurityHeaders(response) {
+  const contentType = String(response?.headers?.get("Content-Type") || "");
+  if (!/\btext\/html\b/i.test(contentType)) return response;
+
+  const headers = new Headers(response.headers);
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains; preload",
+  );
+  // Preserve a route-specific policy if one is deliberately supplied. The
+  // shared policy is the secure default for HTML that previously had none.
+  if (!headers.has("Content-Security-Policy")) {
+    headers.set("Content-Security-Policy", PUBLIC_HTML_CSP);
+  }
+  headers.set("X-Frame-Options", "DENY");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=(), unload=*",
+  );
+
+  // Early people/date renderers advertised an unversioned stylesheet preload
+  // even though the document already loads that stylesheet directly. Chrome
+  // can report that duplicate hint as unused. Remove only that exact hint;
+  // preserve the homepage's versioned preload and every preconnect hint.
+  const link = headers.get("Link");
+  if (link) {
+    const retained = link
+      .split(/,\s*(?=<)/)
+      .map((value) => value.trim())
+      .filter((value) => value && !UNVERSIONED_CUSTOM_CSS_PRELOAD.test(value));
+    if (retained.length > 0) headers.set("Link", retained.join(", "));
+    else headers.delete("Link");
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 // --- Main Request Handler (for user requests) ---
 async function handleFetchRequest(request, env, ctx) {
   const url = new URL(request.url);
@@ -10437,23 +10504,7 @@ async function handleFetchRequest(request, env, ctx) {
   // - base-uri 'self': Restricts the URLs that can be used in <base> elements.
   // - frame-ancestors 'none': Specifically for ClickJacking prevention (prevents embedding your site in iframes).
   // - object-src 'none': Prevents embedding <object>, <embed>, or <applet> elements.
-  const csp =
-    `default-src 'none'; ` +
-    `connect-src 'self' https://api.wikimedia.org https://en.wikipedia.org https://cdn.jsdelivr.net ` +
-    `https://www.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://*.google-analytics.com https://www.google.com https://www.google.ba https://www.gstatic.com ` +
-    `https://www.googleadservices.com https://pagead2.googlesyndication.com ` +
-    `https://*.adtrafficquality.google https://*.doubleclick.net ` +
-    `https://www.googletagmanager.com https://fundingchoicesmessages.google.com https://openlibrary.org; ` +
-    `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://fundingchoicesmessages.google.com https://static.cloudflareinsights.com https://*.adtrafficquality.google 'unsafe-inline'; ` +
-    `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
-    `img-src 'self' data: https://upload.wikimedia.org https://covers.openlibrary.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com https://img.youtube.com https://*.adtrafficquality.google https://*.doubleclick.net; ` +
-    `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
-    `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://fundingchoicesmessages.google.com https://*.adtrafficquality.google; ` +
-    `manifest-src 'self'; ` +
-    `base-uri 'self'; ` +
-    `frame-ancestors 'none'; ` +
-    `object-src 'none';`;
-  newResponse.headers.set("Content-Security-Policy", csp);
+  newResponse.headers.set("Content-Security-Policy", PUBLIC_HTML_CSP);
 
   // X-Frame-Options: DENY - Also for ClickJacking protection. Redundant if CSP frame-ancestors 'none' is used, but good for older browsers.
   newResponse.headers.set("X-Frame-Options", "DENY");
@@ -11725,16 +11776,18 @@ export default {
             { type: pageType, monthName, day },
           );
         }
-        const r = new Response(cachedBody, {
+        const r = applyPublicHtmlSecurityHeaders(new Response(cachedBody, {
           status: cached.status,
           statusText: cached.statusText,
           headers: new Headers(cached.headers),
-        });
+        }));
         r.headers.set("X-Edge-Cache", "HIT");
         return r;
       }
     }
-    const response = await handleFetchRequest(request, env, ctx);
+    const response = applyPublicHtmlSecurityHeaders(
+      await handleFetchRequest(request, env, ctx),
+    );
     if (cacheKey && response.status === 200) {
       const toStore = new Response(response.clone().body, {
         status: response.status,
@@ -11862,4 +11915,6 @@ export const __homepagePerformanceTestHooks = {
 
 export const __indexabilityTestHooks = {
   serveMaintenanceResponse,
+  applyPublicHtmlSecurityHeaders,
+  PUBLIC_HTML_CSP,
 };

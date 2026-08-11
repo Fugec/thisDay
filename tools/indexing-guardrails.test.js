@@ -25,6 +25,60 @@ test("homepage CSP permits Google Ads frames", () => {
   );
 });
 
+test("all public HTML responses receive the shared security contract", async () => {
+  const response = hooks.applyPublicHtmlSecurityHeaders(
+    new Response("<!doctype html><h1>Person page</h1>", {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        Link: "</css/custom.css>; rel=preload; as=style",
+      },
+    }),
+  );
+
+  assert.equal(
+    response.headers.get("content-security-policy"),
+    hooks.PUBLIC_HTML_CSP,
+  );
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(
+    response.headers.get("strict-transport-security"),
+    "max-age=31536000; includeSubDomains; preload",
+  );
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(
+    response.headers.get("referrer-policy"),
+    "strict-origin-when-cross-origin",
+  );
+  assert.match(response.headers.get("permissions-policy"), /unload=\*/);
+  assert.equal(response.headers.get("link"), null);
+});
+
+test("security wrapper preserves deliberate CSP, versioned preloads, and non-HTML", () => {
+  const versioned = hooks.applyPublicHtmlSecurityHeaders(
+    new Response("<!doctype html>", {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy": "default-src 'self'",
+        Link: "</css/custom.css?v=53>; rel=preload; as=style",
+      },
+    }),
+  );
+  assert.equal(
+    versioned.headers.get("content-security-policy"),
+    "default-src 'self'",
+  );
+  assert.equal(
+    versioned.headers.get("link"),
+    "</css/custom.css?v=53>; rel=preload; as=style",
+  );
+
+  const json = new Response("{}", {
+    headers: { "Content-Type": "application/json" },
+  });
+  assert.equal(hooks.applyPublicHtmlSecurityHeaders(json), json);
+  assert.equal(json.headers.get("content-security-policy"), null);
+});
+
 test("maintenance content is served as a temporary non-cacheable response", async () => {
   const request = new Request("https://thisday.info/some-public-page/");
   let upstreamUrl = "";

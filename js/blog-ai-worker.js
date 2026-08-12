@@ -117,6 +117,7 @@ const FEATURED_IMAGE_CHECK_MARKER = "<!-- featured-image-check-v1 -->";
 const EVENT_FIGURES_BACKFILL_MARKER = "<!-- event-figures-backfill-v1 -->";
 const ENTITY_STRIP_BACKFILL_MARKER = "<!-- entity-strip-backfill-v1 -->";
 const AMAZON_COVERS_BACKFILL_MARKER = "<!-- amazon-covers-backfill-v1 -->";
+const ARTICLE_SERVE_READY_MARKER = "<!-- article-serve-ready-v2 -->";
 const KV_REPAIR_ATTEMPT_PREFIX = "repair-attempt-v1:";
 const REPAIR_ATTEMPT_TTL = 60 * 60 * 24; // 1 day (featured-image, amazon-covers)
 // Entity-strip heal backs off WEEKLY rather than daily. For a permanently-unlinkable
@@ -789,6 +790,7 @@ const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
 const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const BLOG_HISTORY_QUALITY_GATE_VERSION = 2;
 const EVERGREEN_HISTORY_EDITION_VERSION = 1;
+const PERSON_PROSE_QUALITY_VERSION = 1;
 const ARTICLE_ORIGINAL_VALUE_GATE_VERSION = 1;
 const MIN_AUTOMATIC_TIMELINE_ENTRIES = 5;
 const MIN_AUTOMATIC_INLINE_FIGURES = 2;
@@ -1116,6 +1118,7 @@ function auditDidYouKnowFacts(
         }
       }
     }
+
   }
 
   if (facts.length > 0 && requireGrounding && groundingVerified !== true) {
@@ -4075,9 +4078,17 @@ export default {
             return { selected: 0 };
           });
           if (recovery.selected === 0) {
-            await recoverRecentEntityStrips(guarded.env).catch((err) =>
-              console.warn(`Blog AI: entity recovery pass failed — ${err.message}`),
-            );
+            const repaired = await recoverRecentEntityStrips(guarded.env).catch((err) => {
+              console.warn(`Blog AI: entity recovery pass failed — ${err.message}`);
+              return 0;
+            });
+            if (repaired === 0) {
+              await recoverPendingPersonProseEnrichment(guarded.env, {
+                limit: 1,
+              }).catch((err) =>
+                console.warn(`Blog AI: person prose recovery pass failed — ${err.message}`),
+              );
+            }
           }
           return;
         }
@@ -4213,6 +4224,53 @@ export default {
         hasOpenRouter3: Boolean(env.OPENROUTER_API_KEY_3 || env.OPENRUITER_API_KEY_3 || env.OPENNRUITER_API_KEY_3),
         hasNvidia: Boolean(env.NVIDIA_API_KEY),
         hasAnthropic: Boolean(env.ANTHROPIC_API_KEY),
+      });
+    }
+
+    // Prepare the current stored article once so public GETs can return it
+    // inside the 10 ms free-plan CPU allowance. This only applies the same
+    // deterministic response normalizers that GET previously re-ran for every
+    // reader; it does not regenerate content or touch the publication index.
+    if (path === "/blog/prepare-live-html" && request.method === "POST") {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const slug = new URL(request.url).searchParams.get("slug") || "";
+      const currentSlug = buildSlug(new Date());
+      if (slug !== currentSlug) {
+        return jsonResponse({
+          status: "error",
+          slug,
+          message: `This preparation may target only today's post (${currentSlug}).`,
+        }, 400);
+      }
+      const guarded = await prepareBlogKvBudget(env, "maintenance");
+      if (!guarded.budget.allowPhase) {
+        return kvBudgetBlockedResponse(guarded.budget);
+      }
+      const key = `${KV_POST_PREFIX}${slug}`;
+      const html = await guarded.env.BLOG_AI_KV.get(key).catch(() => null);
+      if (!html) {
+        return jsonResponse({ status: "error", slug, message: "Post not found." }, 404);
+      }
+      if (html.includes(ARTICLE_SERVE_READY_MARKER)) {
+        return jsonResponse({
+          status: "ok",
+          slug,
+          changed: false,
+          bytes: html.length,
+          kvBudget: publicKvWriteBudget(guarded.budget),
+        });
+      }
+      const prepared = markArticleHtmlServeReady(html);
+      const changed = await blogKvPutIfChanged(guarded.env, key, prepared);
+      return jsonResponse({
+        status: "ok",
+        slug,
+        changed: changed === true,
+        bytes: prepared.length,
+        kvBudget: publicKvWriteBudget(guarded.budget),
       });
     }
 
@@ -4511,6 +4569,117 @@ export default {
       });
     }
 
+    // A completed post normally has no draft because the post-publish outbox
+    // is deleted after finalization. This exact-day admin path rebuilds that
+    // temporary draft only from the retained source package and checkpointed
+    // generation chunks, then runs the ordinary bounded enrichment function.
+    // It never regenerates a topic and cannot target an older archive page.
+    if (
+      path === "/blog/reenrich-published" &&
+      request.method === "POST"
+    ) {
+      const auth = request.headers.get("Authorization") ?? "";
+      if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
+        return jsonResponse({ status: "unauthorized" }, 401);
+      }
+      const reenrichUrl = new URL(request.url);
+      const slug = reenrichUrl.searchParams.get("slug") || "";
+      const currentSlug = buildSlug(new Date());
+      if (slug !== currentSlug) {
+        return jsonResponse(
+          {
+            status: "error",
+            slug,
+            message: `This bounded recovery may target only today's post (${currentSlug}).`,
+          },
+          400,
+        );
+      }
+      const guarded = await prepareBlogKvBudget(env, "enrich");
+      if (!guarded.budget.allowPhase) {
+        return kvBudgetBlockedResponse(guarded.budget);
+      }
+      try {
+        const restored = await restorePublishedDraftForEnrichment(
+          guarded.env,
+          slug,
+          {
+            forceRebuild:
+              reenrichUrl.searchParams.get("restart-prose") === "true",
+            useGroundedOutbox:
+              reenrichUrl.searchParams.get("resume-grounded-outbox") === "true",
+          },
+        );
+        let enrichment;
+        if (restored.finalGroundingStaged) {
+          enrichment = await enrichPublishedPost(guarded.env, slug, {
+            boundedRecovery: true,
+            skipProseQualityEdit: true,
+            skipFinalGrounding: true,
+            deferPublishedCoreSave: true,
+          });
+        } else if (restored.proseQualityStaged) {
+          enrichment = await enrichPublishedPost(guarded.env, slug, {
+            boundedRecovery: true,
+            skipProseQualityEdit: true,
+            stopAfterFinalGrounding: true,
+          });
+        } else {
+          enrichment = await enrichPublishedPost(guarded.env, slug, {
+            boundedRecovery: true,
+            stopAfterProseQualityEdit: true,
+          });
+        }
+        const proseStaged = enrichment?.status === "prose-staged";
+        const groundingStaged =
+          enrichment?.status === "final-grounding-staged";
+        const coreRefreshQueued =
+          enrichment?.status === "core-refresh-queued";
+        return jsonResponse({
+          status: proseStaged
+            ? "prose-staged"
+            : groundingStaged
+              ? "final-grounding-staged"
+              : coreRefreshQueued
+                ? "core-refresh-queued"
+                : "ok",
+          slug,
+          restored,
+          message: proseStaged
+            ? "Prose edit staged; call this endpoint once more to run final grounding and save."
+            : groundingStaged
+              ? "Final grounding staged; call this endpoint once more to queue the isolated core save."
+              : coreRefreshQueued
+                ? "Grounded core refresh queued for the isolated scheduled recovery."
+              : "Published post passed through bounded enrichment.",
+          kvBudget: publicKvWriteBudget(guarded.budget),
+        }, proseStaged || groundingStaged ? 202 : 200);
+      } catch (err) {
+        if (isAIProviderCapacityError(err)) {
+          return aiCapacityDeferredResponse(err, { slug });
+        }
+        if (err?.groundingRecovery) {
+          return jsonResponse(
+            {
+              ...err.groundingRecovery,
+              message: err.message,
+              kvBudget: publicKvWriteBudget(guarded.budget),
+            },
+            err.code === "BOUNDED_GROUNDING_VERIFIER_DEFERRED" ? 503 : 409,
+          );
+        }
+        return jsonResponse(
+          {
+            status: "error",
+            slug,
+            message: err.message,
+            kvBudget: publicKvWriteBudget(guarded.budget),
+          },
+          500,
+        );
+      }
+    }
+
     if (path === "/blog/backfill-entities" && request.method === "POST") {
       const auth = request.headers.get("Authorization") ?? "";
       if (!env.PUBLISH_SECRET || auth !== `Bearer ${env.PUBLISH_SECRET}`) {
@@ -4586,6 +4755,8 @@ export default {
       }
       const recoverParams = new URL(request.url).searchParams;
       const recoverSlug = recoverParams.get("slug") || "";
+      const forceEvergreen =
+        recoverParams.get("force-evergreen") === "true";
       if (!recoverSlug) {
         return jsonResponse({ status: "error", message: "Provide ?slug=X" }, 400);
       }
@@ -4595,10 +4766,11 @@ export default {
       }
       try {
         const result = await recoverPublishedPostEnrichment(guarded.env, recoverSlug);
-        const evergreen = result.found && !result.complete
+        const evergreen = result.found && (forceEvergreen || !result.complete)
           ? await recoverPendingEvergreenHistory(guarded.env, {
               preferPostSlug: recoverSlug,
               requirePostSlug: true,
+              forceRefresh: forceEvergreen,
             })
           : { selected: 0, promoted: 0, deferred: 0 };
         const finalized = result.outboxCleared
@@ -4644,18 +4816,39 @@ export default {
       const typeFilter = reenrichParams.get("type") || "person";
       const reenrichLimit = Math.min(parseInt(reenrichParams.get("limit") || "10", 10), 30);
       const reenrichOffset = parseInt(reenrichParams.get("offset") || "0", 10);
+      const requestedSlugValues = String(
+        reenrichParams.get("slugs") || "",
+      )
+        .split(",")
+        .map((slug) => slug.trim().toLowerCase())
+        .filter(Boolean);
+      if (
+        requestedSlugValues.some((slug) => !/^[a-z0-9-]+$/.test(slug))
+      ) {
+        return jsonResponse(
+          { status: "error", message: "Every requested entity slug must be a simple slug." },
+          400,
+        );
+      }
+      const requestedSlugs = new Set(requestedSlugValues);
+      const guarded = await prepareBlogKvBudget(env, "maintenance");
+      if (!guarded.budget.allowPhase) {
+        return kvBudgetBlockedResponse(guarded.budget);
+      }
+      const budgetEnv = guarded.env;
 
-      const entityIndexRaw = await env.BLOG_AI_KV?.get(KV_ENTITY_INDEX_KEY).catch(() => null);
+      const entityIndexRaw = await budgetEnv.BLOG_AI_KV?.get(KV_ENTITY_INDEX_KEY).catch(() => null);
       if (!entityIndexRaw) return jsonResponse({ status: "error", message: "Entity index not found" }, 404);
       const entityIndex = JSON.parse(entityIndexRaw);
-      const reenrichFiltered = typeFilter === "all" ? entityIndex : entityIndex.filter((e) => e.type === typeFilter);
+      const reenrichFiltered = (typeFilter === "all" ? entityIndex : entityIndex.filter((e) => e.type === typeFilter))
+        .filter((entry) => requestedSlugs.size === 0 || requestedSlugs.has(entry.slug));
       const reenrichBatch = reenrichFiltered.slice(reenrichOffset, reenrichOffset + reenrichLimit);
 
       const reenrichResults = [];
       for (const entry of reenrichBatch) {
         try {
-          const entityKey = `${KV_ENTITY_PREFIX}${entry.type}:${entry.slug}`;
-          const entityRaw = await env.BLOG_AI_KV.get(entityKey);
+          const entityKey = `${KV_ENTITY_PREFIX}${entry.type}:${entry.storageSlug || entry.slug}`;
+          const entityRaw = await budgetEnv.BLOG_AI_KV.get(entityKey);
           if (!entityRaw) { reenrichResults.push({ slug: entry.slug, status: "not_found" }); continue; }
           const entity = JSON.parse(entityRaw);
           const contentProxy = {
@@ -4668,13 +4861,40 @@ export default {
             keyTerms: [],
           };
           const fallback = buildFallbackEntityBodySections(entity, contentProxy);
-          entity.bodySections = await generateEntityBodySections(env, entity, contentProxy, fallback);
+          entity.bodySections = await generateEntityBodySections(budgetEnv, entity, contentProxy, fallback);
+          if (entity.type === "person") {
+            const timelineIssues = generatedPageWritingQualityIssues(
+              {
+                ...entity,
+                overviewCards: [],
+                bodySections: [],
+              },
+              { includeCards: false, includeTimeline: true },
+            );
+            if (timelineIssues.length) delete entity.timeline;
+          }
+          const proseQualityReady =
+            entity.type === "person" && personEntityWritingQualityReady(entity);
+          if (entity.type === "person") {
+            if (proseQualityReady) {
+              entity.personProseQualityVersion = PERSON_PROSE_QUALITY_VERSION;
+              delete entity.needsProseEnrichment;
+            } else {
+              reenrichResults.push({
+                slug: entry.slug,
+                type: entry.type,
+                status: "rejected",
+                error: "Generated prose did not pass the established writing audit; stored page was left unchanged.",
+              });
+              continue;
+            }
+          }
           entity.updatedAt = new Date().toISOString();
           const wordCount = (entity.bodySections || [])
             .flatMap((s) => (Array.isArray(s.paragraphs) ? s.paragraphs : []))
             .join(" ").split(/\s+/).filter(Boolean).length;
-          await env.BLOG_AI_KV.put(entityKey, JSON.stringify(entity));
-          reenrichResults.push({ slug: entry.slug, type: entry.type, status: "ok", sections: entity.bodySections.length, wordCount });
+          await budgetEnv.BLOG_AI_KV.put(entityKey, JSON.stringify(entity));
+          reenrichResults.push({ slug: entry.slug, type: entry.type, status: "ok", sections: entity.bodySections.length, wordCount, proseQualityReady });
         } catch (err) {
           reenrichResults.push({ slug: entry.slug, type: entry.type, status: "error", error: err.message });
         }
@@ -4686,14 +4906,34 @@ export default {
           .map((r) => [`${r.type}:${r.slug}`, r.wordCount >= 150]),
       );
       if (updatedIndexable.size > 0) {
-        const idxRaw = await env.BLOG_AI_KV?.get(KV_ENTITY_INDEX_KEY).catch(() => null);
+        const idxRaw = await budgetEnv.BLOG_AI_KV?.get(KV_ENTITY_INDEX_KEY).catch(() => null);
         if (idxRaw) {
           const idx = JSON.parse(idxRaw);
           for (const entry of idx) {
             const key = `${entry.type}:${entry.slug}`;
-            if (updatedIndexable.has(key)) entry.indexable = updatedIndexable.get(key);
+            if (!updatedIndexable.has(key)) continue;
+            entry.indexable = updatedIndexable.get(key);
+            const result = reenrichResults.find(
+              (item) => `${item.type}:${item.slug}` === key,
+            );
+            if (result?.status === "ok") {
+              entry.updatedAt = new Date().toISOString();
+            }
+            if (entry.type === "person" && result?.proseQualityReady) {
+              entry.personProseQualityVersion = PERSON_PROSE_QUALITY_VERSION;
+              delete entry.needsProseEnrichment;
+            } else if (entry.type === "person") {
+              delete entry.personProseQualityVersion;
+              entry.needsProseEnrichment = true;
+            }
           }
-          await env.BLOG_AI_KV.put(KV_ENTITY_INDEX_KEY, JSON.stringify(idx));
+          await blogKvPutIfChanged(
+            budgetEnv,
+            KV_ENTITY_INDEX_KEY,
+            JSON.stringify(idx),
+            undefined,
+            { optional: true },
+          );
         }
       }
       return jsonResponse({
@@ -4703,6 +4943,7 @@ export default {
         offset: reenrichOffset,
         limit: reenrichLimit,
         nextOffset: reenrichOffset + reenrichLimit < reenrichFiltered.length ? reenrichOffset + reenrichLimit : null,
+        kvBudget: publicKvWriteBudget(guarded.budget),
       });
     }
 
@@ -5217,6 +5458,11 @@ export default {
         env.BLOG_AI_KV.get(`post-entities:${slug}`).catch(() => null),
       ]);
       if (html) {
+        if (html.includes(ARTICLE_SERVE_READY_MARKER)) {
+          return preparedHtmlResponse(
+            injectPublishedYoutubeForServe(html, slug, ytRaw),
+          );
+        }
         const allowArticleKvBackgroundWrites = !blogKvBackgroundWritesPaused(env);
         const extractWikiUrl = (doc) => {
           const s = String(doc || "");
@@ -6810,6 +7056,117 @@ async function recoverPendingBlogDraft(
   return { status: "no-draft", slug: null };
 }
 
+async function restorePublishedDraftForEnrichment(
+  env,
+  slug,
+  { forceRebuild = false, useGroundedOutbox = false } = {},
+) {
+  const match = String(slug || "").match(/^(\d{1,2})-([a-z]+)-(\d{4})$/);
+  if (!match) throw new Error(`Invalid daily article slug: ${slug}`);
+  const day = Number(match[1]);
+  const monthIndex = MONTH_SLUGS.indexOf(match[2]);
+  const year = Number(match[3]);
+  if (
+    monthIndex < 0 ||
+    day < 1 ||
+    day > 31 ||
+    year < 1
+  ) {
+    throw new Error(`Invalid daily article date: ${slug}`);
+  }
+  const date = new Date(Date.UTC(year, monthIndex, day, 12, 0, 0));
+  if (buildSlug(date) !== slug) {
+    throw new Error(`Invalid daily article calendar date: ${slug}`);
+  }
+  const existingDraft = await env.BLOG_AI_KV.get(
+    `${KV_DRAFT_PREFIX}${slug}`,
+  ).catch(() => null);
+  if (existingDraft && !forceRebuild) {
+    try {
+      const parsed = JSON.parse(existingDraft);
+      if (
+        useGroundedOutbox &&
+        parsed?.postPublished === true &&
+        parsed?.didYouKnowGroundingVerified === true
+      ) {
+        return {
+          created: false,
+          source: "grounded-published-outbox",
+          proseQualityStaged: true,
+          finalGroundingStaged: true,
+        };
+      }
+      if (parsed?.boundedStyleRepairAttempted === true) {
+        return {
+          created: false,
+          source: "existing-draft",
+          proseQualityStaged: Boolean(parsed?.proseQualityStagedAt),
+          finalGroundingStaged: Boolean(parsed?.finalGroundingStagedAt),
+        };
+      }
+    } catch {
+      // Rebuild malformed or interrupted temporary state from the retained
+      // checkpoint below. The published post itself is never used as prose
+      // input and is not changed unless the complete enrichment gate passes.
+    }
+  }
+
+  const [postRaw, indexRaw, sourcePayload] = await Promise.all([
+    env.BLOG_AI_KV.get(`${KV_POST_PREFIX}${slug}`).catch(() => null),
+    env.BLOG_AI_KV.get(KV_INDEX_KEY).catch(() => null),
+    env.BLOG_AI_KV.get(draftSourceKey(date), { type: "json" }).catch(() => null),
+  ]);
+  if (!postRaw || !indexRaw) {
+    throw new Error(`Published post or blog index is missing for ${slug}`);
+  }
+  const index = JSON.parse(indexRaw);
+  const entry = Array.isArray(index)
+    ? index.find((candidate) => candidate?.slug === slug)
+    : null;
+  if (!entry?.publishedAt) {
+    throw new Error(`Published index entry is missing for ${slug}`);
+  }
+  const selectedEvent = preparedDraftSourceEvent(sourcePayload, date);
+  if (!selectedEvent) {
+    throw new Error(`Retained source package is incomplete for ${slug}`);
+  }
+  const assembled = await tryAssembleCoreArticleFromCheckpoint(env, date);
+  if (!assembled.ok) {
+    throw new Error(
+      `Retained generation checkpoint cannot rebuild ${slug}: ${assembled.reasons.join("; ")}`,
+    );
+  }
+  const content = assembled.content;
+  attachSelectedEventSourcePages(content, selectedEvent);
+  enforceSelectedEventDate(content, selectedEvent);
+  alignContentDateFields(content, {
+    historicalDateISO: date.toISOString().slice(0, 10),
+  });
+  normalizeContentMetadata(content);
+  if (selectedEvent.imageUrl) content.imageUrl = selectedEvent.imageUrl;
+  if (selectedEvent.imageAlt) content.imageAlt = selectedEvent.imageAlt;
+  await env.BLOG_AI_KV.put(
+    `${KV_DRAFT_PREFIX}${slug}`,
+    JSON.stringify({
+      content,
+      publishedAt: entry.publishedAt,
+      restoredForEnrichmentAt: new Date().toISOString(),
+      // This admin path exists only to apply the final sentence-level prose
+      // rules to an already-published article. Do not spend another broad
+      // whole-body style call before that narrow edit.
+      boundedStyleRepairAttempted: true,
+    }),
+    { expirationTtl: 3 * 86_400 },
+  );
+  return {
+    created: true,
+    source: "retained-generation-checkpoint",
+    bodyWords: articleBodyWordCount(content),
+    proseQualityStaged: false,
+    finalGroundingStaged: false,
+  };
+}
+
 async function maybeGenerateBlogPost(
   env,
   ctx,
@@ -6866,6 +7223,7 @@ async function maybeGenerateBlogPost(
           e.wikiUrl &&
           (
             e.needsWikiRefresh ||
+            e.needsProseEnrichment ||
             e.needsEvergreenRefresh ||
             (
               e.historyQualityGateVersion !== BLOG_HISTORY_QUALITY_GATE_VERSION &&
@@ -6967,6 +7325,13 @@ async function maybeGenerateBlogPost(
               const timeline = await generateEntityTimeline(env, entity).catch(() => []);
               if (timeline.length) entity.timeline = timeline;
               else delete entity.timeline;
+              if (personEntityWritingQualityReady(entity)) {
+                entity.personProseQualityVersion = PERSON_PROSE_QUALITY_VERSION;
+                delete entity.needsProseEnrichment;
+              } else {
+                delete entity.personProseQualityVersion;
+                entity.needsProseEnrichment = true;
+              }
             }
             await env.BLOG_AI_KV.put(kvKey, JSON.stringify(entity));
             await upsertEntityIndex(env, [entity]);
@@ -7599,6 +7964,83 @@ const ARTICLE_BODY_FIELDS = [
   "conclusionParagraphs",
 ];
 
+function articleSectionHasOneSentence(paragraphs) {
+  const text = (Array.isArray(paragraphs) ? paragraphs : [])
+    .map((paragraph) => plainText(paragraph))
+    .filter(Boolean)
+    .join(" ");
+  return Boolean(text) && splitSentences(text, 1).length === 1;
+}
+
+/**
+ * A single sentence does not warrant its own article heading. Move it into
+ * the nearest body section that has more substance, preserving its position
+ * relative to that section. This is a display-only copy: the validated and
+ * grounded content object remains unchanged for schema and publication gates.
+ */
+function compactSparseArticleBodySections(
+  content,
+  { preserveEyewitnessHeading = false } = {},
+) {
+  const compacted = { ...content };
+  const populated = [];
+  const sparse = new Set();
+
+  ARTICLE_BODY_FIELDS.forEach((field, index) => {
+    compacted[field] = Array.isArray(content?.[field])
+      ? content[field].map((paragraph) => String(paragraph || "").trim()).filter(Boolean)
+      : [];
+    if (compacted[field].length === 0) return;
+    populated.push(index);
+    if (
+      articleSectionHasOneSentence(compacted[field]) &&
+      !(field === "eyewitnessOrChronicle" && preserveEyewitnessHeading)
+    ) {
+      sparse.add(index);
+    }
+  });
+
+  if (populated.length < 2 || sparse.size === 0) return compacted;
+
+  let targets = populated.filter((index) => !sparse.has(index));
+  if (targets.length === 0) {
+    // If every field contains one sentence, retain one heading and combine the
+    // rest beneath it. Prefer the fullest sentence, with source order as the
+    // stable tie-breaker.
+    const anchor = populated
+      .map((index) => ({
+        index,
+        words: wordCount(compacted[ARTICLE_BODY_FIELDS[index]].join(" ")),
+      }))
+      .sort((left, right) => right.words - left.words || left.index - right.index)[0]
+      .index;
+    targets = [anchor];
+    sparse.delete(anchor);
+  }
+
+  for (const sourceIndex of [...sparse].sort((a, b) => a - b)) {
+    const sourceField = ARTICLE_BODY_FIELDS[sourceIndex];
+    const targetIndex = targets
+      .map((index) => ({
+        index,
+        distance: Math.abs(index - sourceIndex),
+        words: wordCount(compacted[ARTICLE_BODY_FIELDS[index]].join(" ")),
+      }))
+      .sort((left, right) =>
+        left.distance - right.distance || right.words - left.words || left.index - right.index,
+      )[0]?.index;
+    if (!Number.isInteger(targetIndex) || targetIndex === sourceIndex) continue;
+
+    const targetField = ARTICLE_BODY_FIELDS[targetIndex];
+    compacted[targetField] = sourceIndex < targetIndex
+      ? [...compacted[sourceField], ...compacted[targetField]]
+      : [...compacted[targetField], ...compacted[sourceField]];
+    compacted[sourceField] = [];
+  }
+
+  return compacted;
+}
+
 const MIN_REAL_ARTICLE_BODY_WORDS = 750;
 
 // 2026-08-05: floor for a Core-tier article — a shorter but still complete,
@@ -8040,6 +8482,860 @@ function scanIntraPageDuplication(content) {
     );
   }
   return issues;
+}
+
+// A sentence can be factually distinct and still make the page sound as if
+// every section was generated in isolation: "The [full event name] ...",
+// "On [the article date] ...", then "The [event noun] ..." again. The normal
+// duplicate scanner above deliberately ignores that case because the complete
+// sentences are different. This scanner treats the overview's first paragraph
+// as the one canonical introduction and audits every later prose opening.
+const GENERIC_EVENT_OPENING_NOUNS = new Set([
+  "aftermath", "agreement", "assassination", "attack", "battle", "bombing", "campaign",
+  "conflict", "coup", "crash", "disaster", "earthquake", "election", "event",
+  "expedition", "explosion", "fire", "flight", "flood", "genocide", "incident",
+  "invasion", "launch", "massacre", "mission", "murder", "operation", "party", "protest",
+  "rebellion", "revolt", "riot", "shooting", "siege", "strike", "treaty", "trial",
+  "tragedy", "uprising", "violence", "war", "wildfire",
+]);
+
+function normalizedGenericEventOpeningNoun(value) {
+  const raw = String(value || "").toLowerCase().replace(/[^a-z]/g, "");
+  const candidates = [raw];
+  if (raw.endsWith("ies")) candidates.push(`${raw.slice(0, -3)}y`);
+  if (raw.endsWith("es")) candidates.push(raw.slice(0, -2));
+  if (raw.endsWith("s")) candidates.push(raw.slice(0, -1));
+  const noun = candidates.find((candidate) =>
+    GENERIC_EVENT_OPENING_NOUNS.has(candidate),
+  );
+  if (!noun) return "";
+  if (["fire", "wildfire"].includes(noun)) return "fire";
+  if (
+    [
+      "assassination", "attack", "bombing", "genocide", "massacre",
+      "murder", "shooting", "violence",
+    ].includes(noun)
+  ) {
+    return "violence";
+  }
+  return noun;
+}
+
+function normalizeOpeningMatchText(value) {
+  return plainText(value)
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function articleOpeningEntries(content) {
+  const entries = [];
+  for (const field of ARTICLE_BODY_FIELDS) {
+    (Array.isArray(content?.[field]) ? content[field] : []).forEach((text, index) =>
+      entries.push({ field, index, path: `${field}[${index}]`, text }),
+    );
+  }
+  (Array.isArray(content?.didYouKnowFacts) ? content.didYouKnowFacts : []).forEach(
+    (text, index) => entries.push({
+      field: "didYouKnowFacts",
+      index,
+      path: `didYouKnowFacts[${index}]`,
+      text,
+    }),
+  );
+  for (const field of ["analysisGood", "analysisBad"]) {
+    (Array.isArray(content?.[field]) ? content[field] : []).forEach((item, index) =>
+      entries.push({
+        field,
+        index,
+        path: `${field}[${index}].detail`,
+        text: item?.detail || "",
+      }),
+    );
+  }
+  if (plainText(content?.editorialNote)) {
+    entries.push({
+      field: "editorialNote",
+      index: 0,
+      path: "editorialNote",
+      text: content.editorialNote,
+    });
+  }
+  return entries;
+}
+
+// Quick Fact values are visible article prose and therefore participate in
+// source-process/filler cleanup, but they are deliberately excluded from the
+// section-opening audit above. A compact fact is allowed to repeat the event
+// subject when that is what makes the value understandable beside its label.
+function articleEnrichmentEntries(content) {
+  const entries = articleOpeningEntries(content);
+  (Array.isArray(content?.quickFacts) ? content.quickFacts : []).forEach(
+    (fact, index) => entries.push({
+      field: "quickFacts",
+      index,
+      path: `quickFacts[${index}].value`,
+      text: fact?.value || "",
+    }),
+  );
+  return entries;
+}
+
+function articleOpeningSubjectAliases(content) {
+  const candidates = [
+    content?.sourcePageTitle,
+    content?.eventTitle,
+    content?.title,
+    content?.jsonLdName,
+    ...(Array.isArray(content?.sourcePages)
+      ? content.sourcePages.flatMap((page) => [page?.pageTitle, page?.title])
+      : []),
+  ];
+  const aliases = new Set();
+  for (const candidate of candidates) {
+    const normalized = normalizeOpeningMatchText(candidate)
+      .replace(/^(?:the|an?)\s+/, "")
+      .replace(/\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\s+\d{3,4}.*$/, "")
+      .trim();
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    if (tokens.length >= 3 && tokens.length <= 18) aliases.add(normalized);
+  }
+  return [...aliases].sort((left, right) => right.length - left.length);
+}
+
+function openingStartsWithFullSubject(sentence, aliases) {
+  const normalized = normalizeOpeningMatchText(sentence).replace(/^(?:the|an?)\s+/, "");
+  return aliases.some((alias) =>
+    normalized === alias || normalized.startsWith(`${alias} `)
+  );
+}
+
+function openingStartsWithArticleDate(sentence, content) {
+  const text = normalizeOpeningMatchText(sentence);
+  const historicalDate = normalizeOpeningMatchText(content?.historicalDate);
+  const monthDay = historicalDate.replace(/\s+\d{3,4}\b.*$/, "").trim();
+  const year = Number.isInteger(content?.historicalYear)
+    ? String(content.historicalYear)
+    : historicalDate.match(/\b\d{3,4}\b/)?.[0] || "";
+  return Boolean(
+    (historicalDate && text.startsWith(`on ${historicalDate}`)) ||
+    (monthDay && text.startsWith(`on ${monthDay}`)) ||
+    (year && text.startsWith(`in ${year}`)),
+  );
+}
+
+function genericEventOpeningNoun(sentence, content) {
+  const match = normalizeOpeningMatchText(sentence).match(/^(?:the|this)\s+([a-z]+)\b/);
+  if (!match) return "";
+  const eventNoun = normalizedGenericEventOpeningNoun(match[1]);
+  if (!eventNoun) return "";
+  // "The aftermath ..." is generic on every later article section even
+  // though the source title will naturally not contain that transition noun.
+  if (eventNoun === "aftermath") return eventNoun;
+  const subjectText = normalizeOpeningMatchText([
+    content?.sourcePageTitle,
+    content?.eventTitle,
+    content?.title,
+  ].filter(Boolean).join(" "));
+  const subjectNouns = subjectText
+    .split(/\s+/)
+    .map(normalizedGenericEventOpeningNoun)
+    .filter(Boolean);
+  return subjectNouns.includes(eventNoun) ? eventNoun : "";
+}
+
+function repetitiveSectionOpeningFindings(content) {
+  const aliases = articleOpeningSubjectAliases(content);
+  const signatures = new Map();
+  const findings = [];
+  for (const entry of articleOpeningEntries(content)) {
+    const firstSentence = splitSentences(plainText(entry.text), 12)[0] || plainText(entry.text);
+    if (!firstSentence) continue;
+    const signature = repeatedOpeningSignature(firstSentence);
+    const previousPath = signature ? signatures.get(signature) : "";
+    if (signature && !previousPath) signatures.set(signature, entry.path);
+
+    // The first overview paragraph owns the full introduction. Record its
+    // signature so later matches can be found, but never flag it itself.
+    if (entry.field === "overviewParagraphs" && entry.index === 0) continue;
+
+    let reason = "";
+    if (openingStartsWithFullSubject(firstSentence, aliases)) {
+      reason = "starts by restating the full event subject";
+    } else if (
+      openingStartsWithArticleDate(firstSentence, content) ||
+      startsLikeArticleReintroduction(firstSentence, content)
+    ) {
+      reason = "starts by reintroducing the article date and event";
+    } else {
+      const eventNoun = genericEventOpeningNoun(firstSentence, content);
+      if (eventNoun) {
+        reason = `starts with the generic event subject “${eventNoun}”`;
+      } else if (previousPath) {
+        reason = `repeats the opening pattern used by ${previousPath}`;
+      }
+    }
+    if (reason) findings.push({ ...entry, firstSentence, reason });
+  }
+  return findings;
+}
+
+function scanRepetitiveSectionOpenings(content) {
+  return repetitiveSectionOpeningFindings(content).map(
+    ({ path, reason, firstSentence }) =>
+      `${path} ${reason}: "${quotedExcerpt(firstSentence, 130)}"`,
+  );
+}
+
+const ENRICHMENT_SOURCE_PROCESS_PATTERN =
+  /\b(?:source material(?:\s+from)?|supplied record|historical record|the record (?:confirms|provides|shows|states|indicates|leaves)|the chronicle section (?:of|in) the source)\b/i;
+const ENRICHMENT_GENERIC_FILLER_PATTERN =
+  /\b(?:complex and multifaceted|deep[- ]seated issues?|effects? (?:was|were) still being felt|in the years? that followed|profound impact|significant (?:event|impact|implications?|changes?)|this (?:duration|number) highlights)\b/i;
+
+function enrichmentProseQualityFindings(content) {
+  const merged = new Map();
+  const addFinding = (entry, reason, firstSentence = "") => {
+    const existing = merged.get(entry.path);
+    if (existing) {
+      if (!existing.reasons.includes(reason)) existing.reasons.push(reason);
+      return;
+    }
+    merged.set(entry.path, {
+      ...entry,
+      firstSentence: firstSentence || splitSentences(plainText(entry.text), 12)[0] || "",
+      reasons: [reason],
+    });
+  };
+
+  for (const finding of repetitiveSectionOpeningFindings(content)) {
+    addFinding(finding, finding.reason, finding.firstSentence);
+  }
+
+  const entries = articleEnrichmentEntries(content);
+  for (const entry of entries) {
+    const text = plainText(entry.text);
+    if (!text) continue;
+    const sentences = splitSentences(text, 1);
+    if (ENRICHMENT_SOURCE_PROCESS_PATTERN.test(text)) {
+      addFinding(entry, "uses visible source-process boilerplate instead of direct prose");
+    }
+    if (ENRICHMENT_GENERIC_FILLER_PATTERN.test(text)) {
+      addFinding(entry, "uses generic significance or legacy filler");
+    }
+    if (
+      sentences.some((sentence) =>
+        wordCount(sentence) > 48 || (sentence.match(/,/g) || []).length >= 6
+      )
+    ) {
+      addFinding(entry, "contains a long comma-chain or run-on sentence");
+    }
+    if (
+      entry.field === "didYouKnowFacts" &&
+      (wordCount(text) > 70 || sentences.length > 2)
+    ) {
+      addFinding(entry, "overloads one Did You Know card with several claims or commentary");
+    }
+  }
+
+  // The normal duplication audit intentionally limits semantic comparisons to
+  // items with the same editorial job. Reuse that conservative boundary here,
+  // and ask the later item to keep only the information unique to its role.
+  const bodyFields = new Set(ARTICLE_BODY_FIELDS);
+  const analysisFields = new Set(["analysisGood", "analysisBad"]);
+  for (const { a, b } of semanticDuplicateEntryPairs(content)) {
+    const comparable =
+      (bodyFields.has(a.field) && bodyFields.has(b.field)) ||
+      (analysisFields.has(a.field) && analysisFields.has(b.field)) ||
+      a.field === b.field;
+    if (!comparable) continue;
+    const pathFor = (entry) =>
+      ["analysisGood", "analysisBad"].includes(entry.field)
+        ? `${entry.field}[${entry.index}].detail`
+        : `${entry.field}[${entry.index}]`;
+    addFinding(
+      { ...b, path: pathFor(b) },
+      `substantially repeats information already covered in ${pathFor(a)}`,
+    );
+  }
+
+  return [...merged.values()].map((finding) => ({
+    ...finding,
+    reason: finding.reasons.join("; "),
+  }));
+}
+
+function scanEnrichmentProseQuality(content) {
+  return enrichmentProseQualityFindings(content).map(
+    ({ path, reason, firstSentence }) =>
+      `${path} ${reason}: "${quotedExcerpt(firstSentence, 130)}"`,
+  );
+}
+
+const ENRICHMENT_SOURCE_LEAD_PATTERNS = [
+  /^(?:According to|As (?:stated|noted|shown|described) in) (?:the )?(?:source material|historical record)(?: from [^,]+)?,\s*/i,
+  /^(?:The )?(?:source material|supplied record|historical record) (?:also )?(?:notes?|states?|shows?|indicates?|confirms?|records?) that\s+/i,
+  /^The record (?:confirms|provides|shows|states|indicates|leaves) that\s+/i,
+];
+const ENRICHMENT_TRAILING_SOURCE_ATTRIBUTION_PATTERNS = [
+  /,\s*(?:as (?:stated|noted|shown|described) in|according to) (?:the )?(?:source material|historical record)(?: from [^,.;!?]+)?(?=[.;!?]|$)/gi,
+  /,\s*as (?:the )?(?:source material|supplied record|historical record) (?:notes?|states?|shows?|indicates?|confirms?|records?)(?=[.;!?]|$)/gi,
+];
+const ENRICHMENT_DELETABLE_FILLER_SENTENCE_PATTERN =
+  /\b(?:significant event|significant implications?|significant impact|deep[- ]seated issues?|impact was felt throughout|effects? (?:was|were) still being felt|in the years? that followed)\b/i;
+
+function stripEnrichmentSourceLead(sentence) {
+  let cleaned = String(sentence || "").trim();
+  for (const pattern of ENRICHMENT_SOURCE_LEAD_PATTERNS) {
+    const next = cleaned.replace(pattern, "").trim();
+    if (next !== cleaned) {
+      cleaned = next;
+      break;
+    }
+  }
+  if (!cleaned) return "";
+  return `${cleaned.charAt(0).toUpperCase()}${cleaned.slice(1)}`;
+}
+
+function stripEnrichmentSourceAttribution(sentence) {
+  let cleaned = stripEnrichmentSourceLead(sentence);
+  cleaned = cleaned.replace(
+    /^The (?:source material|source|record)\s+(?:highlights|notes|shows|states)\b[\s\S]*?,\s+with\s+the\s+(.+?)\s+lasting\s+for\s+([\d,]+)\s+days\s+and\s+resulting\s+in\s+the\s+cancellation\s+of\s+([\d,]+)\s+games\.?$/i,
+    "The $1 lasted for $2 days. $3 games were canceled.",
+  );
+  for (const pattern of ENRICHMENT_TRAILING_SOURCE_ATTRIBUTION_PATTERNS) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+  // This form also appears after a colon in fallback editorial notes, so it
+  // cannot be handled by an anchored lead-only expression.
+  cleaned = cleaned.replace(
+    /\b(?:According to|As (?:stated|noted|shown|described) in) (?:the )?(?:source material|historical record)(?: from [^,.;!?]+)?,\s*/gi,
+    "",
+  );
+  cleaned = cleaned.replace(
+    /\b(?:The )?(?:source material|supplied record|historical record) (?:also )?(?:notes?|states?|shows?|indicates?|confirms?|records?) that\s+/gi,
+    "",
+  );
+  // Preserve the concrete first clause rather than discarding a whole item
+  // merely because a legacy generator appended generic impact padding.
+  cleaned = cleaned.replace(
+    /,?\s+(?:and\s+)?(?:its|their|the)\s+effects?\s+(?:was|were)\s+still being felt\s+in the years? that followed\b/gi,
+    "",
+  );
+  // Two independently supported statistics do not need a generated causal
+  // bridge. This exact construction was rejected by the unchanged grounding
+  // gate during the August 12 live enrichment replay. Preserve both facts,
+  // changing only the conjunction and sentence boundary.
+  cleaned = cleaned.replace(
+    /^(The\s+.+?)\s+lasted\s+for\s+([\d,]+)\s+days\s+and\s+resulted\s+in\s+the\s+cancellation\s+of\s+([\d,]+)\s+games\.?$/i,
+    "$1 lasted for $2 days. $3 games were canceled.",
+  );
+  return cleaned
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*([.;!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function mechanicallyCleanEnrichmentText(value) {
+  const original = String(value || "").trim();
+  if (!original) return "";
+  const cleaned = splitSentences(original, 1)
+    .map(stripEnrichmentSourceAttribution)
+    .filter(Boolean)
+    .filter((sentence) =>
+      !ENRICHMENT_DELETABLE_FILLER_SENTENCE_PATTERN.test(sentence)
+    )
+    .join(" ")
+    .trim();
+  return cleaned || original;
+}
+
+// Deletion-only fallback for a model edit that leaves visible drafting
+// language or generic significance padding behind. It never introduces a
+// word or fact: source-process lead-ins are removed, generic filler sentences
+// are dropped, and a complete original field is retained if cleanup would
+// otherwise erase that section.
+function mechanicallyRemoveEnrichmentFiller(content) {
+  let changed = false;
+  const next = { ...content };
+  for (const field of ARTICLE_BODY_FIELDS) {
+    const paragraphs = Array.isArray(content?.[field]) ? content[field] : [];
+    if (paragraphs.length === 0) continue;
+    const cleanedParagraphs = paragraphs
+      .map(mechanicallyCleanEnrichmentText)
+      .filter(Boolean);
+    if (cleanedParagraphs.length === 0) continue;
+    if (
+      normalizeForCompare(cleanedParagraphs.join(" ")) !==
+      normalizeForCompare(paragraphs.join(" "))
+    ) {
+      next[field] = cleanedParagraphs;
+      changed = true;
+    }
+  }
+
+  if (Array.isArray(content?.didYouKnowFacts)) {
+    const cleaned = content.didYouKnowFacts.map(mechanicallyCleanEnrichmentText);
+    if (cleaned.some((text, index) =>
+      normalizeForCompare(text) !== normalizeForCompare(content.didYouKnowFacts[index])
+    )) {
+      next.didYouKnowFacts = cleaned;
+      changed = true;
+    }
+  }
+  if (Array.isArray(content?.quickFacts)) {
+    const cleaned = content.quickFacts.map((fact) => ({
+      ...fact,
+      value: mechanicallyCleanEnrichmentText(fact?.value),
+    }));
+    if (cleaned.some((fact, index) =>
+      normalizeForCompare(fact?.value) !==
+      normalizeForCompare(content.quickFacts[index]?.value)
+    )) {
+      next.quickFacts = cleaned;
+      changed = true;
+    }
+  }
+  for (const field of ["analysisGood", "analysisBad"]) {
+    if (!Array.isArray(content?.[field])) continue;
+    const cleaned = content[field].map((item) => ({
+      ...item,
+      detail: mechanicallyCleanEnrichmentText(item?.detail),
+    }));
+    if (cleaned.some((item, index) =>
+      normalizeForCompare(item?.detail) !==
+      normalizeForCompare(content[field][index]?.detail)
+    )) {
+      next[field] = cleaned;
+      changed = true;
+    }
+  }
+  if (plainText(content?.editorialNote)) {
+    const cleaned = mechanicallyCleanEnrichmentText(content.editorialNote);
+    if (
+      normalizeForCompare(cleaned) !==
+      normalizeForCompare(content.editorialNote)
+    ) {
+      next.editorialNote = cleaned;
+      changed = true;
+    }
+  }
+  return changed ? next : content;
+}
+
+function enrichmentSentenceNumbers(sentence) {
+  return new Set(String(sentence || "").match(/\b\d[\d,]*(?:\.\d+)?\b/g) || []);
+}
+
+function enrichmentLexicalTerms(text, ignoredTokens = new Set()) {
+  const stop = new Set([
+    "after", "also", "before", "being", "from", "have", "into", "other",
+    "their", "there", "these", "they", "this", "those", "were", "which",
+    "while", "with", "would",
+  ]);
+  return new Set(
+    normalizeOpeningMatchText(text)
+      .split(/\s+/)
+      .filter((word) => word.length >= 4 && !stop.has(word) && !ignoredTokens.has(word))
+      .map((word) => word.replace(/(?:ations?|itions?|ments?|ingly|edly|ing|ed|es|s)$/i, ""))
+      .filter((word) => word.length >= 3),
+  );
+}
+
+// Sentence-level semantic dedupe for the article body only. Later sections
+// may discard a near-duplicate sentence, but a sentence carrying any number
+// not present in the earlier match is retained. This keeps new dates, counts,
+// durations, and measurements while removing differently worded recaps.
+function mechanicallyDedupeEnrichmentBodySentences(content) {
+  const ignoredTokens = semanticDuplicateTokens(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.historicalDate,
+      content?.location,
+      content?.country,
+    ].filter(Boolean).join(" "),
+  );
+  const retainedEarlier = [];
+  let changed = false;
+  const next = { ...content };
+  for (const field of ARTICLE_BODY_FIELDS) {
+    const paragraphs = Array.isArray(content?.[field]) ? content[field] : [];
+    if (paragraphs.length === 0) continue;
+    const cleanedParagraphs = [];
+    for (const paragraph of paragraphs) {
+      const kept = [];
+      for (const sentence of splitSentences(paragraph, 1)) {
+        const normalized = normalizeForCompare(sentence);
+        const tokens = semanticDuplicateTokens(sentence, ignoredTokens);
+        const numbers = enrichmentSentenceNumbers(sentence);
+        const duplicate = retainedEarlier.some((earlier) => {
+          if (normalized && normalized === earlier.normalized) return true;
+          if (tokens.size < 4 || earlier.tokens.size < 4) return false;
+          const { shared, ratio } = semanticDuplicateScore(tokens, earlier.tokens);
+          const repeatsNumber =
+            numbers.size > 0 &&
+            [...numbers].some((number) => earlier.numbers.has(number));
+          const minimumShared = repeatsNumber ? 4 : 3;
+          const minimumRatio = repeatsNumber ? 0.55 : 0.6;
+          if (shared < minimumShared || ratio < minimumRatio) return false;
+          return [...numbers].every((number) => earlier.numbers.has(number));
+        });
+        if (duplicate) {
+          changed = true;
+          continue;
+        }
+        kept.push(sentence);
+        retainedEarlier.push({ normalized, tokens, numbers });
+      }
+      const cleaned = kept.join(" ").trim();
+      if (cleaned) cleanedParagraphs.push(cleaned);
+    }
+    // Never erase a required body field mechanically. The normal enrichment
+    // gate can still judge or rewrite a wholly redundant section.
+    if (cleanedParagraphs.length > 0) next[field] = cleanedParagraphs;
+  }
+  return changed ? next : content;
+}
+
+function mechanicallyDropDuplicateEnrichmentParagraphs(content) {
+  const bodyFields = new Set(ARTICLE_BODY_FIELDS);
+  const remainingByField = new Map(
+    ARTICLE_BODY_FIELDS.map((field) => [
+      field,
+      Array.isArray(content?.[field]) ? content[field].length : 0,
+    ]),
+  );
+  const dropPaths = new Set();
+  for (const { a, b } of semanticDuplicateEntryPairs(content)) {
+    if (!bodyFields.has(a.field) || !bodyFields.has(b.field)) continue;
+    if ((remainingByField.get(b.field) || 0) <= 1) continue;
+    const earlierNumbers = enrichmentSentenceNumbers(a.text);
+    const laterNumbers = enrichmentSentenceNumbers(b.text);
+    if ([...laterNumbers].some((number) => !earlierNumbers.has(number))) continue;
+    const path = `${b.field}[${b.index}]`;
+    if (dropPaths.has(path)) continue;
+    dropPaths.add(path);
+    remainingByField.set(b.field, (remainingByField.get(b.field) || 0) - 1);
+  }
+  const ignoredTokens = semanticDuplicateTokens(
+    [
+      content?.title,
+      content?.eventTitle,
+      content?.historicalDate,
+      content?.location,
+      content?.country,
+    ].filter(Boolean).join(" "),
+  );
+  const earlierTokens = new Set();
+  const earlierLexicalTerms = new Set();
+  const earlierNumbers = new Set();
+  for (const field of ARTICLE_BODY_FIELDS) {
+    const paragraphs = Array.isArray(content?.[field]) ? content[field] : [];
+    paragraphs.forEach((paragraph, index) => {
+      const path = `${field}[${index}]`;
+      if (dropPaths.has(path)) return;
+      const tokens = semanticDuplicateTokens(paragraph, ignoredTokens);
+      const lexicalTerms = enrichmentLexicalTerms(paragraph, ignoredTokens);
+      const numbers = enrichmentSentenceNumbers(paragraph);
+      const shared = tokenMatches(tokens, earlierTokens).length;
+      const coverage = shared / Math.max(1, tokens.size);
+      const lexicalShared = [...lexicalTerms].filter((term) =>
+        earlierLexicalTerms.has(term)
+      ).length;
+      const lexicalCoverage = lexicalShared / Math.max(1, lexicalTerms.size);
+      const repeatsOnlyKnownNumbers = [...numbers].every((number) =>
+        earlierNumbers.has(number)
+      );
+      if (
+        (remainingByField.get(field) || 0) > 1 &&
+        ((tokens.size >= 4 && shared >= 3 && coverage >= 0.7) ||
+          (lexicalTerms.size >= 4 && lexicalShared >= 3 && lexicalCoverage >= 0.7)) &&
+        repeatsOnlyKnownNumbers
+      ) {
+        dropPaths.add(path);
+        remainingByField.set(field, (remainingByField.get(field) || 0) - 1);
+        return;
+      }
+      for (const token of tokens) earlierTokens.add(token);
+      for (const term of lexicalTerms) earlierLexicalTerms.add(term);
+      for (const number of numbers) earlierNumbers.add(number);
+    });
+  }
+  if (dropPaths.size === 0) return content;
+  const next = { ...content };
+  for (const field of ARTICLE_BODY_FIELDS) {
+    if (!Array.isArray(content?.[field])) continue;
+    next[field] = content[field].filter(
+      (_paragraph, index) => !dropPaths.has(`${field}[${index}]`),
+    );
+  }
+  return next;
+}
+
+function articleOpeningEditableWordCount(content) {
+  return articleEnrichmentEntries(content).reduce(
+    (total, entry) => total + wordCount(entry.text),
+    0,
+  );
+}
+
+function applyRepetitiveOpeningEdits(content, edits, allowedPaths) {
+  let updated = content;
+  let applied = 0;
+  for (const edit of Array.isArray(edits) ? edits : []) {
+    const field = String(edit?.field || "").trim();
+    const index = Number.isInteger(edit?.index) ? edit.index : 0;
+    const text = typeof edit?.text === "string" ? edit.text.trim() : "";
+    const path = field === "editorialNote"
+      ? "editorialNote"
+      : field === "quickFacts"
+        ? `quickFacts[${index}].value`
+      : ["analysisGood", "analysisBad"].includes(field)
+        ? `${field}[${index}].detail`
+        : `${field}[${index}]`;
+    if (!allowedPaths.has(path) || text.length < 20) continue;
+
+    if (field === "editorialNote") {
+      if (normalizeForCompare(text) === normalizeForCompare(content.editorialNote)) continue;
+      updated = { ...updated, editorialNote: text };
+      applied += 1;
+      continue;
+    }
+    const current = Array.isArray(updated?.[field]) ? updated[field] : null;
+    if (!current || index < 0 || index >= current.length) continue;
+    const currentText = field === "quickFacts"
+      ? current[index]?.value
+      : ["analysisGood", "analysisBad"].includes(field)
+      ? current[index]?.detail
+      : current[index];
+    if (normalizeForCompare(text) === normalizeForCompare(currentText)) continue;
+    const replacement = [...current];
+    replacement[index] = field === "quickFacts"
+      ? { ...replacement[index], value: text }
+      : ["analysisGood", "analysisBad"].includes(field)
+      ? { ...replacement[index], detail: text }
+      : text;
+    updated = { ...updated, [field]: replacement };
+    applied += 1;
+  }
+  return { content: updated, applied };
+}
+
+function enrichmentEditPath(edit) {
+  const field = String(edit?.field || "").trim();
+  const index = Number.isInteger(edit?.index) ? edit.index : 0;
+  if (field === "editorialNote") return "editorialNote";
+  if (field === "quickFacts") return `quickFacts[${index}].value`;
+  if (["analysisGood", "analysisBad"].includes(field)) {
+    return `${field}[${index}].detail`;
+  }
+  return `${field}[${index}]`;
+}
+
+function applyQualitySafeEnrichmentEdits(
+  content,
+  edits,
+  allowedPaths,
+) {
+  let working = content;
+  const acceptedEdits = [];
+  let beforeFindings = enrichmentProseQualityFindings(working);
+  let beforeWordCount = articleOpeningEditableWordCount(working);
+  let beforeBannedCount = scanBannedPhrases(working).length;
+  let beforeDuplicationCount = scanIntraPageDuplication(working).length;
+  for (const edit of Array.isArray(edits) ? edits : []) {
+    const candidateEdit = applyRepetitiveOpeningEdits(
+      working,
+      [edit],
+      allowedPaths,
+    );
+    if (candidateEdit.applied === 0) continue;
+    const candidate = candidateEdit.content;
+    const remaining = enrichmentProseQualityFindings(candidate);
+    if (remaining.length >= beforeFindings.length) continue;
+    const candidateWordCount = articleOpeningEditableWordCount(candidate);
+    if (candidateWordCount > beforeWordCount) continue;
+    const candidateBannedCount = scanBannedPhrases(candidate).length;
+    if (candidateBannedCount > beforeBannedCount) continue;
+    const candidateDuplicationCount = scanIntraPageDuplication(candidate).length;
+    if (candidateDuplicationCount > beforeDuplicationCount) continue;
+    working = candidate;
+    acceptedEdits.push(edit);
+    beforeFindings = remaining;
+    beforeWordCount = candidateWordCount;
+    beforeBannedCount = candidateBannedCount;
+    beforeDuplicationCount = candidateDuplicationCount;
+  }
+  return { content: working, acceptedEdits };
+}
+
+function newlyIntroducedGroundingReasons(before, after) {
+  if (after.ok) return [];
+  if (before.ok) return after.reasons;
+  const existingReasons = new Set(
+    before.reasons.map((reason) => normalizeForCompare(reason)),
+  );
+  return after.reasons.filter(
+    (reason) => !existingReasons.has(normalizeForCompare(reason)),
+  );
+}
+
+function applySafeEnrichmentEditsIncrementally(
+  content,
+  edits,
+  allowedPaths,
+  source,
+) {
+  const qualitySafe = applyQualitySafeEnrichmentEdits(
+    content,
+    edits,
+    allowedPaths,
+  );
+  if (qualitySafe.acceptedEdits.length === 0) {
+    return { content, applied: 0 };
+  }
+
+  // Grounding the complete article once per proposed sentence consumed most
+  // of the free-plan CPU budget on a live recovery. Compare the quality-safe
+  // batch once. If it introduces a grounding reason, identify the edited
+  // field from the existing verifier output, discard only those edits, and
+  // perform one final comparison. Existing unrelated residuals remain owned
+  // by the unchanged final grounding gate below enrichment.
+  const beforeGrounding = verifyArticleGrounding(content, source);
+  const batchGrounding = verifyArticleGrounding(qualitySafe.content, source);
+  const introduced = newlyIntroducedGroundingReasons(
+    beforeGrounding,
+    batchGrounding,
+  );
+  if (introduced.length === 0) {
+    return {
+      content: qualitySafe.content,
+      applied: qualitySafe.acceptedEdits.length,
+    };
+  }
+
+  const rejectedPaths = new Set(
+    introduced
+      .map((reason) => groundingReasonFieldPath(reason, qualitySafe.content))
+      .filter(Boolean),
+  );
+  if (rejectedPaths.size === 0) return { content, applied: 0 };
+  const filteredEdits = qualitySafe.acceptedEdits.filter(
+    (edit) => !rejectedPaths.has(enrichmentEditPath(edit)),
+  );
+  const filtered = applyQualitySafeEnrichmentEdits(
+    content,
+    filteredEdits,
+    allowedPaths,
+  );
+  if (filtered.acceptedEdits.length === 0) return { content, applied: 0 };
+  const filteredGrounding = verifyArticleGrounding(filtered.content, source);
+  if (
+    newlyIntroducedGroundingReasons(beforeGrounding, filteredGrounding).length > 0
+  ) {
+    return { content, applied: 0 };
+  }
+  return {
+    content: filtered.content,
+    applied: filtered.acceptedEdits.length,
+  };
+}
+
+// One narrowly scoped enrichment edit. It cannot rotate the topic, regenerate
+// the article, add sections, or relax a publication gate. Opening variation,
+// sentence cleanup, source-process boilerplate removal, and module focus are
+// handled in this SAME call. A rewrite is kept only when it reduces the audit,
+// does not lengthen the prose or add a banned phrase/duplicate, and the existing
+// deterministic source-grounding gate accepts the complete article afterward.
+async function editEnrichmentProseQuality(
+  env,
+  content,
+  source,
+  { boundedProviderBudget = false } = {},
+) {
+  const findings = enrichmentProseQualityFindings(content);
+  const sourceMaterial = sourceBoundRepairContext(source, 7000);
+  if (findings.length === 0 || !sourceMaterial) return content;
+
+  const editableFields = {
+    overviewParagraphs: content.overviewParagraphs || [],
+    eyewitnessOrChronicle: content.eyewitnessOrChronicle || [],
+    aftermathParagraphs: content.aftermathParagraphs || [],
+    conclusionParagraphs: content.conclusionParagraphs || [],
+    quickFacts: content.quickFacts || [],
+    didYouKnowFacts: content.didYouKnowFacts || [],
+    analysisGood: content.analysisGood || [],
+    analysisBad: content.analysisBad || [],
+    editorialNote: content.editorialNote || "",
+  };
+  const systemPrompt =
+    "You are making one narrow final prose edit in the enrichment step of a factual history article. " +
+    "The existing WRITING.md rewrite discipline supplied below is authoritative. Apply it to every audited item without inventing a second voice or style standard. " +
+    "Edit every item listed by the audit and return each complete revised item. Keep the full event introduction only in overviewParagraphs[0]. " +
+    "For every later item, remove the repeated event-name, date recap, or generic event-subject opening and begin with that item's own specific action, fact, consequence, limitation, contrast, person, place, or number. " +
+    "Do not merely replace it with However, Meanwhile, a synonym, or another scene-setting phrase. If the rest remains grammatical and clear in context, delete the redundant opening rather than paraphrasing it. " +
+    "Remove visible drafting-process language such as 'source material', 'as stated in', and repeated source-page titles. State supported facts directly; when attribution is genuinely needed, name the publisher naturally once. The structured evidence section handles routine sourcing. " +
+    "Resolve every comma-chain or run-on named by the audit while retaining the varied rhythm required by the existing writing discipline. Each body paragraph must keep its own editorial job and retain only facts unique to that job when an earlier comparable section already states the same detail. " +
+    "Keep each Did You Know card to one distinct fact in one or two complete sentences. Remove significance commentary and facts already stated in another Did You Know card or an earlier body item unless the card contributes a distinct source-supported detail. " +
+    "Each analysis detail must interpret its own titled point or identify a precise evidence limit without padding or replaying the article chronology. A conclusion must synthesize the endpoint instead of replaying the chronology. " +
+    "For every generic phrase named by the audit, replace it only with an existing concrete fact; otherwise cut it. " +
+    "Shorter is preferred. Never pad, add a claim, strengthen causality, alter a qualifier, change a date or number, or move information between items. Preserve each analysis title by editing only its detail. " +
+    WRITING_REWRITE_RULES +
+    SOURCE_BOUND_REPAIR_RULES +
+    "Return only JSON in this shape: {\"edits\":[{\"field\":\"eyewitnessOrChronicle\",\"index\":0,\"text\":\"complete revised item\"}]}";
+  const userMessage =
+    `AUTHORITATIVE SOURCE MATERIAL:\n${sourceMaterial}\n\n` +
+    `ENRICHMENT QUALITY AUDIT:\n${findings.map(({ path, reason, firstSentence }) =>
+      `- ${path}: ${reason}; current opening: ${JSON.stringify(firstSentence)}`
+    ).join("\n")}\n\n` +
+    `ARTICLE PROSE (context only; edit audited items only):\n${JSON.stringify(editableFields, null, 2)}`;
+
+  let raw;
+  try {
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ];
+    raw = boundedProviderBudget
+      ? await callBoundedRepairAI(
+          env,
+          messages,
+          { maxTokens: 3000, timeoutMs: 45_000 },
+          "editEnrichmentProseQuality",
+        )
+      : await callAI(env, messages, { maxTokens: 3000, timeoutMs: 45_000 });
+  } catch (err) {
+    console.warn(
+      `editEnrichmentProseQuality: AI call failed (${err.message}) — keeping original`,
+    );
+    return content;
+  }
+
+  let parsed;
+  try {
+    parsed = parseJsonObjectFromAI(raw, "editEnrichmentProseQuality");
+  } catch (err) {
+    console.warn(`${err.message} — keeping original`);
+    return content;
+  }
+  const allowedPaths = new Set(findings.map(({ path }) => path));
+  const applied = applySafeEnrichmentEditsIncrementally(
+    content,
+    parsed?.edits,
+    allowedPaths,
+    source,
+  );
+  if (applied.applied === 0) return content;
+
+  const remaining = enrichmentProseQualityFindings(applied.content);
+  console.log(
+    `editEnrichmentProseQuality: accepted ${applied.applied} edit(s); quality findings ${findings.length} → ${remaining.length}`,
+  );
+  return applied.content;
 }
 
 // 2026-08-08: bounded recovery's "publish with residual" fallback (after 3
@@ -9070,7 +10366,8 @@ async function generateEntityTimeline(env, entity) {
     "Each label describes only real events, works, roles, awards, places, and institutions named in the biography; never invent anything. " +
     'Each entry: {"year":"1971","date":"1971","label":"...","kind":"birth|milestone|death"}. ' +
     'Use kind "birth" for the birth year, "death" for the death year when present, otherwise "milestone". ' +
-    "No dashes, em-dashes, semicolons, or colons in any label.";
+    "No dashes, em-dashes, semicolons, or colons in any label.\n\n" +
+    WRITING_REWRITE_RULES;
   const userMessage =
     `Person: ${name}\n${lifeLine ? `${lifeLine}\n` : ""}\nBIOGRAPHY:\n${bodyText}\n\nReturn ONLY JSON: {"timeline":[]}`;
 
@@ -9134,7 +10431,18 @@ async function generateEntityTimeline(env, entity) {
     })
     .sort((a, b) => yearNum(a) - yearNum(b));
 
-  return grounded.length >= 3 ? grounded : [];
+  if (grounded.length < 3) return [];
+  const writingIssues = generatedPageWritingQualityIssues(
+    { ...entity, overviewCards: [], bodySections: [], timeline: grounded },
+    { includeCards: false, includeTimeline: true },
+  );
+  if (writingIssues.length) {
+    console.warn(
+      `generateEntityTimeline: rejected writing for ${entity.name}: ${writingIssues.join("; ")}`,
+    );
+    return [];
+  }
+  return grounded;
 }
 
 /**
@@ -10535,6 +11843,7 @@ async function storePostPublishEnrichmentOutbox(
     pillars = [],
     didYouKnowGroundingVerified = false,
     entitiesAttemptedAt = "",
+    coreRefreshPending = false,
   },
 ) {
   const key = postPublishEnrichmentKey(slug);
@@ -10560,6 +11869,7 @@ async function storePostPublishEnrichmentOutbox(
       ...(existingState.notifiedAt
         ? { notifiedAt: existingState.notifiedAt }
         : {}),
+      ...(coreRefreshPending ? { coreRefreshPending: true } : {}),
       ...(
         entitiesAttemptedAt ||
         existingState.entitiesAttemptedAt
@@ -10967,10 +12277,11 @@ async function savePublishedPost(
   if (assetIssues.length > 0) {
     console.warn(`Blog: asset quality warnings for ${slug}: ${assetIssues.join("; ")}`);
   }
+  const serveReadyHtml = markArticleHtmlServeReady(checkedHtml);
   await blogKvPutIfChanged(
     env,
     `${KV_POST_PREFIX}${slug}`,
-    checkedHtml,
+    serveReadyHtml,
   );
   if (safeEntityMeta.length > 0) {
     const lightweightEntities = compactArticleEntityMeta(safeEntityMeta);
@@ -11023,7 +12334,7 @@ async function savePublishedPost(
     });
   }
   return {
-    html: checkedHtml,
+    html: serveReadyHtml,
     entry,
     entityMeta: safeEntityMeta,
   };
@@ -11032,7 +12343,14 @@ async function savePublishedPost(
 async function enrichPublishedPost(
   env,
   slug,
-  { boundedRecovery = false } = {},
+  {
+    boundedRecovery = false,
+    stopAfterProseQualityEdit = false,
+    skipProseQualityEdit = false,
+    stopAfterFinalGrounding = false,
+    skipFinalGrounding = false,
+    deferPublishedCoreSave = false,
+  } = {},
 ) {
   // Persist only milestone checkpoints. Earlier code rewrote this one debug
   // key at every enrichment step, spending 14+ puts on a successful article.
@@ -11057,6 +12375,26 @@ async function enrichPublishedPost(
   let content = draft?.content;
   const publishedAt = draft?.publishedAt;
   if (!content || !publishedAt) throw new Error(`Draft payload invalid for ${slug}`);
+  // A manual re-enrichment refreshes an already-public core. Its final HTML
+  // save can exceed the HTTP Worker CPU allowance even though the identical
+  // scheduled recovery has ample CPU. Once a retained outbox is explicitly
+  // marked grounded, queue that compare-before-write save for the isolated
+  // scheduled recovery instead of replaying scans or AI in this request.
+  if (
+    deferPublishedCoreSave &&
+    draft?.postPublished === true &&
+    draft?.didYouKnowGroundingVerified === true
+  ) {
+    await storePostPublishEnrichmentOutbox(env, {
+      slug,
+      content,
+      publishedAt,
+      pillars: draft.pillars,
+      didYouKnowGroundingVerified: true,
+      coreRefreshPending: true,
+    });
+    return { status: "core-refresh-queued", slug };
+  }
   const groundingSource = groundingSourceFromContent(content);
 
   // Validate the hero while the request still has a fresh external-subrequest
@@ -11288,10 +12626,57 @@ async function enrichPublishedPost(
     }
   }
   enriched = enforceEditorialNoteQuality(enriched);
+  if (!skipProseQualityEdit) {
+    enriched = await editEnrichmentProseQuality(
+      env,
+      enriched,
+      groundingSource,
+      { boundedProviderBudget: boundedRecovery },
+    );
+  }
+  // Re-run the zero-token cleanup on the resume invocation too. This lets a
+  // newly deployed deterministic rule improve an already staged draft without
+  // repeating the provider call.
+  const mechanicallyCleaned = mechanicallyDropDuplicateEnrichmentParagraphs(
+    mechanicallyDedupeEnrichmentBodySentences(
+      mechanicallyRemoveEnrichmentFiller(enriched),
+    ),
+  );
+  if (mechanicallyCleaned !== enriched) {
+    const beforeGrounding = verifyArticleGrounding(enriched, groundingSource);
+    const cleanedGrounding = verifyArticleGrounding(
+      mechanicallyCleaned,
+      groundingSource,
+    );
+    if (
+      newlyIntroducedGroundingReasons(beforeGrounding, cleanedGrounding)
+        .length === 0
+    ) {
+      enriched = mechanicallyCleaned;
+      console.log(
+        "editEnrichmentProseQuality: removed residual source-process and generic filler sentences mechanically",
+      );
+    }
+  }
   alignContentDateFields(enriched, { historicalDateISO: date.toISOString().slice(0, 10) });
   const dateValidation = validateContentDateForPublish(enriched, date);
   if (!dateValidation.ok) {
     throw new Error(`Refusing to enrich ${slug}: ${dateValidation.reason}`);
+  }
+  if (stopAfterProseQualityEdit) {
+    await blogKvPutIfChanged(
+      env,
+      `${KV_DRAFT_PREFIX}${slug}`,
+      JSON.stringify({
+        ...draft,
+        content: enriched,
+        boundedStyleRepairAttempted: true,
+        proseQualityStagedAt: new Date().toISOString(),
+      }),
+      { expirationTtl: 3 * 86_400 },
+    );
+    await chk("prose-quality-staged");
+    return { status: "prose-staged", slug };
   }
 
   await chk("pre-learning-blocks");
@@ -11341,7 +12726,7 @@ async function enrichPublishedPost(
   }
 
   let didYouKnowGroundingVerified = false;
-  if (groundingSource) {
+  if (groundingSource && !skipFinalGrounding) {
     await chk("pre-final-grounding");
     const finalGrounding = await verifyFinalGroundingWithRepair(
       env,
@@ -11431,6 +12816,24 @@ async function enrichPublishedPost(
     enriched = finalGrounding.content;
     didYouKnowGroundingVerified = true;
     await chk("post-final-grounding");
+  } else if (skipFinalGrounding) {
+    didYouKnowGroundingVerified = draft?.didYouKnowGroundingVerified === true;
+  }
+
+  if (stopAfterFinalGrounding) {
+    await blogKvPutIfChanged(
+      env,
+      `${KV_DRAFT_PREFIX}${slug}`,
+      JSON.stringify({
+        ...draft,
+        content: enriched,
+        didYouKnowGroundingVerified,
+        finalGroundingStagedAt: new Date().toISOString(),
+      }),
+      { expirationTtl: 3 * 86_400 },
+    );
+    await chk("final-grounding-staged");
+    return { status: "final-grounding-staged", slug };
   }
 
   // The public core only needs visible people labels. Profile validation and
@@ -11444,7 +12847,13 @@ async function enrichPublishedPost(
     publishedAt,
     pillars,
     didYouKnowGroundingVerified,
+    coreRefreshPending: deferPublishedCoreSave,
   });
+
+  if (deferPublishedCoreSave) {
+    await chk("core-refresh-queued");
+    return { status: "core-refresh-queued", slug };
+  }
 
   await chk("pre-save");
   await savePublishedPost(env, {
@@ -11510,7 +12919,10 @@ async function recoverPublishedPostEnrichment(env, slug) {
   // scheduled recovery finished after a previous caller returned. Do not
   // rerun image, quiz, and entity enrichment once every durable target is
   // already present; finalize and clear the outbox immediately.
-  if (preRecoveryStatus.complete) {
+  if (
+    preRecoveryStatus.complete &&
+    draft.postPublishEnrichment?.coreRefreshPending !== true
+  ) {
     return {
       found: true,
       ...(await maybeFinalizePostPublishEnrichment(env, slug, {
@@ -12150,6 +13562,15 @@ function evergreenHistoryEditionQuality(entity) {
   }
   if (evergreenHistoryVisibleValues(entity).some((value) => rawUrlsInVisibleText(value).length > 0)) {
     reasons.push("contains a raw URL in visible prose");
+  }
+  const writingIssues = generatedPageWritingQualityIssues(entity, {
+    includeCards: true,
+    includeMeta: true,
+  });
+  if (writingIssues.length) {
+    reasons.push(
+      `does not follow the established writing rules: ${writingIssues.slice(0, 4).join("; ")}`,
+    );
   }
   return { ok: reasons.length === 0, reasons, bodyWords };
 }
@@ -13756,6 +15177,158 @@ function entityCardsAreFilled(cards, type) {
   });
 }
 
+function generatedPageProseEntries(
+  entity,
+  { includeCards = true, includeMeta = false, includeTimeline = true } = {},
+) {
+  const entries = [];
+  if (includeCards) {
+    (Array.isArray(entity?.overviewCards) ? entity.overviewCards : []).forEach(
+      (card, index) => entries.push({
+        path: `overviewCards[${index}].value`,
+        text: card?.value || "",
+        auditOpening: true,
+      }),
+    );
+  }
+  (Array.isArray(entity?.bodySections) ? entity.bodySections : []).forEach(
+    (section, sectionIndex) =>
+      (Array.isArray(section?.paragraphs) ? section.paragraphs : []).forEach(
+        (paragraph, paragraphIndex) => entries.push({
+          path: `bodySections[${sectionIndex}].paragraphs[${paragraphIndex}]`,
+          text: paragraph,
+          auditOpening: true,
+        }),
+      ),
+  );
+  if (includeTimeline) {
+    (Array.isArray(entity?.timeline) ? entity.timeline : []).forEach(
+      (item, index) => entries.push({
+        path: `timeline[${index}].label`,
+        text: item?.label || "",
+        auditOpening: false,
+      }),
+    );
+  }
+  if (includeMeta) {
+    for (const field of ["description", "summary", "comparisonIntro"]) {
+      if (plainText(entity?.[field])) {
+        entries.push({ path: field, text: entity[field], auditOpening: false });
+      }
+    }
+    (Array.isArray(entity?.comparisonRows) ? entity.comparisonRows : []).forEach(
+      (row, index) => {
+        for (const field of ["expected", "happened", "mattered"]) {
+          if (plainText(row?.[field])) {
+            entries.push({
+              path: `comparisonRows[${index}].${field}`,
+              text: row[field],
+              auditOpening: false,
+            });
+          }
+        }
+      },
+    );
+  }
+  return entries;
+}
+
+// WRITING_REWRITE_RULES is a prompt contract; this is its deterministic
+// acceptance counterpart for generated person and evergreen pages. It stays
+// deliberately narrow: obvious banned/generic filler, drafting-process prose,
+// run-ons, copied sentences, and repeated subject/opening patterns. Source-
+// derived fallbacks remain available whenever generated prose fails the audit.
+function generatedPageWritingQualityIssues(
+  entity,
+  { includeCards = true, includeMeta = false, includeTimeline = true } = {},
+) {
+  const issues = [];
+  const entries = generatedPageProseEntries(entity, {
+    includeCards,
+    includeMeta,
+    includeTimeline,
+  });
+  const subject = normalizeOpeningMatchText(entity?.name).replace(/^(?:the|an?)\s+/, "");
+  const subjectUsable = subject.split(/\s+/).filter(Boolean).length >= 2;
+  const openingSignatures = new Map();
+  const genericEventOpenings = new Map();
+  const seenSentences = new Map();
+  let subjectOpeningPath = "";
+
+  for (const entry of entries) {
+    const text = plainText(entry.text);
+    if (!text) continue;
+    const lower = text.toLowerCase();
+    const banned = BANNED_PHRASE_LIST.find((phrase) => lower.includes(phrase));
+    if (banned) issues.push(`${entry.path} uses banned phrase "${banned}"`);
+    if (ENRICHMENT_SOURCE_PROCESS_PATTERN.test(text)) {
+      issues.push(`${entry.path} uses visible source-process boilerplate`);
+    }
+    if (ENRICHMENT_GENERIC_FILLER_PATTERN.test(text)) {
+      issues.push(`${entry.path} uses generic significance or legacy filler`);
+    }
+    const sentences = splitSentences(text, 1);
+    if (sentences.some((sentence) =>
+      wordCount(sentence) > 48 || (sentence.match(/,/g) || []).length >= 6
+    )) {
+      issues.push(`${entry.path} contains a long comma-chain or run-on sentence`);
+    }
+    for (const sentence of sentences) {
+      const key = normalizeForCompare(sentence);
+      if (!key || key.length < 45) continue;
+      const prior = seenSentences.get(key);
+      if (prior) issues.push(`${entry.path} repeats a sentence from ${prior}`);
+      else seenSentences.set(key, entry.path);
+    }
+    if (!entry.auditOpening) continue;
+    const firstSentence = sentences[0] || text;
+    const normalizedOpening = normalizeOpeningMatchText(firstSentence)
+      .replace(/^(?:the|an?)\s+/, "");
+    if (
+      subjectUsable &&
+      (normalizedOpening === subject || normalizedOpening.startsWith(`${subject} `))
+    ) {
+      if (subjectOpeningPath) {
+        issues.push(`${entry.path} repeats the subject-led opening from ${subjectOpeningPath}`);
+      } else {
+        subjectOpeningPath = entry.path;
+      }
+    }
+    if (entity?.type === "event") {
+      const eventNoun = genericEventOpeningNoun(firstSentence, {
+        sourcePageTitle: entity.name,
+        eventTitle: entity.name,
+        title: entity.pageHeading || entity.seoTitle,
+      });
+      if (eventNoun) {
+        const prior = genericEventOpenings.get(eventNoun);
+        if (prior) {
+          issues.push(
+            `${entry.path} repeats the generic event-family opening “${eventNoun}” from ${prior}`,
+          );
+        } else {
+          genericEventOpenings.set(eventNoun, entry.path);
+        }
+      }
+    }
+    const signature = repeatedOpeningSignature(firstSentence);
+    if (signature) {
+      const prior = openingSignatures.get(signature);
+      if (prior) issues.push(`${entry.path} repeats the opening pattern from ${prior}`);
+      else openingSignatures.set(signature, entry.path);
+    }
+  }
+  return [...new Set(issues)];
+}
+
+function personEntityWritingQualityReady(entity) {
+  return Boolean(
+    entity?.type === "person" &&
+    entityContentWordCount(entity) >= 150 &&
+    generatedPageWritingQualityIssues(entity).length === 0
+  );
+}
+
 function expandedEntityCardValue(label, currentValue, entity, content, fallbackValue) {
   const current = String(currentValue || "").trim();
   const fallback = String(fallbackValue || "").trim();
@@ -13920,7 +15493,9 @@ Life and death must be factual and first. If the person is alive, say "No death 
       [
         {
           role: "system",
-          content: "You write concise historical knowledge cards. Return valid JSON only.",
+          content:
+            "You write concise historical knowledge cards. Return valid JSON only.\n\n" +
+            WRITING_REWRITE_RULES,
         },
         { role: "user", content: prompt },
       ],
@@ -13934,10 +15509,20 @@ Life and death must be factual and first. If the person is alive, say "No death 
     if (!match) return fallbackCards;
     const parsed = JSON.parse(match[0]);
     let normalized = normalizeEntityCards(parsed.cards, fallbackCards, entity.type);
-    if (entityCardsAreFilled(normalized, entity.type)) return normalized;
+    const initialWritingIssues = generatedPageWritingQualityIssues(
+      { ...entity, overviewCards: normalized, bodySections: [] },
+      { includeCards: true, includeTimeline: false },
+    );
+    if (
+      entityCardsAreFilled(normalized, entity.type) &&
+      initialWritingIssues.length === 0
+    ) {
+      return normalized;
+    }
 
     const rewritePrompt =
-      `The cards below are too thin. Rewrite them as full slider cards.\n` +
+      `The cards below are too thin or did not pass the writing audit. Rewrite them as full slider cards.\n` +
+      `${initialWritingIssues.length ? `Writing audit: ${initialWritingIssues.join("; ")}\n` : ""}` +
       `Keep the same labels and order. Each non-date card must be 25 to 45 words, specific, and non-repetitive.\n` +
       `Return JSON only: {"cards":[{"label":"...","value":"..."}]}\n\n` +
       JSON.stringify({ entity: entity.name, type: entity.type, cards: normalized }, null, 2);
@@ -13946,7 +15531,9 @@ Life and death must be factual and first. If the person is alive, say "No death 
       [
         {
           role: "system",
-          content: "You expand short historical entity cards into complete, non-repetitive JSON cards.",
+          content:
+            "You expand short historical entity cards into complete, non-repetitive JSON cards.\n\n" +
+            WRITING_REWRITE_RULES,
         },
         { role: "user", content: rewritePrompt },
       ],
@@ -13961,7 +15548,26 @@ Life and death must be factual and first. If the person is alive, say "No death 
       const expanded = JSON.parse(expandedMatch[0]);
       normalized = normalizeEntityCards(expanded.cards, fallbackCards, entity.type);
     }
-    return ensureFilledEntityCards(normalized, fallbackCards, entity, content);
+    const filled = ensureFilledEntityCards(
+      normalized,
+      fallbackCards,
+      entity,
+      content,
+    );
+    const writingIssues = generatedPageWritingQualityIssues(
+      { ...entity, overviewCards: filled, bodySections: [] },
+      { includeCards: true, includeTimeline: false },
+    );
+    if (!writingIssues.length) return filled;
+    console.warn(
+      `Entity overview AI rejected for ${entity.name}: ${writingIssues.join("; ")}`,
+    );
+    return ensureFilledEntityCards(
+      fallbackCards,
+      fallbackCards,
+      entity,
+      content,
+    );
   } catch (err) {
     console.warn(`Entity overview AI failed for ${entity.name}: ${err.message}`);
     return ensureFilledEntityCards(fallbackCards, fallbackCards, entity, content);
@@ -13990,6 +15596,10 @@ function splitIntroParagraphs(text, targetWords = 100) {
   return paras.filter((p) => p.length > 40);
 }
 
+function personEntityLeadQuestion(entity) {
+  return `Who ${entity?.deathDate ? "was" : "is"} ${entity?.name || "this person"}?`;
+}
+
 function buildFallbackEntityBodySections(entity, content) {
   const factSentences = entityFactSentences(entity.intro, entity.summary);
   const summary = String(entity.summary || entity.intro || "").replace(/\s+/g, " ").trim();
@@ -14000,10 +15610,11 @@ function buildFallbackEntityBodySections(entity, content) {
   if (entity.type === "person") {
     const introParagraphs = splitIntroParagraphs(entity.intro || entity.summary, 110);
     const sections = [];
+    const leadHeading = personEntityLeadQuestion(entity);
 
     if (introParagraphs.length >= 2) {
       sections.push({
-        heading: `Who is ${entity.name}?`,
+        heading: leadHeading,
         paragraphs: introParagraphs.slice(0, 2),
       });
     } else {
@@ -14015,7 +15626,7 @@ function buildFallbackEntityBodySections(entity, content) {
       const educationFact = findEntityFact(factSentences, [/educated/i, /university/i, /college/i, /academy/i], "");
       const serviceFact = findEntityFact(factSentences, [/served/i, /military/i, /air force/i, /air ambulance/i, /army/i], "");
       sections.push({
-        heading: `Who is ${entity.name}?`,
+        heading: leadHeading,
         paragraphs: [
           `${lifeLine} ${summary}`.trim(),
           [educationFact, serviceFact].filter(Boolean).join(" ") || (description ? `${entity.name} is described as ${description}.` : summary),
@@ -14162,6 +15773,7 @@ async function generateEntityBodySections(env, entity, content, fallbackSections
     `- Each section should have 2 to 3 paragraphs.\n` +
     `- Each paragraph should be 100 to 140 words — write full, informative prose, not short summaries.\n` +
     `- Use clear, searchable headings that describe the section topic (e.g. "Early life and career", "Role in the Vietnam War", "Nobel Prize refusal", "Legacy").\n` +
+    `- For a person lead question, use "Who is" when no death date is supplied and "Who was" when a death date is supplied.\n` +
     `- Cover: early life/background, main career/achievement, historical significance, legacy or later life.\n` +
     `- Include all available facts from the supplied intro text — do not omit names, dates, offices, or events.\n` +
     `- Use only supplied facts. Do not invent dates, places, offices, or achievements.\n` +
@@ -14217,7 +15829,20 @@ async function generateEntityBodySections(env, entity, content, fallbackSections
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) return fallbackSections;
     const parsed = JSON.parse(match[0]);
-    return normalizeEntityBodySections(parsed.sections, fallbackSections);
+    const normalized = normalizeEntityBodySections(
+      parsed.sections,
+      fallbackSections,
+    );
+    if (normalized === fallbackSections) return fallbackSections;
+    const writingIssues = generatedPageWritingQualityIssues(
+      { ...entity, overviewCards: [], bodySections: normalized },
+      { includeCards: false, includeTimeline: false },
+    );
+    if (!writingIssues.length) return normalized;
+    console.warn(
+      `Entity body AI rejected for ${entity.name}: ${writingIssues.join("; ")}`,
+    );
+    return fallbackSections;
   } catch (err) {
     console.warn(`Entity body AI failed for ${entity.name}: ${err.message}`);
     return fallbackSections;
@@ -14585,6 +16210,27 @@ async function upsertEntityRecord(env, draftEntity) {
     delete entity.needsEvergreenRefresh;
     delete entity.needsWikiRefresh;
   }
+  const existingPersonReady =
+    existing?.type === "person" &&
+    existing.personProseQualityVersion === PERSON_PROSE_QUALITY_VERSION &&
+    personEntityWritingQualityReady(existing);
+  const draftPersonReady =
+    draftEntity?.type === "person" &&
+    personEntityWritingQualityReady(draftEntity);
+  if (existingPersonReady && !draftPersonReady) {
+    entity.overviewCards = existing.overviewCards;
+    entity.bodySections = existing.bodySections;
+    entity.personProseQualityVersion = PERSON_PROSE_QUALITY_VERSION;
+    delete entity.needsProseEnrichment;
+  } else if (entity.type === "person") {
+    if (personEntityWritingQualityReady(entity)) {
+      entity.personProseQualityVersion = PERSON_PROSE_QUALITY_VERSION;
+      delete entity.needsProseEnrichment;
+    } else {
+      delete entity.personProseQualityVersion;
+      entity.needsProseEnrichment = true;
+    }
+  }
   if (!existing) entity.qualityGateVersion = BLOG_ENTITY_QUALITY_GATE_VERSION;
   // Clear stale refresh flag whenever we now have real data; set it only when still empty
   if (mergedIntro || mergedSummary) {
@@ -14641,6 +16287,12 @@ async function upsertEntityIndex(env, entities) {
           }
         : {}),
       ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
+      ...(entity.type === "person" && entity.personProseQualityVersion
+        ? { personProseQualityVersion: entity.personProseQualityVersion }
+        : {}),
+      ...(entity.type === "person" && entity.needsProseEnrichment
+        ? { needsProseEnrichment: true }
+        : {}),
       ...(entity.needsEvergreenRefresh
         ? { needsEvergreenRefresh: true }
         : {}),
@@ -14868,6 +16520,9 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
       // Mark new entities for AI card generation on next cron refresh when
       // skipping inline AI calls (subrequest budget preservation).
       ...(skipAiGeneration ? { needsWikiRefresh: true } : {}),
+      ...(type === "person" && skipAiGeneration
+        ? { needsProseEnrichment: true }
+        : {}),
     };
     const fallbackCards = type === "person"
       ? buildPersonOverviewCards(entity)
@@ -14905,6 +16560,15 @@ async function upsertEntitiesForContent(env, content, slug, date, pillars, { ski
     if (type === "person" && !skipAiGeneration) {
       const timeline = await generateEntityTimeline(env, entity).catch(() => []);
       if (timeline.length) entity.timeline = timeline;
+    }
+    if (type === "person") {
+      if (personEntityWritingQualityReady(entity)) {
+        entity.personProseQualityVersion = PERSON_PROSE_QUALITY_VERSION;
+        delete entity.needsProseEnrichment;
+      } else {
+        delete entity.personProseQualityVersion;
+        entity.needsProseEnrichment = true;
+      }
     }
     const savedEntity = await upsertEntityRecord(env, entity);
     saved.push(savedEntity);
@@ -15000,15 +16664,137 @@ async function recoverRecentEntityStrips(env, { maxPosts = 3, lookbackDays = 3 }
   return repaired;
 }
 
+function selectPendingPersonProseCandidates(index, { limit = 1 } = {}) {
+  return (Array.isArray(index) ? index : [])
+    .filter((entry) =>
+      entry?.type === "person" &&
+      entry.needsProseEnrichment === true &&
+      entry.personProseQualityVersion !== PERSON_PROSE_QUALITY_VERSION &&
+      entry.slug &&
+      entry.wikiUrl,
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.updatedAt || 0).getTime() -
+        new Date(b.updatedAt || 0).getTime(),
+    )
+    .slice(0, Math.max(1, Math.min(Number(limit) || 1, 1)));
+}
+
+// Article-derived and homepage born/died profiles share this bounded,
+// post-publication prose pass. It never participates in article promotion:
+// one pending profile is accepted only after the established writing audit,
+// and a rejected/provider-missed attempt performs zero KV writes.
+async function recoverPendingPersonProseEnrichment(env, { limit = 1 } = {}) {
+  if (blogKvBackgroundWritesPaused(env)) {
+    return { selected: 0, promoted: 0, deferred: 0 };
+  }
+  const indexRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY).catch(() => null);
+  const index = indexRaw ? JSON.parse(indexRaw) : [];
+  const candidates = selectPendingPersonProseCandidates(index, { limit });
+  const result = { selected: candidates.length, promoted: 0, deferred: 0 };
+  for (const entry of candidates) {
+    const key = `${KV_ENTITY_PREFIX}person:${entry.storageSlug || entry.slug}`;
+    const raw = await env.BLOG_AI_KV.get(key).catch(() => null);
+    if (!raw) {
+      result.deferred += 1;
+      continue;
+    }
+    let entity;
+    try {
+      entity = JSON.parse(raw);
+    } catch {
+      result.deferred += 1;
+      continue;
+    }
+    const trustedHomepageProfile =
+      entity.source === "homepage-on-this-day" &&
+      entity.profileLinkEligible === true &&
+      entity.profileSubjectVerified === true &&
+      Boolean(normalizedWikipediaEntityIdentity(entity.wikiUrl));
+    if (
+      (!hasVerifiedPersonProfileIdentity(entity) && !trustedHomepageProfile) ||
+      (!entity.intro && !entity.summary)
+    ) {
+      result.deferred += 1;
+      continue;
+    }
+    const contentProxy = {
+      title: entity.sourcePostTitle || entity.name,
+      eventTitle: entity.sourcePostTitle || entity.name,
+      historicalDate: null,
+      location: null,
+      description: entity.description || entity.summary || "",
+      keyTerms: [],
+    };
+    const fallbackCards = buildPersonOverviewCards(entity);
+    const fallbackSections = buildFallbackEntityBodySections(
+      entity,
+      contentProxy,
+    );
+    const overviewCards = await generateEntityOverviewCards(
+      env,
+      entity,
+      contentProxy,
+      fallbackCards,
+    );
+    const bodySections = await generateEntityBodySections(
+      env,
+      entity,
+      contentProxy,
+      fallbackSections,
+    );
+    const enriched = { ...entity, overviewCards, bodySections };
+    const timelineIssues = generatedPageWritingQualityIssues(
+      {
+        ...entity,
+        overviewCards: [],
+        bodySections: [],
+        timeline: entity.timeline,
+      },
+      { includeCards: false, includeTimeline: true },
+    );
+    if (timelineIssues.length) delete enriched.timeline;
+    if (!personEntityWritingQualityReady(enriched)) {
+      result.deferred += 1;
+      console.warn(
+        `Blog AI: deferred person prose enrichment for ${entry.slug} because the output did not pass the writing rules.`,
+      );
+      continue;
+    }
+    enriched.personProseQualityVersion = PERSON_PROSE_QUALITY_VERSION;
+    enriched.updatedAt = new Date().toISOString();
+    delete enriched.needsProseEnrichment;
+    await env.BLOG_AI_KV.put(key, JSON.stringify(enriched));
+    await upsertEntityIndex(env, [enriched]);
+    result.promoted += 1;
+    console.log(`Blog AI: accepted reviewed person prose for ${entry.url}.`);
+  }
+  return result;
+}
+
 function selectPendingEvergreenHistoryCandidates(
   index,
-  { limit = 1, preferPostSlug = "", requirePostSlug = false } = {},
+  {
+    limit = 1,
+    preferPostSlug = "",
+    requirePostSlug = false,
+    forceRefresh = false,
+  } = {},
 ) {
   return (Array.isArray(index) ? index : [])
     .filter((entry) =>
       entry?.type === "event" &&
       entry.historyQualityGateVersion === BLOG_HISTORY_QUALITY_GATE_VERSION &&
-      entry.needsEvergreenRefresh === true &&
+      (
+        entry.needsEvergreenRefresh === true ||
+        (
+          forceRefresh &&
+          Boolean(preferPostSlug) &&
+          Array.isArray(entry.relatedPosts) &&
+          entry.relatedPosts.includes(preferPostSlug)
+        )
+      ) &&
       entry.slug &&
       entry.wikiUrl &&
       (
@@ -15037,7 +16823,12 @@ function selectPendingEvergreenHistoryCandidates(
 
 async function recoverPendingEvergreenHistory(
   env,
-  { limit = 1, preferPostSlug = "", requirePostSlug = false } = {},
+  {
+    limit = 1,
+    preferPostSlug = "",
+    requirePostSlug = false,
+    forceRefresh = false,
+  } = {},
 ) {
   const indexRaw = await env.BLOG_AI_KV.get(KV_ENTITY_INDEX_KEY);
   const index = indexRaw ? JSON.parse(indexRaw) : [];
@@ -15045,6 +16836,7 @@ async function recoverPendingEvergreenHistory(
     limit,
     preferPostSlug,
     requirePostSlug,
+    forceRefresh,
   });
   const result = {
     selected: candidates.length,
@@ -15086,6 +16878,7 @@ async function recoverPendingEvergreenHistory(
     }
     if (entity.intro || entity.summary) delete entity.needsWikiRefresh;
     entity = await restorePendingEvergreenHistoryEvidenceFromPost(env, entity);
+    if (forceRefresh) entity.needsEvergreenRefresh = true;
     const edition = await generateEvergreenHistoryEdition(env, entity);
     if (!edition) {
       // A provider miss changes no durable content state. Keep the existing
@@ -20908,6 +22701,23 @@ function replaceUnsupportedClaimWithGroundedClaims(content, path, reason, claimB
   }
 
   const targetSentence = groundingReasonTargetSentence(fullText, reason);
+  const sourceProcessStats = targetSentence.match(
+    /^The (?:source material|source|record)\s+(?:highlights|notes|shows|states)\b[\s\S]*?,\s+with\s+the\s+(.+?)\s+lasting\s+for\s+([\d,]+)\s+days\s+and\s+resulting\s+in\s+the\s+cancellation\s+of\s+([\d,]+)\s+games\.?$/i,
+  );
+  if (sourceProcessStats) {
+    const [, subject, days, games] = sourceProcessStats;
+    const neutralSentence =
+      `The ${subject} lasted for ${days} days, and ${games} games were canceled.`;
+    const neutralText = fullText
+      .replace(targetSentence, neutralSentence)
+      .replace(/\s+/g, " ")
+      .trim();
+    const minimumWords = groundingRefillMinimumWords(path);
+    if (!minimumWords || wordCount(neutralText) >= minimumWords) {
+      setContentFieldByPath(candidate, path, neutralText);
+      return candidate;
+    }
+  }
   let replacement = targetSentence
     ? fullText.replace(targetSentence, " ").replace(/\s+/g, " ").trim()
     : "";
@@ -21163,6 +22973,32 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
             (sentence) => sentence.slice(0, 240) === finding.sentence,
           );
           if (targetSentence) {
+            // August 12, 2026 baseball-strike recovery: the model joined an
+            // arguable commissioner observation to two independently sourced
+            // statistics with "the significance of this absence, with...".
+            // Keep the statistics but sever the unsupported causal bridge.
+            const sourceProcessStats = targetSentence.match(
+              /^The (?:source material|source|record)\s+(?:highlights|notes|shows|states)\b[\s\S]*?,\s+with\s+the\s+(.+?)\s+lasting\s+for\s+([\d,]+)\s+days\s+and\s+resulting\s+in\s+the\s+cancellation\s+of\s+([\d,]+)\s+games\.?$/i,
+            );
+            if (sourceProcessStats) {
+              const [, subject, days, games] = sourceProcessStats;
+              const neutralSentence =
+                `The ${subject} lasted for ${days} days, and ${games} games were canceled.`;
+              const neutralText = fullText
+                .replace(targetSentence, neutralSentence)
+                .replace(/\s+/g, " ")
+                .trim();
+              if (wordCount(neutralText) >= 60) {
+                candidate = JSON.parse(JSON.stringify(working));
+                setContentFieldByPath(
+                  candidate,
+                  finding.field,
+                  neutralText,
+                );
+              }
+            }
+          }
+          if (!candidate && targetSentence) {
             const trimmedSentence = targetSentence
               .replace(
                 /,\s*(?:(?:which|and)\s+)?(?:(?:the|this|that)\s+(?:action|confrontation|decision|event|incident|situation)\s+|it\s+)?(?:(?:directly|eventually|ultimately)\s+)?(?:lead(?:s|ing)?\s+to|led\s+to|prompt(?:ed|s|ing)?|result(?:ed|s|ing)?\s+in|trigger(?:ed|s|ing)?)\b[\s\S]*$/i,
@@ -23603,6 +25439,10 @@ function injectEventImages(html, eventImages) {
       }
       return html.length;
     })();
+    // A compacted one-sentence section leaves its comment anchor but no
+    // section body. Do not let that empty anchor claim a paragraph (and an
+    // image) from the next substantive section.
+    if (pPos >= nextAnchorPos) continue;
     if (html.slice(anchorPos, nextAnchorPos).includes("<figure")) continue;
 
     const fig = figHtml(eventImages[imageIdx], floats[floatIdx % 2]);
@@ -24409,6 +26249,130 @@ function normalizeArticleProcessDisclosureHtml(body) {
   );
 }
 
+const ARTICLE_BODY_HTML_SECTIONS = [
+  { field: "overviewParagraphs", marker: "Overview" },
+  {
+    field: "eyewitnessOrChronicle",
+    marker: "Eyewitness / Chronicle Accounts",
+  },
+  { field: "aftermathParagraphs", marker: "Aftermath" },
+  { field: "conclusionParagraphs", marker: "Conclusion" },
+];
+
+function articleBodyHtmlSectionBlocks(body) {
+  const source = String(body || "");
+  return ARTICLE_BODY_HTML_SECTIONS.map((section, index) => {
+    const escapedMarker = section.marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(
+      `(<!--\\s*${escapedMarker}\\s*-->\\s*)(<section\\b[^>]*>)([\\s\\S]*?)(<\\/section>)`,
+      "i",
+    );
+    const match = pattern.exec(source);
+    if (!match) return null;
+    const paragraphs = [...match[3].matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+      .map((paragraph) => plainText(paragraph[1]))
+      .filter(Boolean);
+    const text = paragraphs.join(" ");
+    return {
+      ...section,
+      index,
+      start: match.index,
+      end: match.index + match[0].length,
+      full: match[0],
+      prefix: match[1],
+      open: match[2],
+      inner: match[3],
+      close: match[4],
+      sentenceCount: splitSentences(text, 1).length,
+      words: wordCount(text),
+    };
+  }).filter(Boolean);
+}
+
+/**
+ * Applies the sparse-heading rule to already stored article HTML. This lets a
+ * current article be corrected deterministically, without regenerating text or
+ * changing any source-grounded claim. Figures move with their sentence.
+ */
+function normalizeSparseArticleBodySectionsHtml(body) {
+  const source = String(body || "");
+  const blocks = articleBodyHtmlSectionBlocks(source);
+  const populated = blocks.filter((block) => block.sentenceCount > 0);
+  const sparse = new Set(
+    populated.filter((block) => block.sentenceCount === 1).map((block) => block.index),
+  );
+  if (populated.length < 2 || sparse.size === 0) return source;
+
+  let targets = populated.filter((block) => !sparse.has(block.index));
+  if (targets.length === 0) {
+    const anchor = [...populated].sort(
+      (left, right) => right.words - left.words || left.index - right.index,
+    )[0];
+    targets = [anchor];
+    sparse.delete(anchor.index);
+  }
+
+  const additions = new Map();
+  const removed = new Set();
+  for (const sourceBlock of populated
+    .filter((block) => sparse.has(block.index))
+    .sort((left, right) => left.index - right.index)) {
+    const target = targets
+      .map((block) => ({
+        block,
+        distance: Math.abs(block.index - sourceBlock.index),
+      }))
+      .sort((left, right) =>
+        left.distance - right.distance ||
+        right.block.words - left.block.words ||
+        left.block.index - right.block.index,
+      )[0]?.block;
+    if (!target || target.index === sourceBlock.index) continue;
+
+    const movingInner = sourceBlock.inner.replace(
+      /^\s*<h2\b[^>]*>[\s\S]*?<\/h2>\s*/i,
+      "",
+    );
+    if (!plainText(movingInner)) continue;
+    if (!additions.has(target.index)) {
+      additions.set(target.index, { before: [], after: [] });
+    }
+    additions.get(target.index)[sourceBlock.index < target.index ? "before" : "after"]
+      .push({ index: sourceBlock.index, html: movingInner });
+    removed.add(sourceBlock.index);
+  }
+
+  if (removed.size === 0) return source;
+
+  let normalized = source;
+  for (const block of [...blocks].sort((left, right) => right.start - left.start)) {
+    let replacement = block.full;
+    if (removed.has(block.index)) {
+      replacement = "";
+    } else if (additions.has(block.index)) {
+      const grouped = additions.get(block.index);
+      const before = grouped.before
+        .sort((left, right) => left.index - right.index)
+        .map((entry) => entry.html)
+        .join("\n");
+      const after = grouped.after
+        .sort((left, right) => left.index - right.index)
+        .map((entry) => entry.html)
+        .join("\n");
+      let inner = block.inner;
+      if (before) {
+        const heading = /^\s*<h2\b[^>]*>[\s\S]*?<\/h2>/i.exec(inner);
+        const insertion = heading ? heading[0].length : 0;
+        inner = `${inner.slice(0, insertion)}\n${before}${inner.slice(insertion)}`;
+      }
+      if (after) inner = `${inner}\n${after}`;
+      replacement = `${block.prefix}${block.open}${inner}${block.close}`;
+    }
+    normalized = `${normalized.slice(0, block.start)}${replacement}${normalized.slice(block.end)}`;
+  }
+  return normalized;
+}
+
 function buildPostHTML(
   c,
   date,
@@ -24437,21 +26401,27 @@ function buildPostHTML(
   const relatedFilmsBlock = buildRelatedFilmsBlock(c);
   const articleBodyAdBlock = buildArticleBodyAdBlock();
 
-  const overviewParas = (c.overviewParagraphs || [])
+  // A verified quotation gives the chronicle section more than a lone prose
+  // sentence, so retain its heading in that case.
+  const hasVerifiableSource =
+    c.eyewitnessQuoteSource &&
+    /\d{4}/.test(c.eyewitnessQuoteSource) &&
+    c.eyewitnessQuoteSource.length > 20;
+  const displayContent = compactSparseArticleBodySections(c, {
+    preserveEyewitnessHeading: Boolean(c.eyewitnessQuote && hasVerifiableSource),
+  });
+
+  const overviewParas = (displayContent.overviewParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
 
-  const eyewitnessParas = (c.eyewitnessOrChronicle || [])
+  const eyewitnessParas = (displayContent.eyewitnessOrChronicle || [])
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
 
   // Only render the blockquote when the source attribution contains a year and
   // a real document/letter reference — filters out vague AI-generated attributions
   // like "Contemporary account" or "Historical record, unknown date".
-  const hasVerifiableSource =
-    c.eyewitnessQuoteSource &&
-    /\d{4}/.test(c.eyewitnessQuoteSource) &&
-    c.eyewitnessQuoteSource.length > 20;
   const eyewitnessQuoteBlock =
     c.eyewitnessQuote && hasVerifiableSource
       ? `          <blockquote class="historical-quote mt-3">
@@ -24460,11 +26430,11 @@ function buildPostHTML(
           </blockquote>`
       : "";
 
-  const aftermathParas = (c.aftermathParagraphs || [])
+  const aftermathParas = (displayContent.aftermathParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
 
-  const conclusionParas = (c.conclusionParagraphs || [])
+  const conclusionParas = (displayContent.conclusionParagraphs || [])
     .map((p) => `            <p>${esc(p)}</p>`)
     .join("\n");
 
@@ -26472,23 +28442,90 @@ function normalizeTdqFloatBarHtml(body) {
   return html;
 }
 
+function injectPublishedYoutubeForServe(body, slug, youtubeUploadedRaw) {
+  let uploaded = null;
+  try {
+    uploaded = youtubeUploadedRaw
+      ? JSON.parse(youtubeUploadedRaw)?.[slug] || null
+      : null;
+  } catch {}
+  if (!uploaded?.youtubeId || uploaded.privacy === "private") return body;
+
+  const youtubeId = String(uploaded.youtubeId);
+  let html = String(body || "").replace(
+    /<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/,
+    `<!-- YouTube -->
+          <div class="my-4">
+            <iframe
+              width="100%"
+              style="aspect-ratio:9/16;border:none;border-radius:8px"
+              src="https://www.youtube.com/embed/${youtubeId}"
+              title="Watch on YouTube"
+              allowfullscreen
+              loading="lazy"
+            ></iframe>
+          </div>
+
+          <!-- Aftermath -->`,
+  );
+  html = html.replace(
+    /https:\/\/youtube\.com\/shorts\//g,
+    "https://www.youtube.com/shorts/",
+  );
+  if (!html.includes('"@type":"VideoObject"')) {
+    const title = html.match(/<meta property="og:title" content="([^"]+)"/)?.[1] || slug;
+    const description = html.match(
+      /<meta(?:\s+(?:name="description"|property="og:description"))\s+content="([^"]+)"/,
+    )?.[1] || "";
+    const schema = {
+      "@context": "https://schema.org",
+      "@type": "VideoObject",
+      name: title,
+      description,
+      thumbnailUrl:
+        VIDEO_THUMBNAIL_OVERRIDES[slug] ||
+        `https://img.youtube.com/vi/${youtubeId}/maxresdefault.jpg`,
+      uploadDate: uploaded.uploadedAt || new Date().toISOString(),
+      duration: "PT45S",
+      embedUrl: `https://www.youtube.com/embed/${youtubeId}`,
+      contentUrl: `https://www.youtube.com/shorts/${youtubeId}`,
+      publisher: {
+        "@type": "Organization",
+        name: "thisDay.info",
+        url: "https://thisday.info",
+        logo: {
+          "@type": "ImageObject",
+          url: "https://thisday.info/icons/android-chrome-192x192.png",
+        },
+      },
+    };
+    html = html.replace(
+      "</head>",
+      `<script type="application/ld+json">${JSON.stringify(schema)}<\/script></head>`,
+    );
+  }
+  return html;
+}
+
 function prepareHtmlResponse(body) {
-  return normalizeHistoryEntityCanonicalLinksHtml(
-    normalizeTdqFloatBarHtml(
-      normalizeArticleAssetVersionsHtml(
-        normalizeReadProgressBarHtml(
-          normalizeArticleEvidenceMapDisclosureHtml(
-            normalizeArticleEntityStripPresentationHtml(
-              normalizeInvalidArticlePersonLabelsHtml(
-                normalizeStackedTitleHtml(
-                  normalizeImageAltHtml(
-                    normalizeCrawlableLinksHtml(
-                      normalizeSearchPreviewHtml(
-                        normalizeHeadingAuditHtml(
-                          normalizeAiAnswerCardHtml(
-                            normalizeArticleLayoutHtml(
-                              stripDynSliderFiguresHtml(
-                                stripGoogleFundingChoices(body),
+  return normalizeSparseArticleBodySectionsHtml(
+    normalizeHistoryEntityCanonicalLinksHtml(
+      normalizeTdqFloatBarHtml(
+        normalizeArticleAssetVersionsHtml(
+          normalizeReadProgressBarHtml(
+            normalizeArticleEvidenceMapDisclosureHtml(
+              normalizeArticleEntityStripPresentationHtml(
+                normalizeInvalidArticlePersonLabelsHtml(
+                  normalizeStackedTitleHtml(
+                    normalizeImageAltHtml(
+                      normalizeCrawlableLinksHtml(
+                        normalizeSearchPreviewHtml(
+                          normalizeHeadingAuditHtml(
+                            normalizeAiAnswerCardHtml(
+                              normalizeArticleLayoutHtml(
+                                stripDynSliderFiguresHtml(
+                                  stripGoogleFundingChoices(body),
+                                ),
                               ),
                             ),
                           ),
@@ -26506,8 +28543,15 @@ function prepareHtmlResponse(body) {
   );
 }
 
-function htmlResponse(body, status = 200) {
-  return new Response(prepareHtmlResponse(body), {
+function markArticleHtmlServeReady(body) {
+  return addHtmlMarker(
+    prepareHtmlResponse(body),
+    ARTICLE_SERVE_READY_MARKER,
+  );
+}
+
+function preparedHtmlResponse(body, status = 200) {
+  return new Response(body, {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -26521,6 +28565,10 @@ function htmlResponse(body, status = 200) {
         "camera=(), microphone=(), geolocation=(), payment=()",
     },
   });
+}
+
+function htmlResponse(body, status = 200) {
+  return preparedHtmlResponse(prepareHtmlResponse(body), status);
 }
 
 function jsonResponse(obj, status = 200, extraHeaders = {}) {
@@ -26632,10 +28680,14 @@ export const __contentGenerationTestHooks = {
   evergreenHistoryEvidenceWordCount,
   evergreenHistoryCandidateEligibility,
   evergreenHistoryEditionQuality,
+  generatedPageWritingQualityIssues,
+  personEntityWritingQualityReady,
   extractEvergreenHistoryArticleParagraphsFromHtml,
   normalizeEvergreenHistoryEdition,
   restorePendingEvergreenHistoryEvidenceFromPost,
   selectPendingEvergreenHistoryCandidates,
+  selectPendingPersonProseCandidates,
+  recoverPendingPersonProseEnrichment,
   syncEvergreenHistoryDiscoveryForEntity,
   upsertEntityRecord,
   upsertEntityIndex,
@@ -26685,6 +28737,12 @@ export const __contentGenerationTestHooks = {
   scanArticleQuality,
   strengthenBoundedCoreFromSource,
   scanIntraPageDuplication,
+  scanRepetitiveSectionOpenings,
+  scanEnrichmentProseQuality,
+  mechanicallyRemoveEnrichmentFiller,
+  mechanicallyDedupeEnrichmentBodySentences,
+  mechanicallyDropDuplicateEnrichmentParagraphs,
+  editEnrichmentProseQuality,
   ensureSourceComparisonContentRationale,
   savePublishedPost,
   unlinkedArticlePeople,
@@ -26710,6 +28768,10 @@ export const __contentGenerationTestHooks = {
   injectPersonFilmographyIntoStoredArticleHtml,
   buildArticleProcessDisclosure,
   normalizeArticleProcessDisclosureHtml,
+  articleSectionHasOneSentence,
+  compactSparseArticleBodySections,
+  normalizeSparseArticleBodySectionsHtml,
+  markArticleHtmlServeReady,
   buildPillarHubHTML,
   servePillarHub,
   buildPostHTML,

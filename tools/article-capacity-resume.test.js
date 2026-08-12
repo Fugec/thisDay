@@ -1196,6 +1196,46 @@ test("optional unsupported claims are removed locally without weakening groundin
   );
 });
 
+test("baseball-strike source-process causality is reduced to supported statistics", () => {
+  const source = {
+    pageTitle: "1994–95 Major League Baseball strike",
+    text: "The 1994–95 Major League Baseball strike began on August 12, 1994.",
+    sourceExtract:
+      "The absence of an official commissioner after Fay Vincent left office arguably stood in the way of a compromise settlement. " +
+      "The strike lasted for 232 days. A total of 948 games were canceled due to the strike.",
+  };
+  const content = {
+    analysisBad: [{
+      title: "Lack of Commissioner",
+      detail:
+        "The absence of an official commissioner after Fay Vincent left office arguably stood in the way of a compromise settlement. " +
+        "The owners and players remained unable to reach an agreement during the work stoppage. " +
+        "The source material highlights the significance of this absence, with the strike lasting for 232 days and resulting in the cancellation of 948 games. " +
+        "The retained record documents the duration and canceled games without assigning every consequence to one official's absence.",
+    }],
+  };
+
+  const reason =
+    'unsupported causal claim in analysisBad[0].detail: "The source material highlights the significance of this absence, with the strike lasting for 232 days and resulting in the cancellation of 948 games."';
+  assert.equal(hooks.groundingReasonIsCore(reason, content), false);
+
+  const repaired = hooks.mechanicallyRepairGroundingReasons(
+    content,
+    [reason],
+    source,
+  );
+  assert.deepEqual(repaired.repairedFieldPaths, ["analysisBad[0].detail"]);
+  assert.match(
+    repaired.content.analysisBad[0].detail,
+    /The strike lasted for 232 days, and 948 games were canceled\./,
+  );
+  assert.doesNotMatch(
+    repaired.content.analysisBad[0].detail,
+    /significance of this absence/i,
+  );
+  assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
+});
+
 test("a source-attribution tail cannot strand the Treaty of Greenville article", () => {
   const supportedAftermath =
     "The agreement described a boundary between United States territory and the lands retained by the participating nations. " +

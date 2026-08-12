@@ -86,8 +86,8 @@ function parsedEdition() {
   ].map((heading, sectionIndex) => ({
     heading,
     paragraphs: [
-      `${words(`edition${sectionIndex}a`, 92)}.`,
-      `${words(`edition${sectionIndex}b`, 94)}.`,
+      `${words(`edition${sectionIndex}a1`, 46)}. ${words(`edition${sectionIndex}a2`, 46)}.`,
+      `${words(`edition${sectionIndex}b1`, 47)}. ${words(`edition${sectionIndex}b2`, 47)}.`,
     ],
   }));
   return {
@@ -290,6 +290,71 @@ test("the edition gate requires deep, distinct, source-backed content", () => {
     editorialMetaRejected.reasons.join("; "),
     /article or page-production commentary/i,
   );
+
+  const weakWriting = {
+    ...ready,
+    bodySections: ready.bodySections.map((section, index) =>
+      index === 0
+        ? {
+            ...section,
+            paragraphs: [
+              `This rich tapestry was a significant event with a profound impact. ${section.paragraphs[0]}`,
+              section.paragraphs[1],
+            ],
+          }
+        : section,
+    ),
+  };
+  const weakWritingRejected =
+    hooks.evergreenHistoryEditionQuality(weakWriting);
+  assert.equal(weakWritingRejected.ok, false);
+  assert.match(
+    weakWritingRejected.reasons.join("; "),
+    /established writing rules/i,
+  );
+});
+
+test("evergreen prose audit recognizes singular and plural event-family openings", () => {
+  const issues = hooks.generatedPageWritingQualityIssues({
+    type: "event",
+    name: "2023 Hawaii wildfires",
+    overviewCards: [{
+      label: "Spread",
+      value: "The wildfire crossed dry areas of Maui while winds accelerated its movement.",
+    }],
+    bodySections: [{
+      heading: "Conditions on Maui",
+      paragraphs: [
+        "The fires spread through dry vegetation while emergency crews responded across several communities.",
+      ],
+    }],
+  });
+  assert.ok(
+    issues.some((issue) => /generic event-family opening “fire”/.test(issue)),
+    JSON.stringify(issues),
+  );
+});
+
+test("a manual exact-post refresh can select an already published evergreen", () => {
+  const ready = readyEntity();
+  const normal = hooks.selectPendingEvergreenHistoryCandidates(
+    [ready],
+    {
+      preferPostSlug: "20-july-2026",
+      requirePostSlug: true,
+    },
+  );
+  assert.deepEqual(normal, []);
+
+  const forced = hooks.selectPendingEvergreenHistoryCandidates(
+    [ready],
+    {
+      preferPostSlug: "20-july-2026",
+      requirePostSlug: true,
+      forceRefresh: true,
+    },
+  );
+  assert.deepEqual(forced.map((entry) => entry.slug), [ready.slug]);
 });
 
 test("a qualified edition upgrades the related article metadata and visible card", async () => {

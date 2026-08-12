@@ -14,6 +14,447 @@ const richHistoryBody = [{
   ).join(" ")],
 }];
 
+test("repetitive-opening audit catches today's section-restart pattern across prose modules", () => {
+  const content = {
+    title: "What led to the 1994 baseball strike?",
+    eventTitle: "1994 Major League Baseball strike",
+    sourcePageTitle: "1994–95 Major League Baseball strike",
+    historicalDate: "August 12, 1994",
+    historicalYear: 1994,
+    overviewParagraphs: [
+      "The 1994–95 Major League Baseball strike began after negotiations stalled.",
+    ],
+    eyewitnessOrChronicle: [
+      "On August 12, 1994, Major League Baseball players began their strike.",
+    ],
+    aftermathParagraphs: [
+      "The strike was suspended the following April after 232 days.",
+    ],
+    conclusionParagraphs: [
+      "The 1994–95 Major League Baseball strike canceled the World Series.",
+    ],
+    didYouKnowFacts: [
+      "The 1994–95 Major League Baseball strike lasted 232 days.",
+    ],
+    analysisGood: [{
+      title: "Duration",
+      detail: "The strike lasted 232 days and crossed two seasons.",
+    }],
+    analysisBad: [],
+    editorialNote:
+      "The strike exposed a long dispute over baseball economics.",
+  };
+
+  const issues = blogHooks.scanRepetitiveSectionOpenings(content);
+
+  assert.ok(
+    issues.some((issue) => issue.startsWith("eyewitnessOrChronicle[0]")),
+    JSON.stringify(issues),
+  );
+  assert.ok(
+    issues.some((issue) => issue.startsWith("aftermathParagraphs[0]")),
+    JSON.stringify(issues),
+  );
+  assert.ok(
+    issues.some((issue) => issue.startsWith("conclusionParagraphs[0]")),
+    JSON.stringify(issues),
+  );
+  assert.ok(
+    issues.some((issue) => issue.startsWith("didYouKnowFacts[0]")),
+    JSON.stringify(issues),
+  );
+  assert.ok(
+    issues.some((issue) => issue.startsWith("analysisGood[0].detail")),
+    JSON.stringify(issues),
+  );
+  assert.ok(
+    issues.some((issue) => issue.startsWith("editorialNote")),
+    JSON.stringify(issues),
+  );
+  assert.ok(
+    !issues.some((issue) => issue.startsWith("overviewParagraphs[0]")),
+    "the article's canonical opening must remain allowed",
+  );
+});
+
+test("live event-family openings cover party, fire plurals, violence, aftermath, and tragedy", () => {
+  for (const sample of [
+    {
+      subject: "DJ Kool Herc Hosts Party",
+      opening: "The party brought neighbors into the recreation room for music and dancing.",
+    },
+    {
+      subject: "2023 Hawaii wildfires",
+      opening: "The fires spread under dry and gusty conditions across Maui.",
+    },
+    {
+      subject: "Simele massacre",
+      opening: "The violence spread from the border dispute into Assyrian villages.",
+    },
+    {
+      subject: "1994 Major League Baseball strike",
+      opening: "The aftermath left a shortened 1995 season and 948 canceled games.",
+    },
+    {
+      subject: "Erwadi fire tragedy",
+      opening: "The tragedy exposed the use of chains inside the mental home.",
+    },
+  ]) {
+    const content = {
+      title: `How did ${sample.subject} unfold?`,
+      eventTitle: sample.subject,
+      sourcePageTitle: sample.subject,
+      overviewParagraphs: [`${sample.subject} began with a documented sequence.`],
+      eyewitnessOrChronicle: [sample.opening],
+    };
+    const issues = blogHooks.scanRepetitiveSectionOpenings(content);
+    assert.ok(
+      issues.some((issue) => issue.startsWith("eyewitnessOrChronicle[0]")),
+      `${sample.opening}\n${JSON.stringify(issues)}`,
+    );
+  }
+
+  const concrete = {
+    title: "Why Did Farragut Enter Mobile Bay?",
+    eventTitle: "Battle of Mobile Bay",
+    sourcePageTitle: "Battle of Mobile Bay",
+    overviewParagraphs: ["The Battle of Mobile Bay opened on August 5, 1864."],
+    eyewitnessOrChronicle: [
+      "The city remained beyond Farragut's immediate reach after the bay fell.",
+      "The men worked below decks while smoke obscured the channel.",
+    ],
+  };
+  assert.deepEqual(blogHooks.scanRepetitiveSectionOpenings(concrete), []);
+});
+
+test("enrichment prose audit distinguishes the live before shape from a focused after edit", () => {
+  const identity = {
+    title: "What led to the 1994 baseball strike?",
+    eventTitle: "1994 Major League Baseball strike",
+    sourcePageTitle: "1994–95 Major League Baseball strike",
+    historicalDate: "August 12, 1994",
+    historicalYear: 1994,
+  };
+  const before = {
+    ...identity,
+    overviewParagraphs: [
+      "The 1994–95 Major League Baseball strike began on August 12, 1994, and lasted for 232 days, as stated in the source material from the 1994–95 Major League Baseball strike, with 948 games canceled, and the effects were still being felt in the years that followed, creating a significant impact on the sport, its owners, its players, and its fans.",
+    ],
+    eyewitnessOrChronicle: [
+      "On August 12, 1994, Major League Baseball players left the field after negotiations stalled.",
+    ],
+    aftermathParagraphs: [
+      "The strike was suspended on April 2, 1995, after 232 days.",
+    ],
+    conclusionParagraphs: [
+      "The 1994–95 Major League Baseball strike was a significant event with significant implications for the sport.",
+    ],
+    didYouKnowFacts: [
+      "The 1994–95 Major League Baseball strike lasted 232 days. It canceled 948 games. This duration highlights the significant impact of the strike, according to the source material from the strike.",
+    ],
+    analysisGood: [{
+      title: "Duration",
+      detail:
+        "The strike lasted 232 days, as noted in the source material from the 1994–95 Major League Baseball strike, and its effects were still being felt in the years that followed.",
+    }],
+    analysisBad: [],
+    editorialNote:
+      "The strike was a complex and multifaceted event with a profound impact.",
+  };
+  const after = {
+    ...identity,
+    overviewParagraphs: [
+      "The 1994–95 Major League Baseball strike began on August 12, 1994. Its 232-day duration canceled 948 games.",
+    ],
+    eyewitnessOrChronicle: [
+      "Players left the field after negotiations with team owners stalled.",
+    ],
+    aftermathParagraphs: [
+      "Play resumed on April 2, 1995, under a shortened 144-game schedule.",
+    ],
+    conclusionParagraphs: [
+      "Canceling the World Series made the labor dispute impossible for the league to contain within contract talks.",
+    ],
+    didYouKnowFacts: [
+      "At 232 days, the stoppage crossed the 1994 and 1995 seasons.",
+    ],
+    analysisGood: [{
+      title: "Duration",
+      detail:
+        "Crossing two seasons increased the dispute's practical cost. The schedule lost 948 games, while the returning 1995 season gave each club only 144 games instead of the usual 162. Those figures show how the work stoppage altered competition as well as negotiations, without requiring a broader claim about baseball's later popularity.",
+    }],
+    analysisBad: [],
+    editorialNote:
+      "A canceled World Series exposed how far the owners and players remained from a workable settlement.",
+  };
+
+  const beforeIssues = blogHooks.scanEnrichmentProseQuality(before);
+  const afterIssues = blogHooks.scanEnrichmentProseQuality(after);
+
+  assert.ok(beforeIssues.length >= 7, JSON.stringify(beforeIssues));
+  assert.ok(
+    beforeIssues.some((issue) => /source-process boilerplate/.test(issue)),
+    JSON.stringify(beforeIssues),
+  );
+  assert.ok(
+    beforeIssues.some((issue) => /run-on sentence/.test(issue)),
+    JSON.stringify(beforeIssues),
+  );
+  assert.ok(
+    beforeIssues.some((issue) => /overloads one Did You Know card/.test(issue)),
+    JSON.stringify(beforeIssues),
+  );
+  assert.ok(
+    beforeIssues.every((issue) => !issue.includes("undefined")),
+    JSON.stringify(beforeIssues),
+  );
+  assert.deepEqual(afterIssues, []);
+});
+
+test("enrichment prose audit catches live record-process boilerplate", () => {
+  const content = {
+    title: "How Did the Hawaii Wildfires Spread?",
+    eventTitle: "2023 Hawaii wildfires",
+    sourcePageTitle: "2023 Hawaii wildfires",
+    overviewParagraphs: [
+      "The 2023 Hawaii wildfires spread across Maui during dry and gusty conditions.",
+    ],
+    eyewitnessOrChronicle: [
+      "The supplied record confirms that 17,000 acres burned during the fires.",
+    ],
+    aftermathParagraphs: [
+      "The historical record leaves parts of the emergency response unresolved.",
+    ],
+  };
+  const issues = blogHooks.scanEnrichmentProseQuality(content);
+  assert.ok(
+    issues.filter((issue) => /source-process boilerplate/.test(issue)).length >= 2,
+    JSON.stringify(issues),
+  );
+});
+
+test("mechanical enrichment fallback deletes filler without erasing a complete body field", () => {
+  const content = {
+    overviewParagraphs: [
+      "The source material notes that 948 games were canceled. The strike was a significant event in the history of the sport.",
+    ],
+    eyewitnessOrChronicle: [
+      "According to the source material, players stopped work on August 12, 1994. The strike had significant implications for the sport.",
+    ],
+    aftermathParagraphs: [
+      "The strike highlighted deep-seated issues between owners and players.",
+    ],
+    conclusionParagraphs: [
+      "Each team played 144 games in 1995. Its effects were still being felt in the years that followed.",
+    ],
+  };
+  const cleaned = blogHooks.mechanicallyRemoveEnrichmentFiller(content);
+
+  assert.deepEqual(cleaned.overviewParagraphs, ["948 games were canceled."]);
+  assert.deepEqual(cleaned.eyewitnessOrChronicle, [
+    "Players stopped work on August 12, 1994.",
+  ]);
+  assert.deepEqual(
+    cleaned.aftermathParagraphs,
+    content.aftermathParagraphs,
+    "a field made entirely of filler remains available for the hard publication gates",
+  );
+  assert.deepEqual(cleaned.conclusionParagraphs, [
+    "Each team played 144 games in 1995.",
+  ]);
+});
+
+test("mechanical enrichment cleanup removes source-process prose from every visible module", () => {
+  const content = {
+    quickFacts: [{
+      label: "Source Detail",
+      value:
+        "According to the source material, the strike was the eighth work stoppage in Major League Baseball history.",
+    }],
+    didYouKnowFacts: [
+      "The stoppage lasted 232 days, as noted in the source material.",
+    ],
+    analysisGood: [{
+      title: "Duration",
+      detail:
+        "The stoppage lasted 232 days, as noted in the source material. This duration highlights the significant impact of the strike.",
+    }, {
+      title: "Separate statistics",
+      detail:
+        "The strike lasted for 232 days and resulted in the cancellation of 948 games.",
+    }, {
+      title: "Legacy process sentence",
+      detail:
+        "The source material highlights the significance of this absence, with the strike lasting for 232 days and resulting in the cancellation of 948 games.",
+    }],
+    analysisBad: [{
+      title: "Later effects",
+      detail:
+        "The source material notes that the strike was the eighth work stoppage in league history, and its effects were still being felt in the years that followed.",
+    }],
+    editorialNote:
+      "The detail that stays with us is this: According to the source material, the strike was the eighth work stoppage in league history.",
+  };
+
+  const cleaned = blogHooks.mechanicallyRemoveEnrichmentFiller(content);
+  const visible = JSON.stringify(cleaned);
+
+  assert.doesNotMatch(visible, /source material/i);
+  assert.doesNotMatch(visible, /significant impact/i);
+  assert.deepEqual(cleaned.quickFacts[0].value,
+    "The strike was the eighth work stoppage in Major League Baseball history.");
+  assert.deepEqual(cleaned.didYouKnowFacts[0], "The stoppage lasted 232 days.");
+  assert.deepEqual(cleaned.analysisGood[0].detail, "The stoppage lasted 232 days.");
+  assert.deepEqual(cleaned.analysisGood[1].detail,
+    "The strike lasted for 232 days. 948 games were canceled.");
+  assert.deepEqual(cleaned.analysisGood[2].detail,
+    "The strike lasted for 232 days. 948 games were canceled.");
+  assert.deepEqual(cleaned.analysisBad[0].detail,
+    "The strike was the eighth work stoppage in league history.");
+  assert.deepEqual(cleaned.editorialNote,
+    "The detail that stays with us is this: the strike was the eighth work stoppage in league history.");
+});
+
+test("mechanical body dedupe drops a later paraphrase but retains a new number", () => {
+  const content = {
+    title: "Baseball strike — August 12, 1994",
+    eventTitle: "Baseball strike",
+    historicalDate: "August 12, 1994",
+    overviewParagraphs: [
+      "The strike canceled the remainder of the season, including the postseason and World Series.",
+    ],
+    eyewitnessOrChronicle: [
+      "The remainder of the season was canceled by the strike, including the postseason and World Series. The stoppage lasted 232 days.",
+    ],
+    aftermathParagraphs: [
+      "The 232-day stoppage crossed into the next season. Each club played 144 games in 1995.",
+    ],
+    conclusionParagraphs: [
+      "A total of 948 games were canceled.",
+    ],
+  };
+  const cleaned = blogHooks.mechanicallyDedupeEnrichmentBodySentences(content);
+
+  assert.deepEqual(cleaned.eyewitnessOrChronicle, ["The stoppage lasted 232 days."]);
+  assert.match(cleaned.aftermathParagraphs[0], /144 games/);
+  assert.match(cleaned.conclusionParagraphs[0], /948 games/);
+});
+
+test("mechanical paragraph dedupe keeps one paragraph per section and preserves new figures", () => {
+  const content = {
+    overviewParagraphs: [
+      "Owners proposed a salary cap to the players, who rejected the proposal during negotiations over league revenue and the financial position of small-market clubs.",
+    ],
+    eyewitnessOrChronicle: [
+      "The stoppage lasted 232 days and became the longest labor interruption in Major League Baseball history.",
+    ],
+    aftermathParagraphs: [
+      "Each club played 144 games when the 1995 schedule resumed.",
+      "Players rejected the owners' salary-cap proposal during negotiations over baseball revenue and the financial position of small-market clubs.",
+    ],
+    conclusionParagraphs: [
+      "The dispute canceled 948 games across the shortened seasons.",
+    ],
+  };
+  const cleaned = blogHooks.mechanicallyDropDuplicateEnrichmentParagraphs(content);
+
+  assert.deepEqual(cleaned.aftermathParagraphs, [
+    "Each club played 144 games when the 1995 schedule resumed.",
+  ]);
+  assert.equal(cleaned.overviewParagraphs.length, 1);
+  assert.match(cleaned.conclusionParagraphs[0], /948/);
+});
+
+test("opening edit runs in enrichment before unchanged date and grounding gates", () => {
+  const workerSource = readFileSync(
+    new URL("../js/blog-ai-worker.js", import.meta.url),
+    "utf8",
+  );
+  const enrichStart = workerSource.indexOf("async function enrichPublishedPost");
+  const enrichEnd = workerSource.indexOf("\nasync function ", enrichStart + 20);
+  const enrichment = workerSource.slice(enrichStart, enrichEnd);
+  const editorialIndex = enrichment.indexOf("enforceEditorialNoteQuality(enriched)");
+  const openingEditIndex = enrichment.indexOf("await editEnrichmentProseQuality(");
+  const dateGateIndex = enrichment.indexOf("validateContentDateForPublish(enriched, date)");
+  const groundingGateIndex = enrichment.indexOf("verifyFinalGroundingWithRepair(");
+
+  assert.ok(editorialIndex >= 0 && editorialIndex < openingEditIndex);
+  assert.ok(openingEditIndex < dateGateIndex);
+  assert.ok(dateGateIndex < groundingGateIndex);
+
+  const editStart = workerSource.indexOf("async function editEnrichmentProseQuality");
+  const editEnd = workerSource.indexOf("\nasync function ", editStart + 20);
+  const editBody = workerSource.slice(editStart, editEnd);
+  assert.match(
+    editBody,
+    /WRITING_REWRITE_RULES/,
+    "the final enrichment edit must apply the existing writing discipline",
+  );
+  assert.match(
+    enrichment,
+    /if \(stopAfterProseQualityEdit\)[\s\S]*?proseQualityStagedAt[\s\S]*?return \{ status: "prose-staged", slug \}/,
+    "the admin recovery may checkpoint prose before the CPU-heavy final gates",
+  );
+  assert.match(
+    enrichment,
+    /if \(!skipProseQualityEdit\)[\s\S]*?editEnrichmentProseQuality/,
+    "the second admin invocation may resume without repeating the model edit",
+  );
+  assert.match(
+    enrichment,
+    /if \(stopAfterFinalGrounding\)[\s\S]*?finalGroundingStagedAt[\s\S]*?return \{ status: "final-grounding-staged", slug \}/,
+    "the admin recovery may checkpoint final grounding before the HTML save",
+  );
+  assert.match(
+    enrichment,
+    /deferPublishedCoreSave[\s\S]*?coreRefreshPending: true[\s\S]*?status: "core-refresh-queued"/,
+    "an HTTP admin replay queues its grounded core save for scheduled CPU",
+  );
+  assert.match(
+    workerSource,
+    /preRecoveryStatus\.complete &&[\s\S]*?coreRefreshPending !== true/,
+    "a queued core refresh cannot be mistaken for an already-complete optional outbox",
+  );
+});
+
+test("people and evergreen generators use the same established writing rules", () => {
+  const workerSource = readFileSync(
+    new URL("../js/blog-ai-worker.js", import.meta.url),
+    "utf8",
+  );
+  const functionBody = (name, nextName) => {
+    const start = workerSource.indexOf(`async function ${name}`);
+    const end = workerSource.indexOf(`\n${nextName}`, start + 20);
+    assert.ok(start >= 0 && end > start, `${name} must remain inspectable`);
+    return workerSource.slice(start, end);
+  };
+  const cards = functionBody(
+    "generateEntityOverviewCards",
+    "function splitIntroParagraphs",
+  );
+  const body = functionBody(
+    "generateEntityBodySections",
+    "function evergreenHistoryEvidenceCorpus",
+  );
+  const timeline = functionBody(
+    "generateEntityTimeline",
+    "/**",
+  );
+  const evergreen = functionBody(
+    "generateEvergreenHistoryEdition",
+    "async function upsertEntityRecord",
+  );
+
+  assert.ok((cards.match(/WRITING_REWRITE_RULES/g) || []).length >= 2);
+  assert.match(cards, /generatedPageWritingQualityIssues/);
+  assert.match(body, /WRITING_REWRITE_RULES/);
+  assert.match(body, /generatedPageWritingQualityIssues/);
+  assert.match(timeline, /WRITING_REWRITE_RULES/);
+  assert.match(timeline, /generatedPageWritingQualityIssues/);
+  assert.match(evergreen, /WRITING_REWRITE_RULES/);
+  assert.match(evergreen, /normalizeEvergreenHistoryEdition/);
+});
+
 test("promotional title hooks are removed from factual event headlines", () => {
   const content = {
     eventTitle: "Join the Fight: Spanish Civil War Begins",
@@ -510,7 +951,8 @@ test("analysis is event-labelled and open by default in a native disclosure", ()
     html.indexOf("The July 1936 uprising") < html.indexOf("article-body-ad-v1"),
   );
   assert.ok(
-    html.indexOf("article-body-ad-v1") < html.indexOf("Contemporary records documented"),
+    html.indexOf("Contemporary records documented") < html.indexOf("article-body-ad-v1"),
+    "two one-sentence body fields combine beneath one heading before the body ad",
   );
   assert.ok(html.indexOf("Test Your Knowledge") < html.indexOf("article-evidence-map"));
   assert.ok(html.indexOf("article-evidence-map") < html.indexOf("Related questions"));
@@ -712,6 +1154,116 @@ test("read progress bar is prominent for new and previously stored articles", ()
     /box-shadow:0 1px 4px rgba\(27,58,45,\.35\)/,
   );
   assert.doesNotMatch(normalized, /height:3px/);
+});
+
+test("single-sentence article sections merge into the nearest substantive section", () => {
+  const content = {
+    overviewParagraphs: [
+      "The strike began on August 12, 1994. Negotiations had stalled over a proposed salary cap.",
+    ],
+    eyewitnessOrChronicle: [
+      "Neither the 1994 nor the 1995 season reached the usual 162 games.",
+    ],
+    aftermathParagraphs: [
+      "Each club played 144 games in 1995.",
+    ],
+    conclusionParagraphs: [
+      "The stoppage lasted 232 days. It canceled 948 games.",
+    ],
+  };
+
+  const compacted = blogHooks.compactSparseArticleBodySections(content);
+
+  assert.deepEqual(compacted.eyewitnessOrChronicle, []);
+  assert.deepEqual(compacted.aftermathParagraphs, []);
+  assert.deepEqual(compacted.overviewParagraphs, [
+    content.overviewParagraphs[0],
+    content.eyewitnessOrChronicle[0],
+  ]);
+  assert.deepEqual(compacted.conclusionParagraphs, [
+    content.aftermathParagraphs[0],
+    content.conclusionParagraphs[0],
+  ]);
+  assert.equal(content.eyewitnessOrChronicle.length, 1, "grounded source content is not mutated");
+});
+
+test("stored article HTML drops thin headings while preserving text, order, and figures", () => {
+  const html = `
+    <!-- Overview -->
+    <section class="mt-4"><h2 class="h3">The Contest and the Stakes</h2>
+      <p>The strike began on August 12, 1994. Negotiations had stalled.</p>
+    </section>
+    <!-- Eyewitness / Chronicle Accounts -->
+    <section class="mt-5"><h2 class="h3">How the Crowd Saw It</h2>
+      <figure><img alt="Baseball player"></figure>
+      <p>Neither season reached the usual 162 games.</p>
+    </section>
+    <!-- Aftermath -->
+    <section class="mt-5"><h2 class="h3">Records, Reactions, and Consequences</h2>
+      <p>Each club played 144 games in 1995.</p>
+    </section>
+    <!-- Conclusion -->
+    <section class="mt-5"><h2 class="h3">The Standard It Set</h2>
+      <p>The stoppage lasted 232 days. It canceled 948 games.</p>
+    </section>`;
+
+  const normalized = blogHooks.normalizeSparseArticleBodySectionsHtml(html);
+
+  assert.doesNotMatch(normalized, /How the Crowd Saw It/);
+  assert.doesNotMatch(normalized, /Records, Reactions, and Consequences/);
+  assert.match(normalized, /The Contest and the Stakes/);
+  assert.match(normalized, /The Standard It Set/);
+  assert.match(normalized, /alt="Baseball player"/);
+  assert.ok(
+    normalized.indexOf("Negotiations had stalled") <
+      normalized.indexOf("Neither season reached"),
+  );
+  assert.ok(
+    normalized.indexOf("Each club played 144 games") <
+      normalized.indexOf("The stoppage lasted 232 days"),
+  );
+  assert.equal(
+    blogHooks.normalizeSparseArticleBodySectionsHtml(normalized),
+    normalized,
+    "serve-time repair is idempotent",
+  );
+});
+
+test("saved articles are normalized once and public GETs use the serve-ready fast path", () => {
+  const workerSource = readFileSync(
+    new URL("../js/blog-ai-worker.js", import.meta.url),
+    "utf8",
+  );
+  const prepared = blogHooks.markArticleHtmlServeReady(
+    "<!doctype html><html><head><title>Ready</title></head><body><article><h1>Ready</h1></article></body></html>",
+  );
+  assert.match(prepared, /<!-- article-serve-ready-v2 -->/);
+  assert.equal(
+    blogHooks.markArticleHtmlServeReady(prepared),
+    prepared,
+    "save-time normalization must be idempotent",
+  );
+
+  const getStart = workerSource.indexOf("const postMatch = path.match");
+  const fastPath = workerSource.indexOf(
+    "html.includes(ARTICLE_SERVE_READY_MARKER)",
+    getStart,
+  );
+  const legacyPatch = workerSource.indexOf(
+    "const allowArticleKvBackgroundWrites",
+    getStart,
+  );
+  assert.ok(fastPath > getStart && fastPath < legacyPatch);
+  assert.match(
+    workerSource,
+    /const serveReadyHtml = markArticleHtmlServeReady\(checkedHtml\);[\s\S]*?blogKvPutIfChanged\([\s\S]*?serveReadyHtml/,
+  );
+  assert.match(workerSource, /path === "\/blog\/prepare-live-html"/);
+  assert.match(
+    workerSource,
+    /if \(html\.includes\(ARTICLE_SERVE_READY_MARKER\)\) \{[\s\S]*?changed: false/,
+    "the admin preparation route must not spend another KV write on marked HTML",
+  );
 });
 
 test("legacy article disclosures drop the guaranteed editorial-review claim", () => {

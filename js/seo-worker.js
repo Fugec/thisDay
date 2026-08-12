@@ -75,6 +75,7 @@ const HOMEPAGE_DESCRIPTION =
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
+const PERSON_PROSE_QUALITY_VERSION = 1;
 const SEO_HISTORY_QUALITY_GATE_VERSION = 2;
 const EVERGREEN_HISTORY_EDITION_VERSION = 1;
 const MIN_EVERGREEN_HISTORY_BODY_WORDS = 650;
@@ -599,7 +600,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
 const HISTORY_EDGE_CACHE_VERSION = 2;
-const PERSON_MEDIA_EDGE_CACHE_VERSION = 1;
+const PERSON_MEDIA_EDGE_CACHE_VERSION = 2;
 const DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 6;
 // Routes eligible for CF Cache API storage. Quiz pages are excluded because
 // the blog worker busts their KV key (quiz-page-v31) on publish; the CF Cache
@@ -2351,6 +2352,11 @@ function buildTlCardExtractSnippet(rawExtract, maxChars = 220) {
   return `${truncated.slice(0, lastSpace > 0 ? lastSpace : maxChars)}…`;
 }
 
+function personLeadQuestion(entity) {
+  const name = entity?.name || "This person";
+  return `Who ${entity?.deathDate ? "was" : "is"} ${name}?`;
+}
+
 function splitEntityHydratedSections(entity) {
   const text = String(entity.intro || entity.summary || "").replace(/\s+/g, " ").trim();
   if (!text) return [];
@@ -2374,13 +2380,14 @@ function splitEntityHydratedSections(entity) {
 
   const name = entity.name || "This subject";
   if (entity.type === "person") {
+    const leadHeading = personLeadQuestion(entity);
     // Two sections for people: everything but the last chunk under the opener,
     // the final chunk as a distinct significance section.
     if (sections.length <= 1) {
-      return sections.map((paragraph) => ({ heading: `Who was ${name}?`, paragraphs: [paragraph] }));
+      return sections.map((paragraph) => ({ heading: leadHeading, paragraphs: [paragraph] }));
     }
     return [
-      { heading: `Who was ${name}?`, paragraphs: sections.slice(0, -1) },
+      { heading: leadHeading, paragraphs: sections.slice(0, -1) },
       { heading: "Historical significance", paragraphs: [sections[sections.length - 1]] },
     ];
   }
@@ -2582,6 +2589,12 @@ async function updateEntityIndexEntry(env, entity) {
         }
       : {}),
     ...(entity.needsWikiRefresh ? { needsWikiRefresh: true } : {}),
+    ...(entity.type === "person" && entity.personProseQualityVersion
+      ? { personProseQualityVersion: entity.personProseQualityVersion }
+      : {}),
+    ...(entity.type === "person" && entity.needsProseEnrichment
+      ? { needsProseEnrichment: true }
+      : {}),
     ...(entity.needsEvergreenRefresh
       ? { needsEvergreenRefresh: true }
       : {}),
@@ -2590,6 +2603,14 @@ async function updateEntityIndexEntry(env, entity) {
   if (merged.indexable) {
     delete merged.needsWikiRefresh;
     delete merged.needsEvergreenRefresh;
+  }
+  if (
+    merged.type === "person" &&
+    merged.personProseQualityVersion === PERSON_PROSE_QUALITY_VERSION
+  ) {
+    delete merged.needsProseEnrichment;
+  } else if (merged.type === "person" && merged.needsProseEnrichment) {
+    delete merged.personProseQualityVersion;
   }
   // Only write when the entry actually changed. handleEntityPage calls this on
   // every entity page view; an unconditional put() rewrites the whole index on
@@ -2839,6 +2860,7 @@ function chunkSentences(sentences, maxWords = 150) {
 
 function rebuildPersonBodySections(entity) {
   const name = entity.name || "This person";
+  const leadHeading = personLeadQuestion(entity);
   const paragraphs = entityFactParagraphs(entity);
   if (!paragraphs.length) return splitEntityHydratedSections(entity);
 
@@ -2896,7 +2918,7 @@ function rebuildPersonBodySections(entity) {
 
   const sections = [];
   sections.push({
-    heading: `Who was ${name}?`,
+    heading: leadHeading,
     paragraphs: chunkSentences(openerSentences.length ? openerSentences : allSentences.slice(0, 1)),
   });
   if (significanceInput.length) {
@@ -2906,6 +2928,23 @@ function rebuildPersonBodySections(entity) {
     });
   }
   return sections.filter((section) => section.paragraphs.length > 0);
+}
+
+function personBodySectionsForRender(entity) {
+  const stored = stripGenericEntityContextSections(entity?.bodySections);
+  const reviewed =
+    entity?.personProseQualityVersion === PERSON_PROSE_QUALITY_VERSION &&
+    entityBodyWordCount({ bodySections: stored }) >= MIN_PERSON_ENTITY_BODY_WORDS &&
+    !hasIncompleteEntityParagraphs({ bodySections: stored });
+  if (reviewed) {
+    return stored.map((section, index) =>
+      index === 0 && /^Who (?:is|was)\b/i.test(String(section?.heading || ""))
+        ? { ...section, heading: personLeadQuestion(entity) }
+        : section,
+    );
+  }
+  const rebuilt = rebuildPersonBodySections(entity);
+  return rebuilt.length ? rebuilt : stored;
 }
 
 function ensureEntityContextSections(entity, type) {
@@ -3310,6 +3349,7 @@ async function createPersonEntityFromWikipediaRequest(env, slug, url) {
     updatedAt: new Date().toISOString(),
     source: "homepage-on-this-day",
     qualityGateVersion: SEO_ENTITY_QUALITY_GATE_VERSION,
+    needsProseEnrichment: true,
   };
   const wiki = await fetchEntityWikiHydration(baseEntity, "person").catch(() => ({}));
   const entity = {
@@ -3461,12 +3501,9 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     entity.relatedMovies = relatedMovies;
     entity.relatedMoviesSubjectQid = wikidataEntityId;
   } else if (type === "person") {
-    // Always normalise person bodies to the clean two-section layout at render
-    // time (deterministic, no KV write). This replaces stale three-section or
-    // malformed stored sections (e.g. a trailing empty "Section" block) so
-    // every people page shows a single "Who was …?" opener + significance.
-    const rebuiltSections = rebuildPersonBodySections(entity);
-    if (rebuiltSections.length) entity.bodySections = rebuiltSections;
+    // Preserve prose that passed the shared writing audit. Legacy, unreviewed,
+    // or malformed records still receive the deterministic clean rebuild.
+    entity.bodySections = personBodySectionsForRender(entity);
     // Up to two inline article images from the Wikipedia media-list (edge-cached
     // with the page; fail-open to text-only when the person has no usable media).
     let personEntityId = normalizeWikidataEntityId(
@@ -3496,6 +3533,8 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   }
   if (type === "person" && url.searchParams.has("repair")) {
     entity.bodySections = rebuildPersonBodySections(entity);
+    delete entity.personProseQualityVersion;
+    entity.needsProseEnrichment = true;
     entity.relatedTopics = inferEntityTopicPillars(entity, type);
     entity.updatedAt = new Date().toISOString();
     const repairWrite = env.BLOG_AI_KV
@@ -11872,6 +11911,7 @@ export const __datePageEngagementTestHooks = {
 export const __personIdentityTestHooks = {
   isLikelyWikipediaPersonEntity,
   seoEntityQualityEligible,
+  personBodySectionsForRender,
   updateEntityIndexEntry,
   refreshEntityIndexFromStoredEntities,
 };

@@ -657,7 +657,7 @@ test("person and born/died cache keys advance without invalidating unrelated rou
     historyHooks.edgeCacheKey(
       new URL("https://thisday.info/people/woody-harrelson/"),
     ),
-    /__people_media_v=1$/,
+    /__people_media_v=2$/,
   );
   assert.match(
     historyHooks.edgeCacheKey(

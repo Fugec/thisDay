@@ -18,6 +18,25 @@ function longBody(heading = "Life") {
   }];
 }
 
+function reviewedPersonBody() {
+  return [
+    {
+      heading: "Early work",
+      paragraphs: [
+        "Born into a family interested in mathematics, the subject received a demanding private education that combined calculation, languages, and music. Tutors recorded a sustained interest in machines and notation, while correspondence shows how those studies developed into a disciplined approach to difficult technical questions.",
+        "During her early adulthood, meetings with engineers introduced plans for mechanical calculating devices. Detailed notes from those exchanges connected abstract mathematical operations with practical machinery, giving later readers a concrete record of how she evaluated both the promise and the limitations of the designs.",
+      ],
+    },
+    {
+      heading: "Published contribution",
+      paragraphs: [
+        "Her best-known publication translated a technical account and added extensive explanatory notes. Those additions described a sequence for calculating Bernoulli numbers and examined how a programmable machine might manipulate symbols under stated rules, extending the discussion beyond ordinary numerical calculation.",
+        "Later historians returned to the notes because they documented an unusually broad view of general-purpose computation. The surviving text supports that specific contribution without requiring claims about modern devices that the nineteenth-century source could not have anticipated or directly described.",
+      ],
+    },
+  ];
+}
+
 test("blog person profiles require Wikidata human identity", () => {
   const validPerson = {
     type: "person",
@@ -239,6 +258,147 @@ test("SEO person creation and quality gates require Wikidata Q5", () => {
     }),
     false,
   );
+});
+
+test("generated people prose follows the shared writing audit", () => {
+  const clean = {
+    type: "person",
+    name: "Ada Lovelace",
+    bodySections: reviewedPersonBody(),
+    overviewCards: [],
+  };
+  assert.deepEqual(blogHooks.generatedPageWritingQualityIssues(clean), []);
+  assert.equal(blogHooks.personEntityWritingQualityReady(clean), true);
+
+  const repetitive = {
+    ...clean,
+    overviewCards: [
+      {
+        label: "Known for",
+        value: "Ada Lovelace wrote detailed notes about Charles Babbage's proposed Analytical Engine and described a method for calculating Bernoulli numbers.",
+      },
+      {
+        label: "Main role",
+        value: "Ada Lovelace worked as a mathematical writer whose published commentary examined how the proposed machine could manipulate symbols according to rules.",
+      },
+    ],
+    bodySections: [{
+      heading: "Drafting",
+      paragraphs: [
+        "According to the source material, her work formed a rich tapestry of ideas that was significant in many ways and remains important to remember.",
+      ],
+    }],
+    timeline: [{
+      date: "1843",
+      label: "This pivotal moment was a testament to an enduring legacy.",
+    }],
+  };
+  const issues = blogHooks.generatedPageWritingQualityIssues(repetitive);
+  assert.ok(issues.some((issue) => /repeats the subject-led opening/.test(issue)));
+  assert.ok(issues.some((issue) => /source-process|banned phrase|generic/i.test(issue)));
+  assert.ok(issues.some((issue) => issue.startsWith("timeline[0].label")));
+});
+
+test("people rendering preserves reviewed prose and rebuilds unreviewed prose", () => {
+  const reviewed = reviewedPersonBody();
+  const entity = {
+    type: "person",
+    name: "Ada Lovelace",
+    intro: biographyIntro,
+    summary: biographyIntro,
+    bodySections: reviewed,
+    personProseQualityVersion: 1,
+  };
+  assert.deepEqual(seoHooks.personBodySectionsForRender(entity), reviewed);
+
+  const unreviewed = seoHooks.personBodySectionsForRender({
+    ...entity,
+    personProseQualityVersion: undefined,
+  });
+  assert.notDeepEqual(unreviewed, reviewed);
+  assert.match(unreviewed[0].heading, /^Who is Ada Lovelace\?$/);
+
+  const deceased = seoHooks.personBodySectionsForRender({
+    ...entity,
+    deathDate: "November 27, 1852",
+    personProseQualityVersion: undefined,
+  });
+  assert.match(deceased[0].heading, /^Who was Ada Lovelace\?$/);
+
+  assert.equal(
+    blogHooks.buildFallbackEntityBodySections(entity, {})[0].heading,
+    "Who is Ada Lovelace?",
+  );
+  assert.equal(
+    blogHooks.buildFallbackEntityBodySections(
+      { ...entity, deathDate: "November 27, 1852" },
+      {},
+    )[0].heading,
+    "Who was Ada Lovelace?",
+  );
+});
+
+test("born, died, and article profiles share one bounded prose queue", () => {
+  const selected = blogHooks.selectPendingPersonProseCandidates([
+    {
+      type: "person",
+      slug: "article-person",
+      wikiUrl: "https://en.wikipedia.org/wiki/Article_Person",
+      needsProseEnrichment: true,
+      updatedAt: "2026-08-12T02:00:00Z",
+    },
+    {
+      type: "person",
+      slug: "born-person",
+      wikiUrl: "https://en.wikipedia.org/wiki/Born_Person",
+      needsProseEnrichment: true,
+      updatedAt: "2026-08-12T01:00:00Z",
+    },
+    {
+      type: "person",
+      slug: "already-reviewed",
+      wikiUrl: "https://en.wikipedia.org/wiki/Reviewed_Person",
+      needsProseEnrichment: true,
+      personProseQualityVersion: 1,
+    },
+  ], { limit: 5 });
+
+  assert.deepEqual(selected.map((entry) => entry.slug), ["born-person"]);
+});
+
+test("the SEO entity index retains pending and reviewed prose state", async () => {
+  let storedIndex = [];
+  const env = {
+    BLOG_AI_KV: {
+      get: async () => JSON.stringify(storedIndex),
+      put: async (_key, value) => {
+        storedIndex = JSON.parse(value);
+      },
+    },
+  };
+  const base = {
+    type: "person",
+    slug: "ada-lovelace",
+    name: "Ada Lovelace",
+    wikiUrl: "https://en.wikipedia.org/wiki/Ada_Lovelace",
+    summary: biographyIntro,
+    intro: biographyIntro,
+    bodySections: reviewedPersonBody(),
+  };
+
+  await seoHooks.updateEntityIndexEntry(env, {
+    ...base,
+    needsProseEnrichment: true,
+  });
+  assert.equal(storedIndex[0].needsProseEnrichment, true);
+  assert.equal(storedIndex[0].personProseQualityVersion, undefined);
+
+  await seoHooks.updateEntityIndexEntry(env, {
+    ...base,
+    personProseQualityVersion: 1,
+  });
+  assert.equal(storedIndex[0].personProseQualityVersion, 1);
+  assert.equal(storedIndex[0].needsProseEnrichment, undefined);
 });
 
 test("protected legacy person URLs cannot be changed by SEO hydration", async () => {

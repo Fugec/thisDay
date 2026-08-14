@@ -102,7 +102,26 @@ function dateConflicts(value, sourceKey, sourceYear) {
 
 export function validatedPersonRenderDates(entity) {
   const evidence = sourceLifeDateEvidence(entity);
-  const birthConflict = dateConflicts(
+  const storedBirthDate = String(entity?.birthDate || "").trim();
+  const storedDeathDate = String(entity?.deathDate || "").trim();
+  const storedBirthKey = calendarDateKeys(storedBirthDate)[0] || "";
+  const storedDeathKey = calendarDateKeys(storedDeathDate)[0] || "";
+  const storedBirthYear = storedBirthKey
+    ? Number(storedBirthKey.slice(0, 4))
+    : yearFromValue(storedBirthDate);
+  const storedDeathYear = storedDeathKey
+    ? Number(storedDeathKey.slice(0, 4))
+    : yearFromValue(storedDeathDate);
+  const birthAfterDeath = Boolean(
+    storedBirthYear &&
+      storedDeathYear &&
+      (storedBirthYear > storedDeathYear ||
+        (storedBirthYear === storedDeathYear &&
+          storedBirthKey &&
+          storedDeathKey &&
+          storedBirthKey > storedDeathKey)),
+  );
+  const birthConflict = birthAfterDeath || dateConflicts(
     entity?.birthDate,
     evidence.birthKey,
     evidence.birthYear,
@@ -113,8 +132,8 @@ export function validatedPersonRenderDates(entity) {
     evidence.deathYear,
   );
   return {
-    birthDate: birthConflict ? "" : String(entity?.birthDate || "").trim(),
-    deathDate: deathConflict ? "" : String(entity?.deathDate || "").trim(),
+    birthDate: birthConflict ? "" : storedBirthDate,
+    deathDate: deathConflict ? "" : storedDeathDate,
     birthConflict,
     deathConflict,
   };

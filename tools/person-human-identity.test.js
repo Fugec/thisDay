@@ -474,6 +474,22 @@ test("person rendering suppresses a stored date that conflicts with source biogr
   assert.equal(rendered._personDateConflictSuppressed, true);
 });
 
+test("person rendering suppresses an impossible birth date after the death date", () => {
+  const rendered = seoHooks.personEntityForRender({
+    type: "person",
+    name: "Dutty Boukman",
+    description: "Early leader of the Haitian Revolution",
+    birthDate: "January 1, 1800",
+    deathDate: "November 7, 1791",
+    intro:
+      "Dutty Boukman was an early leader of the Haitian Revolution who died on 7 November 1791.",
+    bodySections: [],
+  });
+  assert.equal(rendered.birthDate, "");
+  assert.equal(rendered.deathDate, "November 7, 1791");
+  assert.equal(rendered._personDateConflictSuppressed, true);
+});
+
 test("protected legacy person URLs cannot be changed by SEO hydration", async () => {
   const index = [
     {

@@ -32,6 +32,13 @@ test("public CSP permits Open Library covers that redirect to Archive.org", () =
   );
 });
 
+test("history pages bypass edge entries cached before the public CSP update", () => {
+  const version = Number(
+    seoWorker.match(/const HISTORY_EDGE_CACHE_VERSION = (\d+);/)?.[1] || 0,
+  );
+  assert.ok(version >= 3, `history edge cache version is still ${version}`);
+});
+
 test("all public HTML responses receive the shared security contract", async () => {
   const response = hooks.applyPublicHtmlSecurityHeaders(
     new Response("<!doctype html><h1>Person page</h1>", {

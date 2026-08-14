@@ -14,6 +14,72 @@ const richHistoryBody = [{
   ).join(" ")],
 }];
 
+test("published YouTube replacement preserves a sourced timeline", () => {
+  const before = `<!doctype html><html><head></head><body>
+    <!-- YouTube -->
+    <div class="my-4 p-4 rounded"><div>Watch on YouTube</div><a href="https://www.youtube.com/results">Search Videos</a></div>
+    <section class="article-timeline mb-4" data-original-value-module="sourced-timeline" aria-label="Timeline">
+      <ol><li class="tl-entry">1791</li><li class="tl-entry">1804</li></ol>
+    </section>
+    <!-- Aftermath -->
+    <section><h2>Aftermath</h2></section>
+  </body></html>`;
+
+  const after = blogHooks.replaceYoutubeModuleForServe(before, "J4NkMPQG9TI");
+
+  assert.match(after, /youtube\.com\/embed\/J4NkMPQG9TI/);
+  assert.doesNotMatch(after, /Search Videos/);
+  assert.equal((after.match(/class="tl-entry"/g) || []).length, 2);
+  assert.match(after, /data-original-value-module="sourced-timeline"/);
+  assert.match(after, /<!-- Aftermath -->/);
+});
+
+test("Related Questions never copies an exact narrative sentence", () => {
+  const repeated =
+    "The revolution created a state that was free from slavery and ruled by former captives.";
+  const html = blogHooks.buildArticleRelatedQuestionsBlock({
+    eventTitle: "Haitian Revolution",
+    historicalDate: "August 14, 1791",
+    location: "Saint-Domingue",
+    overviewParagraphs: [
+      "The uprising began after a gathering near Cap-Francais in August 1791.",
+    ],
+    eyewitnessOrChronicle: [
+      "Surviving accounts describe coordinated attacks on plantations across the northern plain.",
+    ],
+    aftermathParagraphs: [
+      "The conflict continued until Haiti declared independence in 1804.",
+    ],
+    conclusionParagraphs: [repeated],
+    quickFacts: [{ label: "Significance", value: repeated }],
+    keyTerms: [{ term: "Toussaint Louverture", type: "person" }],
+  });
+
+  assert.equal(html.split(repeated).length - 1, 0);
+  assert.match(html, /documented consequences continued after August 14, 1791/);
+});
+
+test("serve-time cleanup removes an existing duplicated Related Questions item", () => {
+  const repeated =
+    "The revolution created a state that was free from slavery and ruled by former captives.";
+  const before = `<article>
+    <section><h2>Legacy</h2><p>${repeated}</p></section>
+    <section class="faq-section mt-5" aria-label="Related questions">
+      <h2>Questions readers ask</h2>
+      <div class="faq-list">
+        <div class="faq-item"><button>Why did it matter?</button><div class="faq-a"><p>${repeated}</p></div></div>
+        <div class="faq-item"><button>Who was involved?</button><div class="faq-a"><p>Key figures included Toussaint Louverture.</p></div></div>
+      </div>
+    </section>
+  </article>`;
+
+  const after = blogHooks.normalizeArticleRelatedQuestionsDuplicationHtml(before);
+
+  assert.equal(after.split(repeated).length - 1, 1);
+  assert.doesNotMatch(after, /Why did it matter/);
+  assert.match(after, /Key figures included Toussaint Louverture/);
+});
+
 test("repetitive-opening audit catches today's section-restart pattern across prose modules", () => {
   const content = {
     title: "What led to the 1994 baseball strike?",
@@ -711,6 +777,35 @@ test("history card promotion is not confused by its CSS class name", () => {
     (promoted.match(/<section class="story-topic-section"/g) || []).length,
     1,
   );
+});
+
+test("serve-time normalization removes a sparse current-gate history card", () => {
+  const stored = `<!doctype html><html><head></head><body>
+    <section class="story-topic-section" aria-label="Explore this event">
+      <h2 class="story-topic-heading">Explore this event</h2>
+      <a href="/history/haitian-revolution-1791/" class="story-topic-card" data-history-entity-link="1">Unfinished history page</a>
+    </section>
+    <p id="article-continues">The published article remains available.</p>
+  </body></html>`;
+  const entityMeta = JSON.stringify([{
+    type: "event",
+    slug: "haitian-revolution-1791",
+    name: "Haitian Revolution",
+    url: "/history/haitian-revolution-1791/",
+    wikiUrl: "https://en.wikipedia.org/wiki/Haitian_Revolution",
+    historyQualityGateVersion: 2,
+    historyLinkEligible: true,
+    historyCardQualified: true,
+    bodyWordCount: 296,
+  }]);
+
+  const normalized = blogHooks.normalizeArticleHistoryDiscoveryCardHtml(
+    stored,
+    entityMeta,
+  );
+
+  assert.doesNotMatch(normalized, /story-topic-section|data-history-entity-link/);
+  assert.match(normalized, /id="article-continues"/);
 });
 
 test("serve-time history link migration preserves the date article canonical", () => {

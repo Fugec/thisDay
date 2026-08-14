@@ -377,6 +377,7 @@ test("canonical path mapping leaves people and unrelated history URLs alone", ()
 
 test("a future qualified evergreen entity renders indexable with its own canonical and sources", async () => {
   const entity = dynamicEvergreenEntity();
+  assert.ok(hooks.entityBodyWordCount(entity) >= 650);
   assert.equal(hooks.seoEvergreenHistoryEditionEligible(entity), true);
   assert.equal(hooks.seoHistoryEntityQualityEligible(entity), true);
   assert.equal(
@@ -418,4 +419,55 @@ test("a future qualified evergreen entity renders indexable with its own canonic
     html,
     /Use the dated article for the day-specific account/,
   );
+});
+
+test("a sparse current-gate evergreen redirects to its article until the full edition passes", async () => {
+  const entity = dynamicEvergreenEntity();
+  entity.slug = "haitian-revolution-1791";
+  entity.url = "/history/haitian-revolution-1791/";
+  entity.wikiUrl = "https://en.wikipedia.org/wiki/Haitian_Revolution";
+  entity.name = "Haitian Revolution";
+  entity.sourcePostUrl = "/blog/14-august-2026/";
+  entity.sourcePostTitle = "How Did the Haitian Revolution Begin?";
+  entity.relatedPosts = ["14-august-2026"];
+  entity.bodySections = entity.bodySections.slice(0, 1);
+  entity.historyLinkEligible = false;
+  entity.needsEvergreenRefresh = true;
+  delete entity.evergreenHistoryVersion;
+  const values = {
+    "entity-v1:event:haitian-revolution-1791": JSON.stringify(entity),
+    index: JSON.stringify([{
+      slug: "14-august-2026",
+      title: "How Did the Haitian Revolution Begin?",
+      description: "The dated source article for the pending history edition.",
+      publishedAt: "2026-08-14T00:15:00.000Z",
+    }]),
+  };
+  const env = {
+    BLOG_AI_KV: {
+      async get(key, options) {
+        const value = values[key] ?? null;
+        if (options?.type === "json" && value) return JSON.parse(value);
+        return value;
+      },
+    },
+  };
+
+  const response = await hooks.handleFetchRequest(
+    new Request(
+      "https://thisday.info/history/haitian-revolution-1791/?nocache=1",
+    ),
+    env,
+    {},
+  );
+
+  assert.equal(hooks.seoHistoryEntityQualityEligible(entity), false);
+  assert.ok(hooks.entityBodyWordCount(entity) < 650);
+  assert.equal(response.status, 302);
+  assert.equal(
+    response.headers.get("location"),
+    "https://thisday.info/blog/14-august-2026/",
+  );
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("x-robots-tag"), "noindex, follow");
 });

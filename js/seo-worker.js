@@ -605,7 +605,7 @@ const SPECULATION_RULES_JSON = JSON.stringify({
 // staleness window (publish busts quiz-page-v31 only, not these), so a 1h edge
 // TTL never makes a page staler than it already is.
 const EDGE_HTML_CACHE_TTL = 3600; // seconds (1 hour)
-const HISTORY_EDGE_CACHE_VERSION = 2;
+const HISTORY_EDGE_CACHE_VERSION = 3;
 const PERSON_MEDIA_EDGE_CACHE_VERSION = 2;
 const DATE_PERSON_MEDIA_EDGE_CACHE_VERSION = 6;
 // Routes eligible for CF Cache API storage. Quiz pages are excluded because
@@ -3554,6 +3554,26 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
   }
   const posts = await getBlogIndexEntries(env);
   entity = syncEntitySourcePostFromIndex(entity, posts);
+  if (
+    type === "event" &&
+    !historyPage &&
+    entity.historyQualityGateVersion === SEO_HISTORY_QUALITY_GATE_VERSION &&
+    !seoHistoryEntityQualityEligible(entity)
+  ) {
+    const relatedPostSlug = Array.isArray(entity.relatedPosts)
+      ? entity.relatedPosts.find(Boolean)
+      : "";
+    const fallbackPath = entity.sourcePostUrl ||
+      (relatedPostSlug ? `/blog/${relatedPostSlug}/` : "/blog/");
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: new URL(fallbackPath, url.origin).toString(),
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, follow",
+      },
+    });
+  }
   entity = await hydrateSparseEntity(env, entity, type, ctx);
   entity.relatedTopics = inferEntityTopicPillars(entity, type);
   const entityMediaTitle =

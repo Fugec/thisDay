@@ -1544,28 +1544,75 @@ function buildArticleRelatedQuestionsBlock(content, pillars = []) {
   const sigFact =
     (content.quickFacts || []).find((f) => /significance|legacy|impact/i.test(f?.label || ""))?.value || "";
   const firstOf = (arr) => extractFirstSentence((arr || [])[0] || "").trim();
+  const bodySentenceKeys = new Set(
+    [
+      ...(content.overviewParagraphs || []),
+      ...(content.eyewitnessOrChronicle || []),
+      ...(content.eyewitnessParagraphs || []),
+      ...(content.aftermathParagraphs || []),
+      ...(content.conclusionParagraphs || []),
+    ]
+      .flatMap((paragraph) => splitSentences(paragraph, 15))
+      .map((sentence) => normalizeForCompare(sentence))
+      .filter(Boolean),
+  );
+  const usedAnswerKeys = new Set();
+  const chooseDistinctAnswer = (candidates, fallback) => {
+    for (const candidate of candidates) {
+      const answer = String(candidate || "").replace(/\s+/g, " ").trim();
+      if (!answer) continue;
+      const answerKey = normalizeForCompare(answer);
+      const copiesBodySentence = splitSentences(answer, 15).some((sentence) =>
+        bodySentenceKeys.has(normalizeForCompare(sentence)),
+      );
+      if (!answerKey || copiesBodySentence || usedAnswerKeys.has(answerKey)) continue;
+      usedAnswerKeys.add(answerKey);
+      return answer;
+    }
+    const answer = String(fallback || "").replace(/\s+/g, " ").trim();
+    usedAnswerKeys.add(normalizeForCompare(answer));
+    return answer;
+  };
 
   // Each question gets a SUBSTANTIVE answer: prefer compact structured data
   // (timeline lead-up/aftermath, key people, the Significance fact); otherwise
   // summarize the relevant body section. We no longer emit "see the section
   // above" pointer text — every question must actually be answered.
-  const overviewAnswer =
-    (leadup.length ? `The lead-up included ${leadup.slice(0, 3).join("; ")}.` : "") ||
-    firstOf(content.overviewParagraphs) ||
-    `${nounLabel} unfolded on ${date}${loc}.`;
-  const eyewitnessAnswer =
-    (persons.length ? `Key figures included ${persons.slice(0, 3).join(", ")}.` : "") ||
-    firstOf(content.eyewitnessOrChronicle) ||
-    firstOf(content.overviewParagraphs) ||
-    `The principal figures in ${nounLabel} are profiled above.`;
-  const aftermathAnswer =
-    (aftermathEntries.length ? `In the aftermath: ${aftermathEntries.slice(0, 3).join("; ")}.` : "") ||
-    firstOf(content.aftermathParagraphs) ||
-    `${nounLabel} reshaped what followed on and after ${date}.`;
-  const legacyAnswer =
-    sigFact ||
-    firstOf(content.conclusionParagraphs) ||
-    `${nounLabel} remains significant for how it shaped later events.`;
+  const overviewAnswer = chooseDistinctAnswer(
+    [
+      leadup.length ? `The lead-up included ${leadup.slice(0, 3).join("; ")}.` : "",
+      firstOf(content.overviewParagraphs),
+    ],
+    `${nounLabel} unfolded on ${date}${loc}.`,
+  );
+  const eyewitnessAnswer = chooseDistinctAnswer(
+    [
+      persons.length ? `Key figures included ${persons.slice(0, 3).join(", ")}.` : "",
+      firstOf(content.eyewitnessOrChronicle),
+      firstOf(content.overviewParagraphs),
+    ],
+    `${nounLabel} involved the people and institutions identified by the surviving evidence.`,
+  );
+  const aftermathAnswer = chooseDistinctAnswer(
+    [
+      aftermathEntries.length ? `In the aftermath: ${aftermathEntries.slice(0, 3).join("; ")}.` : "",
+      firstOf(content.aftermathParagraphs),
+    ],
+    `${nounLabel} reshaped what followed on and after ${date}.`,
+  );
+  const legacyAnswer = chooseDistinctAnswer(
+    [
+      sigFact,
+      ...(content.analysisGood || []).map((item) => extractFirstSentence(item?.detail || "")),
+      extractFirstSentence(content.contentRationale || ""),
+      extractFirstSentence(content.editorialNote || ""),
+      aftermathEntries.length
+        ? `Its longer aftermath included ${aftermathEntries.slice(-2).join("; ")}.`
+        : "",
+      firstOf(content.conclusionParagraphs),
+    ],
+    `${nounLabel} remains significant because its documented consequences continued after ${date}.`,
+  );
   const topicLinks = getArticleTopicHubMatches(content, 3, pillars);
   const [q1, q2, q3, q4] = getQuestionHeadings(nounLabel, pillars);
 
@@ -5461,8 +5508,13 @@ export default {
       if (html) {
         if (html.includes(ARTICLE_SERVE_READY_MARKER)) {
           return preparedHtmlResponse(
-            normalizeArticleFloatContainmentHtml(
-              injectPublishedYoutubeForServe(html, slug, ytRaw),
+            normalizeArticleHistoryDiscoveryCardHtml(
+              normalizeArticleRelatedQuestionsDuplicationHtml(
+                normalizeArticleFloatContainmentHtml(
+                  injectPublishedYoutubeForServe(html, slug, ytRaw),
+                ),
+              ),
+              articleEntitiesRaw,
             ),
           );
         }
@@ -6477,22 +6529,9 @@ export default {
         }
         const ytEntry = ytRaw ? (JSON.parse(ytRaw)[slug] ?? null) : null;
         if (ytEntry?.youtubeId && ytEntry.privacy !== "private") {
-          const ytIframe = `<!-- YouTube -->
-          <div class="my-4">
-            <iframe
-              width="100%"
-              style="aspect-ratio:9/16;border:none;border-radius:8px"
-              src="https://www.youtube.com/embed/${ytEntry.youtubeId}"
-              title="Watch on YouTube"
-              allowfullscreen
-              loading="lazy"
-            ></iframe>
-          </div>
-
-          <!-- Aftermath -->`;
-          let ytHtml = patchedHtml.replace(
-            /<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/,
-            ytIframe,
+          let ytHtml = replaceYoutubeModuleForServe(
+            patchedHtml,
+            ytEntry.youtubeId,
           );
           // Normalize older non-www Shorts links in stored HTML/JSON-LD.
           ytHtml = ytHtml.replace(
@@ -11931,7 +11970,8 @@ async function postPublishEnrichmentStatus(env, slug, draft = null) {
   const figureCount = countRenderedInlineArticleFigures(html);
   const quizReady = Boolean(parseValidBlogQuiz(quizRaw));
   const evergreenReady = Boolean(
-    html?.includes('data-history-entity-link="1"'),
+    html?.includes('data-history-entity-link="1"') &&
+    entityMeta.some((entity) => isHistoryEntityDiscoveryLinkEligible(entity)),
   );
   const attemptedAt = payload?.postPublishEnrichment?.entitiesAttemptedAt;
   const primaryEvergreenCandidate =
@@ -13199,8 +13239,7 @@ function buildEvergreenHistorySlug(entity, content) {
 }
 
 function verifiedEvergreenHistorySources(content) {
-  return sourcePagesFromContent(content)
-    .filter((page) => {
+  const verified = sourcePagesFromContent(content).filter((page) => {
       if (!isDirectCitationUrl(page.pageUrl)) return false;
       try {
         return (
@@ -13210,8 +13249,8 @@ function verifiedEvergreenHistorySources(content) {
       } catch {
         return false;
       }
-    })
-    .slice(0, 6);
+    });
+  return prioritizeIndependentSourcePages(verified, 6);
 }
 
 function evergreenHistorySourceLinks(content) {
@@ -13326,14 +13365,67 @@ function extractEvergreenHistoryArticleParagraphsFromHtml(html) {
   return paragraphs;
 }
 
+function extractEvergreenHistorySourcesFromHtml(html) {
+  const source = String(html || "");
+  const centralClaim = decodeSourceDocumentText(
+    source.match(
+      /<p\b[^>]*\bclass="[^"]*\bevidence-map-claim\b[^"]*"[^>]*>([\s\S]*?)<\/p>/i,
+    )?.[1] || "",
+  ).replace(/^Central claim checked:\s*/i, "");
+  const pages = [];
+  for (const row of source.matchAll(/<tr\b([^>]*)>([\s\S]*?)<\/tr>/gi)) {
+    const attributes = row[1] || "";
+    if (!/\bclass="[^"]*\bevidence-map-row\b/i.test(attributes)) continue;
+    const role = attributes.match(/\bdata-evidence-role="([^"]+)"/i)?.[1] || "";
+    const anchor = row[2].match(
+      /<a\b[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i,
+    );
+    if (!anchor) continue;
+    const pageUrl = unesc(anchor[1]).trim();
+    if (!isDirectCitationUrl(pageUrl)) continue;
+    const rawLabel = decodeSourceDocumentText(anchor[2]);
+    const pageTitle = rawLabel.replace(/\s+·\s+[^·]+$/, "").trim();
+    pages.push({
+      pageTitle: pageTitle || sourcePublisherName(pageUrl),
+      pageUrl,
+      publisher: sourcePublisherName(pageUrl),
+      ...(centralClaim ? { supportedClaims: [centralClaim] } : {}),
+      ...(role === "independent"
+        ? {
+            verifiedIndependent: true,
+            verificationMethod: "stored-evidence-map",
+          }
+        : {}),
+    });
+  }
+  return normalizeSourcePages(pages);
+}
+
+function evergreenHistoryHasIndependentSourceLinks(entity) {
+  return (Array.isArray(entity?.sourceLinks) ? entity.sourceLinks : []).some(
+    (source) => {
+      if (source?.verifiedIndependent !== true) return false;
+      try {
+        return !new URL(source.url).hostname.toLowerCase().endsWith("wikipedia.org");
+      } catch {
+        return false;
+      }
+    },
+  );
+}
+
 async function restorePendingEvergreenHistoryEvidenceFromPost(env, entity) {
+  const evidenceIsThin =
+    evergreenHistoryEvidenceWordCount(entity?.evergreenEvidence) <
+    MIN_EVERGREEN_HISTORY_EVIDENCE_WORDS;
+  const independentSourceMissing =
+    !evergreenHistoryHasIndependentSourceLinks(entity);
   if (
     !env?.BLOG_AI_KV ||
     entity?.type !== "event" ||
     entity.historyQualityGateVersion !== BLOG_HISTORY_QUALITY_GATE_VERSION ||
     entity.needsEvergreenRefresh !== true ||
-    evergreenHistoryEvidenceWordCount(entity.evergreenEvidence) >=
-      MIN_EVERGREEN_HISTORY_EVIDENCE_WORDS
+    (!evidenceIsThin && !independentSourceMissing)
   ) {
     return entity;
   }
@@ -13346,7 +13438,10 @@ async function restorePendingEvergreenHistoryEvidenceFromPost(env, entity) {
     .catch(() => null);
   const recoveredParagraphs =
     extractEvergreenHistoryArticleParagraphsFromHtml(postHtml);
-  if (recoveredParagraphs.length === 0) return entity;
+  const recoveredSources = extractEvergreenHistorySourcesFromHtml(postHtml);
+  if (recoveredParagraphs.length === 0 && recoveredSources.length === 0) {
+    return entity;
+  }
   const existingEvidence =
     entity.evergreenEvidence && typeof entity.evergreenEvidence === "object"
       ? entity.evergreenEvidence
@@ -13366,7 +13461,41 @@ async function restorePendingEvergreenHistoryEvidenceFromPost(env, entity) {
       seen.add(normalized);
       return true;
     }).slice(0, 18),
+    sourcePages: prioritizeIndependentSourcePages([
+      ...(Array.isArray(existingEvidence.sourcePages)
+        ? existingEvidence.sourcePages
+        : []),
+      ...recoveredSources,
+    ], 6),
   };
+  const sourceLinks = [
+    ...(Array.isArray(entity.sourceLinks) ? entity.sourceLinks : []),
+    ...recoveredSources.map((source) => ({
+      label: source.pageTitle || source.publisher || sourcePublisherName(source.pageUrl),
+      url: source.pageUrl,
+      publisher: source.publisher || sourcePublisherName(source.pageUrl),
+      ...(source.verifiedIndependent === true
+        ? { verifiedIndependent: true }
+        : {}),
+    })),
+  ];
+  const sourceLinksByUrl = new Map();
+  for (const source of sourceLinks) {
+    const url = String(source?.url || "").trim();
+    if (!url) continue;
+    const existing = sourceLinksByUrl.get(url) || {};
+    sourceLinksByUrl.set(url, {
+      ...existing,
+      ...source,
+      ...(existing.verifiedIndependent === true || source.verifiedIndependent === true
+        ? { verifiedIndependent: true }
+        : {}),
+    });
+  }
+  entity.sourceLinks = prioritizeIndependentSourceLinks(
+    [...sourceLinksByUrl.values()],
+    6,
+  );
   return entity;
 }
 
@@ -13622,25 +13751,7 @@ function isHistoryEntityDiscoveryLinkEligible(entity) {
       return true;
     }
     if (evergreenHistoryEditionQuality(entity).ok) return true;
-    // The full AI-generated edition (generateEvergreenHistoryEdition) is a
-    // best-effort async pass that can fail on a bad AI response, and the
-    // daily backlog queue can starve a candidate indefinitely if it does
-    // (2026-07-27: selectPendingEvergreenHistoryCandidates sorts oldest-
-    // updatedAt-first with limit=1, and a failed attempt never advances
-    // updatedAt, so a single stuck entry blocks every other one forever).
-    // The destination /history/ page already renders a real, non-empty page
-    // from just the deterministic bodySections built at entity-creation time
-    // (seo-worker.js's hydrateSparseEntity only re-hydrates below its own
-    // MIN_EVENT_ENTITY_BODY_WORDS=150 floor), so gate the CARD on that same
-    // floor rather than on a lucky AI call landing. This makes the card show
-    // right after core post-publish entity creation instead of only after
-    // (if ever) a separate background promotion succeeds — and once
-    // eligible this way, it can only become MORE eligible later (a
-    // successful edition still upgrades the page), never less, so it never
-    // has to disappear again. A live 2026-07-27 entity (218 words) verified
-    // this floor: 300 (matching the legacy fallback below) was too strict
-    // for the deterministic 2-section content this path actually produces.
-    return entityContentWordCount(entity) >= 150;
+    return false;
   }
   if (entity.historyLinkEligible === true) return true;
   if (entity.historyLinkEligible === false) return false;
@@ -14627,8 +14738,7 @@ function attachSelectedEventSourcePages(content, selectedEvent) {
 }
 
 function compactSourcePagesForIndex(content) {
-  return sourcePagesFromContent(content)
-    .slice(0, 6)
+  return prioritizeIndependentSourcePages(sourcePagesFromContent(content), 6)
     .map((page) => ({
       pageTitle: page.pageTitle,
       pageUrl: page.pageUrl,
@@ -14641,6 +14751,56 @@ function compactSourcePagesForIndex(content) {
       ...(page.verificationMethod ? { verificationMethod: page.verificationMethod } : {}),
     }))
     .filter((page) => page.pageTitle || page.pageUrl);
+}
+
+function prioritizeIndependentSourcePages(pages, limit = 6) {
+  const normalized = normalizeSourcePages(pages);
+  const first = normalized[0] || null;
+  const independent = normalized.filter((page) => {
+    if (page.verifiedIndependent !== true) return false;
+    try {
+      return !new URL(page.pageUrl).hostname.toLowerCase().endsWith("wikipedia.org");
+    } catch {
+      return false;
+    }
+  });
+  return normalizeSourcePages([
+    ...(first ? [first] : []),
+    ...independent,
+    ...normalized,
+  ]).slice(0, Math.max(1, Number(limit) || 6));
+}
+
+function prioritizeIndependentSourceLinks(sources, limit = 6) {
+  const normalized = [];
+  const seen = new Set();
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const url = String(source?.url || "").trim();
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    normalized.push({ ...source, url });
+  }
+  const first = normalized[0] || null;
+  const independent = normalized.filter((source) => {
+    if (source.verifiedIndependent !== true) return false;
+    try {
+      return !new URL(source.url).hostname.toLowerCase().endsWith("wikipedia.org");
+    } catch {
+      return false;
+    }
+  });
+  const prioritized = [];
+  const prioritizedUrls = new Set();
+  for (const source of [
+    ...(first ? [first] : []),
+    ...independent,
+    ...normalized,
+  ]) {
+    if (prioritizedUrls.has(source.url)) continue;
+    prioritizedUrls.add(source.url);
+    prioritized.push(source);
+  }
+  return prioritized.slice(0, Math.max(1, Number(limit) || 6));
 }
 
 function extractSourcePagesFromHtml(html) {
@@ -16783,6 +16943,7 @@ function selectPendingEvergreenHistoryCandidates(
       entry.historyQualityGateVersion === BLOG_HISTORY_QUALITY_GATE_VERSION &&
       (
         entry.needsEvergreenRefresh === true ||
+        entry.historyLinkEligible !== true ||
         (
           forceRefresh &&
           Boolean(preferPostSlug) &&
@@ -16872,8 +17033,15 @@ async function recoverPendingEvergreenHistory(
         entity.resolvedPageTitle || wiki.resolvedPageTitle || "";
     }
     if (entity.intro || entity.summary) delete entity.needsWikiRefresh;
+    if (forceRefresh || !evergreenHistoryEditionQuality(entity).ok) {
+      entity.needsEvergreenRefresh = true;
+      entity.historyLinkEligible = false;
+    }
     entity = await restorePendingEvergreenHistoryEvidenceFromPost(env, entity);
-    if (forceRefresh) entity.needsEvergreenRefresh = true;
+    if (!evergreenHistoryHasIndependentSourceLinks(entity)) {
+      result.deferred += 1;
+      continue;
+    }
     const edition = await generateEvergreenHistoryEdition(env, entity);
     if (!edition) {
       // A provider miss changes no durable content state. Keep the existing
@@ -17046,20 +17214,30 @@ function normalizeArticleHistoryDiscoveryCardHtml(body, entityMetaRaw) {
   } catch {
     return html;
   }
-  const historyEntity = (Array.isArray(entityMeta) ? entityMeta : [])
+  const historyEntities = (Array.isArray(entityMeta) ? entityMeta : [])
     .map(normalizeArticleHistoryEntityMeta)
-    .find((entity) => isHistoryEntityDiscoveryLinkEligible(entity));
+    .filter((entity) => entity?.type === "event");
+  const historyEntity = historyEntities.find((entity) =>
+    isHistoryEntityDiscoveryLinkEligible(entity)
+  );
   const section = buildArticleHistoryDiscoveryCard(historyEntity);
-  if (!section) return html;
+  const existingCardRe =
+    /<section class="story-topic-section"[\s\S]*?<\/section>/i;
+  if (!section) {
+    const hasCurrentPendingCompanion = historyEntities.some(
+      (entity) =>
+        entity.historyQualityGateVersion === BLOG_HISTORY_QUALITY_GATE_VERSION,
+    );
+    return hasCurrentPendingCompanion
+      ? html.replace(existingCardRe, "")
+      : html;
+  }
   // The entity-strip stylesheet itself contains `.story-topic-section` even
   // when no card is rendered. Testing the bare class name made the first
   // promotion try to replace a nonexistent <section>, return the original
   // HTML unchanged, and leave every newly eligible card invisible.
   if (/<section\s+class="[^"]*\bstory-topic-section\b[^"]*"/i.test(html)) {
-    return html.replace(
-      /<section class="story-topic-section"[\s\S]*?<\/section>/i,
-      section,
-    );
+    return html.replace(existingCardRe, section);
   }
   return injectArticleEntityStrip(html, entityMeta);
 }
@@ -28545,19 +28723,28 @@ function normalizeTdqFloatBarHtml(body) {
   return html;
 }
 
-function injectPublishedYoutubeForServe(body, slug, youtubeUploadedRaw) {
-  let uploaded = null;
-  try {
-    uploaded = youtubeUploadedRaw
-      ? JSON.parse(youtubeUploadedRaw)?.[slug] || null
-      : null;
-  } catch {}
-  if (!uploaded?.youtubeId || uploaded.privacy === "private") return body;
+function replaceYoutubeModuleForServe(body, youtubeIdRaw) {
+  const html = String(body || "");
+  const youtubeStart = html.indexOf("<!-- YouTube -->");
+  if (youtubeStart === -1) return html;
+  const aftermathStart = html.indexOf("<!-- Aftermath -->", youtubeStart);
+  if (aftermathStart === -1) return html;
 
-  const youtubeId = String(uploaded.youtubeId);
-  let html = String(body || "").replace(
-    /<!-- YouTube -->[\s\S]*?<!-- Aftermath -->/,
-    `<!-- YouTube -->
+  // The sourced timeline is rendered between the YouTube search card and the
+  // Aftermath marker. Replace only the media card so a later upload cannot
+  // hide the timeline on an otherwise unchanged published article.
+  const timelineStart = html.indexOf(
+    '<section class="article-timeline',
+    youtubeStart,
+  );
+  const replaceEnd =
+    timelineStart !== -1 && timelineStart < aftermathStart
+      ? timelineStart
+      : aftermathStart;
+  const youtubeId = String(youtubeIdRaw || "").trim();
+  if (!youtubeId) return html;
+
+  const embed = `<!-- YouTube -->
           <div class="my-4">
             <iframe
               width="100%"
@@ -28569,8 +28756,21 @@ function injectPublishedYoutubeForServe(body, slug, youtubeUploadedRaw) {
             ></iframe>
           </div>
 
-          <!-- Aftermath -->`,
-  );
+          `;
+  return html.slice(0, youtubeStart) + embed + html.slice(replaceEnd);
+}
+
+function injectPublishedYoutubeForServe(body, slug, youtubeUploadedRaw) {
+  let uploaded = null;
+  try {
+    uploaded = youtubeUploadedRaw
+      ? JSON.parse(youtubeUploadedRaw)?.[slug] || null
+      : null;
+  } catch {}
+  if (!uploaded?.youtubeId || uploaded.privacy === "private") return body;
+
+  const youtubeId = String(uploaded.youtubeId);
+  let html = replaceYoutubeModuleForServe(body, youtubeId);
   html = html.replace(
     /https:\/\/youtube\.com\/shorts\//g,
     "https://www.youtube.com/shorts/",
@@ -28610,25 +28810,78 @@ function injectPublishedYoutubeForServe(body, slug, youtubeUploadedRaw) {
   return html;
 }
 
+function normalizeArticleRelatedQuestionsDuplicationHtml(body) {
+  const html = String(body || "");
+  const faqStart = html.search(
+    /<section\b[^>]*\bclass="[^"]*\bfaq-section\b[^"]*"[^>]*>/i,
+  );
+  if (faqStart === -1) return html;
+  const faqEnd = findElementBlockEnd(html, faqStart, "section");
+  if (faqEnd === -1) return html;
+
+  const faqHtml = html.slice(faqStart, faqEnd);
+  const articleWithoutFaq = html.slice(0, faqStart) + html.slice(faqEnd);
+  const articleSentenceKeys = new Set(
+    [...articleWithoutFaq.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+      .flatMap((match) => splitSentences(match[1], 15))
+      .map((sentence) => normalizeForCompare(sentence))
+      .filter(Boolean),
+  );
+  if (articleSentenceKeys.size === 0) return html;
+
+  const itemStartRe = /<div\b[^>]*\bclass="[^"]*\bfaq-item\b[^"]*"[^>]*>/gi;
+  let cursor = 0;
+  let changed = false;
+  let rebuiltFaq = "";
+  let match;
+  while ((match = itemStartRe.exec(faqHtml))) {
+    const itemEnd = findElementBlockEnd(faqHtml, match.index, "div");
+    if (itemEnd === -1) break;
+    const itemHtml = faqHtml.slice(match.index, itemEnd);
+    const answerHtml = itemHtml.match(
+      /<div\b[^>]*\bclass="[^"]*\bfaq-a\b[^"]*"[^>]*>[\s\S]*?<p\b[^>]*>([\s\S]*?)<\/p>/i,
+    )?.[1] || "";
+    const repeatsArticleSentence = splitSentences(answerHtml, 15).some((sentence) =>
+      articleSentenceKeys.has(normalizeForCompare(sentence)),
+    );
+    rebuiltFaq += faqHtml.slice(cursor, match.index);
+    if (repeatsArticleSentence) {
+      changed = true;
+    } else {
+      rebuiltFaq += itemHtml;
+    }
+    cursor = itemEnd;
+    itemStartRe.lastIndex = itemEnd;
+  }
+  if (!changed) return html;
+  rebuiltFaq += faqHtml.slice(cursor);
+  if (!/\bclass="[^"]*\bfaq-item\b/i.test(rebuiltFaq)) {
+    return html.slice(0, faqStart) + html.slice(faqEnd);
+  }
+  return html.slice(0, faqStart) + rebuiltFaq + html.slice(faqEnd);
+}
+
 function prepareHtmlResponse(body) {
-  return normalizeArticleFloatContainmentHtml(
-    normalizeSparseArticleBodySectionsHtml(
-      normalizeHistoryEntityCanonicalLinksHtml(
-        normalizeTdqFloatBarHtml(
-          normalizeArticleAssetVersionsHtml(
-            normalizeReadProgressBarHtml(
-              normalizeArticleEvidenceMapDisclosureHtml(
-                normalizeArticleEntityStripPresentationHtml(
-                  normalizeInvalidArticlePersonLabelsHtml(
-                    normalizeStackedTitleHtml(
-                      normalizeImageAltHtml(
-                        normalizeCrawlableLinksHtml(
-                          normalizeSearchPreviewHtml(
-                            normalizeHeadingAuditHtml(
-                              normalizeAiAnswerCardHtml(
-                                normalizeArticleLayoutHtml(
-                                  stripDynSliderFiguresHtml(
-                                    stripGoogleFundingChoices(body),
+  return normalizeArticleRelatedQuestionsDuplicationHtml(
+    normalizeArticleFloatContainmentHtml(
+      normalizeSparseArticleBodySectionsHtml(
+        normalizeHistoryEntityCanonicalLinksHtml(
+          normalizeTdqFloatBarHtml(
+            normalizeArticleAssetVersionsHtml(
+              normalizeReadProgressBarHtml(
+                normalizeArticleEvidenceMapDisclosureHtml(
+                  normalizeArticleEntityStripPresentationHtml(
+                    normalizeInvalidArticlePersonLabelsHtml(
+                      normalizeStackedTitleHtml(
+                        normalizeImageAltHtml(
+                          normalizeCrawlableLinksHtml(
+                            normalizeSearchPreviewHtml(
+                              normalizeHeadingAuditHtml(
+                                normalizeAiAnswerCardHtml(
+                                  normalizeArticleLayoutHtml(
+                                    stripDynSliderFiguresHtml(
+                                      stripGoogleFundingChoices(body),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -28876,9 +29129,12 @@ export const __contentGenerationTestHooks = {
   injectPersonFilmographyIntoStoredArticleHtml,
   buildArticleProcessDisclosure,
   normalizeArticleProcessDisclosureHtml,
+  buildArticleRelatedQuestionsBlock,
+  normalizeArticleRelatedQuestionsDuplicationHtml,
   articleSectionHasOneSentence,
   compactSparseArticleBodySections,
   normalizeSparseArticleBodySectionsHtml,
+  replaceYoutubeModuleForServe,
   markArticleHtmlServeReady,
   buildPillarHubHTML,
   servePillarHub,

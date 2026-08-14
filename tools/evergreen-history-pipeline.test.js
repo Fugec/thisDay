@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   __contentGenerationTestHooks as hooks,
+  __entityResolutionTestHooks as entityHooks,
 } from "../js/blog-ai-worker.js";
 
 function words(prefix, count) {
@@ -194,6 +195,42 @@ test("only a primary event with independent evidence becomes an evergreen candid
   assert.ok(
     rejected.reasons.some((reason) => /independent/i.test(reason)),
     rejected.reasons.join("; "),
+  );
+});
+
+test("independent evidence survives a crowded six-source compact window", () => {
+  const content = sourceRichContent();
+  const canonical = content.sourcePages[0];
+  const independent = content.sourcePages[1];
+  content.sourcePages = [
+    canonical,
+    ...Array.from({ length: 6 }, (_, index) => ({
+      pageTitle: `Supporting Wikipedia page ${index + 1}`,
+      pageUrl: `https://en.wikipedia.org/wiki/Supporting_page_${index + 1}`,
+      publisher: "Wikipedia",
+      extract: `${words(`supporting${index}`, 90)}.`,
+    })),
+    independent,
+  ];
+
+  const compact = entityHooks.compactSourcePagesForIndex(content);
+  assert.equal(compact.length, 6);
+  assert.equal(compact[0].pageUrl, canonical.pageUrl);
+  assert.ok(
+    compact.some((source) => source.pageUrl === independent.pageUrl),
+    "the verified independent source must not be crowded out by Wikipedia support pages",
+  );
+
+  const candidate = hooks.evergreenHistoryCandidateEligibility(
+    historySeed(),
+    content,
+    { primaryEvent: true },
+  );
+  assert.equal(candidate.ok, true, candidate.reasons.join("; "));
+  assert.ok(
+    candidate.sourceLinks.some((source) =>
+      source.url === independent.pageUrl && source.verifiedIndependent === true,
+    ),
   );
 });
 
@@ -523,6 +560,87 @@ test("a pending companion self-heals evidence from its stored daily article", as
   );
   assert.ok(
     hooks.evergreenHistoryEvidenceWordCount(restored.evergreenEvidence) >= 700,
+  );
+});
+
+test("a pending companion restores a lost independent source from the stored Evidence Map", async () => {
+  const wikipediaSources = Array.from({ length: 6 }, (_, index) => ({
+    pageTitle: index === 0 ? "Apollo 11" : `Apollo support ${index}`,
+    pageUrl: index === 0
+      ? "https://en.wikipedia.org/wiki/Apollo_11"
+      : `https://en.wikipedia.org/wiki/Apollo_support_${index}`,
+    publisher: "Wikipedia",
+    extract: `${words(`storedwiki${index}`, 120)}.`,
+  }));
+  const postHtml = `<html><body><main>
+    <p class="evidence-map-claim"><strong>Central claim checked:</strong> Apollo 11 completed the first crewed lunar landing in July 1969.</p>
+    <table><tbody>
+      <tr class="evidence-map-row" data-evidence-role="event-record"><td><a href="https://en.wikipedia.org/wiki/Apollo_11">Apollo 11 · Event record</a></td></tr>
+      <tr class="evidence-map-row" data-evidence-role="independent"><td><a href="https://www.nasa.gov/history/apollo-11-mission-overview/">Apollo 11 Mission Overview · Independent reporting</a></td></tr>
+    </tbody></table>
+  </main></body></html>`;
+  const entity = {
+    ...historySeed(),
+    slug: "apollo-11-1969",
+    url: "/history/apollo-11-1969/",
+    historyQualityGateVersion: 2,
+    historyLinkEligible: false,
+    needsEvergreenRefresh: true,
+    sourcePostSlug: "20-july-2026",
+    relatedPosts: ["20-july-2026"],
+    sourceLinks: wikipediaSources.map((source) => ({
+      label: source.pageTitle,
+      url: source.pageUrl,
+      publisher: source.publisher,
+    })),
+    evergreenEvidence: {
+      articleTitle: "Apollo 11 Lands on the Moon — July 20, 1969",
+      articleParagraphs: [words("published", 710)],
+      sourcePages: wikipediaSources,
+    },
+  };
+  const env = {
+    BLOG_AI_KV: {
+      async get(key) {
+        return key === "post:20-july-2026" ? postHtml : null;
+      },
+    },
+  };
+
+  const restored =
+    await hooks.restorePendingEvergreenHistoryEvidenceFromPost(env, entity);
+  const independentUrl =
+    "https://www.nasa.gov/history/apollo-11-mission-overview/";
+
+  assert.equal(restored.sourceLinks.length, 6);
+  assert.ok(
+    restored.sourceLinks.some((source) =>
+      source.url === independentUrl && source.verifiedIndependent === true,
+    ),
+  );
+  assert.ok(
+    restored.evergreenEvidence.sourcePages.some((source) =>
+      source.pageUrl === independentUrl && source.verifiedIndependent === true,
+    ),
+  );
+});
+
+test("a stranded current-gate companion is selected even if its retry flag was lost", () => {
+  const stranded = {
+    type: "event",
+    slug: "haitian-revolution-1791",
+    wikiUrl: "https://en.wikipedia.org/wiki/Haitian_Revolution",
+    historyQualityGateVersion: 2,
+    historyLinkEligible: false,
+    relatedPosts: ["14-august-2026"],
+    updatedAt: "2026-08-14T00:15:00.000Z",
+  };
+
+  assert.deepEqual(
+    hooks.selectPendingEvergreenHistoryCandidates([stranded]).map(
+      (entry) => entry.slug,
+    ),
+    ["haitian-revolution-1791"],
   );
 });
 

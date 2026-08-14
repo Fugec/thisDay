@@ -7,6 +7,7 @@ import {
 import {
   __personIdentityTestHooks as seoHooks,
 } from "../js/seo-worker.js";
+import { extractCalendarDateMentions } from "../js/shared/person-prose.js";
 
 const biographyIntro =
   "Ada Lovelace was an English mathematician and writer best known for her work on Charles Babbage's proposed Analytical Engine. She translated an article about the machine and added extensive notes describing how it might manipulate symbols according to rules. Her published algorithm and wider account of general-purpose computation made her an important figure in computing history.";
@@ -307,7 +308,7 @@ test("people rendering preserves reviewed prose and rebuilds unreviewed prose", 
     intro: biographyIntro,
     summary: biographyIntro,
     bodySections: reviewed,
-    personProseQualityVersion: 1,
+    personProseQualityVersion: 2,
   };
   assert.deepEqual(seoHooks.personBodySectionsForRender(entity), reviewed);
 
@@ -359,7 +360,7 @@ test("born, died, and article profiles share one bounded prose queue", () => {
       slug: "already-reviewed",
       wikiUrl: "https://en.wikipedia.org/wiki/Reviewed_Person",
       needsProseEnrichment: true,
-      personProseQualityVersion: 1,
+      personProseQualityVersion: 2,
     },
   ], { limit: 5 });
 
@@ -395,10 +396,82 @@ test("the SEO entity index retains pending and reviewed prose state", async () =
 
   await seoHooks.updateEntityIndexEntry(env, {
     ...base,
-    personProseQualityVersion: 1,
+    personProseQualityVersion: 2,
   });
-  assert.equal(storedIndex[0].personProseQualityVersion, 1);
+  assert.equal(storedIndex[0].personProseQualityVersion, 2);
   assert.equal(storedIndex[0].needsProseEnrichment, undefined);
+});
+
+test("person writing audit detects equivalent date formats across cards and body", () => {
+  const entity = {
+    type: "person",
+    name: "Magic Johnson",
+    overviewCards: [{
+      label: "Background",
+      value: "Magic Johnson was born in Lansing on August 14, 1959, before becoming a professional basketball player.",
+    }],
+    bodySections: [{
+      heading: "Early life",
+      paragraphs: [
+        "On 14 August 1959, Magic Johnson was born in Lansing, Michigan, where his early experience with basketball preceded his later professional career.",
+      ],
+    }],
+  };
+  assert.ok(
+    blogHooks.generatedPageWritingQualityIssues(entity).some((issue) =>
+      /repeats the biographical date/i.test(issue),
+    ),
+  );
+});
+
+test("person rendering removes repeated dates and card/body duplication", () => {
+  const repeatedFact =
+    "Johnson won five NBA championships with the Los Angeles Lakers during the Showtime era.";
+  const entity = {
+    type: "person",
+    name: "Magic Johnson",
+    description: "American basketball player and entrepreneur (born 1959)",
+    birthDate: "August 14, 1959",
+    intro:
+      `Earvin Magic Johnson Jr. (born August 14, 1959) is an American businessman and former professional basketball player. ${repeatedFact}`,
+    summary:
+      `On 14 August 1959, Johnson was born in Lansing, Michigan. ${repeatedFact}`,
+    overviewCards: [{ label: "Achievement", value: repeatedFact }],
+    bodySections: [{
+      heading: "Who is Magic Johnson?",
+      paragraphs: [
+        `Earvin Magic Johnson Jr. (born August 14, 1959) is an American businessman and former professional basketball player. ${repeatedFact}`,
+        "On 14 August 1959, Johnson was born in Lansing, Michigan, before his basketball career developed through school and college competition.",
+      ],
+    }],
+  };
+  const rendered = seoHooks.personEntityForRender(entity);
+  assert.equal(rendered.description, "American basketball player and entrepreneur");
+  assert.equal(rendered.birthDate, "August 14, 1959");
+  const bodyText = rendered.bodySections
+    .flatMap((section) => section.paragraphs)
+    .join(" ");
+  assert.equal(extractCalendarDateMentions(bodyText).length, 1);
+  const slider = seoHooks.buildEntityOverviewSlider(rendered);
+  assert.doesNotMatch(slider, /Born \/ Died|August 14, 1959|14 August 1959/);
+  assert.doesNotMatch(slider, /Johnson won five NBA championships/);
+});
+
+test("person rendering suppresses a stored date that conflicts with source biography", () => {
+  const rendered = seoHooks.personEntityForRender({
+    type: "person",
+    name: "A. K. Chesterton",
+    description: "British journalist and fascist (1899–1973)",
+    birthDate: "November 30, 1895",
+    deathDate: "August 16, 1973",
+    intro:
+      "Arthur Kenneth Chesterton (1 May 1899 – 16 August 1973) was a British journalist and political activist.",
+    bodySections: [],
+  });
+  assert.equal(rendered.birthDate, "");
+  assert.equal(rendered.deathDate, "August 16, 1973");
+  assert.equal(rendered.description, "British journalist and fascist");
+  assert.equal(rendered._personDateConflictSuppressed, true);
 });
 
 test("protected legacy person URLs cannot be changed by SEO hydration", async () => {

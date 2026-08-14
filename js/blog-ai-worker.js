@@ -68,6 +68,7 @@ import {
   fetchCachedWikidataRelatedFilms,
 } from "./shared/related-media.js";
 import { sortBlogIndexNewestFirst } from "./shared/blog-index-order.js";
+import { extractCalendarDateMentions } from "./shared/person-prose.js";
 
 const PIPELINE_STATE_KEY = "youtube:pipeline-state";
 const DEBUG_BUILD = "2026-04-28-ai-debug-1";
@@ -790,7 +791,7 @@ const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
 const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const BLOG_HISTORY_QUALITY_GATE_VERSION = 2;
 const EVERGREEN_HISTORY_EDITION_VERSION = 1;
-const PERSON_PROSE_QUALITY_VERSION = 1;
+const PERSON_PROSE_QUALITY_VERSION = 2;
 const ARTICLE_ORIGINAL_VALUE_GATE_VERSION = 1;
 const MIN_AUTOMATIC_TIMELINE_ENTRIES = 5;
 const MIN_AUTOMATIC_INLINE_FIGURES = 2;
@@ -5460,7 +5461,9 @@ export default {
       if (html) {
         if (html.includes(ARTICLE_SERVE_READY_MARKER)) {
           return preparedHtmlResponse(
-            injectPublishedYoutubeForServe(html, slug, ytRaw),
+            normalizeArticleFloatContainmentHtml(
+              injectPublishedYoutubeForServe(html, slug, ytRaw),
+            ),
           );
         }
         const allowArticleKvBackgroundWrites = !blogKvBackgroundWritesPaused(env);
@@ -8051,6 +8054,11 @@ const MIN_REAL_ARTICLE_BODY_WORDS = 750;
 // body chunk(s) actually succeeded, not all four sections.
 const CORE_MIN_BODY_WORDS = 350;
 const CORE_MIN_QUICK_FACTS = 4;
+// Analysis should be substantial, but a source-grounded 50-word item is
+// preferable to padding or retaining an unsupported sentence merely to clear
+// the former 60-word floor. Keep every generation, audit, and repair path on
+// this one value so bounded recovery cannot disagree with the writing prompt.
+const MIN_ANALYSIS_DETAIL_WORDS = 50;
 
 // The chunked fallback writes exactly 8 body paragraphs (2 each across the four
 // ARTICLE_BODY_FIELDS). This per-paragraph floor must be high enough that a
@@ -8191,7 +8199,7 @@ function scanArticleQuality(content) {
   ];
   for (const [field, item, index] of analysisItems) {
     const detail = item?.detail || "";
-    if (wordCount(detail) < 55) {
+    if (wordCount(detail) < MIN_ANALYSIS_DETAIL_WORDS) {
       issues.push(`${field}[${index}].detail is too short for real analysis.`);
     }
     if (!hasHardFact(detail)) {
@@ -9855,7 +9863,7 @@ async function improveArticleQuality(
     "Fix only the fields named by the audit issues. Keep facts accurate and do not invent quotations. " +
     "Strengthen weak writing with concrete names, dates, institutions, source-supported anchors, and consequences. " +
     "Preserve array lengths exactly. Preserve the same JSON shape for analysisGood and analysisBad items. " +
-    "If an issue says an analysisGood or analysisBad detail is too short, expand it to 60+ words by adding a second concrete sentence of source-supported reasoning, not by padding with adjectives or restating the title in the sentence you already have. " +
+    `If an issue says an analysisGood or analysisBad detail is too short, expand it to ${MIN_ANALYSIS_DETAIL_WORDS}+ words by adding a second concrete sentence of source-supported reasoning, not by padding with adjectives or restating the title in the sentence you already have. ` +
     `The article body can be concise, but overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, and conclusionParagraphs must total at least ${MIN_REAL_ARTICLE_BODY_WORDS} words. ` +
     "Do not pad. If the body is too short, add source-supported facts that have not appeared elsewhere. If an issue says semantic repetition, rewrite the repeated field so it contributes a new detail rather than the same fact in different words. If an issue says a sentence is duplicated across sections, keep the fact only where it fits best and rewrite the other occurrence with different wording plus a new supporting detail, rather than only deleting it or leaving it unchanged. Reusing a fact across sections is fine; reusing the sentence that states it is not. " +
     "Never use hyphens or em dashes in article body fields. Avoid generic phrases such as 'changed history', " +
@@ -15101,11 +15109,6 @@ function inferHistoricalDateFromEntry(entry) {
 }
 
 function buildPersonOverviewCards(entity) {
-  const lifeDates = entity.birthDate && entity.deathDate
-    ? `${entity.birthDate} – ${entity.deathDate}`
-    : entity.birthDate
-      ? `b. ${entity.birthDate}`
-      : "";
   const factSentences = entityFactSentences(entity.intro, entity.summary);
   const summary = compactEntityText(entity.summary || entity.intro, 185);
   const description = compactEntityText(entity.description, 150);
@@ -15134,13 +15137,12 @@ function buildPersonOverviewCards(entity) {
     { label: "Significance", value: significance },
   ].filter((c) => c.value);
   if (description) cards.unshift({ label: "Main role", value: description });
-  if (lifeDates) cards.unshift({ label: "Life and death", value: lifeDates });
   return cards;
 }
 
 function normalizeEntityCards(cards, fallbackCards, type) {
   const wantedLabels = type === "person"
-    ? ["Life and death", "Main role", "Known for", "Major work", "Significance", "Context"]
+    ? ["Main role", "Known for", "Major work", "Significance", "Context", "Background"]
     : ["What happened", "Date", "Location", "Key people", "Outcome", "Why it matters"];
   const source = Array.isArray(cards) ? cards : [];
   const normalized = [];
@@ -15168,7 +15170,7 @@ function entityCardsAreFilled(cards, type) {
   if (!Array.isArray(cards) || cards.length < 6) return false;
   const compactLabels = type === "event"
     ? new Set(["Date", "Location", "Key people"])
-    : new Set(["Life and death"]);
+    : new Set();
   return cards.every((card) => {
     const value = String(card?.value || "").trim();
     if (!value) return false;
@@ -15253,6 +15255,7 @@ function generatedPageWritingQualityIssues(
   const openingSignatures = new Map();
   const genericEventOpenings = new Map();
   const seenSentences = new Map();
+  const seenPersonDates = new Map();
   let subjectOpeningPath = "";
 
   for (const entry of entries) {
@@ -15266,6 +15269,18 @@ function generatedPageWritingQualityIssues(
     }
     if (ENRICHMENT_GENERIC_FILLER_PATTERN.test(text)) {
       issues.push(`${entry.path} uses generic significance or legacy filler`);
+    }
+    if (entity?.type === "person") {
+      for (const mention of extractCalendarDateMentions(text)) {
+        const prior = seenPersonDates.get(mention.key);
+        if (prior) {
+          issues.push(
+            `${entry.path} repeats the biographical date ${mention.text} from ${prior}`,
+          );
+        } else {
+          seenPersonDates.set(mention.key, entry.path);
+        }
+      }
     }
     const sentences = splitSentences(text, 1);
     if (sentences.some((sentence) =>
@@ -15342,12 +15357,6 @@ function expandedEntityCardValue(label, currentValue, entity, content, fallbackV
     .join(", ");
 
   if (entity.type === "person") {
-    if (label === "Life and death") {
-      const dates = entity.birthDate && entity.deathDate
-        ? `${entity.birthDate} – ${entity.deathDate}`
-        : entity.birthDate ? `b. ${entity.birthDate}` : "";
-      return dates || fallback || current;
-    }
     if (label === "Main role") {
       return description || fallback || current || summary;
     }
@@ -15411,23 +15420,13 @@ function ensureFilledEntityCards(cards, fallbackCards, entity, content) {
     const fallback = fallbackCards.find((item) => item.label === card.label);
     const minWords = entity.type === "event" && ["Date", "Location", "Key people"].includes(card.label)
       ? 4
-      : entity.type === "person" && card.label === "Life and death"
-        ? 7
-        : 18;
+      : 18;
     const words = String(card.value || "").trim().split(/\s+/).filter(Boolean).length;
     const currentKey = normalizeTopicMatchText(card.value || "");
     if (currentKey && used.has(currentKey)) {
       const value = expandedEntityCardValue(card.label, "", entity, content, fallback?.value);
       used.add(normalizeTopicMatchText(value));
       return { label: card.label, value };
-    }
-    if (entity.type === "person" && card.label === "Life and death" && !/\b(death|died)\b/i.test(card.value || "")) {
-      const value = expandedEntityCardValue(card.label, card.value, entity, content, fallback?.value);
-      used.add(normalizeTopicMatchText(value));
-      return {
-        label: card.label,
-        value,
-      };
     }
     if (words >= minWords) {
       used.add(currentKey);
@@ -15445,14 +15444,14 @@ function ensureFilledEntityCards(cards, fallbackCards, entity, content) {
 async function generateEntityOverviewCards(env, entity, content, fallbackCards) {
   if (!hasAnyTextAIProvider(env)) return fallbackCards;
   const typeGuide = entity.type === "person"
-    ? `Write exactly 6 cards with these labels in this order: Life and death, Known for, Main role, Major work, Significance, Context.
-Life and death must be factual and first. If the person is alive, say "No death date is listed." Do not make one up.`
+    ? `Write exactly 6 cards with these labels in this order: Main role, Known for, Major work, Significance, Context, Background.
+Birth and death dates already appear in the page header. Do not repeat them in any card.`
     : `Write exactly 6 cards with these labels in this order: What happened, Date, Location, Key people, Outcome, Why it matters.`;
   const prompt =
     `Create compact, information-rich overview slider cards for a thisDay entity page.\n\n` +
     `${typeGuide}\n\n` +
     `Rules:\n` +
-    `- Each non-date value must be 25 to 45 words.\n` +
+    `- Each value must be 25 to 45 words.\n` +
     `- Full cards are better than tiny labels. Avoid sentence fragments.\n` +
     `- Do not repeat the same phrase or idea across cards.\n` +
     `- Do not repeat the exact Wikipedia short description.\n` +
@@ -15523,7 +15522,7 @@ Life and death must be factual and first. If the person is alive, say "No death 
     const rewritePrompt =
       `The cards below are too thin or did not pass the writing audit. Rewrite them as full slider cards.\n` +
       `${initialWritingIssues.length ? `Writing audit: ${initialWritingIssues.join("; ")}\n` : ""}` +
-      `Keep the same labels and order. Each non-date card must be 25 to 45 words, specific, and non-repetitive.\n` +
+      `Keep the same labels and order. Each card must be 25 to 45 words, specific, and non-repetitive.\n` +
       `Return JSON only: {"cards":[{"label":"...","value":"..."}]}\n\n` +
       JSON.stringify({ entity: entity.name, type: entity.type, cards: normalized }, null, 2);
     const expandedRaw = await callAI(
@@ -15618,17 +15617,12 @@ function buildFallbackEntityBodySections(entity, content) {
         paragraphs: introParagraphs.slice(0, 2),
       });
     } else {
-      const lifeLine = entity.deathDate
-        ? `${entity.name} was born on ${entity.birthDate || "an unlisted date"} and died on ${entity.deathDate}.`
-        : entity.birthDate
-          ? `${entity.name} was born on ${entity.birthDate}.`
-          : "";
       const educationFact = findEntityFact(factSentences, [/educated/i, /university/i, /college/i, /academy/i], "");
       const serviceFact = findEntityFact(factSentences, [/served/i, /military/i, /air force/i, /air ambulance/i, /army/i], "");
       sections.push({
         heading: leadHeading,
         paragraphs: [
-          `${lifeLine} ${summary}`.trim(),
+          summary,
           [educationFact, serviceFact].filter(Boolean).join(" ") || (description ? `${entity.name} is described as ${description}.` : summary),
         ].filter(Boolean),
       });
@@ -15776,6 +15770,7 @@ async function generateEntityBodySections(env, entity, content, fallbackSections
     `- For a person lead question, use "Who is" when no death date is supplied and "Who was" when a death date is supplied.\n` +
     `- Cover: early life/background, main career/achievement, historical significance, legacy or later life.\n` +
     `- Include all available facts from the supplied intro text — do not omit names, dates, offices, or events.\n` +
+    `- Birth and death dates already appear in page metadata. Mention each date no more than once in the complete body, and only where chronology needs it.\n` +
     `- Use only supplied facts. Do not invent dates, places, offices, or achievements.\n` +
     `- Avoid filler phrases like "rich tapestry", "delve", "captivating", "important to remember", "testament to".\n` +
     `- Do not explain what the page is for. Write about the ${isperson ? "person" : "event"} itself.\n` +
@@ -20340,8 +20335,8 @@ ${JSON.stringify({ ...bodyA, ...bodyB }, null, 2)}
 
 Write only this JSON:
 {
-  "analysisGood":[{"title":"3-5 words","detail":"60+ words evaluating a source-documented action, response, or strength of the record"}],
-  "analysisBad":[{"title":"3-5 words","detail":"60+ words evaluating a source-documented failure, limitation, or unresolved question"}],
+  "analysisGood":[{"title":"3-5 words","detail":"${MIN_ANALYSIS_DETAIL_WORDS}+ words evaluating a source-documented action, response, or strength of the record"}],
+  "analysisBad":[{"title":"3-5 words","detail":"${MIN_ANALYSIS_DETAIL_WORDS}+ words evaluating a source-documented failure, limitation, or unresolved question"}],
   "editorialNote":"80+ words from the thisDay. team"
 }
 
@@ -20688,14 +20683,14 @@ Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation �
     "Paragraph 2 (reframing close; ~80 to 100 words): End with a specific source fact, contradiction, or documented detail. The final sentence must be short, direct, self-contained, and source-supported."
   ],
   "analysisGood": [
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Analyze a source-documented historical action, response, or strength of the record without inventing effectiveness, credit, causality, or alternatives. Analyze the event itself, never the article, post, piece, writing, or coverage." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." }
+    { "title": "Concise label (3-5 words)", "detail": "Minimum ${MIN_ANALYSIS_DETAIL_WORDS} words. Analyze a source-documented historical action, response, or strength of the record without inventing effectiveness, credit, causality, or alternatives. Analyze the event itself, never the article, post, piece, writing, or coverage." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum ${MIN_ANALYSIS_DETAIL_WORDS} words. Same source-bound standard." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum ${MIN_ANALYSIS_DETAIL_WORDS} words. Same source-bound standard." }
   ],
   "analysisBad": [
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Analyze a source-documented historical failure, limitation, or unresolved question without inventing responsibility, prevention, or a better alternative. Analyze the event itself, never what the article omits, states, explains, or covers." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." },
-    { "title": "Concise label (3-5 words)", "detail": "Minimum 60 words. Same source-bound standard." }
+    { "title": "Concise label (3-5 words)", "detail": "Minimum ${MIN_ANALYSIS_DETAIL_WORDS} words. Analyze a source-documented historical failure, limitation, or unresolved question without inventing responsibility, prevention, or a better alternative. Analyze the event itself, never what the article omits, states, explains, or covers." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum ${MIN_ANALYSIS_DETAIL_WORDS} words. Same source-bound standard." },
+    { "title": "Concise label (3-5 words)", "detail": "Minimum ${MIN_ANALYSIS_DETAIL_WORDS} words. Same source-bound standard." }
   ],
   "editorialNote": "Minimum 80 words. A frank, first-person-plural editorial reflection from the thisDay. team. Start with 'What strikes us about this is...' or 'We keep coming back to one thing:' or a similarly direct opening. Say something that the body of the article could not quite say — an honest opinion about what this event reveals about power, human nature, or the gap between how history is remembered and what actually happened. No hedging. No 'it is important to remember'. Say the thing.",
   "keyTerms": [
@@ -20779,8 +20774,8 @@ Output exactly this JSON shape and no extra text:
   "eyewitnessQuoteSource": "",
   "aftermathParagraphs": ["two paragraphs, 120-145 words each"],
   "conclusionParagraphs": ["two paragraphs, 105-125 words each"],
-  "analysisGood": [{"title":"3-5 words","detail":"60+ words evaluating a source-documented action, response, or strength of the record"}],
-  "analysisBad": [{"title":"3-5 words","detail":"60+ words evaluating a source-documented failure, limitation, or unresolved question"}],
+  "analysisGood": [{"title":"3-5 words","detail":"${MIN_ANALYSIS_DETAIL_WORDS}+ words evaluating a source-documented action, response, or strength of the record"}],
+  "analysisBad": [{"title":"3-5 words","detail":"${MIN_ANALYSIS_DETAIL_WORDS}+ words evaluating a source-documented failure, limitation, or unresolved question"}],
   "editorialNote": "80+ words from the thisDay. team",
   "keyTerms": [{"term":"exact article phrase","wikiUrl":"https://en.wikipedia.org/wiki/...","type":"person"}],
   "wikiUrl": "source URL",
@@ -20800,7 +20795,7 @@ Field requirements:
 - Before writing, silently pick 6-8 distinct concrete facts from SOURCE MATERIAL (each its own name, number, date, or institutional action) and give each body section (overviewParagraphs, eyewitnessOrChronicle, aftermathParagraphs, conclusionParagraphs) at least 2 of its own. A body section may revisit a fact used earlier in the body when the narrative calls for it, but must express it in fresh wording and pair it with a new detail, not the same sentence again. Facts used anywhere in the body must not reappear, even reworded, in didYouKnowFacts or analysis — pick different facts for those two fields instead.
 - Every Quick Fact must be directly supported. Do not use Significance, Legacy, Impact, or Lessons labels unless SOURCE MATERIAL explicitly states the claimed consequence. Prefer Source Detail, Investigation, Trial, Decision, Record, or Confirmed Outcome.
 - Every Did You Know fact must come from SOURCE MATERIAL. Do not invent a surprising consequence, coincidence, motive, fate, or policy effect.
-- analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be 60+ words.
+- analysisGood must contain at least 3 items. analysisBad must contain at least 3 items. Each detail must be ${MIN_ANALYSIS_DETAIL_WORDS}+ words.
 - Analysis must evaluate only source-documented actions or limitations. Do not invent why something worked, what it prevented, what changed because of it, who deserves credit beyond the source, or what a better alternative would have been.
 - Do not critique the article's writing, sourcing, repetition, or credibility inside analysisGood or analysisBad.
 - keyTerms should contain 5-8 grounded entries. Include a real named person
@@ -22249,17 +22244,11 @@ function boundedGroundingRetryState(draft, reasons, content = null) {
   const previousReasons = Array.isArray(draft?.boundedGroundingReasons)
     ? draft.boundedGroundingReasons
     : [];
-  const rotatableReasons = substantiveReasons.filter((reason) =>
-    groundingReasonIsCore(reason, content),
-  );
-  const previousRotatableReasons = previousReasons.filter((reason) =>
-    groundingReasonIsCore(reason, content),
-  );
-  const storedPreviousSignature = previousRotatableReasons.length > 0
+  const storedPreviousSignature = previousReasons.length > 0
     ? String(draft?.boundedGroundingSignature || "")
     : "";
   const previousSignature =
-    storedPreviousSignature || groundingFailureSignature(previousRotatableReasons);
+    storedPreviousSignature || groundingFailureSignature(previousReasons);
   const previousAttempts = Math.max(
     0,
     Number.parseInt(String(draft?.boundedGroundingAttempts || ""), 10) ||
@@ -22278,33 +22267,20 @@ function boundedGroundingRetryState(draft, reasons, content = null) {
     };
   }
 
-  // Unsupported optional prose is retained for the deterministic claim-bank
-  // repair on the next fresh invocation. It must never consume another topic:
-  // only a contradiction in the locked event/date/identity/toll core can
-  // participate in the repeated-residual rotation counter.
-  if (rotatableReasons.length === 0) {
-    return {
-      signature: "",
-      attempts: 0,
-      shouldRotate: false,
-      transportDeferred: false,
-      optionalClaimDeferred: true,
-      retainedReasons: substantiveReasons.slice(
-        0,
-        BOUNDED_GROUNDING_REASON_RETENTION_LIMIT,
-      ),
-    };
-  }
-
-  const signature = groundingFailureSignature(rotatableReasons);
+  // Optional prose is repaired or omitted before this state is reached. If a
+  // substantive residual still survives, count it just like a core
+  // contradiction so a single optional sentence can never leave a draft at
+  // attempts=0 forever. Rotation remains the fail-closed last resort after
+  // the bounded claim-bank/Core omission paths have both failed.
+  const signature = groundingFailureSignature(substantiveReasons);
   // Legacy retained drafts already carry boundedGroundingReasons. Treat that
   // as one completed attempt so deploying this guard can immediately escape
   // an existing identical-error loop instead of requiring two more failures.
   const semanticallyRepeated =
     previousSignature === signature ||
     groundingFailureProfilesOverlap(
-      groundingFailureProfile(previousRotatableReasons),
-      groundingFailureProfile(rotatableReasons),
+      groundingFailureProfile(previousReasons),
+      groundingFailureProfile(substantiveReasons),
     );
   const attempts = semanticallyRepeated
     ? previousAttempts + 1
@@ -22314,6 +22290,9 @@ function boundedGroundingRetryState(draft, reasons, content = null) {
     attempts,
     shouldRotate: attempts >= BOUNDED_GROUNDING_IDENTICAL_ATTEMPT_LIMIT,
     transportDeferred: false,
+    optionalClaimDeferred: substantiveReasons.every(
+      (reason) => !groundingReasonIsCore(reason, content),
+    ),
     retainedReasons: substantiveReasons.slice(
       0,
       BOUNDED_GROUNDING_REASON_RETENTION_LIMIT,
@@ -22608,7 +22587,9 @@ function groundingReasonIsCore(reason, content = null) {
 function groundingRefillMinimumWords(path) {
   const root = String(path || "").split(/[.[\]]/)[0];
   if (ARTICLE_BODY_FIELDS.includes(root)) return CHUNKED_BODY_PARAGRAPH_MIN_WORDS;
-  if (/^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(path)) return 60;
+  if (/^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(path)) {
+    return MIN_ANALYSIS_DETAIL_WORDS;
+  }
   if (/^didYouKnowFacts\[\d+\]$/.test(path)) return 35;
   if (path === "editorialNote") return 80;
   return 0;
@@ -22675,7 +22656,6 @@ function replaceUnsupportedClaimWithGroundedClaims(content, path, reason, claimB
   if (path === "curiosityTitle") return null;
 
   const claims = selectGroundedRefillClaims(claimBank, content, path);
-  if (claims.length === 0) return null;
   const candidate = JSON.parse(JSON.stringify(content));
 
   if (/^(?:analysisGood|analysisBad)\[\d+\]\.title$/.test(path)) {
@@ -22695,6 +22675,7 @@ function replaceUnsupportedClaimWithGroundedClaims(content, path, reason, claimB
     return candidate;
   }
   if (["description", "ogDescription", "twitterDescription", "jsonLdDescription"].includes(path)) {
+    if (!claims[0]) return null;
     const maxChars = path === "description" ? 155 : path === "ogDescription" ? 130 : path === "twitterDescription" ? 120 : 180;
     setContentFieldByPath(candidate, path, truncateForMeta(claims[0].text, maxChars));
     return candidate;
@@ -22722,6 +22703,9 @@ function replaceUnsupportedClaimWithGroundedClaims(content, path, reason, claimB
     ? fullText.replace(targetSentence, " ").replace(/\s+/g, " ").trim()
     : "";
   const minimumWords = groundingRefillMinimumWords(path);
+  // The safest repair is deletion. Keep the supported remainder when it
+  // already clears the field's real floor; only draw from unused approved
+  // claims when deletion would otherwise leave the item too short.
   for (const claim of claims.slice(0, GROUNDED_REFILL_CLAIM_LIMIT)) {
     if (wordCount(replacement) >= minimumWords && replacement) break;
     replacement = `${replacement}${replacement ? " " : ""}${claim.text}`.trim();
@@ -22739,13 +22723,16 @@ function replaceUnsupportedClaimWithGroundedClaims(content, path, reason, claimB
 
 function mechanicallyRepairGroundingReasons(content, reasons, source) {
   const claimBank = buildGroundedClaimBank(source);
-  if (claimBank.length < 3) {
-    return { content, repairedFieldPaths: [], claimCount: claimBank.length };
-  }
   let working = content;
   const repairedFieldPaths = [];
   for (const reason of (Array.isArray(reasons) ? reasons : []).slice(0, 8)) {
     if (groundingReasonIsCore(reason, working)) continue;
+    // Preserve the established confidence bar for a generic field-only
+    // finding. A quoted rejected sentence is precise enough to delete even
+    // when the retained source yields fewer than three refill claims; an
+    // unquoted finding still needs the older three-claim bank before a
+    // mechanical substitution may bypass the surgical AI repair.
+    if (claimBank.length < 3 && !quotedGroundingReasonText(reason)) continue;
     const path = groundingReasonFieldPath(reason, working);
     if (!path) continue;
     const candidate = replaceUnsupportedClaimWithGroundedClaims(
@@ -22759,6 +22746,72 @@ function mechanicallyRepairGroundingReasons(content, reasons, source) {
     repairedFieldPaths.push(path);
   }
   return { content: working, repairedFieldPaths, claimCount: claimBank.length };
+}
+
+// A Core article deliberately treats Did You Know and Our Take as optional.
+// The dynamic claim bank above always gets first refusal: it removes the
+// rejected sentence and refills the field with approved source claims. When
+// that cannot reach the real analysis floor without repetition, omit only the
+// affected optional item instead of retaining one unsupported sentence and
+// blocking the entire article. Full articles keep their stricter module shape.
+function omitUnsupportedCoreOptionalItems(content, reasons, source) {
+  if (content?.contentTier !== "core") {
+    return { content, removedFieldPaths: [] };
+  }
+
+  const removals = new Map();
+  for (const reason of Array.isArray(reasons) ? reasons : []) {
+    if (groundingReasonIsCore(reason, content)) continue;
+    const path = groundingReasonFieldPath(reason, content);
+    const match = String(path || "").match(
+      /^(analysisGood|analysisBad|didYouKnowFacts)\[(\d+)\](?:\.(?:title|detail))?$/,
+    );
+    if (!match) continue;
+    const field = match[1];
+    const index = Number(match[2]);
+    if (!Array.isArray(content?.[field]) || !content[field][index]) continue;
+    if (!removals.has(field)) removals.set(field, new Set());
+    removals.get(field).add(index);
+  }
+  if (removals.size === 0) return { content, removedFieldPaths: [] };
+
+  const candidate = JSON.parse(JSON.stringify(content));
+  const removedFieldPaths = [];
+  for (const [field, indexes] of removals) {
+    for (const index of [...indexes].sort((a, b) => b - a)) {
+      candidate[field].splice(index, 1);
+      removedFieldPaths.push(`${field}[${index}]`);
+    }
+  }
+
+  // Re-run the affected hard contracts before the AI verifier sees the
+  // smaller candidate. A Core article may omit these modules, but it may not
+  // become structurally thin or deterministically ungrounded as a side effect.
+  try {
+    assertRequiredContentBlocks(candidate);
+  } catch {
+    return { content, removedFieldPaths: [] };
+  }
+  const grounding = verifyArticleGrounding(candidate, source);
+  if (!grounding.ok) return { content, removedFieldPaths: [] };
+
+  // Re-run the exact quality suite used by bounded enrichment. Core quality
+  // findings are advisory, but removing optional prose must never introduce
+  // an additional banned-phrase, thin-writing, or repetition finding.
+  const qualityBefore = [
+    ...scanBannedPhrases(content),
+    ...scanArticleQuality(content),
+    ...scanIntraPageDuplication(content),
+  ];
+  const qualityAfter = [
+    ...scanBannedPhrases(candidate),
+    ...scanArticleQuality(candidate),
+    ...scanIntraPageDuplication(candidate),
+  ];
+  if (qualityAfter.length > qualityBefore.length) {
+    return { content, removedFieldPaths: [] };
+  }
+  return { content: candidate, removedFieldPaths };
 }
 
 // Zero-token, deterministic pre-repair. Tried before any AI repair call; a
@@ -22988,7 +23041,7 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
                 .replace(targetSentence, neutralSentence)
                 .replace(/\s+/g, " ")
                 .trim();
-              if (wordCount(neutralText) >= 60) {
+              if (wordCount(neutralText) >= MIN_ANALYSIS_DETAIL_WORDS) {
                 candidate = JSON.parse(JSON.stringify(working));
                 setContentFieldByPath(
                   candidate,
@@ -23018,7 +23071,7 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
               const minimumRemainingWords = /^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(
                 finding.field,
               )
-                ? 60
+                ? MIN_ANALYSIS_DETAIL_WORDS
                 : ARTICLE_BODY_FIELDS.includes(rootField)
                   ? CHUNKED_BODY_PARAGRAPH_MIN_WORDS
                   : 12;
@@ -23102,7 +23155,7 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
             const minimumRemainingWords = /^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(
               finding.field,
             )
-              ? 60
+              ? MIN_ANALYSIS_DETAIL_WORDS
               : ARTICLE_BODY_FIELDS.includes(rootField)
                 ? CHUNKED_BODY_PARAGRAPH_MIN_WORDS
                 : 12;
@@ -23145,7 +23198,7 @@ function mechanicallyRemoveOptionalUnsupportedClaims(content, source) {
               /^(?:analysisGood|analysisBad)\[\d+\]\.detail$/.test(
                 finding.field,
               )
-                ? 60
+                ? MIN_ANALYSIS_DETAIL_WORDS
                 : ARTICLE_BODY_FIELDS.includes(rootField)
                   ? CHUNKED_BODY_PARAGRAPH_MIN_WORDS
                   : null;
@@ -23193,7 +23246,7 @@ async function repairGroundingContradictions(env, content, reasons, source, call
   if (claimBankRepair.repairedFieldPaths.length > 0) {
     content = claimBankRepair.content;
     console.log(
-      `Grounding repair replaced unsupported prose from a ${claimBankRepair.claimCount}-claim source bank without an AI call (${claimBankRepair.repairedFieldPaths.join(", ")}).`,
+      `Grounding repair removed or refilled unsupported prose from retained evidence without an AI call (${claimBankRepair.claimCount} approved source claims available; ${claimBankRepair.repairedFieldPaths.join(", ")}).`,
     );
     const remaining = verifyArticleGrounding(content, source);
     if (remaining.ok) return content;
@@ -23327,7 +23380,7 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
     );
     if (afterClaimBankRepair.ok) {
       console.log(
-        `Final grounding: dynamic ${claimBankRepair.claimCount}-claim source bank resolved ${slug} without a generation repair (${claimBankRepair.repairedFieldPaths.join(", ")}).`,
+        `Final grounding: sentence removal/approved-claim recovery resolved ${slug} without a generation repair (${claimBankRepair.claimCount} source claims available; ${claimBankRepair.repairedFieldPaths.join(", ")}).`,
       );
       return { ok: true, reasons: [], content: claimBankRepair.content };
     }
@@ -23338,6 +23391,37 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
     );
     if (contradictions.length === 0) {
       return { ...afterClaimBankRepair, content };
+    }
+  }
+
+  const coreOptionalOmission = omitUnsupportedCoreOptionalItems(
+    content,
+    contradictions,
+    source,
+  );
+  if (coreOptionalOmission.removedFieldPaths.length > 0) {
+    const afterCoreOptionalOmission = await verify(
+      env,
+      coreOptionalOmission.content,
+      source,
+    );
+    if (afterCoreOptionalOmission.ok) {
+      console.log(
+        `Final grounding: omitted unsupported optional Core item(s) for ${slug} after the source-claim bank could not safely refill them (${coreOptionalOmission.removedFieldPaths.join(", ")}).`,
+      );
+      return {
+        ok: true,
+        reasons: [],
+        content: coreOptionalOmission.content,
+      };
+    }
+    lastResult = afterCoreOptionalOmission;
+    content = coreOptionalOmission.content;
+    contradictions = (afterCoreOptionalOmission.reasons || []).filter(
+      (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
+    );
+    if (contradictions.length === 0) {
+      return { ...afterCoreOptionalOmission, content };
     }
   }
 
@@ -28375,6 +28459,25 @@ function normalizeAiAnswerCardHtml(body) {
   return html;
 }
 
+function normalizeArticleFloatContainmentHtml(body) {
+  let html = String(body || "");
+  if (
+    html.includes("article-float-containment-v1") ||
+    !html.includes("</head>")
+  ) {
+    return html;
+  }
+
+  // Inline article figures deliberately float beside their section prose on
+  // desktop. A float is otherwise allowed to escape a short section and make
+  // the following YouTube, timeline, or library module wrap around it. Keep
+  // every narrative section as its own formatting context, and clear the
+  // full-width modules as a defensive fallback for older stored markup.
+  const patch =
+    '<style>/*article-float-containment-v1*/article.p-4>section.mt-4,article.p-4>section.mt-5{display:flow-root}article.p-4>div.my-4,article.p-4>div.mt-3,article.p-4>.article-timeline,article.p-4>.article-body-ad{clear:both}</style>';
+  return html.replace("</head>", `${patch}</head>`);
+}
+
 function normalizeArticleAssetVersionsHtml(body) {
   return String(body || "").replace(
     /\/css\/custom\.css\?v=\d+/g,
@@ -28508,23 +28611,25 @@ function injectPublishedYoutubeForServe(body, slug, youtubeUploadedRaw) {
 }
 
 function prepareHtmlResponse(body) {
-  return normalizeSparseArticleBodySectionsHtml(
-    normalizeHistoryEntityCanonicalLinksHtml(
-      normalizeTdqFloatBarHtml(
-        normalizeArticleAssetVersionsHtml(
-          normalizeReadProgressBarHtml(
-            normalizeArticleEvidenceMapDisclosureHtml(
-              normalizeArticleEntityStripPresentationHtml(
-                normalizeInvalidArticlePersonLabelsHtml(
-                  normalizeStackedTitleHtml(
-                    normalizeImageAltHtml(
-                      normalizeCrawlableLinksHtml(
-                        normalizeSearchPreviewHtml(
-                          normalizeHeadingAuditHtml(
-                            normalizeAiAnswerCardHtml(
-                              normalizeArticleLayoutHtml(
-                                stripDynSliderFiguresHtml(
-                                  stripGoogleFundingChoices(body),
+  return normalizeArticleFloatContainmentHtml(
+    normalizeSparseArticleBodySectionsHtml(
+      normalizeHistoryEntityCanonicalLinksHtml(
+        normalizeTdqFloatBarHtml(
+          normalizeArticleAssetVersionsHtml(
+            normalizeReadProgressBarHtml(
+              normalizeArticleEvidenceMapDisclosureHtml(
+                normalizeArticleEntityStripPresentationHtml(
+                  normalizeInvalidArticlePersonLabelsHtml(
+                    normalizeStackedTitleHtml(
+                      normalizeImageAltHtml(
+                        normalizeCrawlableLinksHtml(
+                          normalizeSearchPreviewHtml(
+                            normalizeHeadingAuditHtml(
+                              normalizeAiAnswerCardHtml(
+                                normalizeArticleLayoutHtml(
+                                  stripDynSliderFiguresHtml(
+                                    stripGoogleFundingChoices(body),
+                                  ),
                                 ),
                               ),
                             ),
@@ -28647,6 +28752,7 @@ export const __contentGenerationTestHooks = {
   canDistributeIndependentArticleWork,
   runIndependentArticleWork,
   MIN_REAL_ARTICLE_BODY_WORDS,
+  MIN_ANALYSIS_DETAIL_WORDS,
   CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
   generateEntityTimeline,
   fetchWikipediaEntityData,
@@ -28699,7 +28805,9 @@ export const __contentGenerationTestHooks = {
   groundingReasonFieldPath,
   groundingReasonIsCore,
   mechanicallyRepairGroundingReasons,
+  omitUnsupportedCoreOptionalItems,
   mechanicallyRemoveOptionalUnsupportedClaims,
+  verifyFinalGroundingWithRepair,
   groundingFailureSignature,
   boundedGroundingRetryState,
   normalizeContentMetadata,

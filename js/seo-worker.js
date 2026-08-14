@@ -58,6 +58,12 @@ import {
   fetchCachedWikidataRelatedFilms,
 } from "./shared/related-media.js";
 import { sortBlogIndexNewestFirst } from "./shared/blog-index-order.js";
+import {
+  calendarDateKeys,
+  extractCalendarDateMentions,
+  stripPersonLifeDateParenthetical,
+  validatedPersonRenderDates,
+} from "./shared/person-prose.js";
 
 // --- Configuration Constants ---
 // Define a User-Agent for API requests to Wikipedia.
@@ -75,7 +81,7 @@ const HOMEPAGE_DESCRIPTION =
 const MIN_PERSON_ENTITY_BODY_WORDS = 150;
 const MIN_EVENT_ENTITY_BODY_WORDS = 150;
 const SEO_ENTITY_QUALITY_GATE_VERSION = 1;
-const PERSON_PROSE_QUALITY_VERSION = 1;
+const PERSON_PROSE_QUALITY_VERSION = 2;
 const SEO_HISTORY_QUALITY_GATE_VERSION = 2;
 const EVERGREEN_HISTORY_EDITION_VERSION = 1;
 const MIN_EVERGREEN_HISTORY_BODY_WORDS = 650;
@@ -1139,6 +1145,29 @@ const PERSON_CARD_PREFER = [
   /\bled\b/i, /\bchampioned\b/i, /\bestablished\b/i,
 ];
 
+function normalizedPersonProseKey(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function personBodySentenceKeys(entity) {
+  const keys = new Set();
+  for (const section of Array.isArray(entity?.bodySections) ? entity.bodySections : []) {
+    for (const paragraph of Array.isArray(section?.paragraphs) ? section.paragraphs : []) {
+      for (const sentence of splitSentences(paragraph)) {
+        const key = normalizedPersonProseKey(sentence);
+        if (key) keys.add(key);
+      }
+    }
+  }
+  return keys;
+}
+
 function personIntroSentences(text) {
   if (!text) return [];
   // Mask periods in common abbreviations and single-letter initials so the
@@ -1175,37 +1204,33 @@ function buildEntityOverviewSlider(entity) {
   const cards = [];
 
   if (entity.type === "person") {
-    // Dates from direct entity fields
-    if (entity.birthDate || entity.deathDate) {
-      const dates = entity.birthDate && entity.deathDate
-        ? `${entity.birthDate} – ${entity.deathDate}`
-        : entity.birthDate
-          ? `b. ${entity.birthDate}`
-          : `d. ${entity.deathDate}`;
-      cards.push({ label: "Born / Died", value: dates });
-    }
-
-    // Role from Wikipedia description (most reliable one-liner)
-    const roleValue = entity.description && !isEntityPlaceholder(entity.description) ? entity.description : "";
-    if (roleValue) {
-      cards.push({ label: "Role", value: roleValue });
-    }
+    // The header already owns the canonical role and life dates. Overview
+    // cards must add information rather than echo either header metadata or a
+    // sentence selected for the body below.
+    const bodySentenceKeys = personBodySentenceKeys(entity);
     const nameStart = String(entity.name || "").trim().split(/\s+/)[0].toLowerCase();
 
     // Concrete sentences from Wikipedia intro
     const sentences = personIntroSentences(entity.intro || entity.summary || "");
-    const usedTexts = new Set(cards.map((c) => c.value.toLowerCase()));
+    const usedTexts = new Set();
     for (const sentence of sentences) {
       if (cards.length >= 6) break;
       const key = sentence.toLowerCase();
-      if (usedTexts.has(key)) continue;
+      const proseKey = normalizedPersonProseKey(sentence);
+      if (
+        usedTexts.has(key) ||
+        bodySentenceKeys.has(proseKey) ||
+        calendarDateKeys(sentence).length > 0
+      ) {
+        continue;
+      }
       // Skip the definitional opener ("X (born …) is an Australian actor") that
-      // just restates the Role card. The opener uniquely leads with the person's
+      // just restates the header description. The opener uniquely leads with the person's
       // name and an "is/was a/an <noun>" clause; pronoun-led substantive
       // sentences ("He is a five-time All-Star …") are kept. No length cap, so a
       // long opener ("Zion Lateef Williamson … is an American professional …")
       // is still caught.
-      if (roleValue && nameStart && key.startsWith(nameStart) && /\b(is|was|are|were)\s+(a|an)\s+[A-Za-z]/.test(sentence)) continue;
+      if (nameStart && key.startsWith(nameStart) && /\b(is|was|are|were)\s+(a|an)\s+[A-Za-z]/.test(sentence)) continue;
       cards.push({ label: sentenceLabel(sentence), value: sentence });
       usedTexts.add(key);
     }
@@ -1213,9 +1238,11 @@ function buildEntityOverviewSlider(entity) {
     // Fill remaining from stored AI cards that look concrete
     const storedGood = (entity.overviewCards || [])
       .filter((c) => c?.label && c?.value)
-      .filter((c) => !["Context", "Life and death", "Main role", "Known for"].includes(c.label))
+      .filter((c) => !["Context", "Life and death", "Born / Died", "Role", "Main role"].includes(c.label))
       .filter((c) => !isEntityPlaceholder(c.value))
-      .filter((c) => !PERSON_CARD_SKIP.some((p) => p.test(c.value)));
+      .filter((c) => !PERSON_CARD_SKIP.some((p) => p.test(c.value)))
+      .filter((c) => calendarDateKeys(c.value).length === 0)
+      .filter((c) => !bodySentenceKeys.has(normalizedPersonProseKey(c.value)));
     for (const c of storedGood) {
       if (cards.length >= 6) break;
       if (!usedTexts.has(c.value.toLowerCase())) {
@@ -2762,7 +2789,6 @@ function inferEntityTopicPillars(entity, type) {
 }
 
 function entityFactParagraphs(entity) {
-  const name = entity.name || "This person";
   const seen = new Set();
   const normalizeSentence = (value) =>
     String(value || "")
@@ -2790,23 +2816,8 @@ function entityFactParagraphs(entity) {
     addSentences(card?.value, facts);
   }
 
-  const lifeLine = entity.birthDate && entity.deathDate
-    ? `${name} lived from ${entity.birthDate} to ${entity.deathDate}.`
-    : entity.birthDate
-      ? `${name} was born on ${entity.birthDate}.`
-      : entity.deathDate
-        ? `${name} died on ${entity.deathDate}.`
-        : "";
-
   const paragraphs = [];
   const factualSentences = facts.slice();
-  if (lifeLine) {
-    // Don't prepend the life line when the first fact already states the birth/
-    // death (the Wikipedia intro "X (born …) is …" would otherwise duplicate it).
-    const firstStatesLife = /\b(born|died|b\.|d\.)\b/i.test(factualSentences[0] || "");
-    if (factualSentences.length && !firstStatesLife) factualSentences[0] = `${lifeLine} ${factualSentences[0]}`;
-    else if (!factualSentences.length) factualSentences.push(lifeLine);
-  }
 
   let current = [];
   let words = 0;
@@ -2826,6 +2837,67 @@ function entityFactParagraphs(entity) {
   return paragraphs
     .map((paragraph) => paragraph.replace(/\s+/g, " ").trim())
     .filter((paragraph) => paragraph.split(/\s+/).length >= 18);
+}
+
+function escapePersonDateRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function removeRepeatedPersonDateFromSentence(sentence, mention) {
+  const escaped = escapePersonDateRegex(mention.text);
+  let next = String(sentence || "")
+    .replace(
+      new RegExp(`\\b(born|died)\\s+on\\s+${escaped}`, "i"),
+      "$1",
+    )
+    .replace(
+      new RegExp(`\\(\\s*(?:born|died|b\\.|d\\.)?\\s*${escaped}\\s*\\)`, "i"),
+      "",
+    )
+    .replace(new RegExp(escaped, "i"), "")
+    .replace(/\(\s*(?:born|died|b\.|d\.)?\s*[–—-]?\s*\)/gi, "")
+    .replace(/\(\s*([^()]+?)\s*[–—-]\s*\)/g, "($1)")
+    .replace(/\(\s*[–—-]\s*([^()]+?)\s*\)/g, "($1)")
+    .replace(/\bwas born\s*,\s*in\b/gi, "was born in")
+    .replace(/\bdied\s*,\s*in\b/gi, "died in")
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*,/g, ",")
+    .replace(/\s+([.;!?])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (/^(?:[A-Z][\w'’.-]*\s+){0,5}(?:was born|died)\.?$/i.test(next)) {
+    return "";
+  }
+  return next;
+}
+
+function dedupePersonBodyDateMentions(sections) {
+  const seenDates = new Set();
+  return (Array.isArray(sections) ? sections : [])
+    .map((section) => ({
+      ...section,
+      paragraphs: (Array.isArray(section?.paragraphs) ? section.paragraphs : [])
+        .map((paragraph) => {
+          const output = [];
+          for (const rawSentence of splitCompleteSentences(paragraph)) {
+            let sentence = rawSentence;
+            for (const mention of extractCalendarDateMentions(rawSentence)) {
+              if (seenDates.has(mention.key)) {
+                sentence = removeRepeatedPersonDateFromSentence(sentence, {
+                  ...mention,
+                  text: mention.text,
+                });
+              } else {
+                seenDates.add(mention.key);
+              }
+            }
+            if (sentence) output.push(sentence);
+          }
+          return output.join(" ").replace(/\s+/g, " ").trim();
+        })
+        .filter(Boolean),
+    }))
+    .filter((section) => section.paragraphs.length > 0);
 }
 
 function splitCompleteSentences(value) {
@@ -2937,14 +3009,28 @@ function personBodySectionsForRender(entity) {
     entityBodyWordCount({ bodySections: stored }) >= MIN_PERSON_ENTITY_BODY_WORDS &&
     !hasIncompleteEntityParagraphs({ bodySections: stored });
   if (reviewed) {
-    return stored.map((section, index) =>
+    return dedupePersonBodyDateMentions(stored.map((section, index) =>
       index === 0 && /^Who (?:is|was)\b/i.test(String(section?.heading || ""))
         ? { ...section, heading: personLeadQuestion(entity) }
         : section,
-    );
+    ));
   }
   const rebuilt = rebuildPersonBodySections(entity);
-  return rebuilt.length ? rebuilt : stored;
+  return dedupePersonBodyDateMentions(rebuilt.length ? rebuilt : stored);
+}
+
+function personEntityForRender(entity) {
+  const dates = validatedPersonRenderDates(entity);
+  return {
+    ...entity,
+    birthDate: dates.birthDate,
+    deathDate: dates.deathDate,
+    description: stripPersonLifeDateParenthetical(entity?.description),
+    bodySections: dedupePersonBodyDateMentions(entity?.bodySections),
+    ...(dates.birthConflict || dates.deathConflict
+      ? { _personDateConflictSuppressed: true }
+      : {}),
+  };
 }
 
 function ensureEntityContextSections(entity, type) {
@@ -3554,6 +3640,7 @@ async function handleEntityPage(request, env, url, type, slug, ctx) {
     if (ctx?.waitUntil && write) ctx.waitUntil(write);
   }
   entity = applyHistoryEvergreenPage(entity, historyPage);
+  if (type === "person") entity = personEntityForRender(entity);
   const title = entity.seoTitle || `${entity.name} | thisDay.`;
   const pageHeading = entity.pageHeading || entity.name;
   const canonical = `${url.origin}${entity.url || url.pathname}`;
@@ -9115,7 +9202,7 @@ const PUBLIC_HTML_CSP =
   `https://www.googletagmanager.com https://fundingchoicesmessages.google.com https://openlibrary.org; ` +
   `script-src 'self' https://cdn.jsdelivr.net https://consent.cookiebot.com https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://fundingchoicesmessages.google.com https://static.cloudflareinsights.com https://*.adtrafficquality.google 'unsafe-inline'; ` +
   `style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; ` +
-  `img-src 'self' data: https://upload.wikimedia.org https://covers.openlibrary.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com https://img.youtube.com https://*.adtrafficquality.google https://*.doubleclick.net; ` +
+  `img-src 'self' data: https://upload.wikimedia.org https://covers.openlibrary.org https://archive.org https://*.archive.org https://cdn.buymeacoffee.com https://imgsct.cookiebot.com https://www.google.com https://www.google.ba https://www.googleadservices.com https://pagead2.googlesyndication.com https://placehold.co https://www.googletagmanager.com https://i.ytimg.com https://img.youtube.com https://*.adtrafficquality.google https://*.doubleclick.net; ` +
   `font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; ` +
   `frame-src https://consentcdn.cookiebot.com https://td.doubleclick.net https://www.googletagmanager.com https://www.google.com https://www.youtube.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://fundingchoicesmessages.google.com https://*.adtrafficquality.google; ` +
   `manifest-src 'self'; ` +
@@ -11912,6 +11999,8 @@ export const __personIdentityTestHooks = {
   isLikelyWikipediaPersonEntity,
   seoEntityQualityEligible,
   personBodySectionsForRender,
+  personEntityForRender,
+  buildEntityOverviewSlider,
   updateEntityIndexEntry,
   refreshEntityIndexFromStoredEntities,
 };

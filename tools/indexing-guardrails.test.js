@@ -25,6 +25,13 @@ test("homepage CSP permits Google Ads frames", () => {
   );
 });
 
+test("public CSP permits Open Library covers that redirect to Archive.org", () => {
+  assert.match(
+    seoWorker,
+    /img-src[^;]*https:\/\/covers\.openlibrary\.org[^;]*https:\/\/archive\.org https:\/\/\*\.archive\.org/,
+  );
+});
+
 test("all public HTML responses receive the shared security contract", async () => {
   const response = hooks.applyPublicHtmlSecurityHeaders(
     new Response("<!doctype html><h1>Person page</h1>", {

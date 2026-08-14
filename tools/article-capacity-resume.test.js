@@ -1278,7 +1278,7 @@ test("a source-attribution tail cannot strand the Treaty of Greenville article",
     /direct outcome|explicitly noted|recurring feature/i,
   );
   assert.ok(repaired.content.aftermathParagraphs[0].split(/\s+/).length >= 95);
-  assert.ok(repaired.content.analysisGood[0].detail.split(/\s+/).length >= 60);
+  assert.ok(repaired.content.analysisGood[0].detail.split(/\s+/).length >= 50);
   assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
 });
 
@@ -1461,7 +1461,7 @@ test("bounded grounding removes Marikana-style causal tails while retaining subs
     repaired.content.analysisBad[0].detail,
     /which ultimately led/i,
   );
-  assert.ok(repaired.content.analysisBad[0].detail.split(/\s+/).length >= 60);
+  assert.ok(repaired.content.analysisBad[0].detail.split(/\s+/).length >= 50);
   assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
 });
 
@@ -1538,29 +1538,125 @@ test("dynamic source claims replace unsupported optional prose without weakening
   assert.deepEqual(repaired.repairedFieldPaths, ["analysisBad[0].detail"]);
   assert.doesNotMatch(repaired.content.analysisBad[0].detail, /prevented another|guaranteed safer/i);
   assert.ok(
-    repaired.content.analysisBad[0].detail.split(/\s+/).length >= 60,
+    repaired.content.analysisBad[0].detail.split(/\s+/).length >= 50,
     "source claims must refill the analysis word floor",
   );
   const grounding = hooks.verifyArticleGrounding(repaired.content, source);
   assert.equal(grounding.ok, true, grounding.reasons.join("; "));
 });
 
-test("bounded grounding rotates only repeated core contradictions", () => {
+test("grounding deletes one unsupported sentence when the approved remainder clears 50 words", () => {
+  const source = {
+    pageTitle: "Russell Hill subway accident",
+    text:
+      "The Russell Hill subway accident occurred in Toronto on August 11, 1995.",
+    sourceExtract:
+      "The Russell Hill subway accident involved two trains on Line 1 in Toronto. The collision happened between St. Clair West and Dupont stations on August 11, 1995. Toronto emergency crews entered the tunnel and removed passengers from the damaged cars. The official record lists three passenger deaths and thirty injured people. The inquiry examined signalling, operating procedures, and the actions of the train crews.",
+  };
+  const supportedRemainder =
+    "The retained record names the Russell Hill subway accident, Toronto, August 11, 1995, and the Line 1 tunnel between St. Clair West and Dupont stations. It lists three passenger deaths and thirty injuries, then separates the emergency response from an inquiry into signalling, operating procedures, and the actions of the train crews. That distinction keeps this account tied to the documented chronology and its stated limits.";
+  const unsupported =
+    "The inquiry prevented another subway disaster and guaranteed safer service.";
+  const content = {
+    title: "Russell Hill subway accident — August 11, 1995",
+    eventTitle: "Russell Hill subway accident",
+    overviewParagraphs: [source.sourceExtract],
+    analysisBad: [{
+      title: "Documented Limits",
+      detail: `${supportedRemainder} ${unsupported}`,
+    }],
+  };
+  const repaired = hooks.mechanicallyRepairGroundingReasons(
+    content,
+    [
+      `unsupported preventive outcome in analysisBad[0].detail: "${unsupported}"`,
+    ],
+    source,
+  );
+
+  assert.deepEqual(repaired.repairedFieldPaths, ["analysisBad[0].detail"]);
+  assert.equal(repaired.content.analysisBad.length, 1);
+  assert.equal(repaired.content.analysisBad[0].detail, supportedRemainder);
+  assert.ok(repaired.content.analysisBad[0].detail.split(/\s+/).length >= 50);
+  assert.equal(hooks.verifyArticleGrounding(repaired.content, source).ok, true);
+});
+
+test("a Core article omits an unrefillable optional analysis item and continues", async () => {
+  const blockedSentence =
+    "According to historical records, Boukman's role was significant in the early stages of the revolution, which ultimately led to the founding of a state free from slavery and ruled by former captives.";
+  const reason =
+    `unsupported causal claim in analysisGood[0].detail: "${blockedSentence}"`;
+  const bodyParagraph =
+    "The retained record identifies the Bois Caïman ceremony in Saint Domingue and names Dutty Boukman as its leader. ".repeat(38);
+  const content = {
+    contentTier: "core",
+    title: "Haitian Revolution Begins — August 14, 1791",
+    eventTitle: "Slaves hold Vodou ceremony",
+    historicalDate: "August 14, 1791",
+    historicalYear: 1791,
+    quickFacts: ["Event", "Date", "Place", "Leader"].map((label) => ({
+      label,
+      value: `${label} source value`,
+    })),
+    overviewParagraphs: [bodyParagraph],
+    analysisGood: [{
+      title: "Effective Leadership",
+      detail:
+        "Dutty Boukman led the Vodou ceremony at Bois Caïman on August 14, 1791. " +
+        blockedSentence,
+    }],
+    analysisBad: [],
+    didYouKnowFacts: [],
+  };
+  const source = {
+    pageTitle: "Haitian Revolution",
+    text: "Dutty Boukman led a Vodou ceremony at Bois Caïman on August 14, 1791.",
+    sourceExtract:
+      "The Haitian Revolution was an insurrection against French colonial rule in Saint Domingue.",
+  };
+
+  let repairCalled = false;
+  const result = await hooks.verifyFinalGroundingWithRepair(
+    {},
+    content,
+    source,
+    "14-august-2026",
+    {
+      verify: async (_env, candidate) =>
+        JSON.stringify(candidate).includes(blockedSentence)
+          ? { ok: false, reasons: [reason] }
+          : { ok: true, reasons: [] },
+      repair: async () => {
+        repairCalled = true;
+        return content;
+      },
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(repairCalled, false);
+  assert.deepEqual(result.content.analysisGood, []);
+  assert.doesNotMatch(JSON.stringify(result.content), /ultimately led to the founding/i);
+  assert.doesNotThrow(() => hooks.assertRequiredContentBlocks(result.content));
+});
+
+test("bounded grounding advances repeated optional and core contradictions", () => {
   const optionalReasons = [
     'unsupported causal claim in analysisBad[0].detail: "The dispute led to deaths."',
   ];
   const optionalFirst = hooks.boundedGroundingRetryState({}, optionalReasons);
-  assert.equal(optionalFirst.attempts, 0);
+  assert.equal(optionalFirst.attempts, 1);
   assert.equal(optionalFirst.shouldRotate, false);
   assert.equal(optionalFirst.optionalClaimDeferred, true);
-  assert.equal(optionalFirst.signature, "");
+  assert.ok(optionalFirst.signature);
 
   const optionalSecond = hooks.boundedGroundingRetryState({
+    boundedGroundingSignature: optionalFirst.signature,
     boundedGroundingReasons: optionalReasons,
-    boundedGroundingAttempts: 9,
+    boundedGroundingAttempts: optionalFirst.attempts,
   }, optionalReasons);
-  assert.equal(optionalSecond.attempts, 0);
-  assert.equal(optionalSecond.shouldRotate, false);
+  assert.equal(optionalSecond.attempts, 2);
+  assert.equal(optionalSecond.shouldRotate, true);
 
   const coreReasons = [
     "casualty number contradiction: article says 41 but source says 36",
@@ -1587,8 +1683,9 @@ test("bounded grounding rotates only repeated core contradictions", () => {
   const changed = hooks.boundedGroundingRetryState({
     boundedGroundingSignature: first.signature,
     boundedGroundingAttempts: 1,
+    boundedGroundingReasons: coreReasons,
   }, ["unsupported preventive outcome in conclusionParagraphs[0]"]);
-  assert.equal(changed.attempts, 0);
+  assert.equal(changed.attempts, 1);
   assert.equal(changed.shouldRotate, false);
 
   const transport = hooks.boundedGroundingRetryState({

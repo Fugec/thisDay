@@ -47,9 +47,12 @@ if (!LORA_BOLD_EXISTS) console.warn("  ⚠ Lora-Bold.ttf not found — falling b
 // Custom background image for the title panel (1080×480, dark green textured bg)
 const TEXT_BG_PATH = join(dirname(fileURLToPath(import.meta.url)), "../assets/text-bg.png");
 /**
- * Single scene per video — one full-bleed image with pulsing zoom.
+ * Prefer three full-bleed article images. Articles with only two distinct,
+ * usable images still qualify as multi-scene; a one-image result fails closed.
  */
-const N_SCENES = 1;
+export const VIDEO_SCENE_COUNT = 3;
+export const MIN_MULTI_SCENE_IMAGES = 2;
+const N_SCENES = VIDEO_SCENE_COUNT;
 
 // Gentle crossfade only — slide/wipe transitions are too jarring for a calm history channel
 const XFADE_TRANSITIONS = ["fade"];
@@ -365,7 +368,12 @@ function getWikipediaTitleFromUrl(articleUrlOrTitle) {
   return raw;
 }
 
-async function fetchWikipediaImageBuffers(articleUrlOrTitle, count = 2, context = {}) {
+async function fetchWikipediaImageBuffers(
+  articleUrlOrTitle,
+  count = 2,
+  context = {},
+  seenIdentities = new Set(),
+) {
   const ua = { "User-Agent": "thisday.info-blog/1.0 (https://thisday.info)" };
   const buffers = [];
   const pageTitle = getWikipediaTitleFromUrl(articleUrlOrTitle);
@@ -436,8 +444,13 @@ async function fetchWikipediaImageBuffers(articleUrlOrTitle, count = 2, context 
       );
       for (const url of urls) {
         if (buffers.length >= count) break;
+        const identity = normalizeVideoImageIdentity(url);
+        if (identity && seenIdentities.has(identity)) continue;
         const buf = await downloadSafe(url);
-        if (buf) buffers.push(buf);
+        if (buf) {
+          buffers.push(buf);
+          if (identity) seenIdentities.add(identity);
+        }
       }
     }
   } catch {
@@ -841,7 +854,8 @@ export async function resolvePostImage(post) {
   );
 }
 
-const DURATION = 45; // seconds — max 45 s
+export const VIDEO_DURATION_LIMIT_S = 60;
+const DURATION = VIDEO_DURATION_LIMIT_S;
 const FPS = 30;
 
 // ---------------------------------------------------------------------------
@@ -1124,13 +1138,45 @@ async function downloadImageBuffer(url) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-async function fetchArticleImageBuffers(slug, limit = 3) {
+export function normalizeVideoImageIdentity(value) {
+  let raw = String(value || "").trim();
+  if (!raw) return "";
+
+  try {
+    let parsed = new URL(raw, "https://thisday.info");
+    if (parsed.pathname.includes("/image-proxy")) {
+      const proxied = parsed.searchParams.get("src");
+      if (proxied) parsed = new URL(proxied);
+    }
+
+    let pathname = decodeURIComponent(parsed.pathname);
+    const thumbMarker = "/thumb/";
+    const thumbIndex = pathname.indexOf(thumbMarker);
+    if (thumbIndex >= 0) {
+      const prefix = pathname.slice(0, thumbIndex);
+      const parts = pathname.slice(thumbIndex + thumbMarker.length).split("/");
+      if (parts.length >= 4) pathname = `${prefix}/${parts.slice(0, -1).join("/")}`;
+    }
+    return `${parsed.hostname.toLowerCase()}${pathname}`;
+  } catch {
+    return raw.split(/[?#]/)[0].toLowerCase();
+  }
+}
+
+async function fetchArticleImageBuffers(
+  slug,
+  limit = 3,
+  seenIdentities = new Set(),
+) {
   const urls = await getPostImageUrls(slug, Math.max(limit * 4, 12));
   const buffers = [];
   for (const url of urls) {
+    const identity = normalizeVideoImageIdentity(url);
+    if (identity && seenIdentities.has(identity)) continue;
     try {
       const buf = await downloadImageBuffer(url);
       buffers.push(buf);
+      if (identity) seenIdentities.add(identity);
       if (buffers.length >= limit) break;
     } catch {
       // skip broken article images and keep going
@@ -1142,11 +1188,14 @@ async function fetchArticleImageBuffers(slug, limit = 3) {
 async function fetchPreferredVideoImageBuffers(post, articleSource, limit, context = {}) {
   const buffers = [];
   const featuredUrl = post?.imageUrl || null;
+  const seenIdentities = new Set();
 
   if (featuredUrl) {
     try {
       const featuredBuffer = await downloadImageBuffer(featuredUrl);
       buffers.push(featuredBuffer);
+      const identity = normalizeVideoImageIdentity(featuredUrl);
+      if (identity) seenIdentities.add(identity);
       console.log("  ✓ Using blog featured image as primary video image");
     } catch (err) {
       console.warn(`  ⚠ Featured image unavailable for video (${err.message}) — falling back to Wikipedia article images`);
@@ -1155,10 +1204,25 @@ async function fetchPreferredVideoImageBuffers(post, articleSource, limit, conte
 
   if (buffers.length >= limit) return buffers.slice(0, limit);
 
+  const articleBuffers = await fetchArticleImageBuffers(
+    post?.slug,
+    limit - buffers.length,
+    seenIdentities,
+  );
+  buffers.push(...articleBuffers);
+  if (articleBuffers.length > 0) {
+    console.log(
+      `  ✓ Added ${articleBuffers.length} distinct inline article image(s)`,
+    );
+  }
+
+  if (buffers.length >= limit) return buffers.slice(0, limit);
+
   const fallbackBuffers = await fetchWikipediaImageBuffers(
     articleSource,
     limit - buffers.length,
     context,
+    seenIdentities,
   );
   buffers.push(...fallbackBuffers);
   return buffers.slice(0, limit);
@@ -1383,7 +1447,7 @@ function extractPersonName(title) {
  * and leaves Zero GPU headroom for future WAN 2.2 I2V animation (3 clips ≈ 2.5 min/day).
  *
  * @param {string} title
- * @param {string[]|null} contentItems  DYK bullets / Quick Facts rows
+ * @param {string[]|null} contentItems  Overview timing parts or fallback fact rows
  * @param {string|null}   qualityHint   Remediation directive from a failed quality check
  * @returns {string[]}  3 prompts
  */
@@ -1557,7 +1621,7 @@ async function generateMultiSceneVideo(
   const XF = 1.2; // crossfade duration in seconds — longer = gentler on the eyes
 
   // Compute actual video duration from narration end + 3 s tail,
-  // capped at the 45 s max. Falls back to DURATION when no timestamps.
+  // capped at the 60 s Shorts target. Falls back to DURATION without timestamps.
   const narrEnd = words?.length > 0 ? words[words.length - 1].end : null;
   const videoDuration = narrEnd
     ? Math.max(Math.min(Math.ceil(narrEnd) + 3, DURATION), 10)
@@ -1583,10 +1647,14 @@ async function generateMultiSceneVideo(
     );
   }
 
-  const minWikiImages = Math.max(
-    1,
-    Number.parseInt(process.env.WIKI_IMAGE_MIN_COUNT || `${N_SCENES}`, 10) ||
-      N_SCENES,
+  const configuredMinWikiImages =
+    Number.parseInt(
+      process.env.WIKI_IMAGE_MIN_COUNT || `${MIN_MULTI_SCENE_IMAGES}`,
+      10,
+    ) || MIN_MULTI_SCENE_IMAGES;
+  const minWikiImages = Math.min(
+    N_SCENES,
+    Math.max(MIN_MULTI_SCENE_IMAGES, configuredMinWikiImages),
   );
 
   if (imageBuffers.length < minWikiImages) {

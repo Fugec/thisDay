@@ -6,16 +6,22 @@
  */
 
 import "dotenv/config";
-import { getPostIndex, getDidYouKnow, getQuickFacts, getArticleText, getPostWikipediaUrl } from "./lib/kv.js";
+import {
+  getArticleText,
+  getDidYouKnow,
+  getOverviewNarration,
+  getPostIndex,
+  getPostWikipediaUrl,
+  getQuickFacts,
+} from "./lib/kv.js";
 import { generateVideo } from "./lib/video.js";
-import { videoHeadlineTitle, videoMatchTitle } from "./lib/titles.js";
-import { generateNarration, buildNarrationParts } from "./lib/elevenlabs.js";
+import { videoMatchTitle } from "./lib/titles.js";
+import { generateNarration } from "./lib/elevenlabs.js";
 import {
   assessNarrationCaptionIntegrity,
   auditNarrationTopicConnection,
-  buildNarrationTopicContext,
-  selectInterestingNarrationFacts,
 } from "./lib/narration-selection.js";
+import { prepareNarrationSource } from "./lib/narration-source.js";
 import { getMusicPath } from "./lib/music.js";
 
 function getTodaySlug() {
@@ -39,27 +45,32 @@ async function main() {
   console.log(`Post: ${post.title}`);
 
   // Narration content
-  const [dyk, qf, articleText, wikiUrl] = await Promise.all([
+  const [overviewText, dyk, qf, articleText, wikiUrl] = await Promise.all([
+    getOverviewNarration(slug),
     getDidYouKnow(slug),
     getQuickFacts(slug),
     getArticleText(slug).catch(() => null),
     getPostWikipediaUrl(slug),
   ]);
-  const rawItems = [...(dyk || []), ...(qf || [])];
-  const topicContext = buildNarrationTopicContext(post, qf);
-  const selectedItems = selectInterestingNarrationFacts(
-    videoMatchTitle(post),
-    rawItems,
+  const narration = prepareNarrationSource(post, {
+    overviewText,
+    didYouKnow: dyk,
+    quickFacts: qf,
     articleText,
-    { limit: 3, dateHint: videoHeadlineTitle(post), topicContext },
+  });
+  const topicContext = narration.topicContext;
+  const narrationParts = narration.narrationParts;
+  const contentItems = narration.contentItems;
+  console.log(
+    narration.source === "overview"
+      ? `Narration source: Overview (${narration.overviewAssessment.words} words)`
+      : `Narration source: curated facts (${narration.overviewAssessment.reasons.join("; ")})`,
   );
-  const contentItems = selectedItems;
-  const narrationItems = selectedItems;
-  const narrationParts = buildNarrationParts(post, narrationItems);
   const topicAudit = auditNarrationTopicConnection(
     videoMatchTitle(post),
     narrationParts,
     topicContext,
+    { continuousNarrative: narration.source === "overview" },
   );
   if (!topicAudit.ok) {
     throw new Error(
@@ -83,7 +94,7 @@ async function main() {
     bgMusicPath,
     words,
     useAiImage,
-    contentItems: selectedItems,
+    contentItems,
     wikiArticleUrl: wikiUrl,
     narrationParts,
   });

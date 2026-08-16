@@ -1,9 +1,10 @@
 /**
  * ElevenLabs Text-to-Speech helper.
  *
- * Generates a documentary-style voiceover narration for each blog post
- * using text from the post's "Did You Know?" section (newer posts) or
- * "Quick Facts" table (older posts).
+ * Generates a documentary-style voiceover narration for each blog post.
+ * Current posts prefer the first paragraph from the article's Overview
+ * section. Did You Know / Quick Facts remain the safe fallback for older or
+ * insufficient overview content.
  *
  * Uses the /with-timestamps endpoint to get word-level timing data
  * so video.js can render animated synchronized captions.
@@ -13,7 +14,7 @@
  *
  * Free plan: 10 000 chars/month.
  * Schedule: 1 video every 3 days ≈ 10 videos/month.
- * Avg narration: ~600 chars → ~6 000 chars/month (well within free tier).
+ * Avg narration: ~750 chars → ~7 500 chars/month (within the scheduled budget).
  *
  * Env vars required: ELEVENLABS_API_KEY (primary), ELEVENLABS_API_KEY_2 (fallback)
  * Fallback is used automatically when the primary account hits its 10k char/month quota.
@@ -32,12 +33,112 @@ const MODEL_IDS = [
   "eleven_flash_v2_5", // documented functional replacement for Turbo v2.5
 ];
 
+const OVERVIEW_NARRATION_LIMITS = Object.freeze({
+  minChars: 400,
+  maxChars: 1000,
+  minWords: 65,
+  maxWords: 150,
+  minSentences: 3,
+});
+
+const OVERVIEW_SOURCE_ARTIFACT_RE =
+  /\b(?:advertisement|click here|jump to navigation|plot synopsis|read more|related stories|table of contents)\b|https?:\/\/|www\./i;
+
+function normalizeNarrationText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function splitOverviewSentences(value) {
+  const clean = normalizeNarrationText(value);
+  if (!clean) return [];
+  const protectedText = clean
+    .replace(/\b[A-Z]\.(?:[A-Z]\.)*/g, (match) => match.replace(/\./g, "\u0001"))
+    .replace(
+      /\b(?:Dr|Mr|Mrs|Ms|Prof|St|Jr|Sr|Gen|Lt|Col|Capt|Sgt|Gov|Sen|Rep|Pres|No|Inc|Ltd|Co|Corp)\./gi,
+      (match) => match.replace(/\./g, "\u0001"),
+    );
+  return protectedText
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.replace(/\u0001/g, ".").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Checks whether an Overview paragraph is dense and bounded enough to become
+ * the narration verbatim. Topic matching is performed separately against the
+ * post metadata before TTS.
+ */
+export function assessOverviewNarration(value) {
+  const text = normalizeNarrationText(value);
+  const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+  const sentences = splitOverviewSentences(text);
+  const reasons = [];
+
+  if (text.length < OVERVIEW_NARRATION_LIMITS.minChars) {
+    reasons.push(`overview is shorter than ${OVERVIEW_NARRATION_LIMITS.minChars} characters`);
+  }
+  if (text.length > OVERVIEW_NARRATION_LIMITS.maxChars) {
+    reasons.push(`overview exceeds ${OVERVIEW_NARRATION_LIMITS.maxChars} characters`);
+  }
+  if (words < OVERVIEW_NARRATION_LIMITS.minWords) {
+    reasons.push(`overview has fewer than ${OVERVIEW_NARRATION_LIMITS.minWords} words`);
+  }
+  if (words > OVERVIEW_NARRATION_LIMITS.maxWords) {
+    reasons.push(`overview exceeds ${OVERVIEW_NARRATION_LIMITS.maxWords} words`);
+  }
+  if (sentences.length < OVERVIEW_NARRATION_LIMITS.minSentences) {
+    reasons.push(`overview has fewer than ${OVERVIEW_NARRATION_LIMITS.minSentences} sentences`);
+  }
+  if (!/\b(?:\d{1,4}(?:,\d{3})*|\d{1,4}\s*(?:BC|BCE|AD|CE))\b/i.test(text)) {
+    reasons.push("overview has no concrete date or number");
+  }
+  if (OVERVIEW_SOURCE_ARTIFACT_RE.test(text)) {
+    reasons.push("overview contains source or navigation residue");
+  }
+
+  return {
+    ok: reasons.length === 0,
+    text,
+    chars: text.length,
+    words,
+    sentences: sentences.length,
+    reasons,
+  };
+}
+
+/**
+ * Splits one verbatim Overview paragraph into two balanced timing/audit parts.
+ * Joining the parts with one space reconstructs the normalized paragraph.
+ */
+export function buildOverviewNarrationParts(value) {
+  const assessment = assessOverviewNarration(value);
+  if (!assessment.text) return [];
+  const sentences = splitOverviewSentences(assessment.text);
+  if (sentences.length < 2) return [assessment.text];
+
+  let splitAt = 1;
+  let smallestDifference = Infinity;
+  for (let index = 1; index < sentences.length; index += 1) {
+    const leftLength = sentences.slice(0, index).join(" ").length;
+    const rightLength = sentences.slice(index).join(" ").length;
+    const difference = Math.abs(leftLength - rightLength);
+    if (difference < smallestDifference) {
+      smallestDifference = difference;
+      splitAt = index;
+    }
+  }
+
+  return [
+    sentences.slice(0, splitAt).join(" "),
+    sentences.slice(splitAt).join(" "),
+  ].filter(Boolean);
+}
+
 /**
  * Builds the TTS narration script.
  *
- * Uses only the high-interest facts selected before this function is called.
- * The title supplies context; generic intros, source attributions, calls to
- * action, descriptions, and arbitrary first article paragraphs are excluded.
+ * Builds the fallback fact-card narration. Overview narration is prepared by
+ * buildOverviewNarrationParts before this fallback is reached.
  *
  * @param {{ title: string, description: string }} post
  * @param {string[]|null} contentItems  — DYK bullets or Quick Facts rows

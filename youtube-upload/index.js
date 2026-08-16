@@ -4,10 +4,10 @@
  * Reads new AI blog posts from Cloudflare KV, generates a Shorts-format
  * MP4 for each one, and uploads it to YouTube.
  *
- * Audio:  ElevenLabs TTS narration (from Did You Know / Quick Facts section)
- *         mixed with background music (assets/background.mp3) at 15% volume.
- * Image:  Exact Wikipedia-article mode. Pulls scene images only from the
- *         specific Wikipedia article tied to the post topic.
+ * Audio:  ElevenLabs TTS narration (article Overview first, with Did You Know /
+ *         Quick Facts fallback) mixed with background music at 15% volume.
+ * Image:  Multi-scene mode. Uses the post's featured and inline article
+ *         images first, then the exact Wikipedia article as a fallback.
  * Schedule: Mon/Tue/Thu/Fri via GitHub Actions cron at 13:00 UTC
  *           (about 09:00 Eastern during daylight saving time)
  *
@@ -37,6 +37,7 @@ import {
   getDidYouKnow,
   getQuickFacts,
   getArticleText,
+  getOverviewNarration,
   getPostWikipediaUrl,
   updateIndexEntry,
   deleteIndexEntry,
@@ -44,11 +45,9 @@ import {
 import {
   assessNarrationCaptionIntegrity,
   auditNarrationTopicConnection,
-  buildNarrationTopicContext,
-  selectInterestingNarrationFacts,
 } from "./lib/narration-selection.js";
 import { generateVideo, resolvePostImage } from "./lib/video.js";
-import { videoHeadlineTitle, videoMatchTitle } from "./lib/titles.js";
+import { videoMatchTitle } from "./lib/titles.js";
 import { verifyKvReadWriteAccess } from "./lib/kv.js";
 import { checkVideoQuality } from "./lib/video-quality.js";
 import {
@@ -73,10 +72,8 @@ import { getMusicPath } from "./lib/music.js";
 import { notifyUpload } from "./lib/notify.js";
 import { postToMeta } from "./lib/meta.js";
 import { postToTikTok } from "./lib/tiktok.js";
-import {
-  generateNarration,
-  buildNarrationParts,
-} from "./lib/elevenlabs.js";
+import { generateNarration } from "./lib/elevenlabs.js";
+import { prepareNarrationSource } from "./lib/narration-source.js";
 
 // Parse REUPLOAD_SLUGS from env into a Set.
 // Accepts: "a,b,c" or "a b c" or newline-separated.
@@ -357,88 +354,56 @@ async function main() {
       let videoResult = null;
       try {
         // ── ElevenLabs TTS narration ───────────────────────────────────────────
-        // Source text: current/legacy Did You Know and Quick Facts markup.
-        console.log("  Fetching Did You Know / Quick Facts from KV...");
-        const [dykItems, quickFacts] = await Promise.all([
+        // Current posts prefer the first Overview paragraph. Curated fact cards
+        // remain the deterministic fallback for older or weak articles.
+        console.log("  Fetching Overview and fallback facts from KV...");
+        const [overviewText, dykItems, quickFacts, articleText] = await Promise.all([
+          getOverviewNarration(post.slug),
           getDidYouKnow(post.slug),
           getQuickFacts(post.slug),
+          getArticleText(post.slug).catch(() => null),
         ]);
-        const contentItems = [
-          ...(dykItems || []),
-          ...(quickFacts || []),
-        ];
-
-        if (contentItems.length > 0) {
-          console.log(
-            `  Found ${dykItems?.length || 0} Did You Know and ${quickFacts?.length || 0} Quick Facts item(s).`,
-          );
-        } else {
-          console.log(
-            "  No DYK/Quick Facts found — scanning article text for concrete facts.",
-          );
-        }
-
-        // Deterministically select concrete source-backed facts. Article text is
-        // used only to fill gaps left by the two curated fact sections.
-        const articleText = await getArticleText(post.slug).catch(() => null);
         const wikiArticleUrl = await getPostWikipediaUrl(post.slug).catch(
           () => null,
         );
-        const narrationTopicContext = buildNarrationTopicContext(
-          post,
+        const narration = prepareNarrationSource(post, {
+          overviewText,
+          didYouKnow: dykItems,
           quickFacts,
-        );
-        const selectedNarrationItems = selectInterestingNarrationFacts(
-          videoMatchTitle(post),
-          contentItems,
           articleText,
-          {
-            limit: 3,
-            dateHint: videoHeadlineTitle(post),
-            topicContext: narrationTopicContext,
-          },
-        );
-        if (selectedNarrationItems.length > 0) {
+        });
+        const narrationTopicContext = narration.topicContext;
+        const narrationParts = narration.narrationParts;
+        const narrationContentItems = narration.contentItems;
+
+        if (narration.source === "overview") {
           console.log(
-            `  Selected ${selectedNarrationItems.length} high-interest narration fact(s):`,
+            `  ✓ Using Overview narration verbatim (${narration.overviewAssessment.words} words, ${narration.overviewAssessment.sentences} sentences).`,
           );
-          selectedNarrationItems.forEach((item, index) =>
+        } else {
+          const overviewReasons = narration.overviewAssessment.reasons.join("; ");
+          console.log(
+            `  Overview fallback: ${overviewReasons || "Overview section is unavailable"}.`,
+          );
+          console.log(
+            `  Found ${dykItems?.length || 0} Did You Know and ${quickFacts?.length || 0} Quick Facts item(s).`,
+          );
+        }
+
+        if (narrationContentItems.length > 0) {
+          console.log(
+            `  Prepared ${narrationContentItems.length} ${narration.source === "overview" ? "overview part" : "high-interest fact"}(s):`,
+          );
+          narrationContentItems.forEach((item, index) =>
             console.log(`    ${index + 1}. ${item}`),
           );
         } else {
           console.warn(
-            "  ⚠ No high-interest source facts passed selection — using the headline only.",
-          );
-        }
-
-        const narrationItems = selectedNarrationItems;
-        const preparedNarrationParts = buildNarrationParts(
-          post,
-          narrationItems,
-        );
-        // Date trimming can remove the only topic anchor from an otherwise
-        // eligible candidate. Audit the exact post-trim text that TTS will
-        // receive, drop any disconnected part, and require the remaining
-        // script to pass as a whole.
-        const preparedTopicAudit = auditNarrationTopicConnection(
-          videoMatchTitle(post),
-          preparedNarrationParts,
-          narrationTopicContext,
-        );
-        const narrationParts = preparedTopicAudit.results
-          .filter((result) => result.connected)
-          .map((result) => result.text);
-        if (narrationParts.length !== preparedNarrationParts.length) {
-          console.warn(
-            `  ⚠ Dropped ${preparedNarrationParts.length - narrationParts.length} narration fact(s) after the exact TTS-text topic check.`,
+            "  ⚠ No narration content passed deterministic selection.",
           );
         }
         const script = narrationParts.join(" ");
-        const topicAudit = auditNarrationTopicConnection(
-          videoMatchTitle(post),
-          narrationParts,
-          narrationTopicContext,
-        );
+        const topicAudit = narration.topicAudit;
         if (!topicAudit.ok) {
           const failures = topicAudit.results
             .filter((result) => !result.connected)
@@ -454,6 +419,7 @@ async function main() {
           checkedAt: new Date().toISOString(),
           title: topicAudit.title,
           connected: true,
+          source: narration.source,
           facts: narrationParts,
           script,
         };
@@ -515,7 +481,7 @@ async function main() {
             bgMusicPath,
             words: narrWords,
             useAiImage,
-            contentItems: selectedNarrationItems,
+            contentItems: narrationContentItems,
             wikiArticleUrl,
             narrationParts,
             qualityHint,
@@ -560,6 +526,7 @@ async function main() {
           videoMatchTitle(post),
           narrationParts,
           narrationTopicContext,
+          { continuousNarrative: narration.source === "overview" },
         );
         const finalCaptionAudit = assessNarrationCaptionIntegrity(
           script,
@@ -592,6 +559,7 @@ async function main() {
             videoMatchTitle(post),
             narrationParts,
             narrationTopicContext,
+            { continuousNarrative: narration.source === "overview" },
           );
           const promotionCaptionAudit = assessNarrationCaptionIntegrity(
             script,

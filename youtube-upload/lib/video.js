@@ -13,7 +13,7 @@
  *
  * Audio mixing:
  *   narrationPath  — ElevenLabs TTS voiceover, played once at full volume.
- *   bgMusicPath    — Background music looped for the full 45 s at 15% volume.
+ *   bgMusicPath    — Background music looped for the video at 33% volume.
  *   When both are present they are mixed with FFmpeg's amix filter so the
  *   voice is always clear over the music.
  *
@@ -855,6 +855,7 @@ export async function resolvePostImage(post) {
 }
 
 export const VIDEO_DURATION_LIMIT_S = 60;
+export const BACKGROUND_MUSIC_VOLUME = 0.33;
 const DURATION = VIDEO_DURATION_LIMIT_S;
 const FPS = 30;
 
@@ -1851,8 +1852,11 @@ async function generateMultiSceneVideo(
       let audioFilter = "";
       if (hasNarr && hasMusic) {
         audioFilter =
-          `;[${musicIdx}:a]volume=0.11[bg]` +
+          `;[${musicIdx}:a]volume=${BACKGROUND_MUSIC_VOLUME}[bg]` +
           `;[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`;
+      } else if (hasMusic) {
+        audioFilter =
+          `;[${musicIdx}:a]volume=${BACKGROUND_MUSIC_VOLUME}[a]`;
       }
 
       cmd.complexFilter(
@@ -1879,7 +1883,7 @@ async function generateMultiSceneVideo(
       } else if (hasMusic) {
         cmd.outputOptions([
           ...baseOpts,
-          `-map ${musicIdx}:a`,
+          "-map [a]",
           "-c:a aac",
           "-b:a 128k",
           "-shortest",
@@ -1925,7 +1929,7 @@ async function generateMultiSceneVideo(
  * @param {{ slug: string, title: string, factualTitle?: string, eventTitle?: string, description: string, imageUrl: string }} post
  * @param {{
  *   narrationPath?: string|null,  ElevenLabs TTS audio — played once at 100% volume
- *   bgMusicPath?:   string|null,  Background music — looped at 15% volume
+ *   bgMusicPath?:   string|null,  Background music — looped at 33% volume
  *   words?:         { word: string, start: number, end: number }[],  Caption timestamps
  *   useAiImage?:    boolean,      When true, use the multi-scene wiki-image path
  *                                 (legacy name kept for compatibility)
@@ -2013,11 +2017,11 @@ export async function generateVideo(
       : "  Captions: none (no word timestamps)",
   );
 
-  // 4. Encode PNG frame → 45-second MP4 with slow Ken Burns motion
+  // 4. Encode PNG frame with slow Ken Burns motion
   //    Audio strategy:
-  //      narration + music  → amix (narration 100%, music 15%)
-  //      narration only     → narration track, video pads to 45 s silently
-  //      music only         → music looped at full volume for 45 s
+  //      narration + music  → amix (narration 100%, music 33%)
+  //      narration only     → narration track, video pads to target silently
+  //      music only         → music looped at 33% volume for the target duration
   //      no audio           → silent video
   try {
     await new Promise((resolve, reject) => {
@@ -2059,7 +2063,7 @@ export async function generateVideo(
           cmd
             .complexFilter(
               `${sceneFilter};${captionFilter};` +
-                `[${musicIdx}:a]volume=0.11[bg];` +
+                `[${musicIdx}:a]volume=${BACKGROUND_MUSIC_VOLUME}[bg];` +
                 `[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`,
             )
             .outputOptions([
@@ -2081,11 +2085,14 @@ export async function generateVideo(
             ]);
         } else if (hasMusic) {
           cmd
-            .complexFilter(`${sceneFilter};${captionFilter}`)
+            .complexFilter(
+              `${sceneFilter};${captionFilter};` +
+                `[${musicIdx}:a]volume=${BACKGROUND_MUSIC_VOLUME}[a]`,
+            )
             .outputOptions([
               ...baseOpts,
               `-map ${videoMapLabel}`,
-              `-map ${narrIdx}:a`,
+              "-map [a]",
               "-c:a aac",
               "-b:a 128k",
               "-shortest",
@@ -2101,7 +2108,7 @@ export async function generateVideo(
           cmd
             .complexFilter(
               `${buildKenBurns(0, videoDuration, "[0:v]", "[v0]")};` +
-              `[${musicIdx}:a]volume=0.11[bg];` +
+              `[${musicIdx}:a]volume=${BACKGROUND_MUSIC_VOLUME}[bg];` +
               `[${narrIdx}:a][bg]amix=inputs=2:duration=longest:normalize=0[a]`,
             )
             .outputOptions([
@@ -2120,14 +2127,19 @@ export async function generateVideo(
             "-b:a 128k",
           ]);
         } else if (hasMusic) {
-          cmd.outputOptions([
-            ...baseOpts,
-            "-map [v0]",
-            "-map 1:a",
-            "-c:a aac",
-            "-b:a 128k",
-            "-shortest",
-          ]);
+          cmd
+            .complexFilter(
+              `${buildKenBurns(0, videoDuration, "[0:v]", "[v0]")};` +
+                `[${musicIdx}:a]volume=${BACKGROUND_MUSIC_VOLUME}[a]`,
+            )
+            .outputOptions([
+              ...baseOpts,
+              "-map [v0]",
+              "-map [a]",
+              "-c:a aac",
+              "-b:a 128k",
+              "-shortest",
+            ]);
         } else {
           cmd
             .complexFilter(buildKenBurns(0, videoDuration, "[0:v]", "[v0]"))

@@ -5,7 +5,7 @@
  * MP4 for each one, and uploads it to YouTube.
  *
  * Audio:  ElevenLabs TTS narration (article Overview first, with Did You Know /
- *         Quick Facts fallback) mixed with background music at 15% volume.
+ *         Quick Facts fallback) mixed with background music at 33% volume.
  * Image:  Multi-scene mode. Uses the post's featured and inline article
  *         images first, then the exact Wikipedia article as a fallback.
  * Schedule: Mon/Tue/Thu/Fri via GitHub Actions cron at 13:00 UTC
@@ -346,7 +346,7 @@ async function main() {
   try {
     for (let post of pending) {
       console.log(`\n→ ${post.title}`);
-      // Per-post music — always uses assets/background.mp3
+      // Per-post music — always uses assets/lacrimosa thisday.mp3
       const bgMusicPath = getMusicPath();
       let videoPath;
       let videoCuts = [];

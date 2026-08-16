@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   extractArticleTextFromHtml,
   extractDidYouKnowFromHtml,
+  extractOverviewNarrationFromHtml,
   extractQuickFactsFromHtml,
 } from "./lib/kv.js";
 import {
@@ -13,12 +14,21 @@ import {
   selectInterestingNarrationFacts,
 } from "./lib/narration-selection.js";
 import {
+  assessOverviewNarration,
   buildNarrationParts,
   buildNarrationScript,
+  buildOverviewNarrationParts,
 } from "./lib/elevenlabs.js";
+import { prepareNarrationSource } from "./lib/narration-source.js";
 import { buildVideoTitle } from "./lib/titles.js";
 import { auditYoutubeVideo } from "./lib/youtube.js";
-import { buildSingleImageMotion } from "./lib/video.js";
+import {
+  buildSingleImageMotion,
+  MIN_MULTI_SCENE_IMAGES,
+  normalizeVideoImageIdentity,
+  VIDEO_DURATION_LIMIT_S,
+  VIDEO_SCENE_COUNT,
+} from "./lib/video.js";
 import {
   collectReplacedYoutubeIds,
   isUploadLockActive,
@@ -53,6 +63,127 @@ function testCurrentMarkupExtraction() {
     "Event: JFK Jr. plane crash",
     "Date: July 16, 1999",
   ]);
+}
+
+const OVERVIEW_NARRATION =
+  "On August 16, 1930, Ub Iwerks released Fiddlesticks, the first color sound cartoon. " +
+  "This 1930 American animated comedy short film was directed and animated by Ub Iwerks, featuring his character Flip the Frog. " +
+  "The short film utilized the short-lived Harriscolor process, making it the first complete individual sound cartoon to be photographed in color. " +
+  "Fiddlesticks was a significant release, as it marked a new milestone in animation technology. " +
+  "The film's plot revolves around Flip, who is seen dancing on lilypads until he reaches land and dries himself off. " +
+  "He then walks to a party, where he performs a dance for the audience, accidentally climbing to a spider web. " +
+  "The cartoon's use of color and sound added a new dimension to the animation, making it a notable achievement in the field. " +
+  "The film's release was a testament to Ub Iwerks' innovative approach to animation.";
+
+function testOverviewNarrationExtractionAndSelection() {
+  const html = `
+    <p class="article-meta">Published August 16, 2026.</p>
+    <!-- Overview -->
+    <section class="mt-4">
+      <h2>The Ceremony and the Signal</h2>
+      <figure><figcaption>Ub Iwerks</figcaption></figure>
+      <p>On August 16, 1930, <a href="https://en.wikipedia.org/wiki/Ub_Iwerks">Ub Iwerks</a> released Fiddlesticks, the first color sound cartoon. ${OVERVIEW_NARRATION.replace(/^On August 16, 1930, Ub Iwerks released Fiddlesticks, the first color sound cartoon\.\s*/, "")}</p>
+      <p>This second Overview paragraph must not be narrated.</p>
+    </section>
+    <!-- Personal Analysis -->`;
+  const extracted = extractOverviewNarrationFromHtml(html);
+  assert.equal(extracted, OVERVIEW_NARRATION);
+
+  const assessment = assessOverviewNarration(extracted);
+  assert.equal(assessment.ok, true);
+  assert.equal(assessment.words, 143);
+  assert.equal(assessment.sentences, 8);
+
+  const parts = buildOverviewNarrationParts(extracted);
+  assert.equal(parts.length, 2);
+  assert.equal(parts.join(" "), OVERVIEW_NARRATION);
+  assert.match(parts[0], /^On August 16, 1930/);
+
+  const post = {
+    title: "How did Ub Iwerks create the first color sound cartoon?",
+    eventTitle: "The first color sound cartoon, Fiddlesticks, is released by Ub Iwerks",
+    sourcePageTitle: "Fiddlesticks (1930 film)",
+    description: "Ub Iwerks released Fiddlesticks using Harriscolor.",
+  };
+  const prepared = prepareNarrationSource(post, {
+    overviewText: extracted,
+    quickFacts: [
+      "Event: The first color sound cartoon, Fiddlesticks, is released by Ub Iwerks",
+      "Key Figure: Ub Iwerks",
+    ],
+    didYouKnow: ["A fallback fact from 1930 that must not replace the Overview."],
+  });
+  assert.equal(prepared.source, "overview");
+  assert.equal(prepared.topicAudit.ok, true);
+  assert.equal(prepared.narrationParts.join(" "), OVERVIEW_NARRATION);
+}
+
+function testWeakOverviewFallsBackToCuratedFacts() {
+  const post = {
+    title: TITLE,
+    eventTitle: "John F. Kennedy Jr. dies in a plane crash",
+    sourcePageTitle: "John F. Kennedy Jr. plane crash",
+  };
+  const weak = "John F. Kennedy Jr. died in 1999.";
+  const prepared = prepareNarrationSource(post, {
+    overviewText: weak,
+    didYouKnow: LIVE_STYLE_FACTS,
+    quickFacts: [
+      "Event: John F. Kennedy Jr. dies in a plane crash",
+      "Date: July 16, 1999",
+    ],
+  });
+  assert.equal(prepared.source, "curated-facts");
+  assert.ok(prepared.overviewAssessment.reasons.some((reason) => /shorter|fewer/.test(reason)));
+  assert.ok(prepared.narrationParts.length >= 2);
+}
+
+function testOverviewSourceResidueFailsClosed() {
+  const contaminated = `${OVERVIEW_NARRATION} Plot synopsis: read more at https://example.com.`;
+  const assessment = assessOverviewNarration(contaminated);
+  assert.equal(assessment.ok, false);
+  assert.ok(assessment.reasons.some((reason) => /source or navigation residue/.test(reason)));
+}
+
+function testOverviewAuditPreservesNarrativeContext() {
+  const title = "Hawaii wildfires burn seventeen thousand acres";
+  const topicContext = {
+    text: "2023 Hawaii wildfires on Maui burned 17,000 acres",
+    coreText: "2023 Hawaii wildfires Maui",
+    personTerms: [],
+    locationText: "Maui, Hawaii",
+  };
+  const parts = [
+    "The 2023 Hawaii wildfires erupted on Maui in early August, scorching 17,000 acres and claiming at least 101 lives.",
+    "Emergency responders faced unprecedented challenges as the fires spread rapidly through densely populated areas.",
+  ];
+  assert.equal(
+    auditNarrationTopicConnection(title, parts, topicContext).ok,
+    false,
+  );
+  assert.equal(
+    auditNarrationTopicConnection(title, parts, topicContext, {
+      continuousNarrative: true,
+    }).ok,
+    true,
+  );
+}
+
+function testMultiImageVideoConfiguration() {
+  assert.equal(VIDEO_SCENE_COUNT, 3);
+  assert.equal(MIN_MULTI_SCENE_IMAGES, 2);
+  assert.equal(VIDEO_DURATION_LIMIT_S, 60);
+
+  const original =
+    "https://upload.wikimedia.org/wikipedia/commons/0/0c/Flip_the_Frog_-_Fiddlesticks_poster.jpg?utm_source=en.wikipedia.org";
+  const thumbnail =
+    "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Flip_the_Frog_-_Fiddlesticks_poster.jpg/640px-Flip_the_Frog_-_Fiddlesticks_poster.jpg";
+  const proxiedThumbnail =
+    `https://thisday.info/image-proxy?src=${encodeURIComponent(thumbnail)}`;
+  assert.equal(
+    normalizeVideoImageIdentity(original),
+    normalizeVideoImageIdentity(proxiedThumbnail),
+  );
 }
 
 function testInterestingFactSelection() {
@@ -337,6 +468,11 @@ function testReplacementChainSurvivesConcurrentRetries() {
 }
 
 testCurrentMarkupExtraction();
+testOverviewNarrationExtractionAndSelection();
+testWeakOverviewFallsBackToCuratedFacts();
+testOverviewSourceResidueFailsClosed();
+testOverviewAuditPreservesNarrativeContext();
+testMultiImageVideoConfiguration();
 testInterestingFactSelection();
 testNarrationContainsFactsOnly();
 testAllFillerFailsClosed();

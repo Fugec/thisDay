@@ -111,6 +111,7 @@ async function main() {
     title,
     storedAudit.facts,
     topicContext,
+    { continuousNarrative: storedAudit.source === "overview" },
   );
   const rebuiltScript = storedAudit.facts
     .map((fact) => String(fact || "").trim())
@@ -149,6 +150,7 @@ async function main() {
     title,
     storedAudit.facts,
     topicContext,
+    { continuousNarrative: storedAudit.source === "overview" },
   );
   const immediateVideoAudit = auditYoutubeVideo(
     post,

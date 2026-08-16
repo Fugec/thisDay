@@ -174,6 +174,53 @@ export async function getArticleText(slug) {
 }
 
 /**
+ * Extracts the first substantive paragraph from the explicitly marked
+ * Overview section. Current articles use this paragraph as a compact,
+ * chronological account of the anniversary event, which makes it a stronger
+ * narration source than disconnected fact cards.
+ *
+ * The marker is required deliberately: older or malformed pages fall back to
+ * the existing Did You Know / Quick Facts narration path instead of allowing
+ * navigation, metadata, or recommendation prose into ElevenLabs.
+ *
+ * @param {string} raw
+ * @returns {string|null}
+ */
+export function extractOverviewNarrationFromHtml(raw) {
+  const html = String(raw || "");
+  const markerIndex = html.indexOf("<!-- Overview -->");
+  if (markerIndex < 0) return null;
+
+  const afterMarker = html.slice(markerIndex + "<!-- Overview -->".length);
+  const section = afterMarker.match(/<section\b[^>]*>([\s\S]*?)<\/section>/i)?.[1];
+  if (!section) return null;
+
+  for (const match of section.matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/gi)) {
+    const attrs = match[1] || "";
+    if (/\b(?:article-meta|dyn-fact|tdq-|amazon-|evidence-map)\b/i.test(attrs)) {
+      continue;
+    }
+    const text = decodeEntities(
+      match[2]
+        .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim(),
+    );
+    if (text.length >= 60) return text;
+  }
+
+  return null;
+}
+
+export async function getOverviewNarration(slug) {
+  const raw = await kvGet(`post:${slug}`);
+  if (!raw) return null;
+  return extractOverviewNarrationFromHtml(raw);
+}
+
+/**
  * Extracts wiki-hosted image URLs from the stored post HTML.
  * The blog content uses /image-proxy?src=... wrappers; this unwraps them
  * back to the original Wikimedia/Commons URL so the video pipeline can reuse

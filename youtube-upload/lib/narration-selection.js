@@ -396,7 +396,7 @@ export function auditNarrationTopicConnection(
   title,
   facts,
   topicContext = "",
-  { minimumFacts = 2 } = {},
+  { minimumFacts = 2, continuousNarrative = false } = {},
 ) {
   const items = (Array.isArray(facts) ? facts : [])
     .map((fact) => normalizeText(fact))
@@ -405,20 +405,38 @@ export function auditNarrationTopicConnection(
     text,
     ...narrationTopicConnection(text, title, topicContext),
   }));
-  return {
-    version: 1,
-    ok:
-      results.length >= minimumFacts &&
-      results.every((result) => result.connected) &&
-      results.some(
+  const joinedResult = continuousNarrative
+    ? {
+        text: items.join(" "),
+        ...narrationTopicConnection(items.join(" "), title, topicContext),
+      }
+    : null;
+  const hasTopicAnchor = continuousNarrative
+    ? Boolean(
+        joinedResult &&
+          (joinedResult.titleMatches.length > 0 ||
+            joinedResult.personMatches.length > 0 ||
+            joinedResult.contextMatches.length >= 2),
+      )
+    : results.some(
         (result) =>
           result.titleMatches.length > 0 ||
           result.personMatches.length > 0 ||
           result.contextMatches.length >= 2,
-      ),
+      );
+  return {
+    version: 1,
+    ok:
+      results.length >= minimumFacts &&
+      (continuousNarrative
+        ? joinedResult?.connected
+        : results.every((result) => result.connected)) &&
+      hasTopicAnchor,
     title: normalizeText(title),
     checkedFacts: results.length,
     minimumFacts,
+    continuousNarrative,
+    joinedResult,
     results,
   };
 }

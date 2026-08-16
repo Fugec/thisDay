@@ -23,6 +23,7 @@ import { prepareNarrationSource } from "./lib/narration-source.js";
 import { buildVideoTitle } from "./lib/titles.js";
 import { auditYoutubeVideo } from "./lib/youtube.js";
 import {
+  BACKGROUND_MUSIC_VOLUME,
   buildSingleImageMotion,
   MIN_MULTI_SCENE_IMAGES,
   normalizeVideoImageIdentity,
@@ -173,6 +174,7 @@ function testMultiImageVideoConfiguration() {
   assert.equal(VIDEO_SCENE_COUNT, 3);
   assert.equal(MIN_MULTI_SCENE_IMAGES, 2);
   assert.equal(VIDEO_DURATION_LIMIT_S, 60);
+  assert.equal(BACKGROUND_MUSIC_VOLUME, 0.33);
 
   const original =
     "https://upload.wikimedia.org/wikipedia/commons/0/0c/Flip_the_Frog_-_Fiddlesticks_poster.jpg?utm_source=en.wikipedia.org";

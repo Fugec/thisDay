@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
+  extractPostArticleImageUrls,
   extractArticleTextFromHtml,
   extractDidYouKnowFromHtml,
   extractOverviewNarrationFromHtml,
@@ -34,6 +36,10 @@ import {
   collectReplacedYoutubeIds,
   isUploadLockActive,
 } from "./lib/tracker.js";
+import {
+  buildUploadNotificationMessage,
+  discordAttachmentVideoBitrateKbps,
+} from "./lib/notify.js";
 
 const TITLE =
   "John F. Kennedy Jr. Dies in Plane Crash — July 16, 1999";
@@ -172,7 +178,7 @@ function testOverviewAuditPreservesNarrativeContext() {
 
 function testMultiImageVideoConfiguration() {
   assert.equal(VIDEO_SCENE_COUNT, 3);
-  assert.equal(MIN_MULTI_SCENE_IMAGES, 2);
+  assert.equal(MIN_MULTI_SCENE_IMAGES, 1);
   assert.equal(VIDEO_DURATION_LIMIT_S, 60);
   assert.equal(BACKGROUND_MUSIC_VOLUME, 0.33);
 
@@ -185,6 +191,69 @@ function testMultiImageVideoConfiguration() {
   assert.equal(
     normalizeVideoImageIdentity(original),
     normalizeVideoImageIdentity(proxiedThumbnail),
+  );
+}
+
+function testVideoImagesComeOnlyFromTheExactArticle() {
+  const hero =
+    "https://upload.wikimedia.org/wikipedia/en/9/98/Wade_Frankum.jpg";
+  const inline =
+    "https://upload.wikimedia.org/wikipedia/commons/a/a1/Exact_article_scene.jpg";
+  const related =
+    "https://upload.wikimedia.org/wikipedia/commons/0/04/Port_Arthur%2C_Tasmania.JPG";
+  const quiz =
+    "https://upload.wikimedia.org/wikipedia/commons/e/ea/Quiz_art.jpg";
+  const html = `
+    <figure class="text-center article-hero-fig">
+      <img src="/image-proxy?src=${encodeURIComponent(hero)}&w=800&q=85">
+    </figure>
+    <section><!-- Overview -->
+      <figure style="float:right;margin-left:1rem">
+        <img src="${inline}">
+      </figure>
+    </section>
+    <a class="related-card"><img src="/image-proxy?src=${encodeURIComponent(related)}&w=80"></a>
+    <div class="tdq-float-bar"><img src="/image-proxy?src=${encodeURIComponent(quiz)}&w=176"></div>`;
+
+  assert.deepEqual(extractPostArticleImageUrls(html, 3), [hero, inline]);
+}
+
+function testReviewedPromotionPinsTheReplacementIdentity() {
+  const source = readFileSync(
+    new URL("./promote-reviewed.js", import.meta.url),
+    "utf8",
+  );
+  const promotionWrite = source.slice(
+    source.indexOf("try {\n    await setYoutubeVideoPrivacy"),
+    source.indexOf("} catch (error)", source.indexOf("try {\n    await setYoutubeVideoPrivacy")),
+  );
+  assert.match(promotionWrite, /youtubeId:\s*tracked\.youtubeId/);
+  assert.match(promotionWrite, /uploadedAt:\s*tracked\.uploadedAt/);
+}
+
+function testDiscordAttachmentBitrateLeavesAudioAndContainerHeadroom() {
+  const kbps = discordAttachmentVideoBitrateKbps(
+    46,
+    Math.floor(8 * 1024 * 1024 * 0.84),
+  );
+  assert.ok(kbps >= 1000 && kbps <= 1300, `unexpected bitrate: ${kbps}`);
+}
+
+function testDiscordAttachmentMessageKeepsYoutubeAndBlogLinks() {
+  const message = buildUploadNotificationMessage(
+    {
+      slug: "17-august-2026",
+      factualTitle: "A Historical Event — August 17, 2026",
+    },
+    "AbCdEfGhI12",
+  );
+  assert.match(
+    message,
+    /https:\/\/www\.youtube\.com\/shorts\/AbCdEfGhI12/,
+  );
+  assert.match(
+    message,
+    /https:\/\/thisday\.info\/blog\/17-august-2026\//,
   );
 }
 
@@ -475,6 +544,10 @@ testWeakOverviewFallsBackToCuratedFacts();
 testOverviewSourceResidueFailsClosed();
 testOverviewAuditPreservesNarrativeContext();
 testMultiImageVideoConfiguration();
+testVideoImagesComeOnlyFromTheExactArticle();
+testReviewedPromotionPinsTheReplacementIdentity();
+testDiscordAttachmentBitrateLeavesAudioAndContainerHeadroom();
+testDiscordAttachmentMessageKeepsYoutubeAndBlogLinks();
 testInterestingFactSelection();
 testNarrationContainsFactsOnly();
 testAllFillerFailsClosed();

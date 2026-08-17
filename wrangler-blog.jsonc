@@ -48,7 +48,8 @@
     // organizations/projects. Empty means one shared pool and disables
     // concurrent Groq article chunks, preventing parallel TPM exhaustion.
     // Verified independent 2026-08-05: all 7 keys answered a live request
-    // against llama-3.3-70b-versatile within minutes of that model's org
+    // against the then-active Llama 3.3 70B model within minutes of that
+    // model's org
     // reporting "Used 98746/100000" TPD for the key-1 account — the other
     // six were untouched. Before this, an empty value meant every key
     // shared one "groq:shared" circuit, so one account's TPD exhaustion

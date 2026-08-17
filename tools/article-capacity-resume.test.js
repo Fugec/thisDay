@@ -12,6 +12,11 @@ import {
   callWorkersAIDirect,
   isAIProviderCapacityError,
 } from "../js/shared/ai-call.js";
+import {
+  GROQ_TEXT_MODEL_DEFAULT as YOUTUBE_GROQ_TEXT_MODEL_DEFAULT,
+  __resetGroqModelResolverForTests as resetYoutubeGroqModelResolverForTests,
+  resolveGroqModels as resolveYoutubeGroqModels,
+} from "../youtube-upload/lib/model-resolver.js";
 
 function makeKvMock() {
   const store = new Map();
@@ -699,7 +704,7 @@ test("Groq-only request-size failures remain structural errors", async () => {
     const value = String(url);
     if (value.endsWith("/v1/models")) {
       return new Response(JSON.stringify({
-        data: [{ id: "llama-3.3-70b-versatile", active: true }],
+        data: [{ id: "openai/gpt-oss-120b", active: true }],
       }), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (value.includes("api.groq.com/openai/v1/chat/completions")) {
@@ -728,6 +733,165 @@ test("Groq-only request-size failures remain structural errors", async () => {
     assert.match(failure.message, /request too large/i);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("retired Groq text models cannot be revived by stale active catalog data", async () => {
+  __resetGroqModelCacheForTests();
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (url, init) => {
+    const value = String(url);
+    if (value.endsWith("/v1/models")) {
+      return new Response(JSON.stringify({
+        data: [
+          { id: "llama-3.3-70b-versatile", active: true, context_window: 131072, max_completion_tokens: 32768 },
+          { id: "llama-3.1-8b-instant", active: true, context_window: 131072, max_completion_tokens: 8192 },
+          { id: "openai/gpt-oss-120b", active: true, context_window: 131072, max_completion_tokens: 65536 },
+        ],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (value.includes("api.groq.com/openai/v1/chat/completions")) {
+      requestBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "replacement-ok" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    throw new Error(`unexpected fetch: ${value}`);
+  };
+  try {
+    assert.equal(
+      await callAI(
+        { ARTICLE_AI_PROVIDER_MODE: "groq-only", GROQ_API_KEY: "stale-catalog-key" },
+        [{ role: "user", content: "use an active model" }],
+        { providerAttemptLimit: 1 },
+      ),
+      "replacement-ok",
+    );
+    assert.equal(requestBody.model, "openai/gpt-oss-120b");
+    assert.equal(requestBody.reasoning_effort, "low");
+  } finally {
+    globalThis.fetch = originalFetch;
+    __resetGroqModelCacheForTests();
+  }
+});
+
+test("large Groq requests prefer Qwen 3.6 before the reasoning-heavy GPT OSS model", async () => {
+  __resetGroqModelCacheForTests();
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (url, init) => {
+    const value = String(url);
+    if (value.endsWith("/v1/models")) {
+      return new Response(JSON.stringify({
+        data: [
+          { id: "openai/gpt-oss-120b", active: true, context_window: 131072, max_completion_tokens: 65536 },
+          { id: "qwen/qwen3.6-27b", active: true, context_window: 131072, max_completion_tokens: 16384 },
+          { id: "openai/gpt-oss-20b", active: true, context_window: 131072, max_completion_tokens: 65536 },
+        ],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (value.includes("api.groq.com/openai/v1/chat/completions")) {
+      requestBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "large-request-ok" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    throw new Error(`unexpected fetch: ${value}`);
+  };
+  try {
+    assert.equal(
+      await callAI(
+        { ARTICLE_AI_PROVIDER_MODE: "groq-only", GROQ_API_KEY: "large-request-key" },
+        [{ role: "user", content: "produce structured article JSON" }],
+        { maxTokens: 4096, providerAttemptLimit: 1 },
+      ),
+      "large-request-ok",
+    );
+    assert.equal(requestBody.model, "qwen/qwen3.6-27b");
+    assert.equal(requestBody.reasoning_effort, "none");
+    assert.equal(requestBody.reasoning_format, "hidden");
+  } finally {
+    globalThis.fetch = originalFetch;
+    __resetGroqModelCacheForTests();
+  }
+});
+
+test("Groq catalog failure falls back directly to GPT OSS 120B", async () => {
+  __resetGroqModelCacheForTests();
+  const originalFetch = globalThis.fetch;
+  let requestBody = null;
+  globalThis.fetch = async (url, init) => {
+    const value = String(url);
+    if (value.endsWith("/v1/models")) {
+      return new Response("catalog unavailable", { status: 503 });
+    }
+    if (value.includes("api.groq.com/openai/v1/chat/completions")) {
+      requestBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "offline-chain-ok" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    throw new Error(`unexpected fetch: ${value}`);
+  };
+  try {
+    assert.equal(
+      await callAI(
+        { ARTICLE_AI_PROVIDER_MODE: "groq-only", GROQ_API_KEY: "offline-catalog-key" },
+        [{ role: "user", content: "use the emergency model chain" }],
+        { providerAttemptLimit: 1 },
+      ),
+      "offline-chain-ok",
+    );
+    assert.equal(requestBody.model, "openai/gpt-oss-120b");
+    assert.equal(requestBody.reasoning_effort, "low");
+  } finally {
+    globalThis.fetch = originalFetch;
+    __resetGroqModelCacheForTests();
+  }
+});
+
+test("the YouTube pipeline defaults to GPT OSS 120B without a catalog", async () => {
+  const keyNames = ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3", "GROQ_API_KEY_4"];
+  const originalKeys = Object.fromEntries(keyNames.map((name) => [name, process.env[name]]));
+  try {
+    for (const name of keyNames) delete process.env[name];
+    resetYoutubeGroqModelResolverForTests();
+    assert.equal(YOUTUBE_GROQ_TEXT_MODEL_DEFAULT, "openai/gpt-oss-120b");
+    assert.equal((await resolveYoutubeGroqModels()).textModel, "openai/gpt-oss-120b");
+  } finally {
+    for (const name of keyNames) {
+      if (originalKeys[name] == null) delete process.env[name];
+      else process.env[name] = originalKeys[name];
+    }
+    resetYoutubeGroqModelResolverForTests();
+  }
+});
+
+test("the YouTube pipeline rejects retired Llama IDs from stale catalog data", async () => {
+  const keyNames = ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3", "GROQ_API_KEY_4"];
+  const originalKeys = Object.fromEntries(keyNames.map((name) => [name, process.env[name]]));
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.GROQ_API_KEY = "youtube-stale-catalog-key";
+    for (const name of keyNames.slice(1)) delete process.env[name];
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      data: [
+        { id: "llama-3.3-70b-versatile" },
+        { id: "llama-3.1-8b-instant" },
+        { id: "openai/gpt-oss-120b" },
+        { id: "qwen/qwen3.6-27b" },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    resetYoutubeGroqModelResolverForTests();
+    assert.equal((await resolveYoutubeGroqModels()).textModel, "openai/gpt-oss-120b");
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const name of keyNames) {
+      if (originalKeys[name] == null) delete process.env[name];
+      else process.env[name] = originalKeys[name];
+    }
+    resetYoutubeGroqModelResolverForTests();
   }
 });
 

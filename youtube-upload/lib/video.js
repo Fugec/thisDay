@@ -2,8 +2,8 @@
  * Generates a YouTube Shorts MP4 (1080x1920) from a blog post.
  *
  * Background visuals:
- *   default path        → multi-scene wiki mode using article images first,
- *                         then Wikipedia/Wikimedia Commons fallbacks
+ *   default path        → one-to-three scenes using only images stored in
+ *                         the exact blog article
  *   USE_AI_IMAGE=false  → legacy single-image path using post.imageUrl
  *
  * Captions:
@@ -47,11 +47,11 @@ if (!LORA_BOLD_EXISTS) console.warn("  ⚠ Lora-Bold.ttf not found — falling b
 // Custom background image for the title panel (1080×480, dark green textured bg)
 const TEXT_BG_PATH = join(dirname(fileURLToPath(import.meta.url)), "../assets/text-bg.png");
 /**
- * Prefer three full-bleed article images. Articles with only two distinct,
- * usable images still qualify as multi-scene; a one-image result fails closed.
+ * Prefer three full-bleed article images, but a single usable image is valid
+ * and becomes one continuous Ken Burns scene for the complete video.
  */
 export const VIDEO_SCENE_COUNT = 3;
-export const MIN_MULTI_SCENE_IMAGES = 2;
+export const MIN_MULTI_SCENE_IMAGES = 1;
 const N_SCENES = VIDEO_SCENE_COUNT;
 
 // Gentle crossfade only — slide/wipe transitions are too jarring for a calm history channel
@@ -1186,46 +1186,18 @@ async function fetchArticleImageBuffers(
   return buffers;
 }
 
-async function fetchPreferredVideoImageBuffers(post, articleSource, limit, context = {}) {
-  const buffers = [];
-  const featuredUrl = post?.imageUrl || null;
+async function fetchPreferredVideoImageBuffers(post, limit) {
   const seenIdentities = new Set();
-
-  if (featuredUrl) {
-    try {
-      const featuredBuffer = await downloadImageBuffer(featuredUrl);
-      buffers.push(featuredBuffer);
-      const identity = normalizeVideoImageIdentity(featuredUrl);
-      if (identity) seenIdentities.add(identity);
-      console.log("  ✓ Using blog featured image as primary video image");
-    } catch (err) {
-      console.warn(`  ⚠ Featured image unavailable for video (${err.message}) — falling back to Wikipedia article images`);
-    }
-  }
-
-  if (buffers.length >= limit) return buffers.slice(0, limit);
-
-  const articleBuffers = await fetchArticleImageBuffers(
+  const buffers = await fetchArticleImageBuffers(
     post?.slug,
-    limit - buffers.length,
+    limit,
     seenIdentities,
   );
-  buffers.push(...articleBuffers);
-  if (articleBuffers.length > 0) {
+  if (buffers.length > 0) {
     console.log(
-      `  ✓ Added ${articleBuffers.length} distinct inline article image(s)`,
+      `  ✓ Loaded ${buffers.length} distinct image(s) from the stored article`,
     );
   }
-
-  if (buffers.length >= limit) return buffers.slice(0, limit);
-
-  const fallbackBuffers = await fetchWikipediaImageBuffers(
-    articleSource,
-    limit - buffers.length,
-    context,
-    seenIdentities,
-  );
-  buffers.push(...fallbackBuffers);
   return buffers.slice(0, limit);
 }
 
@@ -1610,8 +1582,6 @@ async function generateMultiSceneVideo(
     narrationPath,
     bgMusicPath,
     words,
-    contentItems,
-    wikiArticleUrl,
     narrationParts,
     videoPath,
     qualityHint = null,
@@ -1633,40 +1603,21 @@ async function generateMultiSceneVideo(
       : `  Video duration: ${videoDuration} s (default — no word timestamps)`,
   );
 
-  // 1. Use the article's featured image first. This keeps the video aligned with
-  // the published blog post; Wikipedia article images are only fallback material.
-  const fallbackTitle = videoMatchTitle(post).replace(/\s*[—–-]\s+\w+ \d{1,2},\s*\d{4}$/, "").trim();
-  const articleSource = wikiArticleUrl || fallbackTitle;
-  console.log(`  Fetching featured/article image for "${slug}"...`);
-  const imageBuffers = await fetchPreferredVideoImageBuffers(post, articleSource, N_SCENES, {
-    contentItems,
-  });
+  // Use only imagery already stored inside this exact blog article. If the
+  // article has one image, that image carries the full video; if it has more,
+  // use at most three in article order.
+  console.log(`  Fetching exact article images for "${slug}"...`);
+  const imageBuffers = await fetchPreferredVideoImageBuffers(post, N_SCENES);
 
-  if (imageBuffers.length === 0) {
+  if (imageBuffers.length < MIN_MULTI_SCENE_IMAGES) {
     throw new Error(
-      "IMAGE_UNAVAILABLE: no usable featured image or exact Wikipedia article image",
-    );
-  }
-
-  const configuredMinWikiImages =
-    Number.parseInt(
-      process.env.WIKI_IMAGE_MIN_COUNT || `${MIN_MULTI_SCENE_IMAGES}`,
-      10,
-    ) || MIN_MULTI_SCENE_IMAGES;
-  const minWikiImages = Math.min(
-    N_SCENES,
-    Math.max(MIN_MULTI_SCENE_IMAGES, configuredMinWikiImages),
-  );
-
-  if (imageBuffers.length < minWikiImages) {
-    throw new Error(
-      `IMAGE_UNAVAILABLE: exact Wikipedia article mode requires ${minWikiImages} usable article images, got ${imageBuffers.length}`,
+      "IMAGE_UNAVAILABLE: no usable image stored in the exact blog article",
     );
   }
 
   const sceneCount = Math.min(N_SCENES, imageBuffers.length);
   console.log(
-    `  ✓ Using ${sceneCount} real image(s) for video (featured first, min=${minWikiImages})`,
+    `  ✓ Using ${sceneCount} image(s) from the exact blog article (featured first, max=${N_SCENES})`,
   );
 
   const sceneLayers = await Promise.all(
@@ -1931,7 +1882,7 @@ async function generateMultiSceneVideo(
  *   narrationPath?: string|null,  ElevenLabs TTS audio — played once at 100% volume
  *   bgMusicPath?:   string|null,  Background music — looped at 33% volume
  *   words?:         { word: string, start: number, end: number }[],  Caption timestamps
- *   useAiImage?:    boolean,      When true, use the multi-scene wiki-image path
+ *   useAiImage?:    boolean,      When true, use the article-image scene path
  *                                 (legacy name kept for compatibility)
  * }} [opts]
  * @returns {Promise<{ path: string, cuts: number[] }>} path to the MP4 and scene cut timestamps
@@ -1943,8 +1894,6 @@ export async function generateVideo(
     bgMusicPath,
     words = [],
     useAiImage = false,
-    contentItems = null,
-    wikiArticleUrl = null,
     narrationParts = null,
     qualityHint = null, // remediation directive from a failed quality check
   } = {},
@@ -1956,14 +1905,12 @@ export async function generateVideo(
   const framePath = join(TMP, `${slug}_frame.png`);
   const videoPath = join(TMP, `${slug}.mp4`);
 
-  // Multi-scene: article/Wikipedia images crossfaded at narration-timed boundaries
+  // Article-image mode: one image or up to three article figures.
   if (useAiImage) {
     return generateMultiSceneVideo(post, {
       narrationPath,
       bgMusicPath,
       words,
-      contentItems,
-      wikiArticleUrl,
       narrationParts,
       videoPath,
       qualityHint,

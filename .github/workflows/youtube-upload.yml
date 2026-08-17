@@ -112,7 +112,6 @@ jobs:
           BLOG_WORKER_URL: ${{ secrets.BLOG_WORKER_URL }}
           YOUTUBE_REGEN_SECRET: ${{ secrets.YOUTUBE_REGEN_SECRET }}
           USE_AI_IMAGE: ${{ secrets.USE_AI_IMAGE }}
-          WIKI_IMAGE_MIN_COUNT: ${{ secrets.WIKI_IMAGE_MIN_COUNT }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_TOKEN_2: ${{ secrets.HF_TOKEN_2 }}
           HF_TOKEN_3: ${{ secrets.HF_TOKEN_3 }}

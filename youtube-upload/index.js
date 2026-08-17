@@ -6,8 +6,8 @@
  *
  * Audio:  ElevenLabs TTS narration (article Overview first, with Did You Know /
  *         Quick Facts fallback) mixed with background music at 33% volume.
- * Image:  Multi-scene mode. Uses the post's featured and inline article
- *         images first, then the exact Wikipedia article as a fallback.
+ * Image:  Uses only the post's own featured and inline article images. A post
+ *         with one image gets one continuous scene; up to three are used.
  * Schedule: Mon/Tue/Thu/Fri via GitHub Actions cron at 13:00 UTC
  *           (about 09:00 Eastern during daylight saving time)
  *
@@ -21,7 +21,6 @@
  *   BLOG_WORKER_URL        (needed when this job must trigger /blog/publish)
  *   YOUTUBE_REGEN_SECRET   (auth for POST /blog/publish regeneration)
  *   YOUTUBE_PRIVACY        (optional: private or public, default public)
- *   WIKI_IMAGE_MIN_COUNT   (optional: min usable wiki images for multi-scene video; default 3)
  *   ALLOW_SILENT_VIDEO     (optional: true only for deliberate music-only uploads)
  *
  * Optional expert-model fallbacks used by helper modules:
@@ -38,7 +37,6 @@ import {
   getQuickFacts,
   getArticleText,
   getOverviewNarration,
-  getPostWikipediaUrl,
   updateIndexEntry,
   deleteIndexEntry,
 } from "./lib/kv.js";
@@ -363,9 +361,6 @@ async function main() {
           getQuickFacts(post.slug),
           getArticleText(post.slug).catch(() => null),
         ]);
-        const wikiArticleUrl = await getPostWikipediaUrl(post.slug).catch(
-          () => null,
-        );
         const narration = prepareNarrationSource(post, {
           overviewText,
           didYouKnow: dykItems,
@@ -445,9 +440,9 @@ async function main() {
         }
 
         // ── Image pre-check ────────────────────────────────────────────────────
-        // Multi-scene mode builds from article/Wikipedia images instead of a
-        // single stored post.imageUrl, so the legacy resolvePostImage check is
-        // only needed for the single-scene fallback path.
+        // Article-image mode reads only the exact post's own images instead of
+        // accepting unrelated page thumbnails. The legacy resolvePostImage
+        // check is only needed for the explicit single-image legacy path.
         const useAiImage = process.env.USE_AI_IMAGE !== "false";
         if (!useAiImage) {
           console.log("  Checking image...");
@@ -461,7 +456,7 @@ async function main() {
             console.log("  ✓ Image OK");
           }
         } else {
-          console.log("  Multi-scene wiki mode — skipping single-image pre-check.");
+          console.log("  Exact-article image mode — skipping legacy image pre-check.");
         }
 
         // ── Generate video (with quality gate + retry) ─────────────────────────
@@ -481,8 +476,6 @@ async function main() {
             bgMusicPath,
             words: narrWords,
             useAiImage,
-            contentItems: narrationContentItems,
-            wikiArticleUrl,
             narrationParts,
             qualityHint,
           });

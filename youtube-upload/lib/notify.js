@@ -1,4 +1,12 @@
-import { statSync, readFileSync } from "fs";
+import { execFileSync } from "child_process";
+import {
+  mkdtempSync,
+  statSync,
+  readFileSync,
+  rmSync,
+} from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { videoHeadlineTitle } from "./titles.js";
 
 /**
@@ -15,10 +23,9 @@ import { videoHeadlineTitle } from "./titles.js";
  *
  * If neither is set this function is a silent no-op — safe to call always.
  *
- * Video delivery chain (all full-resolution, link only — no file attachment):
- *   1. catbox.moe  — permanent, 200 MB cap; 403s from CI IPs intermittently
- *   2. 0x0.st      — permanent (~1 yr for ~15 MB), works from CI IPs
- *   3. transfer.sh — auto-deletes after 24 h (Max-Days: 1), designed for CI
+ * Discord receives an MP4 attachment directly. Videos above the conservative
+ * attachment ceiling are transcoded to a temporary smaller MP4; the original
+ * YouTube master is never modified. External download hosts are fallback-only.
  */
 
 // catbox/litterbox sit behind Cloudflare and 403 requests that don't look like a
@@ -33,6 +40,176 @@ const CATBOX_HEADERS = {
   Origin: "https://catbox.moe",
   Referer: "https://catbox.moe/",
 };
+
+const DEFAULT_DISCORD_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
+const DISCORD_ATTACHMENT_AUDIO_KBPS = 96;
+
+export function buildUploadNotificationMessage(
+  post,
+  youtubeId,
+  downloadUrl = null,
+) {
+  return (
+    `✅ **New Short uploaded**\n` +
+    `📺 ${videoHeadlineTitle(post)}\n` +
+    `🎬 https://www.youtube.com/shorts/${youtubeId}\n` +
+    `🌐 https://thisday.info/blog/${post.slug}/` +
+    (downloadUrl ? `\n📥 Download MP4: ${downloadUrl}` : ``)
+  );
+}
+
+function discordAttachmentMaxBytes() {
+  const configuredMb = Number.parseFloat(
+    process.env.DISCORD_ATTACHMENT_MAX_MB ||
+      String(DEFAULT_DISCORD_ATTACHMENT_MAX_BYTES / 1024 / 1024),
+  );
+  const safeMb = Number.isFinite(configuredMb)
+    ? Math.min(25, Math.max(1, configuredMb))
+    : 8;
+  return Math.floor(safeMb * 1024 * 1024);
+}
+
+export function discordAttachmentVideoBitrateKbps(
+  durationSeconds,
+  targetBytes,
+  audioKbps = DISCORD_ATTACHMENT_AUDIO_KBPS,
+) {
+  const duration = Math.max(1, Number(durationSeconds) || 1);
+  const bytes = Math.max(1024 * 1024, Number(targetBytes) || 0);
+  const totalKbps = Math.floor((bytes * 8) / duration / 1000);
+  return Math.max(320, totalKbps - audioKbps - 32);
+}
+
+function videoDurationSeconds(videoPath) {
+  const raw = execFileSync(
+    "ffprobe",
+    [
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "default=noprint_wrappers=1:nokey=1",
+      videoPath,
+    ],
+    { encoding: "utf8", timeout: 30_000 },
+  ).trim();
+  const duration = Number.parseFloat(raw);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new Error("ffprobe did not return a valid video duration");
+  }
+  return duration;
+}
+
+function prepareDiscordAttachment(videoPath, post) {
+  const maxBytes = discordAttachmentMaxBytes();
+  const originalSize = statSync(videoPath).size;
+  if (originalSize <= maxBytes) {
+    return {
+      path: videoPath,
+      filename: `${post.slug}.mp4`,
+      cleanup: () => {},
+    };
+  }
+
+  const workDir = mkdtempSync(join(tmpdir(), "thisday-discord-"));
+  const outputPath = join(workDir, `${post.slug}.mp4`);
+  try {
+    const duration = videoDurationSeconds(videoPath);
+    // Leave container/metadata headroom beneath Discord's limit.
+    const targetBytes = Math.floor(maxBytes * 0.84);
+    const videoKbps = discordAttachmentVideoBitrateKbps(
+      duration,
+      targetBytes,
+    );
+    execFileSync(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        videoPath,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-b:v",
+        `${videoKbps}k`,
+        "-maxrate",
+        `${videoKbps}k`,
+        "-bufsize",
+        `${videoKbps * 2}k`,
+        "-c:a",
+        "aac",
+        "-b:a",
+        `${DISCORD_ATTACHMENT_AUDIO_KBPS}k`,
+        "-movflags",
+        "+faststart",
+        outputPath,
+      ],
+      { timeout: 180_000 },
+    );
+    const outputSize = statSync(outputPath).size;
+    if (outputSize > maxBytes) {
+      throw new Error(
+        `compressed attachment is ${(outputSize / 1048576).toFixed(1)} MB`,
+      );
+    }
+    console.log(
+      `  ✓ Discord attachment prepared: ${(outputSize / 1048576).toFixed(1)} MB`,
+    );
+    return {
+      path: outputPath,
+      filename: `${post.slug}.mp4`,
+      cleanup: () => rmSync(workDir, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    rmSync(workDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function sendDiscordVideoAttachment(
+  discord,
+  post,
+  youtubeId,
+  videoPath,
+) {
+  const attachment = prepareDiscordAttachment(videoPath, post);
+  try {
+    const form = new FormData();
+    form.append(
+      "payload_json",
+      JSON.stringify({
+        content: buildUploadNotificationMessage(post, youtubeId),
+      }),
+    );
+    form.append(
+      "files[0]",
+      new Blob([readFileSync(attachment.path)], { type: "video/mp4" }),
+      attachment.filename,
+    );
+    const webhook = new URL(discord);
+    webhook.searchParams.set("wait", "true");
+    const response = await fetch(webhook, { method: "POST", body: form });
+    if (!response.ok) {
+      const detail = (await response.text()).trim().slice(0, 160);
+      throw new Error(
+        `Discord attachment upload failed: HTTP ${response.status}${detail ? ` (${detail})` : ""}`,
+      );
+    }
+    console.log("  ✓ Discord notified (MP4 attachment)");
+    return true;
+  } finally {
+    attachment.cleanup();
+  }
+}
 
 async function uploadToCatbox(videoPath, post) {
   const { size } = statSync(videoPath);
@@ -102,24 +279,36 @@ export async function notifyUpload(post, youtubeId, videoPath = null) {
   const slack = process.env.SLACK_WEBHOOK_URL;
   if (!discord && !slack) return;
 
+  let discordAttached = false;
+  if (discord && videoPath) {
+    discordAttached = await sendDiscordVideoAttachment(
+      discord,
+      post,
+      youtubeId,
+      videoPath,
+    ).catch((error) => {
+      console.warn(`  ⚠ Discord attachment error: ${error.message}`);
+      return false;
+    });
+  }
+
   let downloadUrl = null;
-  if (videoPath) {
+  if (videoPath && ((!discordAttached && discord) || slack)) {
     downloadUrl = await getDownloadUrl(videoPath, post);
     if (!downloadUrl) {
       console.warn("  ⚠ All upload hosts failed — Discord notification will have no video link");
     }
   }
 
-  const message =
-    `✅ **New Short uploaded**\n` +
-    `📺 ${videoHeadlineTitle(post)}\n` +
-    `🎬 https://www.youtube.com/shorts/${youtubeId}\n` +
-    `🌐 https://thisday.info/blog/${post.slug}/` +
-    (downloadUrl ? `\n📥 Download MP4: ${downloadUrl}` : ``);
+  const message = buildUploadNotificationMessage(
+    post,
+    youtubeId,
+    downloadUrl,
+  );
 
   const sends = [];
 
-  if (discord) {
+  if (discord && !discordAttached) {
     sends.push(
       fetch(discord, {
         method: "POST",
@@ -150,6 +339,7 @@ export async function notifyUpload(post, youtubeId, videoPath = null) {
   }
 
   await Promise.all(sends);
+  return { discordAttached, downloadUrl };
 }
 
 /**

@@ -10,7 +10,7 @@ import { isInterestingNarrationFact } from "./narration-selection.js";
  * selected facts. It must not introduce additional claims.
  *
  * Provider fallback chain (first available key wins):
- *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: llama-3.3-70b-versatile)
+ *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: openai/gpt-oss-120b)
  *              Keys: GROQ_API_KEY → GROQ_API_KEY_2 → GROQ_API_KEY_3 → GROQ_API_KEY_4
  *   2. HuggingFace — best free instruct model auto-resolved via resolveHFTextModel()
  *              Tokens: HF_TOKEN → HF_TOKEN_2 → HF_TOKEN_3 → HF_TOKEN_4

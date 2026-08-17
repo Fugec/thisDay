@@ -6,7 +6,7 @@ import { resolveGroqModels, resolveHFTextModel, groqReasoningParams, reasoningCo
  * accuracy before sending to FLUX / HuggingFace image generation.
  *
  * Provider fallback chain (first available key wins):
- *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: llama-3.3-70b-versatile)
+ *   1. Groq  — best free model auto-resolved via resolveGroqModels() (default: openai/gpt-oss-120b)
  *              Keys: GROQ_API_KEY → GROQ_API_KEY_2 → GROQ_API_KEY_3 → GROQ_API_KEY_4
  *   2. HuggingFace — best free instruct model auto-resolved via resolveHFTextModel()
  *              (default: meta-llama/Llama-3.3-70B-Instruct via unified router.huggingface.co/v1)

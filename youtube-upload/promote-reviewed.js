@@ -188,6 +188,13 @@ async function main() {
 
   if (retireOnly) {
     await updateUploaded(slug, {
+      // Keep the reviewed upload identity explicit. A fresh KV read inside
+      // updateUploaded can briefly return the pre-upload tracker value because
+      // Workers KV is eventually consistent; without these fields that stale
+      // value can restore the retired video ID.
+      youtubeId: tracked.youtubeId,
+      privacy: "public",
+      uploadedAt: tracked.uploadedAt,
       retiredYoutubeIds: [
         ...new Set([
           ...(Array.isArray(tracked.retiredYoutubeIds)
@@ -216,7 +223,14 @@ async function main() {
       );
     }
     await updateUploaded(slug, {
+      // Do not let an eventually-consistent read restore the replaced video.
+      youtubeId: tracked.youtubeId,
       privacy: "public",
+      uploadedAt: tracked.uploadedAt,
+      replacesYoutubeId: tracked.replacesYoutubeId || "",
+      replacesYoutubeIds: Array.isArray(tracked.replacesYoutubeIds)
+        ? tracked.replacesYoutubeIds
+        : [],
       reviewedAt: new Date().toISOString(),
       topicAudit: {
         ...storedAudit,

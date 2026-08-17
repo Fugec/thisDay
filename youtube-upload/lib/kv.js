@@ -221,24 +221,39 @@ export async function getOverviewNarration(slug) {
 }
 
 /**
- * Extracts wiki-hosted image URLs from the stored post HTML.
- * The blog content uses /image-proxy?src=... wrappers; this unwraps them
- * back to the original Wikimedia/Commons URL so the video pipeline can reuse
- * the exact article images.
+ * Extracts the featured image and floated inline figures from one stored blog
+ * article. Recommendation cards, quiz artwork, companion cards, and other
+ * page chrome are deliberately excluded so a video can never mix imagery from
+ * different articles.
  *
- * @param {string} slug
+ * The blog uses /image-proxy?src=... wrappers; this unwraps them back to the
+ * original Wikimedia URL before returning the ordered, deduplicated list.
+ *
+ * @param {string} raw
  * @param {number} [limit=15]
- * @returns {Promise<string[]>}
+ * @returns {string[]}
  */
-export async function getPostImageUrls(slug, limit = 15) {
-  const raw = await kvGet(`post:${slug}`);
-  if (!raw) return [];
+export function extractPostArticleImageUrls(raw, limit = 15) {
+  if (!raw || limit <= 0) return [];
 
   const urls = [];
   const seen = new Set();
-  const imgRe = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi;
-  for (const match of raw.matchAll(imgRe)) {
-    let src = decodeEntities(match[1]);
+  const figureRe = /<figure\b[^>]*>[\s\S]*?<\/figure>/gi;
+  const articleFigures = [...raw.matchAll(figureRe)]
+    .map((match) => match[0])
+    .filter((figure) => {
+      const openingTag = figure.match(/^<figure\b[^>]*>/i)?.[0] || "";
+      return (
+        /\bclass\s*=\s*["'][^"']*\barticle-hero-fig\b/i.test(openingTag) ||
+        /\bstyle\s*=\s*["'][^"']*\bfloat\s*:\s*(?:left|right)\b/i.test(openingTag)
+      );
+    });
+
+  for (const figure of articleFigures) {
+    const imgMatch = figure.match(
+      /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/i,
+    );
+    let src = decodeEntities(imgMatch?.[1] || "");
     if (!src) continue;
 
     try {
@@ -278,6 +293,18 @@ export async function getPostImageUrls(slug, limit = 15) {
   }
 
   return urls;
+}
+
+/**
+ * Reads one stored article and returns only its own featured/inline images.
+ *
+ * @param {string} slug
+ * @param {number} [limit=15]
+ * @returns {Promise<string[]>}
+ */
+export async function getPostImageUrls(slug, limit = 15) {
+  const raw = await kvGet(`post:${slug}`);
+  return extractPostArticleImageUrls(raw, limit);
 }
 
 /**

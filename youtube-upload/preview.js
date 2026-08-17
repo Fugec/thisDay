@@ -11,7 +11,6 @@ import {
   getDidYouKnow,
   getOverviewNarration,
   getPostIndex,
-  getPostWikipediaUrl,
   getQuickFacts,
 } from "./lib/kv.js";
 import { generateVideo } from "./lib/video.js";
@@ -45,12 +44,11 @@ async function main() {
   console.log(`Post: ${post.title}`);
 
   // Narration content
-  const [overviewText, dyk, qf, articleText, wikiUrl] = await Promise.all([
+  const [overviewText, dyk, qf, articleText] = await Promise.all([
     getOverviewNarration(slug),
     getDidYouKnow(slug),
     getQuickFacts(slug),
     getArticleText(slug).catch(() => null),
-    getPostWikipediaUrl(slug),
   ]);
   const narration = prepareNarrationSource(post, {
     overviewText,
@@ -60,7 +58,6 @@ async function main() {
   });
   const topicContext = narration.topicContext;
   const narrationParts = narration.narrationParts;
-  const contentItems = narration.contentItems;
   console.log(
     narration.source === "overview"
       ? `Narration source: Overview (${narration.overviewAssessment.words} words)`
@@ -94,8 +91,6 @@ async function main() {
     bgMusicPath,
     words,
     useAiImage,
-    contentItems,
-    wikiArticleUrl: wikiUrl,
     narrationParts,
   });
 

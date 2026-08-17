@@ -4,47 +4,46 @@
  * available free model, and caches the result for the process lifetime.
  *
  * Groq fallbacks:
- *   text:   llama-3.3-70b-versatile
+ *   text:   openai/gpt-oss-120b
  *   vision: meta-llama/llama-4-scout-17b-16e-instruct (Groq shutdown 2026-07-17;
  *           NVIDIA NIM meta/llama-4-maverick-17b-128e-instruct is the fallback)
  *
  * HuggingFace fallback:
- *   text:   meta-llama/Llama-3.3-70B-Instruct  (unified router.huggingface.co/v1 — same model as Groq)
+ *   text:   meta-llama/Llama-3.3-70B-Instruct  (independent HF lifecycle)
  */
 
 const GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models";
 
 // E2E lesson (2026-07-03, see js/shared/ai-call.js for the full writeup):
-// llama-3.3-70b-versatile stays primary even though Groq announced its
-// 2026-08-16 shutdown. It is not excluded here — a full local publish E2E
-// with gpt-oss-120b as primary hit repeated Groq 413 "Request too large" on
+// a full local publish E2E with gpt-oss-120b as primary hit repeated Groq 413
+// "Request too large" on
 // EVERY request, because this account's TPM allocation for gpt-oss-120b/20b
 // and qwen3.6-27b is only 8000 tokens/minute (6000 for qwen3-32b) vs 12000
 // for llama-3.3-70b-versatile. Real payloads (source context, prompt review,
 // image-review vision prompts) can exceed 8000 tokens in one request; a
 // small-sample A/B test never reveals this because it never uses a large
-// enough payload. Do not re-promote gpt-oss/qwen3 above llama-3.3 without
-// re-testing against a real, large payload — not just a short A/B sample.
-export const GROQ_TEXT_MODEL_DEFAULT   = "llama-3.3-70b-versatile";
+// enough payload. Llama 3.3 is now retired, so GPT OSS 120B is the production
+// default and request-time token capping remains mandatory for real payloads.
+export const GROQ_TEXT_MODEL_DEFAULT   = "openai/gpt-oss-120b";
 export const GROQ_VISION_MODEL_DEFAULT = "meta-llama/llama-4-scout-17b-16e-instruct";
 
 // Confirmed free text models on Groq free tier — checked in priority order.
 // Only models on this list are eligible; paid/preview/namespaced models are
 // never selected even if they appear in the API response.
-// Groq shutdowns (https://console.groq.com/docs/deprecations):
-//   llama-3.3-70b-versatile + llama-3.1-8b-instant → decommission 2026-08-16;
-//   llama-3.1-70b-versatile / llama-3-70b-8192 are already gone from the catalog.
-// Still first-choice until Groq's own catalog marks it inactive — see the
-// E2E lesson above. gpt-oss/qwen3.6 are strong fallback tiers (lower TPM
-// budget on this account, but fine for smaller per-call payloads).
+// llama-3.3-70b-versatile and llama-3.1-8b-instant were decommissioned on
+// 2026-08-16 and must not appear in this list. GPT OSS 120B is Groq's current
+// production replacement; Qwen 3.6 27B remains the next fallback.
 // Update this list when Groq adds new free models.
 const FREE_TEXT_MODEL_PRIORITY = [
-  "llama-3.3-70b-versatile", // primary — proven at real payload scale, 12000 TPM
-  "openai/gpt-oss-120b",     // fallback — 8000 TPM on this account
+  "openai/gpt-oss-120b",     // production replacement — 8000 TPM on this account
   "qwen/qwen3.6-27b",        // fallback — 8000 TPM (needs reasoning_format hidden + reasoning_effort none)
   "openai/gpt-oss-20b",      // lighter fallback, free
-  "qwen/qwen3-32b",          // additional fallback, free (6000 TPM)
 ];
+
+const RETIRED_GROQ_TEXT_MODELS = new Set([
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+]);
 
 // Confirmed free vision-capable models on Groq — checked in priority order.
 // llama-4-scout is Groq's ONLY remaining vision model and decommissions
@@ -149,9 +148,8 @@ export function reasoningCompletionBudget(modelId, maxTokens) {
  * Per-model Groq TPM (tokens/minute) ceiling, live-verified on this account
  * 2026-07-03. Groq-specific — do NOT reuse for HuggingFace, which runs its
  * own unrelated rate-limit system. Mirrors groqModelTpmLimit in
- * js/shared/ai-call.js; keep the two in sync. llama-3.3-70b-versatile
- * (12000 TPM, the primary model) normally has enough headroom, but very large
- * prompts still get capped before Groq rejects the request.
+ * js/shared/ai-call.js; keep the two in sync. The retired Llama 3.3 ceiling
+ * remains recognized only for historical diagnostics; selection excludes it.
  *
  * @param {string} modelId
  * @returns {number|null}
@@ -268,6 +266,10 @@ async function fetchModelIds(apiKey) {
 
 let _cache = null;
 
+export function __resetGroqModelResolverForTests() {
+  _cache = null;
+}
+
 /**
  * Resolves the best available Groq text and vision model IDs.
  * Queries the Groq models API once and caches for the process lifetime.
@@ -305,13 +307,16 @@ export async function resolveGroqModels() {
     return (_cache = { textModel: GROQ_TEXT_MODEL_DEFAULT, visionModel: GROQ_VISION_MODEL_DEFAULT });
   }
 
-  const modelSet = new Set(modelIds);
+  const activeTextModelIds = modelIds.filter(
+    (id) => !RETIRED_GROQ_TEXT_MODELS.has(String(id).toLowerCase()),
+  );
+  const modelSet = new Set(activeTextModelIds);
 
   // Best text model: prefer confirmed free models in priority order.
   // If none are available (e.g. Groq changes lineup), fall back to scoring
   // whatever is in the catalog so the pipeline keeps working.
   const freeText = FREE_TEXT_MODEL_PRIORITY.find((id) => modelSet.has(id));
-  const textModel = freeText ?? modelIds
+  const textModel = freeText ?? activeTextModelIds
     .filter((id) => !/whisper|guard|speech|tts|embedding/i.test(id))
     .sort((a, b) => scoreTextModel(b) - scoreTextModel(a))[0] ?? GROQ_TEXT_MODEL_DEFAULT;
 
@@ -331,13 +336,8 @@ export async function resolveGroqModels() {
 // ===========================================================================
 
 // Unified HF router (OpenAI-compatible): the model travels in the request
-// body and HF picks a serving provider. This serves the SAME
-// llama-3.3-70b-versatile as the Groq primary, so quality/reliability holds
-// when Groq rate-limits. HF's TPM policy is unrelated to Groq's — the
-// gpt-oss/qwen TPM ceiling that demoted them to fallback tier on Groq (see
-// GROQ_TEXT_MODEL_DEFAULT above) does not necessarily apply here, but
-// leading with the model already proven at real payload scale keeps this
-// path consistent and low-risk regardless.
+// body and HF picks a serving provider. HuggingFace has its own model catalog
+// and lifecycle, so Groq's Llama 3.3 retirement does not remove the HF entry.
 const HF_ROUTER_MODELS_URL = "https://router.huggingface.co/v1/models";
 const HF_ROUTER_CHAT_URL = "https://router.huggingface.co/v1/chat/completions";
 

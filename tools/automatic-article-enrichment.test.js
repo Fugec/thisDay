@@ -42,6 +42,20 @@ function queuedCompanion() {
   };
 }
 
+function eligibleEvergreenCompanion() {
+  return {
+    type: "event",
+    slug: "example-event-1969",
+    name: "Example Event",
+    wikiUrl: "https://en.wikipedia.org/wiki/Example",
+    url: "/history/example-event-1969/",
+    historyQualityGateVersion: 2,
+    historyCardQualified: true,
+    historyLinkEligible: true,
+    evergreenHistoryVersion: 1,
+  };
+}
+
 test("event fallbacks omit unsupported significance prose instead of filling space", () => {
   const entity = {
     type: "event",
@@ -92,7 +106,7 @@ test("event fallbacks omit unsupported significance prose instead of filling spa
   );
 });
 
-test("short event leads reuse validated article copy so the evergreen card does not depend on AI capacity", () => {
+test("short event leads reuse validated article copy without bypassing the evergreen edition gate", () => {
   const articleParagraph = Array.from(
     { length: 125 },
     (_, index) => `grounded${index}`,
@@ -125,7 +139,7 @@ test("short event leads reuse validated article copy so the evergreen card does 
   assert.ok(words >= 150, `expected at least 150 fallback words, got ${words}`);
   assert.equal(
     hooks.blogEntityQualityEligible({ ...entity, bodySections: sections }),
-    true,
+    false,
   );
 });
 
@@ -309,7 +323,10 @@ test("outbox completion waits for every asynchronous target", async () => {
   const store = new Map([
     ["post:20-july-2026", html],
     ["quiz-v3:blog:20-july-2026", JSON.stringify(quiz)],
-    ["post-entities:20-july-2026", "[]"],
+    [
+      "post-entities:20-july-2026",
+      JSON.stringify([eligibleEvergreenCompanion()]),
+    ],
   ]);
   const env = {
     BLOG_AI_KV: {
@@ -371,7 +388,10 @@ test("an already-complete retained outbox is cleared without rerunning enrichmen
         '<a data-history-entity-link="1" href="/history/example/"></a></article>',
     ],
     [`quiz-v3:blog:${slug}`, JSON.stringify(quiz)],
-    [`post-entities:${slug}`, "[]"],
+    [
+      `post-entities:${slug}`,
+      JSON.stringify([eligibleEvergreenCompanion()]),
+    ],
     ["index", JSON.stringify([{ slug }])],
   ]);
   let deletes = 0;
@@ -428,7 +448,10 @@ test("completed outbox cleanup failures remain observable and retryable", async 
         '<a data-history-entity-link="1" href="/history/example/"></a></article>',
     ],
     [`quiz-v3:blog:${slug}`, JSON.stringify(quiz)],
-    [`post-entities:${slug}`, "[]"],
+    [
+      `post-entities:${slug}`,
+      JSON.stringify([eligibleEvergreenCompanion()]),
+    ],
   ]);
   const env = {
     BLOG_AI_KV: {

@@ -44,20 +44,12 @@
 import { resolveAiModel } from "./ai-model.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-// Groq-announced shutdowns (https://console.groq.com/docs/deprecations):
-//   llama-3.3-70b-versatile                             → decommissions 2026-08-16
-//   llama-3.1-8b-instant                                → decommissions 2026-08-16
-//   meta-llama/llama-4-scout-17b-16e-instruct (vision)  → decommissions 2026-07-17
-//
-// llama-3.3-70b-versatile is STILL the primary model, not "already gone".
-// It is still active and has NOT been demoted for being on this list — see
-// the E2E lesson below. Do not pre-emptively hard-exclude a still-working
-// model just because a shutdown date is announced; Groq flips `active:false`
-// on its own /v1/models response at/near decommission, and rankTextModels()
-// already filters `active === false` — that is the whole self-healing point
-// (the runtime falls through to the next-ranked model automatically, no
-// deploy needed). A manual blocklist here just fights the score-based
-// ranking with no upside once the model IS truly gone.
+// Groq decommissioned llama-3.3-70b-versatile and llama-3.1-8b-instant on
+// 2026-08-16 (https://console.groq.com/docs/deprecations). GPT OSS 120B is
+// Groq's production replacement; Qwen 3.6 27B is retained as the next text
+// fallback. Permanently retired IDs are filtered even if a stale catalog
+// response still reports them active, and they are absent from the offline
+// fallback chain.
 //
 // E2E LESSON (2026-07-03): an earlier version of this file demoted
 // llama-3.3-70b-versatile's score and defaulted to openai/gpt-oss-120b
@@ -74,14 +66,14 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 // and so never revealed the problem. llama-3.3-70b-versatile is proven
 // reliable at real payload scale ("battle-tested for structured JSON at 4096
 // tokens" — the original design comment for its score bonus) and is kept as
-// primary until Groq's own catalog marks it inactive. gpt-oss-120b and
-// qwen3.6-27b remain strong secondary tiers (properly reasoning-gated) for
-// when llama-3.3 is genuinely retired or Groq's own rate limits kick in.
-const GROQ_MODEL = "llama-3.3-70b-versatile"; // hardcoded fallback if dynamic selection fails
+// primary until its announced shutdown. Now that the shutdown date has passed,
+// request-size protections below preserve that lesson while GPT OSS 120B and
+// Qwen 3.6 take over the active chain.
+const GROQ_MODEL = "openai/gpt-oss-120b"; // production fallback if dynamic selection fails
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-// Same model as the Groq primary so quality/reliability doesn't drop when
-// Groq is rate-limited; ":free" variants cost nothing. `models` is
-// OpenRouter's server-side fallback chain (verified live 2026-07-03: a busy
+// OpenRouter has an independent model lifecycle, so Groq's retirement does not
+// imply that this provider-specific Llama entry is gone. `models` supplies a
+// GPT OSS server-side fallback chain (verified live 2026-07-03: a busy
 // 120b:free request was transparently served by 20b:free), ending in the
 // generic free router as last resort.
 const OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free";
@@ -550,15 +542,8 @@ function scoreModelForTextGen(modelId) {
   }
 
   // ── Architecture generation (recency / instruction-following quality) ──────
-  // Llama 3.3's +560 is deliberately larger than raw param count would give
-  // it (a 70b model otherwise loses to a 120b one on param score alone) —
-  // it is "battle-tested for structured JSON at 4096 tokens" AND, per the
-  // E2E lesson above this file's constants, has 12000 TPM on Groq's free
-  // tier vs 8000 for gpt-oss/qwen3.6-27b — real production payloads
-  // (source context + article JSON) need that headroom. Do not shrink this
-  // bonus again without re-running a full local publish E2E, not just a
-  // small-sample A/B test — small samples never hit the TPM ceiling that
-  // broke production here.
+  // The legacy Llama 3.3 score is retained only for deterministic ranking
+  // tests; rankTextModels() hard-excludes Groq's retired IDs below.
   if (/llama.?4/i.test(id))         score += 200; // Llama 4 — newest Meta arch
   else if (/llama.?3\.3/i.test(id)) score += 560; // Llama 3.3 — proven at real payload scale, 12000 TPM
   else if (/llama.?3\.1/i.test(id)) score += 40;  // Llama 3.1 — solid baseline
@@ -578,18 +563,17 @@ function scoreModelForTextGen(modelId) {
  */
 const _MIN_CONTEXT_WINDOW = 8_192;
 const _MIN_MAX_COMPLETION_TOKENS = 4_096;
-// Verified live against /v1/models on all 7 configured Groq keys (2026-07-22,
-// identical catalog across keys — same account). "qwen/qwen3-32b" (formerly
-// listed here) is no longer in the active catalog at all; "openai/gpt-oss-120b"
-// (score 1230, the actual #2 behind GROQ_MODEL's 1280) was missing. Ordered by
-// scoreModelForTextGen ranking so an emergency fallback (live query itself
-// failed) still tries models in the same order dynamic resolution would.
+const _GROQ_RETIRED_TEXT_MODELS = new Set([
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+]);
+
+// Offline emergency chain. It must contain only post-2026-08-16 active model
+// IDs because a failed catalog request cannot protect us from a retired ID.
 const _GROQ_FALLBACK_MODEL_CANDIDATES = [
   GROQ_MODEL,
-  "openai/gpt-oss-120b",
   "qwen/qwen3.6-27b",
   "openai/gpt-oss-20b",
-  "llama-3.1-8b-instant",
 ];
 
 function uniqueModelIds(models) {
@@ -604,18 +588,17 @@ function uniqueModelIds(models) {
  * Fields that are absent are treated as passing — the filter only fires when a
  * field is explicitly present and fails.
  *
- * Deliberately does NOT hard-exclude models by ID/deprecation announcement —
- * see the E2E lesson at GROQ_MODEL above. A model with an announced shutdown
- * date is still ranked normally by score until the provider's own `active`
- * flag flips false; that is what makes the fallback self-healing without a
- * deploy, per the original design intent.
+ * Announced deprecations remain selectable until their shutdown date. Once a
+ * model is permanently retired, its ID is added to
+ * _GROQ_RETIRED_TEXT_MODELS so stale catalog metadata cannot revive it.
  *
  * Filter order:
- *   1. active === false  → skip (Groq marks decommissioned models this way)
- *   2. context_window < 8192  → skip (prompt alone fills smaller windows)
- *   3. max_completion_tokens < 4096  → skip (can't emit full JSON output)
- *   4. scoreModelForTextGen < 0  → skip (audio, guard, TTS, compound models)
- *   5. Sort survivors by score descending
+ *   1. permanently retired ID  → skip
+ *   2. active === false  → skip
+ *   3. context_window < 8192  → skip (prompt alone fills smaller windows)
+ *   4. max_completion_tokens < 4096  → skip (can't emit full JSON output)
+ *   5. scoreModelForTextGen < 0  → skip (audio, guard, TTS, compound models)
+ *   6. Sort survivors by score descending
  *
  * @param {Array<{id:string, active?:boolean, context_window?:number, max_completion_tokens?:number}>} models
  * @returns {Array<{id:string, score:number}>}
@@ -623,6 +606,7 @@ function uniqueModelIds(models) {
 function rankTextModels(models) {
   return models
     .filter((m) => {
+      if (_GROQ_RETIRED_TEXT_MODELS.has(String(m.id || "").toLowerCase())) return false;
       if (m.active === false) return false;
       if (m.context_window != null && m.context_window < _MIN_CONTEXT_WINDOW) return false;
       if (m.max_completion_tokens != null && m.max_completion_tokens < _MIN_MAX_COMPLETION_TOKENS) return false;
@@ -635,7 +619,7 @@ function rankTextModels(models) {
 
 /**
  * Resolves Groq text model candidates at runtime.
- * Cache-first (module-level, 1h TTL). Falls back to GROQ_MODEL constant.
+ * Cache-first (module-level, 1h TTL). Falls back to the active offline chain.
  * @param {string} firstKey - First available Groq API key for the models query
  */
 async function resolveGroqModelCandidates(firstKey) {
@@ -694,12 +678,15 @@ function orderGroqModelsForRequest(models, messages, maxTokens) {
   const isLargeStructuredRequest = promptChars >= 6000 || maxTokens >= 3000;
   if (!isLargeStructuredRequest) return models;
   const primary = [];
-  const deferred = [];
+  const deferred120b = [];
+  const lightweight = [];
   for (const model of models) {
-    if (String(model).toLowerCase() === "openai/gpt-oss-120b") deferred.push(model);
+    const id = String(model).toLowerCase();
+    if (id === "openai/gpt-oss-120b") deferred120b.push(model);
+    else if (id === "openai/gpt-oss-20b") lightweight.push(model);
     else primary.push(model);
   }
-  return [...primary, ...deferred];
+  return [...primary, ...deferred120b, ...lightweight];
 }
 
 /**
@@ -756,9 +743,8 @@ export function reasoningCompletionBudget(modelId, maxTokens) {
  * some drift and re-verifying via a live request's response headers is the
  * source of truth if 413s reappear.
  *
- * llama-3.3-70b-versatile (12000 TPM, the primary model) normally has enough
- * headroom for our configured jobs. It is included so very large prompts can
- * still be capped before Groq rejects the request.
+ * The retired Llama 3.3 ceiling remains recognized for historical tests and
+ * diagnostics, but the selector can no longer return that model.
  *
  * @param {string} modelId
  * @returns {number|null}  TPM ceiling, or null if unknown/uncapped

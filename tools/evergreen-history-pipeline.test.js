@@ -234,6 +234,74 @@ test("independent evidence survives a crowded six-source compact window", () => 
   );
 });
 
+test("evergreen AI evidence leaves completion room without losing independent grounding", () => {
+  const seed = historySeed();
+  const content = sourceRichContent();
+  const candidate = hooks.evergreenHistoryCandidateEligibility(
+    seed,
+    content,
+    { primaryEvent: true },
+  );
+  assert.equal(candidate.ok, true, candidate.reasons.join("; "));
+
+  const corpus = hooks.evergreenHistoryEvidenceCorpus({
+    ...seed,
+    evergreenEvidence: candidate.evidence,
+  });
+  assert.ok(corpus.length <= 14_000, `corpus has ${corpus.length} characters`);
+  assert.ok(corpus.split(/\s+/).filter(Boolean).length >= 700);
+  assert.match(corpus, /Apollo 11 Mission Overview/);
+  assert.match(corpus, /nasa0/);
+});
+
+test("evergreen prose repair cannot introduce a new numeric fact", () => {
+  const original = hooks.evergreenHistoryVisibleEditionPayload(readyEntity());
+  const proseOnly = structuredClone(original);
+  proseOnly.description = proseOnly.description.replace(
+    "Follow the alarms",
+    "Trace the alarms",
+  );
+  assert.equal(
+    hooks.evergreenHistoryRepairAddsNumbers(original, proseOnly),
+    false,
+  );
+
+  const inventedNumber = structuredClone(proseOnly);
+  inventedNumber.description += " The margin was 77 percent.";
+  assert.equal(
+    hooks.evergreenHistoryRepairAddsNumbers(original, inventedNumber),
+    true,
+  );
+  assert.equal(Object.hasOwn(original, "evergreenEvidence"), false);
+  assert.equal(Object.hasOwn(original, "sourceLinks"), false);
+});
+
+test("evergreen filler cleanup is deletion-only and keeps substantive paragraphs", () => {
+  const entity = readyEntity();
+  entity.bodySections[3].paragraphs = entity.bodySections[3].paragraphs.map(
+    (paragraph) =>
+      `${paragraph} This significant event remains a reminder of its lasting impact.`,
+  );
+  assert.equal(hooks.evergreenHistoryEditionQuality(entity).ok, false);
+
+  const pruned = hooks.mechanicallyPruneEvergreenEditionFiller(entity);
+  assert.equal(pruned.changed, true);
+  assert.ok(
+    pruned.edition.bodySections[3].paragraphs.every(
+      (paragraph) => !/significant event|a reminder of|lasting impact/i.test(paragraph),
+    ),
+  );
+  const accepted = hooks.normalizeEvergreenHistoryEdition(entity, pruned.edition);
+  assert.ok(accepted);
+  assert.equal(
+    hooks.evergreenHistoryRepairAddsNumbers(
+      hooks.evergreenHistoryVisibleEditionPayload(entity),
+      pruned.edition,
+    ),
+    false,
+  );
+});
+
 test("publication requires exactly one complete or durably queued companion", () => {
   const candidate = hooks.evergreenHistoryCandidateEligibility(
     historySeed(),

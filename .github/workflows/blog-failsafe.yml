@@ -224,7 +224,7 @@ jobs:
             elif [ "$HTTP_STATUS" = "409" ] && printf '%s' "$BODY" | jq -e '.status == "event-rotated"' >/dev/null 2>&1; then
               echo "::error::The draft repeated the same grounding residual and was rotated. The next scheduled run will prepare a different topic."
             elif [ "$HTTP_STATUS" = "409" ] && printf '%s' "$BODY" | jq -e '.status == "grounding-residual"' >/dev/null 2>&1; then
-              echo "::error::The draft was retained for another grounding pass. Optional unsupported prose will be pruned from source claims; only a repeated core contradiction can rotate the topic."
+              echo "::error::The draft was retained for another grounding pass. Verified fixes remain checkpointed; the topic rotates only after consecutive passes make no grounding progress."
             elif echo "$BODY" | grep -q "Bounded recovery rejected"; then
               echo "::error::The bounded publication gate rejected this topic. The next scheduled run may select another topic without a same-run regeneration."
             else

@@ -205,6 +205,57 @@ test("a Groq 429 opens one durable shared circuit instead of probing all seven k
   }
 });
 
+test("decimal Retry-After durations cannot become multi-year provider circuits", async () => {
+  __resetGroqModelCacheForTests();
+  const originalFetch = globalThis.fetch;
+  const kv = makeKvMock();
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.endsWith("/v1/models")) {
+      return new Response(JSON.stringify({
+        data: [{
+          id: "llama-3.3-70b-versatile",
+          active: true,
+          context_window: 131072,
+          max_completion_tokens: 32768,
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (value.includes("api.groq.com/openai/v1/chat/completions")) {
+      return new Response("rate limited", {
+        status: 429,
+        headers: {
+          "content-type": "text/plain",
+          "retry-after": "33.2699999s",
+        },
+      });
+    }
+    throw new Error(`unexpected fetch: ${value}`);
+  };
+
+  const startedAt = Date.now();
+  try {
+    await assert.rejects(
+      callAI(
+        { BLOG_AI_KV: kv, GROQ_API_KEY: "decimal-retry-key" },
+        [{ role: "user", content: "one bounded request" }],
+        { providerAttemptLimit: 1, groqOnly: true },
+      ),
+      isAIProviderCapacityError,
+    );
+    const today = new Date().toISOString().slice(0, 10);
+    const state = JSON.parse(
+      await kv.get(`ai-provider-circuit-v1:${today}`),
+    );
+    const retryAt = Date.parse(state.providers["groq:shared"].retryAt);
+    assert.ok(retryAt - startedAt >= 33_000);
+    assert.ok(retryAt - startedAt < 35_000);
+  } finally {
+    globalThis.fetch = originalFetch;
+    __resetGroqModelCacheForTests();
+  }
+});
+
 test("a rate-limited Groq pool does not block a declared independent pool", async () => {
   __resetGroqModelCacheForTests();
   const originalFetch = globalThis.fetch;
@@ -1709,6 +1760,82 @@ test("dynamic source claims replace unsupported optional prose without weakening
   assert.equal(grounding.ok, true, grounding.reasons.join("; "));
 });
 
+test("source claims accumulate across several simultaneous grounding failures", () => {
+  const sourceSentences = [
+    "The accident involved two trains travelling on Line 1 in Toronto.",
+    "The collision happened between St. Clair West and Dupont stations.",
+    "Toronto emergency crews entered the tunnel through both nearby stations.",
+    "Rescuers removed passengers from the damaged cars after the collision.",
+    "The official record lists three passenger deaths and thirty injured people.",
+    "The inquiry examined signalling, operating procedures, and train crew actions.",
+    "Investigators reconstructed the movements of both trains before the collision.",
+    "The Toronto Transit Commission published the retained inquiry findings.",
+    "The record distinguishes the emergency response from the later investigation.",
+    "The supplied chronology identifies the date, location, casualties, and responders.",
+    "Investigators reviewed the signals displayed before both trains entered the section.",
+    "The inquiry record describes the operating instructions available to each crew.",
+    "Emergency personnel established access points at the adjacent subway stations.",
+    "The damaged cars remained inside the tunnel during the initial response.",
+    "The published findings preserve separate accounts of operations and emergency work.",
+    "The retained documents name the transit authority responsible for the investigation.",
+  ];
+  const source = {
+    pageTitle: "Russell Hill subway accident",
+    text:
+      "The Russell Hill subway accident occurred in Toronto on August 11, 1995.",
+    sourceExtract: sourceSentences.join(" "),
+  };
+  const unsupportedPrevention =
+    "The inquiry prevented another subway disaster and guaranteed safer service.";
+  const unsupportedOutcome =
+    "The emergency response resulted in a permanent national safety program.";
+  const content = {
+    title: "Russell Hill subway accident — August 11, 1995",
+    eventTitle: "Russell Hill subway accident",
+    eyewitnessOrChronicle: [
+      `${sourceSentences.slice(0, 8).join(" ")} ${unsupportedOutcome}`,
+    ],
+    analysisBad: [{
+      title: "Investigation Limits",
+      detail:
+        `The retained record separates the collision from the investigation that followed. ${unsupportedPrevention}`,
+    }],
+  };
+  const reasons = [
+    `unsupported preventive outcome in analysisBad[0].detail: "${unsupportedPrevention}"`,
+    `unsupported causal claim in eyewitnessOrChronicle[0]: "${unsupportedOutcome}"`,
+  ];
+
+  const before = hooks.verifyArticleGrounding(content, source);
+  assert.equal(before.ok, false, "both unsupported claims must be live findings");
+
+  const repaired = hooks.mechanicallyRepairGroundingReasons(
+    content,
+    reasons,
+    source,
+  );
+
+  assert.deepEqual(
+    repaired.repairedFieldPaths,
+    ["analysisBad[0].detail", "eyewitnessOrChronicle[0]"],
+  );
+  assert.doesNotMatch(
+    JSON.stringify(repaired.content),
+    /prevented another|guaranteed safer|permanent national safety program/i,
+  );
+  assert.ok(
+    repaired.content.analysisBad[0].detail.split(/\s+/).length >= 50,
+    "the repaired analysis item must retain its real word floor",
+  );
+  assert.ok(
+    repaired.content.eyewitnessOrChronicle[0].split(/\s+/).length >=
+      hooks.CHUNKED_BODY_PARAGRAPH_MIN_WORDS,
+    "the repaired body paragraph must retain its real word floor",
+  );
+  const after = hooks.verifyArticleGrounding(repaired.content, source);
+  assert.equal(after.ok, true, after.reasons.join("; "));
+});
+
 test("grounding deletes one unsupported sentence when the approved remainder clears 50 words", () => {
   const source = {
     pageTitle: "Russell Hill subway accident",
@@ -1804,6 +1931,111 @@ test("a Core article omits an unrefillable optional analysis item and continues"
   assert.doesNotThrow(() => hooks.assertRequiredContentBlocks(result.content));
 });
 
+test("Core optional omissions survive while a separate body claim awaits repair", () => {
+  const bodyClaim =
+    "The ceremony caused the government to abolish the institution.";
+  const analysisClaim =
+    "The speech prevented all further violence.";
+  const supportedBodySentence =
+    "The retained record identifies the ceremony, its location, date, and named participants.";
+  const content = {
+    contentTier: "core",
+    title: "Documented ceremony — August 18, 1949",
+    eventTitle: "Documented ceremony",
+    historicalDate: "August 18, 1949",
+    historicalYear: 1949,
+    quickFacts: ["Event", "Date", "Place", "Participants"].map((label) => ({
+      label,
+      value: `${label} source value`,
+    })),
+    overviewParagraphs: [
+      `${`${supportedBodySentence} `.repeat(55)}${bodyClaim}`,
+    ],
+    analysisGood: [{
+      title: "Claimed Effect",
+      detail:
+        `The supplied account names the leader and records the speech. ${analysisClaim}`,
+    }],
+    analysisBad: [],
+    didYouKnowFacts: [],
+  };
+  const source = {
+    pageTitle: "Documented ceremony",
+    text: "The documented ceremony occurred on August 18, 1949.",
+    sourceExtract:
+      "The retained account names the ceremony, its location, date, participants, leader, and speech.",
+  };
+  const reasons = [
+    `unsupported causal claim in overviewParagraphs[0]: "${bodyClaim}"`,
+    `unsupported preventive outcome in analysisGood[0].detail: "${analysisClaim}"`,
+  ];
+
+  assert.equal(
+    hooks.groundingReasonFieldPath(reasons[1], content),
+    "analysisGood[0].detail",
+    "an explicit verifier path must outrank fuzzy overlap with Quick Fact labels",
+  );
+  const before = hooks.verifyArticleGrounding(content, source);
+  assert.equal(before.ok, false);
+  const omitted = hooks.omitUnsupportedCoreOptionalItems(
+    content,
+    reasons,
+    source,
+  );
+
+  assert.deepEqual(omitted.removedFieldPaths, ["analysisGood[0]"]);
+  assert.deepEqual(omitted.content.analysisGood, []);
+  assert.equal(
+    hooks.verifyArticleGrounding(omitted.content, source).ok,
+    false,
+    "the independent body residual should remain for the next repair stage",
+  );
+  assert.doesNotThrow(() => hooks.assertRequiredContentBlocks(omitted.content));
+});
+
+test("a safe partial AI grounding repair is retained for the next bounded pass", async () => {
+  const firstClaim =
+    "The ceremony reshaped the city's political culture.";
+  const secondClaim =
+    "Observers viewed the response as historically significant.";
+  const firstReason =
+    `unsupported causal claim in description: "${firstClaim}"`;
+  const secondReason =
+    `unsupported significance claim in description: "${secondClaim}"`;
+  const original = {
+    description: `${firstClaim} ${secondClaim}`,
+  };
+  const partiallyRepaired = {
+    description: `The retained record identifies the ceremony. ${secondClaim}`,
+  };
+  const source = {
+    pageTitle: "Documented ceremony",
+    text: "Record.",
+    sourceExtract: "The retained record identifies the ceremony.",
+  };
+
+  const result = await hooks.verifyFinalGroundingWithRepair(
+    {},
+    original,
+    source,
+    "18-august-2026",
+    {
+      maxRepairAttempts: 1,
+      verify: async (_env, candidate) =>
+        candidate === original
+          ? { ok: false, reasons: [firstReason, secondReason] }
+          : { ok: false, reasons: [secondReason] },
+      repair: async () => partiallyRepaired,
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.content, partiallyRepaired);
+  assert.deepEqual(result.reasons, [secondReason]);
+  assert.equal(result.madeProgress, true);
+  assert.deepEqual(result.repairedFieldPaths, ["description"]);
+});
+
 test("bounded grounding advances repeated optional and core contradictions", () => {
   const optionalReasons = [
     'unsupported causal claim in analysisBad[0].detail: "The dispute led to deaths."',
@@ -1821,6 +2053,42 @@ test("bounded grounding advances repeated optional and core contradictions", () 
   }, optionalReasons);
   assert.equal(optionalSecond.attempts, 2);
   assert.equal(optionalSecond.shouldRotate, true);
+
+  const progressReset = hooks.boundedGroundingRetryState(
+    {
+      boundedGroundingReasons: optionalReasons,
+      boundedGroundingSignature: optionalFirst.signature,
+      boundedGroundingAttempts: 1,
+    },
+    optionalReasons,
+    null,
+    { madeProgress: true },
+  );
+  assert.equal(progressReset.attempts, 0);
+  assert.equal(progressReset.shouldRotate, false);
+  assert.equal(progressReset.madeProgress, true);
+
+  const firstNoProgress = hooks.boundedGroundingRetryState(
+    {
+      boundedGroundingReasons: optionalReasons,
+      boundedGroundingSignature: progressReset.signature,
+      boundedGroundingAttempts: progressReset.attempts,
+    },
+    optionalReasons,
+  );
+  assert.equal(firstNoProgress.attempts, 1);
+  assert.equal(firstNoProgress.shouldRotate, false);
+
+  const secondNoProgress = hooks.boundedGroundingRetryState(
+    {
+      boundedGroundingReasons: optionalReasons,
+      boundedGroundingSignature: firstNoProgress.signature,
+      boundedGroundingAttempts: firstNoProgress.attempts,
+    },
+    optionalReasons,
+  );
+  assert.equal(secondNoProgress.attempts, 2);
+  assert.equal(secondNoProgress.shouldRotate, true);
 
   const coreReasons = [
     "casualty number contradiction: article says 41 but source says 36",
@@ -1862,6 +2130,22 @@ test("bounded grounding advances repeated optional and core contradictions", () 
   assert.equal(transport.signature, first.signature);
   assert.equal(transport.attempts, 9);
   assert.deepEqual(transport.retainedReasons, coreReasons);
+
+  const progressThenTransport = hooks.boundedGroundingRetryState(
+    {
+      boundedGroundingSignature: first.signature,
+      boundedGroundingAttempts: 1,
+      boundedGroundingReasons: coreReasons,
+    },
+    ["final grounding verifier unavailable: provider timeout"],
+    null,
+    { madeProgress: true },
+  );
+  assert.equal(progressThenTransport.transportDeferred, true);
+  assert.equal(progressThenTransport.shouldRotate, false);
+  assert.equal(progressThenTransport.madeProgress, true);
+  assert.equal(progressThenTransport.attempts, 0);
+  assert.deepEqual(progressThenTransport.retainedReasons, coreReasons);
 
   const shiftingFirstReasons = [
     'unsupported causal claim in analysisBad[0].detail: "The confrontation caused a national reform."',
@@ -2213,6 +2497,57 @@ test("bounded enrichment checkpoints one optional style attempt before calling a
   assert.match(boundedBody, /draft\.boundedStyleRepairAttempted === true/);
 });
 
+test("normal enrichment checkpoints verified grounding progress for the bounded failsafe", () => {
+  const worker = readFileSync(
+    new URL("../js/blog-ai-worker.js", import.meta.url),
+    "utf8",
+  );
+  const enrichStart = worker.indexOf("async function enrichPublishedPost");
+  const finalGroundingStart = worker.indexOf(
+    "const finalGrounding = await verifyFinalGroundingWithRepair(",
+    enrichStart,
+  );
+  const finalGroundingEnd = worker.indexOf(
+    "enriched = finalGrounding.content",
+    finalGroundingStart,
+  );
+  const finalGroundingBody = worker.slice(
+    finalGroundingStart,
+    finalGroundingEnd,
+  );
+  const progressBranch = finalGroundingBody.indexOf(
+    "if (finalGrounding.madeProgress === true)",
+  );
+  const retainedWrite = finalGroundingBody.indexOf(
+    'boundedRepairStage: "final-grounding-progress"',
+    progressBranch,
+  );
+  const coreClassification = finalGroundingBody.indexOf(
+    "const coreGroundingReasons",
+    progressBranch,
+  );
+  const eventBlock = finalGroundingBody.indexOf(
+    "await markGroundingBlockedEvent(",
+    coreClassification,
+  );
+
+  assert.ok(progressBranch >= 0, "the normal path must inspect verified progress");
+  assert.match(
+    finalGroundingBody.slice(progressBranch, coreClassification),
+    /boundedGroundingRetryState\([\s\S]*\{ madeProgress: true \}/,
+  );
+  assert.ok(
+    retainedWrite > progressBranch &&
+      coreClassification > retainedWrite &&
+      eventBlock > coreClassification,
+    "verified progress must be persisted before a remaining core claim can block the event",
+  );
+  assert.match(
+    finalGroundingBody.slice(progressBranch, coreClassification),
+    /boundedGroundingAttempts: retryState\.attempts/,
+  );
+});
+
 test("failsafe resumes retained enrichment outboxes and retries only transient recovery failures", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/blog-failsafe.yml", import.meta.url),
@@ -2237,7 +2572,10 @@ test("failsafe resumes retained enrichment outboxes and retries only transient r
   assert.match(workflow, /is_worker_resource_error\(\)/);
   assert.match(workflow, /error code:\[\[:space:\]\]\*1102/);
   assert.match(workflow, /Worker CPU\/resource limit stopped bounded enrichment/);
-  assert.match(workflow, /only a repeated core contradiction can rotate the topic/);
+  assert.match(
+    workflow,
+    /topic rotates only after consecutive passes make no grounding progress/,
+  );
   assert.match(
     workflow,
     /\.finalized\.complete == true and \.finalized\.outboxCleared == true/,

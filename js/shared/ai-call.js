@@ -188,12 +188,16 @@ function providerRetryAtFromResponse(response, body = "", now = Date.now()) {
     return nextUtcResetMs(now);
   }
   const retryAfter = response?.headers?.get?.("retry-after");
+  const retryAfterMs = parseProviderResetDurationMs(retryAfter);
+  if (retryAfterMs > 0) return now + retryAfterMs;
+  // Retry-After accepts either a delay or an HTTP date. Parse the delay
+  // first: Date.parse treats decimal second values such as "33.2699999s" as
+  // calendar years, which opened production provider circuits until 2033+
+  // instead of for roughly half a minute.
   const retryAfterDate = Date.parse(String(retryAfter || ""));
   if (Number.isFinite(retryAfterDate) && retryAfterDate > now) {
     return retryAfterDate;
   }
-  const retryAfterMs = parseProviderResetDurationMs(retryAfter);
-  if (retryAfterMs > 0) return now + retryAfterMs;
   const tokenResetMs = parseProviderResetDurationMs(
     response?.headers?.get?.("x-ratelimit-reset-tokens"),
   );

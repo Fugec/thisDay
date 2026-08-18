@@ -791,6 +791,11 @@ const SOCIAL_PREVIEW_IMAGE_PARAMS = "w=1200&h=630&fit=cover&q=85";
 const BLOG_ENTITY_QUALITY_GATE_VERSION = 1;
 const BLOG_HISTORY_QUALITY_GATE_VERSION = 2;
 const EVERGREEN_HISTORY_EDITION_VERSION = 1;
+// Keep enough canonical, article, and independent evidence for grounding while
+// leaving roughly 3,500 completion tokens under Groq's 8,000-TPM ceiling.
+// The previous 22k-character corpus left only 1,702 completion tokens for the
+// August 18 Kemi edition and deterministically truncated its JSON response.
+const EVERGREEN_HISTORY_AI_EVIDENCE_CHAR_LIMIT = 14_000;
 const PERSON_PROSE_QUALITY_VERSION = 2;
 const ARTICLE_ORIGINAL_VALUE_GATE_VERSION = 1;
 const MIN_AUTOMATIC_TIMELINE_ENTRIES = 5;
@@ -12790,6 +12795,7 @@ async function enrichPublishedPost(
           draft,
           finalGrounding.reasons,
           retainedContent,
+          { madeProgress: finalGrounding.madeProgress === true },
         );
         if (retryState.shouldRotate) {
           await markGroundingBlockedEvent(
@@ -12831,6 +12837,42 @@ async function enrichPublishedPost(
         );
       }
       const retainedContent = finalGrounding.content || enriched;
+      // The normal 00:15 path gets the first full grounding/repair budget.
+      // If it safely corrected at least one quoted claim but another finding
+      // remains, preserve that improved draft for the later bounded failsafe
+      // instead of deleting it as though nothing changed. The retry counter
+      // starts at zero because rotation is based on consecutive no-progress
+      // passes. Publication remains blocked until a later full verification
+      // returns ok.
+      if (finalGrounding.madeProgress === true) {
+        const retryState = boundedGroundingRetryState(
+          draft,
+          finalGrounding.reasons,
+          retainedContent,
+          { madeProgress: true },
+        );
+        await blogKvPutIfChanged(
+          env,
+          `${KV_DRAFT_PREFIX}${slug}`,
+          JSON.stringify({
+            ...draft,
+            content: retainedContent,
+            publishedAt,
+            boundedRepairStage: "final-grounding-progress",
+            boundedRepairUpdatedAt: new Date().toISOString(),
+            boundedGroundingReasons: retryState.retainedReasons,
+            boundedGroundingSignature: retryState.signature,
+            boundedGroundingAttempts: retryState.attempts,
+          }),
+          { expirationTtl: 3 * 86_400 },
+        );
+        throw boundedGroundingRecoveryError(
+          slug,
+          finalGrounding.reasons,
+          retryState,
+          false,
+        );
+      }
       const coreGroundingReasons = (finalGrounding.reasons || []).filter(
         (reason) => groundingReasonIsCore(reason, retainedContent),
       );
@@ -13614,6 +13656,39 @@ function hasCopiedEvergreenHistoryPhrase(entity, phraseWords = 12) {
       }
       return false;
     });
+}
+
+function copiedEvergreenHistoryPhrases(entity, phraseWords = 12, limit = 4) {
+  const normalizeWords = (value) =>
+    normalizeTopicMatchText(value).split(/\s+/).filter(Boolean);
+  const evidenceParagraphs = Array.isArray(
+    entity?.evergreenEvidence?.articleParagraphs,
+  )
+    ? entity.evergreenEvidence.articleParagraphs
+    : [];
+  const evidencePhrases = new Set();
+  for (const paragraph of evidenceParagraphs) {
+    const tokens = normalizeWords(paragraph);
+    for (let index = 0; index <= tokens.length - phraseWords; index += 1) {
+      evidencePhrases.add(tokens.slice(index, index + phraseWords).join(" "));
+    }
+  }
+  const matches = [];
+  for (const paragraph of (Array.isArray(entity?.bodySections)
+    ? entity.bodySections
+    : []).flatMap((section) =>
+    Array.isArray(section?.paragraphs) ? section.paragraphs : []
+  )) {
+    const tokens = normalizeWords(paragraph);
+    for (let index = 0; index <= tokens.length - phraseWords; index += 1) {
+      const phrase = tokens.slice(index, index + phraseWords).join(" ");
+      if (evidencePhrases.has(phrase) && !matches.includes(phrase)) {
+        matches.push(phrase);
+        if (matches.length >= limit) return matches;
+      }
+    }
+  }
+  return matches;
 }
 
 function evergreenHistoryEditionQuality(entity) {
@@ -16006,7 +16081,7 @@ async function generateEntityBodySections(env, entity, content, fallbackSections
 
 function evergreenHistoryEvidenceCorpus(entity) {
   const evidence = entity?.evergreenEvidence || {};
-  return [
+  const corpus = [
     entity?.name,
     entity?.description,
     entity?.summary,
@@ -16017,9 +16092,9 @@ function evergreenHistoryEvidenceCorpus(entity) {
     evidence.historicalDate,
     evidence.location,
     evidence.articleDescription,
-    ...(Array.isArray(evidence.articleParagraphs)
-      ? evidence.articleParagraphs
-      : []),
+    // Pack source identity and the verified independent report before the
+    // longer daily body. This keeps both grounding layers inside the bounded
+    // prompt even when the article itself is unusually long.
     ...(Array.isArray(evidence.sourcePages)
       ? evidence.sourcePages.flatMap((page) => [
           page?.pageTitle,
@@ -16029,12 +16104,18 @@ function evergreenHistoryEvidenceCorpus(entity) {
             : []),
         ])
       : []),
+    ...(Array.isArray(evidence.articleParagraphs)
+      ? evidence.articleParagraphs
+      : []),
   ]
     .filter(Boolean)
     .join("\n\n")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 22_000);
+    .trim();
+  return truncateSourceExtract(
+    corpus,
+    EVERGREEN_HISTORY_AI_EVIDENCE_CHAR_LIMIT,
+  );
 }
 
 function timelineDateIsGrounded(date, corpus) {
@@ -16071,7 +16152,11 @@ function timelineDateIsGrounded(date, corpus) {
   );
 }
 
-function normalizeEvergreenHistoryEdition(entity, value) {
+function normalizeEvergreenHistoryEdition(
+  entity,
+  value,
+  { onReject = null } = {},
+) {
   const parsed = value && typeof value === "object" ? value : {};
   const clean = (text, max = 0) => {
     const normalized = String(text || "")
@@ -16157,7 +16242,167 @@ function normalizeEvergreenHistoryEdition(entity, value) {
       : {}),
   };
   const quality = evergreenHistoryEditionQuality(edition);
+  if (!quality.ok && typeof onReject === "function") {
+    onReject(quality, edition);
+  }
   return quality.ok ? edition : null;
+}
+
+function evergreenHistoryVisibleEditionPayload(entity) {
+  return {
+    pageHeading: entity?.pageHeading,
+    seoTitle: entity?.seoTitle,
+    seoDescription: entity?.seoDescription,
+    description: entity?.description,
+    summary: entity?.summary,
+    overviewCards: entity?.overviewCards,
+    comparisonHeading: entity?.comparisonHeading,
+    comparisonIntro: entity?.comparisonIntro,
+    comparisonRows: entity?.comparisonRows,
+    bodySections: entity?.bodySections,
+    timeline: entity?.timeline,
+  };
+}
+
+function evergreenHistoryNumericTokens(value) {
+  return new Set(
+    (JSON.stringify(value || {}).match(/\b\d[\d,.:%-]*\b/g) || [])
+      .map((token) => token.toLowerCase()),
+  );
+}
+
+function evergreenHistoryRepairAddsNumbers(original, repaired) {
+  const allowed = evergreenHistoryNumericTokens(original);
+  return [...evergreenHistoryNumericTokens(repaired)].some(
+    (token) => !allowed.has(token),
+  );
+}
+
+function mechanicallyPruneEvergreenEditionFiller(entity) {
+  const candidate = evergreenHistoryVisibleEditionPayload(entity);
+  const copiedPhrases = copiedEvergreenHistoryPhrases(entity);
+  let changed = false;
+  const bodySections = (Array.isArray(candidate.bodySections)
+    ? candidate.bodySections
+    : []).map((section) => ({
+    ...section,
+    paragraphs: (Array.isArray(section?.paragraphs)
+      ? section.paragraphs
+      : []).map((paragraph) => {
+      const original = String(paragraph || "").trim();
+      const retained = splitSentences(original, 1).filter((sentence) => {
+        const lower = sentence.toLowerCase();
+        const normalized = normalizeTopicMatchText(sentence);
+        return !(
+          BANNED_PHRASE_LIST.some((phrase) => lower.includes(phrase)) ||
+          ENRICHMENT_GENERIC_FILLER_PATTERN.test(sentence) ||
+          ENRICHMENT_SOURCE_PROCESS_PATTERN.test(sentence) ||
+          copiedPhrases.some((phrase) => normalized.includes(phrase))
+        );
+      });
+      const cleaned = retained.join(" ").trim();
+      if (
+        cleaned &&
+        wordCount(cleaned) >= 55 &&
+        normalizeForCompare(cleaned) !== normalizeForCompare(original)
+      ) {
+        changed = true;
+        return cleaned;
+      }
+      return original;
+    }),
+  }));
+  return {
+    changed,
+    edition: { ...candidate, bodySections },
+  };
+}
+
+async function repairEvergreenHistoryEditionCandidate(
+  env,
+  entity,
+  rejectedEdition,
+  rejectionReasons,
+) {
+  const candidate = evergreenHistoryVisibleEditionPayload(rejectedEdition);
+  const copiedPhrases = copiedEvergreenHistoryPhrases(rejectedEdition);
+  const prompt =
+    `Repair a structurally complete evergreen-history JSON object that failed only the writing-quality gate.\n\n` +
+    `Rules:\n` +
+    `- Return JSON only with the same fields, arrays, section count, paragraph count, cards, and timeline entries.\n` +
+    `- Rewrite only prose needed to clear the listed issues.\n` +
+    `- Preserve every fact, name, number, date, relationship, and chronology exactly. Do not add a fact or inference.\n` +
+    `- Rephrase every listed copied phrase with different sentence structure; do not merely swap one synonym.\n` +
+    `- Remove the named banned phrases and all article/page-production commentary.\n` +
+    `- Keep every body paragraph at 90 to 125 words and keep the focused question heading.\n\n` +
+    `REJECTION REASONS:\n${JSON.stringify(rejectionReasons || [])}\n\n` +
+    `COPIED PHRASES TO REWRITE:\n${JSON.stringify(copiedPhrases)}\n\n` +
+    `CANDIDATE JSON:\n${JSON.stringify(candidate)}`;
+  try {
+    const raw = await callAI(
+      env,
+      [
+        {
+          role: "system",
+          content:
+            "You make fact-preserving prose repairs to source-bounded historical JSON. Return valid JSON only.\n\n" +
+            WRITING_REWRITE_RULES,
+        },
+        { role: "user", content: prompt },
+      ],
+      {
+        maxTokens: 3600,
+        timeoutMs: 45_000,
+        temperature: 0.15,
+        expectJson: true,
+      },
+    );
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim();
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]);
+    if (evergreenHistoryRepairAddsNumbers(candidate, parsed)) {
+      console.warn(
+        `Evergreen history repair rejected for ${entity.name} — introduced a new numeric fact.`,
+      );
+      return null;
+    }
+    let repairedReasons = [];
+    let rejectedRepair = null;
+    const repaired = normalizeEvergreenHistoryEdition(entity, parsed, {
+      onReject: (quality, candidateEdition) => {
+        repairedReasons = quality.reasons || [];
+        rejectedRepair = candidateEdition;
+      },
+    });
+    if (!repaired && rejectedRepair) {
+      const pruned = mechanicallyPruneEvergreenEditionFiller(rejectedRepair);
+      if (pruned.changed) {
+        const prunedRepair = normalizeEvergreenHistoryEdition(
+          entity,
+          pruned.edition,
+        );
+        if (prunedRepair) return prunedRepair;
+      }
+    }
+    if (!repaired) {
+      console.warn(
+        `Evergreen history repair rejected by quality gate for ${entity.name}` +
+          (repairedReasons.length
+            ? ` — ${repairedReasons.join("; ")}`
+            : ""),
+      );
+    }
+    return repaired;
+  } catch (err) {
+    console.warn(
+      `Evergreen history repair failed for ${entity?.name || "event"}: ${err.message}`,
+    );
+    return null;
+  }
 }
 
 async function generateEvergreenHistoryEdition(env, entity) {
@@ -16187,7 +16432,8 @@ async function generateEvergreenHistoryEdition(env, entity) {
     `- Choose one source-supported niche question that is recognizably about the event but does not duplicate the daily article title.\n` +
     `- Write exactly 5 concise overview cards.\n` +
     `- Write exactly 4 body sections with 2 paragraphs each. Each paragraph must contain 90 to 125 words.\n` +
-    `- Organize the sections around: origins or enabling conditions; the actors, choices, or mechanism; the decisive sequence; consequences and longer significance. Use specific natural headings instead of those generic labels.\n` +
+    `- Organize the sections around: origins or enabling conditions; the actors, choices, or mechanism; the decisive sequence; and the documented immediate aftermath or later record. Use specific natural headings instead of those generic labels.\n` +
+    `- End with concrete sourced outcomes. Do not use abstract legacy or significance filler such as "significant event", "turning point", "lasting impact", "a reminder of", or "still resonates".\n` +
     `- Write 5 to 8 chronological timeline entries. Every date and year must occur in the evidence.\n` +
     `- Add 3 comparison rows only when the evidence supports a useful expectation-versus-outcome or constraint-versus-result comparison; otherwise return an empty comparisonRows array.\n` +
     `- Paraphrase and synthesize. Do not copy a daily article paragraph verbatim.\n` +
@@ -16216,7 +16462,12 @@ async function generateEvergreenHistoryEdition(env, entity) {
         },
         { role: "user", content: prompt },
       ],
-      { maxTokens: 3600, timeoutMs: 45_000, temperature: 0.3 },
+      {
+        maxTokens: 3600,
+        timeoutMs: 45_000,
+        temperature: 0.3,
+        expectJson: true,
+      },
     );
     const cleaned = raw
       .replace(/^```(?:json)?\s*/i, "")
@@ -16224,14 +16475,51 @@ async function generateEvergreenHistoryEdition(env, entity) {
       .trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) return null;
+    let rejectionReasons = [];
+    let rejectedEdition = null;
     const edition = normalizeEvergreenHistoryEdition(
       entity,
       JSON.parse(match[0]),
+      {
+        onReject: (quality, candidate) => {
+          rejectionReasons = quality.reasons || [];
+          rejectedEdition = candidate;
+        },
+      },
     );
     if (!edition) {
       console.warn(
-        `Evergreen history edition rejected by quality gate for ${entity.name}`,
+        `Evergreen history edition rejected by quality gate for ${entity.name}` +
+          (rejectionReasons.length
+            ? ` — ${rejectionReasons.join("; ")}`
+            : ""),
       );
+      if (rejectedEdition) {
+        const pruned = mechanicallyPruneEvergreenEditionFiller(rejectedEdition);
+        if (pruned.changed) {
+          let prunedReasons = [];
+          let prunedCandidate = null;
+          const prunedEdition = normalizeEvergreenHistoryEdition(
+            entity,
+            pruned.edition,
+            {
+              onReject: (quality, candidate) => {
+                prunedReasons = quality.reasons || [];
+                prunedCandidate = candidate;
+              },
+            },
+          );
+          if (prunedEdition) return prunedEdition;
+          rejectionReasons = prunedReasons;
+          rejectedEdition = prunedCandidate || rejectedEdition;
+        }
+        return await repairEvergreenHistoryEditionCandidate(
+          env,
+          entity,
+          rejectedEdition,
+          rejectionReasons,
+        );
+      }
     }
     return edition;
   } catch (err) {
@@ -22322,17 +22610,18 @@ async function verifyFinalArticleGrounding(env, content, source) {
 // blurb for Pope Adrian V asserted the wrong predecessor; the article echoed
 // it, the grounding gate correctly refused, and — because the claim was baked
 // into the stored draft — every retry failed identically and the day was lost.
-// Now a flagged contradiction gets exactly one surgical source-bound repair
-// pass and a re-verification; if that still fails, the event is recorded as
-// blocked for the date and the draft is deleted so the next generation run
-// picks a different topic.
+// Now flagged contradictions first use a deterministic source-claim bank,
+// then a bounded surgical source-bound repair and re-verification. Safe
+// multi-claim progress is retained for the next invocation; a topic is blocked
+// only after consecutive no-progress failures, so available evidence is used
+// before the next generation run picks a different topic.
 // ---------------------------------------------------------------------------
 
 const KV_BLOCKED_EVENT_PREFIX = "blocked-event:";
 // Transport-level verifier failures (provider down, garbled JSON) are not
 // article defects; a content repair would be pointless churn.
 const GROUNDING_VERIFIER_TRANSPORT_PATTERN = /final grounding verifier/;
-const BOUNDED_GROUNDING_IDENTICAL_ATTEMPT_LIMIT = 2;
+const BOUNDED_GROUNDING_NO_PROGRESS_ATTEMPT_LIMIT = 2;
 const BOUNDED_GROUNDING_REASON_RETENTION_LIMIT = 16;
 
 const GROUNDING_FAILURE_CATEGORY_PATTERNS = [
@@ -22415,7 +22704,12 @@ function groundingFailureSignature(reasons) {
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, "0")}-${normalized.length}`;
 }
 
-function boundedGroundingRetryState(draft, reasons, content = null) {
+function boundedGroundingRetryState(
+  draft,
+  reasons,
+  content = null,
+  { madeProgress = false } = {},
+) {
   const substantiveReasons = (Array.isArray(reasons) ? reasons : []).filter(
     (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
   );
@@ -22427,17 +22721,22 @@ function boundedGroundingRetryState(draft, reasons, content = null) {
     : "";
   const previousSignature =
     storedPreviousSignature || groundingFailureSignature(previousReasons);
-  const previousAttempts = Math.max(
-    0,
-    Number.parseInt(String(draft?.boundedGroundingAttempts || ""), 10) ||
-      (previousSignature ? 1 : 0),
+  const storedAttempts = Number.parseInt(
+    String(draft?.boundedGroundingAttempts ?? ""),
+    10,
   );
+  const previousAttempts = Number.isInteger(storedAttempts)
+    ? Math.max(0, storedAttempts)
+    : previousSignature
+      ? 1
+      : 0;
   if (substantiveReasons.length === 0) {
     return {
       signature: previousSignature,
-      attempts: previousAttempts,
+      attempts: madeProgress ? 0 : previousAttempts,
       shouldRotate: false,
       transportDeferred: true,
+      madeProgress,
       retainedReasons: previousReasons.slice(
         0,
         BOUNDED_GROUNDING_REASON_RETENTION_LIMIT,
@@ -22460,14 +22759,25 @@ function boundedGroundingRetryState(draft, reasons, content = null) {
       groundingFailureProfile(previousReasons),
       groundingFailureProfile(substantiveReasons),
     );
-  const attempts = semanticallyRepeated
-    ? previousAttempts + 1
-    : 1;
+  // `attempts` counts consecutive no-progress failures, not merely verifier
+  // invocations. A source-bank edit or a deterministically safe partial AI
+  // repair changes the draft that the next invocation will inspect, so it
+  // must reset the rotation counter rather than look like the same stuck
+  // content. This keeps rotation as the last resort after the available
+  // source claims have genuinely stopped improving the article.
+  const attempts = madeProgress
+    ? 0
+    : semanticallyRepeated
+      ? previousAttempts + 1
+      : 1;
   return {
     signature,
     attempts,
-    shouldRotate: attempts >= BOUNDED_GROUNDING_IDENTICAL_ATTEMPT_LIMIT,
+    shouldRotate:
+      !madeProgress &&
+      attempts >= BOUNDED_GROUNDING_NO_PROGRESS_ATTEMPT_LIMIT,
     transportDeferred: false,
+    madeProgress,
     optionalClaimDeferred: substantiveReasons.every(
       (reason) => !groundingReasonIsCore(reason, content),
     ),
@@ -22481,8 +22791,10 @@ function boundedGroundingRetryState(draft, reasons, content = null) {
 function boundedGroundingRecoveryError(slug, reasons, retryState, rotated) {
   const status = rotated ? "event-rotated" : "grounding-residual";
   const message = rotated
-    ? `Bounded recovery rotated the event after ${retryState.attempts} identical final source-grounding failures — ${reasons.join("; ")}`
-    : `Bounded recovery retained the draft after final source-grounding failed — ${reasons.join("; ")}`;
+    ? `Grounding recovery rotated the event after ${retryState.attempts} consecutive final-grounding passes made no verified progress — ${reasons.join("; ")}`
+    : retryState.madeProgress
+      ? `Grounding recovery retained verified progress for another pass — ${reasons.join("; ")}`
+      : `Grounding recovery retained the draft after final source-grounding failed — ${reasons.join("; ")}`;
   const error = new Error(message);
   error.code = rotated
     ? "BOUNDED_GROUNDING_EVENT_ROTATED"
@@ -22494,6 +22806,7 @@ function boundedGroundingRecoveryError(slug, reasons, retryState, rotated) {
     slug,
     rotated,
     attempts: retryState.attempts,
+    madeProgress: retryState.madeProgress === true,
     signature: retryState.signature,
     reasons: (Array.isArray(reasons) ? reasons : []).slice(0, 5),
   };
@@ -22712,6 +23025,18 @@ function groundingReasonFieldPath(reason, content) {
     }
   }
 
+  // The final verifier names the offending content path whenever it can. A
+  // valid explicit path is stronger evidence than fuzzy token overlap: common
+  // words such as "event", "date", or "speech" can otherwise redirect an
+  // analysis/body repair into an unrelated Quick Fact. Quote matching remains
+  // the fallback for legacy or pathless verifier messages.
+  if (
+    explicitPath &&
+    typeof getContentFieldByPath(content, explicitPath) === "string"
+  ) {
+    return explicitPath;
+  }
+
   const quoted = quotedGroundingReasonText(reason);
   const entries = repairableGroundingClaimEntries(content);
   if (quoted) {
@@ -22899,6 +23224,64 @@ function replaceUnsupportedClaimWithGroundedClaims(content, path, reason, claimB
   return candidate;
 }
 
+function groundingReasonCount(result) {
+  return result?.ok
+    ? 0
+    : (Array.isArray(result?.reasons) ? result.reasons : []).length;
+}
+
+function quotedGroundingClaimWasRemoved(before, candidate, reason) {
+  const quote = quotedGroundingReasonText(reason);
+  if (!quote) return false;
+  const path = groundingReasonFieldPath(reason, before);
+  if (!path) return false;
+  const beforeText = getContentFieldByPath(before, path);
+  const candidateText = getContentFieldByPath(candidate, path);
+  if (typeof beforeText !== "string" || typeof candidateText !== "string") {
+    return false;
+  }
+  const normalizedQuote = normalizeForCompare(quote);
+  if (!normalizedQuote) return false;
+  return (
+    normalizeForCompare(beforeText).includes(normalizedQuote) &&
+    !normalizeForCompare(candidateText).includes(normalizedQuote)
+  );
+}
+
+// A final-grader response can identify several unsupported sentences at once.
+// Accepting each source-bank replacement only when the entire article becomes
+// clean makes those edits mutually blocking: fixing A is discarded while B
+// remains, then fixing B is discarded while A remains. A candidate may now
+// advance when it removes the exact quoted claim and does not increase the
+// deterministic grounding findings. Publication still requires the complete
+// final verifier below; this merely lets safe edits accumulate into one batch.
+function groundingCandidateMakesSafeProgress(
+  before,
+  candidate,
+  reason,
+  source,
+) {
+  if (!candidate) return false;
+  const hasQuotedTarget = Boolean(quotedGroundingReasonText(reason));
+  const removedQuotedTarget = quotedGroundingClaimWasRemoved(
+    before,
+    candidate,
+    reason,
+  );
+  if (hasQuotedTarget && !removedQuotedTarget) return false;
+  const beforeGrounding = verifyArticleGrounding(before, source);
+  const candidateGrounding = verifyArticleGrounding(candidate, source);
+  if (candidateGrounding.ok) return true;
+  if (beforeGrounding.ok) return false;
+  if (
+    groundingReasonCount(candidateGrounding) >
+    groundingReasonCount(beforeGrounding)
+  ) {
+    return false;
+  }
+  return removedQuotedTarget;
+}
+
 function mechanicallyRepairGroundingReasons(content, reasons, source) {
   const claimBank = buildGroundedClaimBank(source);
   let working = content;
@@ -22919,7 +23302,16 @@ function mechanicallyRepairGroundingReasons(content, reasons, source) {
       reason,
       claimBank,
     );
-    if (!candidate || !verifyArticleGrounding(candidate, source).ok) continue;
+    if (
+      !groundingCandidateMakesSafeProgress(
+        working,
+        candidate,
+        reason,
+        source,
+      )
+    ) {
+      continue;
+    }
     working = candidate;
     repairedFieldPaths.push(path);
   }
@@ -22970,8 +23362,23 @@ function omitUnsupportedCoreOptionalItems(content, reasons, source) {
   } catch {
     return { content, removedFieldPaths: [] };
   }
-  const grounding = verifyArticleGrounding(candidate, source);
-  if (!grounding.ok) return { content, removedFieldPaths: [] };
+  const groundingBefore = verifyArticleGrounding(content, source);
+  const groundingAfter = verifyArticleGrounding(candidate, source);
+  // Other flagged body fields may still be awaiting their own refill. Keep a
+  // structurally valid optional-item omission when it cannot have worsened
+  // the deterministic audit, then let the complete final verifier judge the
+  // combined batch. Requiring `groundingAfter.ok` here recreated the same
+  // multi-claim deadlock as the source-bank loop above.
+  if (
+    !groundingAfter.ok &&
+    (
+      groundingBefore.ok ||
+      groundingReasonCount(groundingAfter) >
+        groundingReasonCount(groundingBefore)
+    )
+  ) {
+    return { content, removedFieldPaths: [] };
+  }
 
   // Re-run the exact quality suite used by bounded enrichment. Core quality
   // findings are advisory, but removing optional prose must never introduce
@@ -23523,6 +23930,38 @@ async function repairGroundingContradictions(env, content, reasons, source, call
   return applied > 0 ? updated : content;
 }
 
+function canRetainPartialGroundingRepair(
+  beforeContent,
+  beforeReasons,
+  candidate,
+  afterReasons,
+  source,
+) {
+  if (!candidate || candidate === beforeContent) return false;
+  const substantiveBefore = (Array.isArray(beforeReasons) ? beforeReasons : [])
+    .filter((reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)));
+  const substantiveAfter = (Array.isArray(afterReasons) ? afterReasons : [])
+    .filter((reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)));
+  if (
+    substantiveBefore.length === 0 ||
+    substantiveAfter.length >= substantiveBefore.length
+  ) {
+    return false;
+  }
+  if (
+    !substantiveBefore.some((reason) =>
+      quotedGroundingClaimWasRemoved(beforeContent, candidate, reason),
+    )
+  ) {
+    return false;
+  }
+  // The final AI verifier may still have one narrower concern, but no partial
+  // edit is durable unless the deterministic gate already accepts the whole
+  // candidate. It remains a draft and must pass the final verifier before any
+  // publication write.
+  return verifyArticleGrounding(candidate, source).ok;
+}
+
 async function verifyFinalGroundingWithRepair(env, content, source, slug, deps = {}) {
   const verify = deps.verify || verifyFinalArticleGrounding;
   const repair = deps.repair || repairGroundingContradictions;
@@ -23532,13 +23971,31 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
   );
 
   const first = await verify(env, content, source);
-  if (first.ok) return { ok: true, reasons: [], content };
-  let lastResult = first;
+  if (first.ok) {
+    return {
+      ok: true,
+      reasons: [],
+      content,
+      madeProgress: false,
+      repairedFieldPaths: [],
+    };
+  }
+  let retainedResult = first;
+  let retainedContent = content;
+  let madeProgress = false;
+  const repairedFieldPaths = [];
 
   let contradictions = (first.reasons || []).filter(
     (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
   );
-  if (contradictions.length === 0) return { ...first, content };
+  if (contradictions.length === 0) {
+    return {
+      ...first,
+      content,
+      madeProgress,
+      repairedFieldPaths,
+    };
+  }
 
   // The final AI grader can identify a real unsupported inference that the
   // narrower deterministic patterns do not recognize. Remove that exact
@@ -23551,6 +24008,8 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
     source,
   );
   if (claimBankRepair.repairedFieldPaths.length > 0) {
+    madeProgress = true;
+    repairedFieldPaths.push(...claimBankRepair.repairedFieldPaths);
     const afterClaimBankRepair = await verify(
       env,
       claimBankRepair.content,
@@ -23560,15 +24019,27 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
       console.log(
         `Final grounding: sentence removal/approved-claim recovery resolved ${slug} without a generation repair (${claimBankRepair.claimCount} source claims available; ${claimBankRepair.repairedFieldPaths.join(", ")}).`,
       );
-      return { ok: true, reasons: [], content: claimBankRepair.content };
+      return {
+        ok: true,
+        reasons: [],
+        content: claimBankRepair.content,
+        madeProgress,
+        repairedFieldPaths,
+      };
     }
-    lastResult = afterClaimBankRepair;
+    retainedResult = afterClaimBankRepair;
     content = claimBankRepair.content;
+    retainedContent = content;
     contradictions = (afterClaimBankRepair.reasons || []).filter(
       (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
     );
     if (contradictions.length === 0) {
-      return { ...afterClaimBankRepair, content };
+      return {
+        ...afterClaimBankRepair,
+        content,
+        madeProgress,
+        repairedFieldPaths,
+      };
     }
   }
 
@@ -23578,6 +24049,8 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
     source,
   );
   if (coreOptionalOmission.removedFieldPaths.length > 0) {
+    madeProgress = true;
+    repairedFieldPaths.push(...coreOptionalOmission.removedFieldPaths);
     const afterCoreOptionalOmission = await verify(
       env,
       coreOptionalOmission.content,
@@ -23591,15 +24064,23 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
         ok: true,
         reasons: [],
         content: coreOptionalOmission.content,
+        madeProgress,
+        repairedFieldPaths,
       };
     }
-    lastResult = afterCoreOptionalOmission;
+    retainedResult = afterCoreOptionalOmission;
     content = coreOptionalOmission.content;
+    retainedContent = content;
     contradictions = (afterCoreOptionalOmission.reasons || []).filter(
       (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
     );
     if (contradictions.length === 0) {
-      return { ...afterCoreOptionalOmission, content };
+      return {
+        ...afterCoreOptionalOmission,
+        content,
+        madeProgress,
+        repairedFieldPaths,
+      };
     }
   }
 
@@ -23608,19 +24089,35 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
   // AI repair call below. If it fixes everything, skip that call entirely.
   const mechanical = mechanicallyRepairBareOrderReferences(content, source);
   if (mechanical.repairedFieldPaths.length > 0) {
+    madeProgress = true;
+    repairedFieldPaths.push(...mechanical.repairedFieldPaths);
     const afterMechanical = await verify(env, mechanical.content, source);
     if (afterMechanical.ok) {
       console.log(
         `Final grounding: mechanical repair resolved ${slug} without an AI call (${mechanical.repairedFieldPaths.join(", ")}).`,
       );
-      return { ok: true, reasons: [], content: mechanical.content };
+      return {
+        ok: true,
+        reasons: [],
+        content: mechanical.content,
+        madeProgress,
+        repairedFieldPaths,
+      };
     }
-    lastResult = afterMechanical;
+    retainedResult = afterMechanical;
     content = mechanical.content;
+    retainedContent = content;
     contradictions = (afterMechanical.reasons || []).filter(
       (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
     );
-    if (contradictions.length === 0) return { ...afterMechanical, content };
+    if (contradictions.length === 0) {
+      return {
+        ...afterMechanical,
+        content,
+        madeProgress,
+        repairedFieldPaths,
+      };
+    }
     console.warn(
       `Final grounding: mechanical repair fixed part of ${slug} (${mechanical.repairedFieldPaths.join(", ")}); ${contradictions.length} issue(s) remain for AI repair.`,
     );
@@ -23637,10 +24134,11 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
   // within the same call gives genuinely fixable overclaiming another chance
   // to clear before falling back to "retained, try again next invocation" —
   // this does not loosen what counts as grounded; verify() and repair() are
-  // unchanged, this only gives them one more shot. `content` (the original,
-  // or the mechanically-repaired value above) is never reassigned, so a
-  // total failure still returns it unchanged — a failed repair attempt must
-  // never replace the persisted content, only a verified-passing one may.
+  // unchanged, this only gives them one more shot. A fully failed repair still
+  // returns the last deterministic baseline. Partial AI progress is retained
+  // only when it removes an exact quoted rejection, strictly reduces the
+  // remaining final-verifier issues, and passes deterministic grounding; it
+  // remains an unpublished draft until a later final-verifier pass succeeds.
   let workingContent = content;
   let workingReasons = contradictions;
   for (let attempt = 1; attempt <= maxRepairAttempts; attempt += 1) {
@@ -23652,25 +24150,74 @@ async function verifyFinalGroundingWithRepair(env, content, source, slug, deps =
       repaired = await repair(env, workingContent, workingReasons, source);
     } catch (err) {
       console.warn(`Final-grounding repair pass ${attempt}/${maxRepairAttempts} failed for ${slug}: ${err.message}`);
-      return { ...lastResult, content };
+      return {
+        ...retainedResult,
+        content: retainedContent,
+        madeProgress,
+        repairedFieldPaths,
+      };
     }
     if (!repaired || repaired === workingContent) {
-      return { ...lastResult, content };
+      return {
+        ...retainedResult,
+        content: retainedContent,
+        madeProgress,
+        repairedFieldPaths,
+      };
     }
 
     const reverified = await verify(env, repaired, source);
     if (reverified.ok) {
       console.log(`Final grounding repair succeeded for ${slug} on pass ${attempt}/${maxRepairAttempts}.`);
-      return { ok: true, reasons: [], content: repaired };
+      return {
+        ok: true,
+        reasons: [],
+        content: repaired,
+        madeProgress: true,
+        repairedFieldPaths,
+      };
+    }
+    if (
+      canRetainPartialGroundingRepair(
+        workingContent,
+        workingReasons,
+        repaired,
+        reverified.reasons,
+        source,
+      )
+    ) {
+      retainedContent = repaired;
+      retainedResult = reverified;
+      madeProgress = true;
+      for (const reason of workingReasons) {
+        if (!quotedGroundingClaimWasRemoved(workingContent, repaired, reason)) {
+          continue;
+        }
+        const path = groundingReasonFieldPath(reason, workingContent);
+        if (path && !repairedFieldPaths.includes(path)) {
+          repairedFieldPaths.push(path);
+        }
+      }
     }
     workingContent = repaired;
     workingReasons = (reverified.reasons || []).filter(
       (reason) => !GROUNDING_VERIFIER_TRANSPORT_PATTERN.test(String(reason)),
     );
-    lastResult = reverified;
-    if (workingReasons.length === 0) return { ...reverified, content };
+    if (workingReasons.length === 0) {
+      return {
+        ...reverified,
+        content: retainedContent,
+        madeProgress,
+        repairedFieldPaths,
+      };
+    }
   }
-  return { ...lastResult, content };
+  return {
+    ...retainedResult,
+    content: retainedContent,
+    madeProgress,
+    repairedFieldPaths,
+  };
 }
 
 async function markGroundingBlockedEvent(env, slug, content, reasons) {
@@ -29037,12 +29584,17 @@ export const __contentGenerationTestHooks = {
   normalizedWikipediaEntityIdentity,
   buildEvergreenHistorySlug,
   evergreenHistoryEvidenceWordCount,
+  evergreenHistoryEvidenceCorpus,
   evergreenHistoryCandidateEligibility,
   evergreenHistoryEditionQuality,
+  evergreenHistoryVisibleEditionPayload,
+  evergreenHistoryRepairAddsNumbers,
+  mechanicallyPruneEvergreenEditionFiller,
   generatedPageWritingQualityIssues,
   personEntityWritingQualityReady,
   extractEvergreenHistoryArticleParagraphsFromHtml,
   normalizeEvergreenHistoryEdition,
+  generateEvergreenHistoryEdition,
   restorePendingEvergreenHistoryEvidenceFromPost,
   selectPendingEvergreenHistoryCandidates,
   selectPendingPersonProseCandidates,
